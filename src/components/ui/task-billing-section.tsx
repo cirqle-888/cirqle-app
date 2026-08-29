@@ -59,6 +59,14 @@ export interface TaskBillingSectionProps {
   noChargeReason?: string | null
   onBillableChange?: (patch: { isBillable: boolean; noChargeReason: string | null }) => void
 
+  /**
+   * Spend one of the package's included slots on this task even though it is a
+   * different service — a Facebook cover coming out of the 15 committed
+   * posters. Coverage only: the task keeps its own service and its own price.
+   */
+  countsAsServiceId?: string | null
+  onCountsAsChange?: (serviceId: string | null) => void
+
   /** False for users without pricing access: quantity inputs, no money. */
   showFinancials?: boolean
 
@@ -84,6 +92,7 @@ export function TaskBillingSection({
   quantity, hours, spend, onChange,
   taskDate, packageId, onPackageChange,
   isBillable = true, noChargeReason = null, onBillableChange,
+  countsAsServiceId = null, onCountsAsChange,
   showFinancials = true,
   lockedAmount = null, lockedCurrency, lockedNote,
   amount, unitPriceDisplay, footer,
@@ -112,6 +121,10 @@ export function TaskBillingSection({
   // never be covered by the fee — so say so rather than let it look included.
   const serviceOutsidePackage =
     !!chosen && !!serviceId && !chosen.serviceIds.includes(serviceId)
+  /** The package's included lines, with names, for the substitution picker. */
+  const includedServices = (chosen?.serviceIds ?? [])
+    .map(id => services.find(sv => sv.id === id))
+    .filter((sv): sv is ServiceLike => !!sv)
 
   // ── Billable or waived? ───────────────────────────────────────────────────
   // Every task, not just variants: a cover thrown in with a retainer, a
@@ -227,13 +240,48 @@ export function TaskBillingSection({
           )}
 
           {serviceOutsidePackage && (
-            <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
-              <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
-              <span>
-                This service isn&rsquo;t part of <strong>{chosen!.name}</strong>, so the package fee won&rsquo;t
-                cover it and it will bill on its own. Add the service to the package, or bill separately.
-              </span>
-            </p>
+            <>
+              {!countsAsServiceId && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
+                  <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                  <span>
+                    This service isn&rsquo;t part of <strong>{chosen!.name}</strong>, so the package fee
+                    won&rsquo;t cover it and it will bill on its own — unless you spend one of the
+                    included slots on it below.
+                  </span>
+                </p>
+              )}
+
+              {/* Spend an included slot on a different deliverable. Per task,
+                  never automatic: the same cover comes out of the allowance for
+                  one client and is billed on its own for the next, and only a
+                  person knows which. */}
+              {onCountsAsChange && includedServices.length > 0 && (
+                <div className="space-y-1.5 pt-1 border-t border-violet-500/20">
+                  <label className="block text-[11px] font-medium text-violet-600 dark:text-violet-300">
+                    Use up one included item?
+                  </label>
+                  <select
+                    value={countsAsServiceId ?? ''}
+                    onChange={e => onCountsAsChange(e.target.value || null)}
+                    className={inputCls}
+                  >
+                    <option value="">No — bill this task on its own</option>
+                    {includedServices.map(sv => (
+                      <option key={sv.id} value={sv.id}>Count as one {sv.name ?? 'included item'}</option>
+                    ))}
+                  </select>
+                  {countsAsServiceId && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Uses one <strong>{includedServices.find(sv => sv.id === countsAsServiceId)?.name ?? 'included item'}</strong>{' '}
+                      from this month&rsquo;s allowance, so it adds no line to the invoice. The task stays
+                      a {services.find(sv => sv.id === serviceId)?.name || 'task'} everywhere else —
+                      in reports, in its price, and in what the designer is paid.
+                    </p>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

@@ -75,7 +75,7 @@ export async function syncInvoicePackageLines(
     // `status` is not optional here: coverage must not let an unfinished task
     // take a covered slot and push a delivered one into billable overage.
     admin.from('tasks')
-      .select('id, package_id, service_id, task_date, task_number, status')
+      .select('id, package_id, service_id, task_date, task_number, status, package_counts_as_service_id')
       .in('package_id', ids).is('deleted_at', null)
       // Waived work is free to the client: it must neither consume the
       // allowance nor bill as an overage. Same rule auto-link follows when it

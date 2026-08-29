@@ -66,6 +66,15 @@ export interface PackageTaskLike {
    * is absent the task is assumed delivered. Every real caller selects it.
    */
   status?: string | null
+  /**
+   * "Count this against that line instead."
+   *
+   * A Facebook cover page is its own service at its own price, but the deal
+   * with the client is that it comes out of the 15 committed posters. Set per
+   * task by a person; coverage — and ONLY coverage — reads this in place of
+   * `service_id`. The task's real service is untouched everywhere else.
+   */
+  package_counts_as_service_id?: string | null
 }
 
 /** One included line, with how much of it has been delivered. */

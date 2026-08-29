@@ -149,6 +149,7 @@ interface Task {
   billing_override?: boolean
   is_billable?: boolean
   no_charge_reason?: string | null
+  package_counts_as_service_id?: string | null
   /** Package this task is delivered under. Affects invoicing only, never price. */
   package_id?: string | null
   client?: { id: string; name: string; code: string }
@@ -314,6 +315,7 @@ const EMPTY_FORM = {
   no_charge_reason: null as string | null,                                       // why it was waived; null while billable
   manual_billing_amount: '',                                                     // user-typed override amount
   package_id: null as string | null,                                             // delivered under a package (invoicing only)
+  package_counts_as_service_id: null as string | null,                           // spends one included slot of ANOTHER service
   // ── Derived billing ("Handling = 30% of this month's posters") ──
   derived_on: false,                                                             // the rule section is switched on
   derived_service_ids: [] as string[],                                           // source services
@@ -1227,7 +1229,12 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     // complimentary for one client and billed for the next (pay-per-creative),
     // so the service cannot know: every task starts billable at its
     // Pricing-Matrix price, and waiving is always a person's decision.
-    setForm(p => ({ ...p, service_id: serviceId, currency: cur, quantity: '1', hours: '1' }))
+    // A substitution is about THIS deliverable standing in for an included one,
+    // so changing the deliverable retires it.
+    setForm(p => ({
+      ...p, service_id: serviceId, currency: cur, quantity: '1', hours: '1',
+      package_counts_as_service_id: null,
+    }))
   }
 
   async function saveQuickPrice() {
@@ -1294,6 +1301,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       billing_override:  !!task.billing_override,
       is_billable:       task.is_billable !== false,
       no_charge_reason:  (task as { no_charge_reason?: string | null }).no_charge_reason ?? null,
+      package_counts_as_service_id: task.package_counts_as_service_id ?? null,
       manual_billing_amount: task.billing_amount_inr != null ? String(task.billing_amount_inr) : '',
       package_id:        task.package_id ?? null,
       // Derived billing is edited in TaskEditModal, not this legacy form state.
@@ -1559,6 +1567,10 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       currency: unitCurrency,
       // Invoicing only — the price above still came from the Pricing Matrix.
       ...(form.package_id ? { package_id: form.package_id } : {}),
+      // Only written when a slot is actually being spent, so ordinary task
+      // creation is unaffected on a database that predates the column.
+      ...(form.package_counts_as_service_id
+        ? { package_counts_as_service_id: form.package_counts_as_service_id } : {}),
       task_date: form.task_date,
       is_recurring: form.is_recurring,
       recurring_interval: form.is_recurring ? form.recurring_interval : null,
@@ -5431,11 +5443,17 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                 onChange={patch => setForm(p => ({ ...p, ...patch }))}
                 taskDate={form.task_date}
                 packageId={form.package_id}
-                onPackageChange={pid => setForm(p => ({ ...p, package_id: pid }))}
+                onPackageChange={pid => setForm(p => ({
+                  ...p, package_id: pid,
+                  // No package, no slot to spend.
+                  package_counts_as_service_id: pid ? p.package_counts_as_service_id : null,
+                }))}
                 isBillable={form.is_billable}
                 noChargeReason={form.no_charge_reason}
                 onBillableChange={({ isBillable, noChargeReason }) =>
                   setForm(p => ({ ...p, is_billable: isBillable, no_charge_reason: noChargeReason }))}
+                countsAsServiceId={form.package_counts_as_service_id}
+                onCountsAsChange={sid => setForm(p => ({ ...p, package_counts_as_service_id: sid }))}
                 showFinancials={showBilling}
                 amount={computedAmount}
                 unitPriceDisplay={displayUnitPrice}

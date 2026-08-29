@@ -33,6 +33,7 @@ import { retryWithoutScope, withoutScope } from '@/lib/finance/classify'
 import { activePackagesForClient, type PackageOption } from '@/lib/packages/queries'
 import { autoLinkTaskPackage } from '@/lib/packages/auto-link'
 import { normalizeNoChargeReason, retryWithoutNoChargeReason, withoutNoChargeReason } from '@/lib/tasks/billable'
+import { retryWithoutColumn, withoutColumn } from '@/lib/db/missing-column'
 
 const REVALIDATE = '/dashboard/tasks'
 
@@ -751,6 +752,12 @@ export interface SaveTaskInput {
   isBillable?: boolean
   /** Why it was waived. Cleared automatically when the task is billable. */
   noChargeReason?: string | null
+  /**
+   * Spend one included slot of this service on the task, though the task is a
+   * different service — a cover coming out of the committed posters. Coverage
+   * only; never touches the price. `undefined` = leave as-is.
+   */
+  countsAsServiceId?: string | null
 }
 
 async function toInr(
@@ -815,16 +822,25 @@ export async function serverSaveTask(
       is_billable:      input.isBillable,
       no_charge_reason: normalizeNoChargeReason(input.isBillable, input.noChargeReason),
     } : {}),
+    ...(input.countsAsServiceId !== undefined
+      ? { package_counts_as_service_id: input.countsAsServiceId || null } : {}),
     task_date:          input.taskDate || null,
   }
 
-  const { data, error } = await retryWithoutNoChargeReason(strip =>
-    admin
-      .from('tasks')
-      .update(strip ? withoutNoChargeReason(updates) : updates)
-      .eq('id', input.taskId)
-      .select('*, client:clients(id, name, code), service:services!service_id(id, name)')
-      .single())
+  // Two columns that may predate their migrations; each retry drops only its
+  // own, so the save always lands even on a half-migrated database.
+  const { data, error } = await retryWithoutColumn('package_counts_as_service_id', stripCounts =>
+    retryWithoutNoChargeReason(stripReason => {
+      let payload: Record<string, unknown> = updates
+      if (stripReason) payload = withoutNoChargeReason(payload)
+      if (stripCounts) payload = withoutColumn(payload, 'package_counts_as_service_id')
+      return admin
+        .from('tasks')
+        .update(payload)
+        .eq('id', input.taskId)
+        .select('*, client:clients(id, name, code), service:services!service_id(id, name)')
+        .single()
+    }))
 
   if (error) return { ok: false, error: error.message }
 

@@ -163,6 +163,17 @@ export function tasksInPeriod<T extends PackageTaskLike>(
   return tasks.filter(t => taskMonth(t.task_date) === month)
 }
 
+/**
+ * The service a task consumes the allowance of.
+ *
+ * Normally its own. A task may be pointed at a different included line — a
+ * Facebook cover spending one of the committed posters — in which case coverage
+ * reads that line and nothing else about the task changes.
+ */
+export function coverageServiceId(t: PackageTaskLike): string | null {
+  return t.package_counts_as_service_id || t.service_id
+}
+
 /** Oldest first, with a stable tie-break so the verdict never flips between reads. */
 function byDeliveryOrder(a: PackageTaskLike, b: PackageTaskLike): number {
   const d = String(a.task_date ?? '').localeCompare(String(b.task_date ?? ''))
@@ -198,13 +209,14 @@ export function resolveCoverage(
     // Abandoned work is not owed, not delivered, and not billable. It leaves
     // the calculation entirely rather than lingering as a phantom deliverable.
     if (isCancelled(t.status)) continue
-    if (!t.service_id || !matchedServiceIds.has(t.service_id)) {
+    const serviceId = coverageServiceId(t)
+    if (!serviceId || !matchedServiceIds.has(serviceId)) {
       unmatchedTaskIds.push(t.id)
       continue
     }
-    const arr = byService.get(t.service_id)
+    const arr = byService.get(serviceId)
     if (arr) arr.push(t)
-    else byService.set(t.service_id, [t])
+    else byService.set(serviceId, [t])
   }
   for (const arr of byService.values()) arr.sort(byDeliveryOrder)
 

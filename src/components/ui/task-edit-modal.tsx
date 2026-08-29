@@ -87,6 +87,7 @@ export function TaskEditModal({
     package_id: (task.package_id as string | null) ?? null,
     is_billable: task.is_billable !== false,
     no_charge_reason: (task.no_charge_reason as string | null) ?? null,
+    package_counts_as_service_id: (task.package_counts_as_service_id as string | null) ?? null,
   })
 
   // ── Committed services pinned in the picker ────────────────────────────────
@@ -197,6 +198,7 @@ export function TaskEditModal({
       // Billable is saved rather than read as "leave unchanged".
       isBillable:       form.is_billable,
       noChargeReason:   form.no_charge_reason,
+      countsAsServiceId: form.package_counts_as_service_id,
       taskDate:         form.task_date || null,
     })
 
@@ -369,11 +371,16 @@ export function TaskEditModal({
                 onChange={patch => setForm(p => ({ ...p, ...patch }))}
                 taskDate={form.task_date}
                 packageId={form.package_id}
-                onPackageChange={pid => setForm(p => ({ ...p, package_id: pid }))}
+                onPackageChange={pid => setForm(p => ({
+                  ...p, package_id: pid,
+                  package_counts_as_service_id: pid ? p.package_counts_as_service_id : null,
+                }))}
                 isBillable={form.is_billable}
                 noChargeReason={form.no_charge_reason}
                 onBillableChange={({ isBillable, noChargeReason }) =>
                   setForm(p => ({ ...p, is_billable: isBillable, no_charge_reason: noChargeReason }))}
+                countsAsServiceId={form.package_counts_as_service_id}
+                onCountsAsChange={sid => setForm(p => ({ ...p, package_counts_as_service_id: sid }))}
                 showFinancials={showFinancials}
                 lockedAmount={isVariant ? variantBillingInr : null}
                 lockedCurrency={(task.currency as string) || 'INR'}

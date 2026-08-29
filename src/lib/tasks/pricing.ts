@@ -32,6 +32,8 @@ function num(value: number | string | null | undefined, fallback: number): numbe
 
 export interface ServiceLike {
   id: string
+  /** Present on every real caller; optional so a pricing-only stub still fits. */
+  name?: string | null
   pricing_type?: string | null
   default_price?: number | null
   default_currency?: string | null

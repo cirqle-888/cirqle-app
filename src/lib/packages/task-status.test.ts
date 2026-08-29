@@ -70,6 +70,50 @@ describe('a Facebook cover, delivered as a poster', () => {
   })
 })
 
+describe('a Facebook cover spending a committed poster', () => {
+  // The real case: its own service (its own price, its own place in reports),
+  // but the agreement is that it comes out of the 15 posters.
+  const COVER = 'svc-fb-cover'
+  const cover: CoverageTask = {
+    id: 'fb-cover', service_id: COVER, task_date: '2026-08-20', task_number: 1800,
+    status: 'done', package_id: PKG, package_counts_as_service_id: POSTER,
+  }
+
+  it('is covered by the fee and uses one slot', () => {
+    const fourteen = Array.from({ length: 14 }, (_, i) => poster(i + 1))
+    const index = buildCoverageIndex([socialPackage], items, [...fourteen, cover])
+
+    expect(taskBillingStatus(cover, index)).toBe('covered')
+  })
+
+  it('queues behind posters delivered before it, like any other slot', () => {
+    // Slots go oldest first. A poster on the 15th is delivered before the cover
+    // on the 20th, so it takes the last slot and the cover becomes the overage —
+    // the same rule that applies between two posters, with no special case for
+    // the substitution.
+    const fourteen = Array.from({ length: 14 }, (_, i) => poster(i + 1))
+    const fifteenth = poster(15)
+    const index = buildCoverageIndex([socialPackage], items, [...fourteen, fifteenth, cover])
+
+    expect(taskBillingStatus(fifteenth, index)).toBe('covered')
+    expect(taskBillingStatus(cover, index)).toBe('extra')
+  })
+
+  it('bills on its own when nobody spends a slot on it', () => {
+    // Same task without the substitution: not a poster, so the fee cannot cover
+    // it and it charges normally.
+    const unsubstituted: CoverageTask = { ...cover, package_counts_as_service_id: null }
+    const index = buildCoverageIndex([socialPackage], items, [unsubstituted])
+    expect(taskBillingStatus(unsubstituted, index)).toBe('billable')
+  })
+
+  it('goes over the allowance like any other poster once the month is full', () => {
+    const fifteen = Array.from({ length: 15 }, (_, i) => poster(i + 1))
+    const index = buildCoverageIndex([socialPackage], items, [...fifteen, cover])
+    expect(taskBillingStatus(cover, index)).toBe('extra')
+  })
+})
+
 describe('a highlight icon, given away', () => {
   const icon: CoverageTask = {
     id: 'icon-1', service_id: HIGHLIGHT, task_date: '2026-08-05', task_number: 1500,

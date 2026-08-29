@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
+import { coverageTaskColumns } from '@/lib/packages/coverage-select'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { userCanSee } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
@@ -50,7 +51,7 @@ export default async function PackagesPage() {
   // tasks_package_idx, so this stays cheap however large `tasks` grows.
   const { data: linkedTasks } = await admin
     .from('tasks')
-    .select('id, package_id, service_id, task_date, task_number, title, status, billing_amount, currency')
+    .select(await coverageTaskColumns(admin, 'title, billing_amount, currency'))
     .not('package_id', 'is', null)
     .is('deleted_at', null)
     .order('task_date', { ascending: true })

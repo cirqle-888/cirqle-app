@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
+import { coverageTaskColumns } from '@/lib/packages/coverage-select'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { getCompanySettings } from '@/lib/settings/company-settings'
@@ -218,7 +219,7 @@ export default async function SocialCalendarPage({
         const ids = pkgs.map((p: { id: string }) => p.id)
         const { data: linked } = await admin
           .from('tasks')
-          .select('id, package_id, service_id, task_date, task_number, status')
+          .select(await coverageTaskColumns(admin))
           .in('package_id', ids)
           .is('deleted_at', null)
         packageTasks = linked || []

@@ -262,7 +262,10 @@ export default async function TasksPage({
   const hasDeletedAt = await columnExists(supabase, 'tasks', 'deleted_at')
   // Same dance for the waiver reason (migration 20260829140000): the column is
   // new, and naming it in the select before it exists 400s the whole page.
-  const hasNoChargeReason = await columnExists(supabase, 'tasks', 'no_charge_reason')
+  const [hasNoChargeReason, hasPackageCountsAs] = await Promise.all([
+    columnExists(supabase, 'tasks', 'no_charge_reason'),
+    columnExists(supabase, 'tasks', 'package_counts_as_service_id'),
+  ])
 
   const cutoff = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString()
 
@@ -285,6 +288,7 @@ export default async function TasksPage({
   const serviceSelect: string = 'id, name, default_price, default_currency, pricing_type'
   const selectClause: string = (vis.tasksPricing ? ADMIN_TASK_SELECT : EMPLOYEE_TASK_SELECT)
     + (vis.tasksPricing && hasNoChargeReason ? ', no_charge_reason' : '')
+    + (vis.tasksPricing && hasPackageCountsAs ? ', package_counts_as_service_id' : '')
 
   // Service-scoped task visibility (tasks.view_by_service). 'services' viewers
   // only receive tasks of their assigned services plus tasks they worked on —

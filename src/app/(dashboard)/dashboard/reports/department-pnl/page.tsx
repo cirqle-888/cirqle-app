@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { createAdminClient, fetchAll, fetchAllIn } from '@/lib/supabase/server'
+import { createAdminClient, fetchAll, fetchAllIn, columnExists } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import Header from '@/components/layout/header'
 import { monthRange } from '@/lib/finance/pnl'
@@ -14,7 +14,7 @@ import {
   type DepartmentInput, type DepartmentPnlRow, type EmployeeEarningCell,
 } from '@/lib/finance/department-pnl'
 import { buildPackageRevenue, type PackageItemInput } from '@/lib/finance/package-revenue'
-import { cycleForMonth, isDelivered, isPackageInForceForMonth } from '@/lib/packages/progress'
+import { cycleForMonth, isDelivered, isPackageInForceForMonth, coverageServiceId } from '@/lib/packages/progress'
 import { CheckCircle2, Info, Package, TriangleAlert } from 'lucide-react'
 import { isBillableTask } from '@/lib/tasks/billable'
 
@@ -75,9 +75,14 @@ export default async function DepartmentPnlPage({
 
   // ── Measured half: revenue + labour, by department ─────────────────────────
   // `to` is inclusive, matching how every other date filter in the app reads.
+  // A task may be pointed at a different included line (a cover spending one of
+  // the committed posters), so this reads the substitution the same way the
+  // invoice does — or the report would show the line under-delivered.
+  const taskSelect: string = 'id, billing_amount_inr, service_id, package_id, status, task_date, is_billable'
+    + (await columnExists(admin, 'tasks', 'package_counts_as_service_id') ? ', package_counts_as_service_id' : '')
   const { data: taskRows, error: taskError } = await fetchAll(
     admin.from('tasks')
-      .select('id, billing_amount_inr, service_id, package_id, status, task_date, is_billable')
+      .select(taskSelect)
       .gte('task_date', range.from)
       .lte('task_date', range.to)
       .is('deleted_at', null),
@@ -90,6 +95,7 @@ export default async function DepartmentPnlPage({
     status: string | null
     task_date: string
     is_billable?: boolean | null
+    package_counts_as_service_id?: string | null
   }[]
 
   /** Which department a task belongs to — unassigned when the chain breaks. */
@@ -276,7 +282,7 @@ export default async function DepartmentPnlPage({
 
     for (const it of items) {
       const delivered = tasks.filter(t =>
-        t.package_id === pkg.id && t.service_id === it.service_id && isDelivered(t.status))
+        t.package_id === pkg.id && coverageServiceId(t) === it.service_id && isDelivered(t.status))
       packageInputs.push({
         packageId: pkg.id,
         packageName: pkg.name,

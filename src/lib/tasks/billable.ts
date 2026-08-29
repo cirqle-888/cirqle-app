@@ -24,6 +24,8 @@
  * unset flag as waived would silently empty every invoice.
  */
 
+import { isMissingColumn, withoutColumn, retryWithoutColumn, type PgError } from '@/lib/db/missing-column'
+
 export const NO_CHARGE_REASONS = [
   { value: 'package',  label: 'Included in package' },
   { value: 'goodwill', label: 'Goodwill' },
@@ -84,30 +86,24 @@ export function excludeWaived<T extends { not(column: string, operator: string, 
 // ── Pre-migration safety net ────────────────────────────────────────────────
 // `no_charge_reason` arrives with migration 20260829140000. Until it is applied,
 // naming it in a write is a hard error — and a task that will not save is far
-// worse than one that saves without its reason. Same shape as
-// finance/classify's scope retry, which exists for exactly this reason.
+// worse than one that saves without its reason. These are the generic helpers
+// in lib/db/missing-column, bound to this column.
 
-type PgWriteResult = { error: { code?: string | null; message?: string | null } | null }
 
-export function isNoChargeColumnMissing(
-  error: { code?: string | null; message?: string | null } | null | undefined,
-): boolean {
-  if (!error) return false
-  if (error.code !== 'PGRST204' && error.code !== '42703') return false
-  return /no_charge_reason/.test(error.message ?? '')
+export const NO_CHARGE_REASON_COLUMN = 'no_charge_reason'
+
+export function isNoChargeColumnMissing(error: PgError): boolean {
+  return isMissingColumn(error, NO_CHARGE_REASON_COLUMN)
 }
 
 /** Copy of a row without the waiver reason, for the pre-migration retry. */
-export function withoutNoChargeReason<T extends object>(row: T): Omit<T, 'no_charge_reason'> {
-  const { no_charge_reason: _r, ...rest } = row as T & { no_charge_reason?: unknown }
-  return rest
+export function withoutNoChargeReason<T extends object>(row: T): Partial<T> {
+  return withoutColumn(row, NO_CHARGE_REASON_COLUMN)
 }
 
 /** Run a write that names `no_charge_reason`; retry once without it if absent. */
-export async function retryWithoutNoChargeReason<R extends PgWriteResult>(
+export async function retryWithoutNoChargeReason<R extends { error: PgError }>(
   attempt: (strip: boolean) => PromiseLike<R>,
 ): Promise<R> {
-  const first = await attempt(false)
-  if (isNoChargeColumnMissing(first.error)) return attempt(true)
-  return first
+  return retryWithoutColumn(NO_CHARGE_REASON_COLUMN, attempt)
 }
