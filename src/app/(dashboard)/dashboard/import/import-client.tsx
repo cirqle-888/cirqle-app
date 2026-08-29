@@ -5,6 +5,7 @@ import { Download } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ConfirmDialog, ConfirmModalProps } from '@/components/ui/confirm-dialog'
+import { todayISO } from '@/lib/utils/local-date'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface RefClient    { id: string; name: string; code: string }
@@ -1733,17 +1734,44 @@ export default function ImportClient({ clients, services, employees, groups, par
           if (!invId) { res.skipped += 1; continue }
           const updateFields: any = { status: r.invoice_status }
           if (r.paid_amount) updateFields.paid_amount = parseFloat(r.paid_amount)
-          const { error: updErr } = await supabase.from('invoices').update(updateFields).eq('id', invId)
+          // `.select()` returns the updated row, so the payment below gets the
+          // invoice's currency and rate without a second round-trip per row.
+          const { data: updated, error: updErr } = await supabase
+            .from('invoices').update(updateFields).eq('id', invId)
+            .select('currency, exchange_rate').maybeSingle()
           if (updErr) { res.errors.push(`${r.invoice_ref}: ${updErr.message}`); res.skipped += 1; continue }
-          // Optionally insert payment record
+
+          // Record the money movement alongside the status change.
+          //
+          // This used to insert into `invoice_payments`, a table that does not
+          // exist (it is `payments`), AND discarded the result — so the insert
+          // failed every time, silently, while the row was still counted as
+          // imported. The invoice's paid_amount was updated with no matching
+          // payment row behind it, which is exactly the kind of disagreement
+          // between the ledger and the invoice that no one notices until a
+          // reconciliation months later.
           if (r.paid_amount && parseFloat(r.paid_amount) > 0) {
-            await supabase.from('invoice_payments').insert({
+            const amount = parseFloat(r.paid_amount)
+            const rate = Number(updated?.exchange_rate) || 1
+            const { error: payErr } = await supabase.from('payments').insert({
               invoice_id: invId,
-              amount: parseFloat(r.paid_amount),
-              payment_date: r.payment_date || new Date().toISOString().slice(0, 10),
+              amount,
+              // Finance reads report in INR, so a payment with no INR base is
+              // invisible to them. Derive it from the invoice's own rate.
+              currency: updated?.currency || 'INR',
+              exchange_rate: rate,
+              amount_inr: Math.round((amount * rate + Number.EPSILON) * 100) / 100,
+              payment_date: normalizeDate(r.payment_date || '') || todayISO(),
               payment_method: r.payment_method || 'other',
               notes: r.notes || null,
-            }).select('id')
+            })
+            if (payErr) {
+              // Report it rather than swallowing it — the status DID change, so
+              // say precisely what is now inconsistent instead of "imported".
+              res.errors.push(`${r.invoice_ref}: status updated but payment not recorded — ${payErr.message}`)
+              res.skipped += 1
+              continue
+            }
           }
           res.inserted += 1
         }
