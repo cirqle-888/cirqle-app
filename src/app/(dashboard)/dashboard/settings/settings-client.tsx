@@ -3737,12 +3737,6 @@ export default function SettingsClient(props: Props) {
                       <option value="false">Inactive</option>
                     </AppSelect>
                   </FieldRow>
-                  <FieldRow label={<span className="flex items-center">Bills by default <InfoTip text="Work this agency gives away — Instagram highlight icons, say. New tasks on the service start as Waived: they keep this price (so the designer is still paid for them) but never reach a client invoice. A manager can switch any single task back to Billable." /></span>}>
-                    <AppSelect value={form.default_billable === false ? 'false' : 'true'} onChange={e => setForm(p => ({ ...p, default_billable: e.target.value === 'true' }))}>
-                      <option value="true">Billable</option>
-                      <option value="false">Free — waived by default</option>
-                    </AppSelect>
-                  </FieldRow>
                   <FieldRow label={<span className="flex items-center">Intake Form <InfoTip text="Which client-facing form this service exposes. A client's available request/intake forms are derived from the services assigned to them." /></span>}>
                     <AppSelect value={form.intake_kind || 'none'} onChange={e => setForm(p => ({ ...p, intake_kind: e.target.value }))}>
                       {INTAKE_KINDS.map(k => <option key={k} value={k}>{INTAKE_KIND_META[k].label}</option>)}

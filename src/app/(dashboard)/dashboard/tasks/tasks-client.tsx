@@ -62,7 +62,7 @@ import {
   type PendingSource,
 } from './actions'
 import {
-  DEFAULT_NO_CHARGE_REASON, normalizeNoChargeReason, isNoChargeColumnMissing,
+  normalizeNoChargeReason, isNoChargeColumnMissing,
   withoutNoChargeReason, isWaivedTask, noChargeReasonLabel,
 } from '@/lib/tasks/billable'
 import {
@@ -161,8 +161,6 @@ interface Service {
   pricing_type?: string
   default_price?: number
   default_currency?: string
-  /** false = work this agency gives away (Instagram highlight icons, say). */
-  default_billable?: boolean
 }
 
 interface VisibilitySettings {
@@ -1225,16 +1223,11 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     const svc = services.find(s => s.id === serviceId)
     const cp = clientPricings.find(p => p.client_id === form.client_id && p.service_id === serviceId)
     const cur = (cp?.currency || svc?.default_currency || 'INR') as Currency
-    // Some services are given away as a matter of policy — highlight icons ride
-    // along with the social retainer. They still carry their matrix price (the
-    // designer is paid for them); they just start out not billed. A manager can
-    // switch any of them back to Billable in the Financial section.
-    const freeByDefault = svc?.default_billable === false
-    setForm(p => ({
-      ...p, service_id: serviceId, currency: cur, quantity: '1', hours: '1',
-      is_billable: !freeByDefault,
-      no_charge_reason: freeByDefault ? DEFAULT_NO_CHARGE_REASON : null,
-    }))
+    // Deliberately NOT deciding billability here. The same deliverable is
+    // complimentary for one client and billed for the next (pay-per-creative),
+    // so the service cannot know: every task starts billable at its
+    // Pricing-Matrix price, and waiving is always a person's decision.
+    setForm(p => ({ ...p, service_id: serviceId, currency: cur, quantity: '1', hours: '1' }))
   }
 
   async function saveQuickPrice() {

@@ -262,10 +262,7 @@ export default async function TasksPage({
   const hasDeletedAt = await columnExists(supabase, 'tasks', 'deleted_at')
   // Same dance for the waiver reason (migration 20260829140000): the column is
   // new, and naming it in the select before it exists 400s the whole page.
-  const [hasNoChargeReason, hasDefaultBillable] = await Promise.all([
-    columnExists(supabase, 'tasks', 'no_charge_reason'),
-    columnExists(supabase, 'services', 'default_billable'),
-  ])
+  const hasNoChargeReason = await columnExists(supabase, 'tasks', 'no_charge_reason')
 
   const cutoff = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString()
 
@@ -286,7 +283,6 @@ export default async function TasksPage({
   // Plain `string` for the same reason as selectClause below: a template
   // literal here trips supabase-js's select-literal parser (TS2589-adjacent).
   const serviceSelect: string = 'id, name, default_price, default_currency, pricing_type'
-    + (hasDefaultBillable ? ', default_billable' : '')
   const selectClause: string = (vis.tasksPricing ? ADMIN_TASK_SELECT : EMPLOYEE_TASK_SELECT)
     + (vis.tasksPricing && hasNoChargeReason ? ', no_charge_reason' : '')
 
@@ -489,8 +485,7 @@ export default async function TasksPage({
     canRevealNames,
   )
 
-  // Cast: the pricing branch selects through a runtime-built string (the
-  // default_billable column is only named once its migration is applied), which
+  // Cast: the pricing branch selects through a plain string variable, which
   // supabase-js cannot type statically.
   const allServices = (servicesRes.data || []) as { id: string; name: string }[]
   const scopedServices =
