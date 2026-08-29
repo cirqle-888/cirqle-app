@@ -74,3 +74,4 @@ figma-plugin/*.zip
 
 # Archived code bundles — binary, kept locally for reference only
 docs/_archive/*.tgz
+/mobile/dist/

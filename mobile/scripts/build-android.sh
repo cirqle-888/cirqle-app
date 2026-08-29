@@ -54,7 +54,7 @@ else
 fi
 
 echo "▶ Gradle assembleRelease + bundleRelease…"
-( cd android && chmod +x ./gradlew && ./gradlew assembleRelease bundleRelease --no-daemon "${SIGN_ARGS[@]}" )
+( cd android && chmod +x ./gradlew && ./gradlew assembleRelease bundleRelease --no-daemon ${SIGN_ARGS[@]+"${SIGN_ARGS[@]}"} )
 
 echo
 echo "✓ Done."
