@@ -20,8 +20,16 @@
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 
-const env = readFileSync(resolve(process.cwd(), '.env.local'), 'utf8')
-const get = (k) => env.match(new RegExp(`^${k}=(.+)$`, 'm'))?.[1]?.trim()
+// Prefer real environment variables (CI) and fall back to .env.local (laptop),
+// so the same script runs in both places without a checked-in secrets file.
+let fileEnv = ''
+try {
+  fileEnv = readFileSync(resolve(process.cwd(), '.env.local'), 'utf8')
+} catch {
+  // No .env.local — CI supplies these as secrets instead.
+}
+const get = (k) =>
+  process.env[k]?.trim() || fileEnv.match(new RegExp(`^${k}=(.+)$`, 'm'))?.[1]?.trim()
 
 const URL = get('NEXT_PUBLIC_SUPABASE_URL')
 const ANON = get('NEXT_PUBLIC_SUPABASE_ANON_KEY')
