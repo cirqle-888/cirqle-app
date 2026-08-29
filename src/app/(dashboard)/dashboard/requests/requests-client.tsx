@@ -166,6 +166,15 @@ const EMPTY_NEW = {
 const inrFmt = (n: number) =>
   '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 0 })
 
+/**
+ * Statuses that still represent work somebody has to do. What "carrying five
+ * jobs" means — finished work is not a load.
+ */
+const OPEN_LOAD_STATUSES = [
+  'submitted', 'under_review', 'approved',
+  'started', 'in_progress', 'waiting_for_content', 'revision_requested', 'delivered',
+]
+
 /** Status buckets for the by-client board summary (new / active / done). */
 const PENDING_STATUSES = ['submitted', 'under_review', 'approved']
 const ACTIVE_STATUSES  = ['started', 'in_progress', 'waiting_for_content', 'revision_requested', 'delivered']
@@ -260,12 +269,19 @@ export default function RequestsClient({
     client: { type: 'text', get: (r: any) => r.client?.name },
     agency: { type: 'text', get: (r: any) => r.agency?.name },
     ref:    { type: 'text', get: (r: any) => refLabel(r.ref_no) },
+    assignee: { type: 'text', get: (r: any) => r.assigned_employee?.name },
   }), [])
   const requestGeneric = (r: any) =>
     `${refLabel(r.ref_no)} ${r.title || ''} ${r.client?.name || ''} ${r.agency?.name || ''} ${r.submitter_name || ''} ${r.assigned_employee?.name || ''}`
   const [clientFilter, setClientFilter] = useState('')
   // Inbox type filter: design requests vs offer-campaign submissions.
   const [typeFilter, setTypeFilter] = useState<'all' | 'request' | 'offer' | 'checklist'>('all')
+  /**
+   * Who is carrying this work. '' = everyone, 'unassigned' = the pile nobody
+   * has picked up — which is the one a manager actually needs to find, because
+   * an unassigned item is the only kind that cannot progress by itself.
+   */
+  const [assigneeFilter, setAssigneeFilter] = useState<string>('')
   const [showOnboard, setShowOnboard] = useState(false)
   const [onboarding, setOnboarding] = useState(false)
   const [onboardForm, setOnboardForm] = useState({ clientId: '', assignedEmployeeId: '' })
@@ -276,7 +292,7 @@ export default function RequestsClient({
 
   // View mode: flat list (tabbed) or kanban board (all statuses at once)
   const [view, setView] = useState<'list' | 'board'>('list')
-  const [boardBy, setBoardBy] = useState<'status' | 'client'>('status')
+  const [boardBy, setBoardBy] = useState<'status' | 'client' | 'assignee'>('status')
 
   // Batch selection (design requests only — offer campaigns excluded, same
   // as drag-reorder above). Mutually exclusive with drag mode: you're either
@@ -347,11 +363,39 @@ export default function RequestsClient({
    * work somebody owes — but "Design Requests" means the billable kind, so the
    * two lenses are mutually exclusive and "All types" shows both.
    */
+  /** Assignment lens: everyone, one person, or the unassigned pile. */
+  const matchesAssignee = useCallback((r: { assigned_employee_id?: string | null }) => {
+    if (!assigneeFilter) return true
+    if (assigneeFilter === 'unassigned') return !r.assigned_employee_id
+    return r.assigned_employee_id === assigneeFilter
+  }, [assigneeFilter])
+
   const matchesTypeFilter = useCallback((r: { kind?: string | null }) => {
     if (typeFilter === 'checklist') return isChecklistRequest(r)
     if (typeFilter === 'request') return !isChecklistRequest(r)
     return true
   }, [typeFilter])
+
+  /**
+   * Open work per person, and the unassigned pile — the numbers behind the
+   * assignee filter. Only OPEN statuses count: a designer with forty completed
+   * requests is not carrying forty jobs, and counting those would make the
+   * person who has finished the most look like the busiest.
+   */
+  const openLoad = useMemo(() => {
+    const byEmployee = new Map<string, number>()
+    let unassigned = 0
+    for (const r of requests) {
+      if (!OPEN_LOAD_STATUSES.includes(r.status)) continue
+      if (!matchesTypeFilter(r)) continue
+      if (clientFilter && r.client?.id !== clientFilter) continue
+      if (r.assigned_employee_id) {
+        byEmployee.set(r.assigned_employee_id, (byEmployee.get(r.assigned_employee_id) ?? 0) + 1)
+      } else unassigned++
+    }
+    return { byEmployee, unassigned }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requests, typeFilter, clientFilter])
 
   const counts = useMemo(() => {
     const m: Record<string, number> = {}
@@ -359,12 +403,12 @@ export default function RequestsClient({
     const inclOff = typeFilter === 'all' || typeFilter === 'offer'
     for (const t of TABS) {
       m[t.key] =
-        (inclReq ? requests.filter(r => t.statuses.includes(r.status) && matchesTypeFilter(r)).length : 0) +
-        (inclOff ? offerItems.filter(o => t.statuses.includes(o.status)).length : 0)
+        (inclReq ? requests.filter(r => t.statuses.includes(r.status) && matchesTypeFilter(r) && matchesAssignee(r)).length : 0) +
+        (inclOff && !assigneeFilter ? offerItems.filter(o => t.statuses.includes(o.status)).length : 0)
     }
     return m
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requests, offerItems, typeFilter])
+  }, [requests, offerItems, typeFilter, assigneeFilter])
 
   // Only offer clients that actually have requests in the filter dropdown.
   const filterClients = useMemo(() => {
@@ -403,6 +447,7 @@ export default function RequestsClient({
     const reqRows = typeFilter === 'offer' ? [] : requests.filter(r => {
       if (!t.statuses.includes(r.status)) return false
       if (!matchesTypeFilter(r)) return false
+      if (!matchesAssignee(r)) return false
       if (clientFilter && r.client?.id !== clientFilter) return false
       if (activeFacets.length && !recordMatchesFacets(activeFacets, r, REQUEST_FIELDS, requestGeneric)) return false
       return true
@@ -410,7 +455,9 @@ export default function RequestsClient({
       // the same name, so the database's answer is read first and carried as
       // `checklist`. Renaming either would touch every row renderer below.
     }).map((r: any) => ({ ...r, checklist: isChecklistRequest(r), kind: 'request' as const }))
-    const offRows = (typeFilter === 'request' || typeFilter === 'checklist') ? [] : offerItems.filter(o => {
+    // Offer campaigns carry no assignee, so any assignment lens excludes them
+    // rather than showing rows the filter cannot speak about.
+    const offRows = (typeFilter === 'request' || typeFilter === 'checklist' || assigneeFilter) ? [] : offerItems.filter(o => {
       if (!t.statuses.includes(o.status)) return false
       if (clientFilter && o.client?.id !== clientFilter) return false
       // Facet/text search is request-oriented — keep offers out of search results.
@@ -432,7 +479,7 @@ export default function RequestsClient({
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requests, offerItems, tab, activeFacets, clientFilter, typeFilter, matchesTypeFilter])
+  }, [requests, offerItems, tab, activeFacets, clientFilter, typeFilter, assigneeFilter, matchesTypeFilter, matchesAssignee])
 
   async function openRequest(r: any) {
     setOpen(r); setNotes(r.internal_notes || ''); setUpdateMsg('')
@@ -726,10 +773,12 @@ export default function RequestsClient({
     return requests.filter(r => {
       if (clientFilter && r.client?.id !== clientFilter) return false
       if (activeFacets.length && !recordMatchesFacets(activeFacets, r, REQUEST_FIELDS, requestGeneric)) return false
+      if (!matchesTypeFilter(r)) return false
+      if (!matchesAssignee(r)) return false
       return true
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requests, activeFacets, clientFilter])
+  }, [requests, activeFacets, clientFilter, typeFilter, assigneeFilter])
 
   const boardCols = useMemo(() => {
     if (boardBy === 'status') {
@@ -737,6 +786,25 @@ export default function RequestsClient({
         key: t.key, label: t.label,
         rows: boardRows.filter(r => t.statuses.includes(r.status)),
       })).filter(c => c.key !== 'all' && (c.key !== 'archived' || c.rows.length > 0))
+    }
+    // By assignee: one column per person, so a manager can see who is carrying
+    // what — and, in the first column, what nobody has picked up. Unassigned
+    // leads deliberately: it is the only column that cannot move on its own.
+    if (boardBy === 'assignee') {
+      const groups = new Map<string, { label: string; rows: any[] }>()
+      for (const r of boardRows) {
+        const key = r.assigned_employee_id || 'unassigned'
+        const label = r.assigned_employee ? dn(r.assigned_employee) : 'Unassigned'
+        if (!groups.has(key)) groups.set(key, { label, rows: [] })
+        groups.get(key)!.rows.push(r)
+      }
+      return [...groups.entries()]
+        .sort((a, b) => {
+          if (a[0] === 'unassigned') return -1
+          if (b[0] === 'unassigned') return 1
+          return b[1].rows.length - a[1].rows.length
+        })
+        .map(([key, g]) => ({ key, label: g.label, rows: g.rows }))
     }
     // By client: one column per requester, with pending/active/done summary.
     const groups = new Map<string, { label: string; rows: any[] }>()
@@ -749,6 +817,7 @@ export default function RequestsClient({
     return [...groups.entries()]
       .sort((a, b) => b[1].rows.length - a[1].rows.length)
       .map(([key, g]) => ({ key, label: g.label, rows: g.rows }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardRows, boardBy])
 
   const requesterOf = (r: any) =>
@@ -796,7 +865,7 @@ export default function RequestsClient({
         )) : (
           <>
             <span className="text-xs text-muted-foreground mr-1">Group by</span>
-            {(['status', 'client'] as const).map(g => (
+            {(['status', 'client', 'assignee'] as const).map(g => (
               <button key={g} onClick={() => setBoardBy(g)}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-medium capitalize whitespace-nowrap transition-colors border ${
                   boardBy === g ? 'gradient-bg text-white border-transparent shadow' : 'bg-secondary text-muted-foreground border-border hover:text-foreground'
@@ -962,6 +1031,24 @@ export default function RequestsClient({
           <option value="">All clients</option>
           {filterClients.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
+        {/* Who is carrying it. "Unassigned" comes first and carries a count,
+            because that is the pile which never moves on its own. */}
+        <select value={assigneeFilter} onChange={e => setAssigneeFilter(e.target.value)}
+          title="Filter by who it is assigned to"
+          className="bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 sm:w-52">
+          <option value="">Anyone</option>
+          <option value="unassigned">
+            {openLoad.unassigned > 0 ? `Unassigned (${openLoad.unassigned})` : 'Unassigned (0)'}
+          </option>
+          {employees
+            .filter(e => (openLoad.byEmployee.get(e.id) ?? 0) > 0 || e.id === assigneeFilter)
+            .sort((a, b) => (openLoad.byEmployee.get(b.id) ?? 0) - (openLoad.byEmployee.get(a.id) ?? 0))
+            .map(e => (
+              <option key={e.id} value={e.id}>
+                {dn(e)} ({openLoad.byEmployee.get(e.id) ?? 0} open)
+              </option>
+            ))}
+        </select>
         <select value={typeFilter} onChange={e => setTypeFilter(e.target.value as any)}
           title="Filter by submission type"
           className="bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 sm:w-44">
@@ -994,8 +1081,21 @@ export default function RequestsClient({
         className="mb-3"
         chips={[
           ...(clientFilter ? [{ key: 'client', label: 'Client', value: filterClients.find(([id]) => id === clientFilter)?.[1] || 'Selected', onRemove: () => setClientFilter('') }] : []),
+          ...(assigneeFilter ? [{
+            key: 'assignee', label: 'Assigned to',
+            value: assigneeFilter === 'unassigned'
+              ? 'Nobody'
+              : (() => { const e = employees.find(x => x.id === assigneeFilter); return e ? dn(e) : 'Selected' })(),
+            onRemove: () => setAssigneeFilter(''),
+          }] : []),
+          ...(typeFilter !== 'all' ? [{
+            key: 'type', label: 'Type',
+            value: typeFilter === 'checklist' ? 'Complimentary & setup'
+              : typeFilter === 'offer' ? 'Offer Campaigns' : 'Design Requests',
+            onRemove: () => setTypeFilter('all'),
+          }] : []),
         ]}
-        onClearAll={() => { setClientFilter('') }}
+        onClearAll={() => { setClientFilter(''); setAssigneeFilter(''); setTypeFilter('all') }}
       />
 
       {/* ── Board view ── */}
@@ -1024,7 +1124,10 @@ export default function RequestsClient({
                     <p className="text-xs font-bold truncate">{col.label}</p>
                     <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-secondary border border-border text-muted-foreground shrink-0">{col.rows.length}</span>
                   </div>
-                  {boardBy === 'client' && col.rows.length > 0 && (
+                  {/* Per-column workload. Grouped by person this is the answer
+                      to "what is on their plate right now?" — a column of nine
+                      is not a busy designer if eight of them are done. */}
+                  {boardBy !== 'status' && col.rows.length > 0 && (
                     <p className="text-[10px] text-muted-foreground mt-1">
                       {pending > 0 && <span className="text-blue-400">{pending} pending</span>}
                       {pending > 0 && (active > 0 || done > 0) && ' · '}
