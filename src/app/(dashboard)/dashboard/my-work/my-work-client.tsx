@@ -18,6 +18,7 @@ import {
   isPending, moveRefusalReason, type WorkStage,
 } from '@/lib/requests/my-work'
 import { moveMyWork, type MyWorkRow } from './actions'
+import { CHECKLIST_LABEL, CHECKLIST_HINT } from '@/lib/requests/kind'
 
 const DiscussButton = dynamicImport(
   () => import('@/components/chat/discuss-button').then(m => m.DiscussButton),
@@ -70,6 +71,15 @@ function Card({ row, dragging }: { row: MyWorkRow; dragging?: boolean }) {
         }`}>
           {row.source === 'plan' ? 'Plan' : row.ref_no ? `REQ-${String(row.ref_no).padStart(4, '0')}` : 'Request'}
         </span>
+        {/* Complimentary work still has to be done and still has a deadline —
+            it just never becomes a billable task. Saying so on the card stops
+            anyone wondering where its task number went. */}
+        {row.checklist && (
+          <span title={CHECKLIST_HINT}
+            className="px-1.5 py-0.5 rounded font-medium bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">
+            {CHECKLIST_LABEL}
+          </span>
+        )}
         {row.client_name && (
           <span className="px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">{row.client_name}</span>
         )}

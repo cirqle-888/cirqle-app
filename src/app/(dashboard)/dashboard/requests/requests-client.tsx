@@ -23,7 +23,7 @@ import {
   CalendarDays, MessageSquarePlus, Save, CheckCircle2, X, Flag,
   Search, Plus, UserRound, List, LayoutGrid, Link as LinkIcon, Trash2,
   ExternalLink, GripVertical, Share2, RefreshCw, Sparkles,
-  BadgePercent, Megaphone, ChevronDown,
+  BadgePercent, Megaphone, ChevronDown, ListChecks,
 } from 'lucide-react'
 import {
   CLIENT_STATUS_LABEL, STATUS_CHIP, PRIORITY_CHIP, refLabel, type RequestStatus,
@@ -31,7 +31,7 @@ import {
 import {
   setRequestStatusAction, markRequestViewed, getRequestTimeline,
   postExternalUpdate, updateInternalNotes, markRevisionAddressed, postRequestNote,
-  assignRequestEmployee, createManualRequest, searchTasksForLink, linkRequestToTask,
+  assignRequestEmployee, createManualRequest, createBrandOnboardingChecklist, searchTasksForLink, linkRequestToTask,
   reorderStaffPriority, bulkSetRequestStatus, bulkAssignRequestEmployee,
 } from './actions'
 import { DiscussButton } from '@/components/chat/discuss-button'
@@ -39,6 +39,10 @@ import { CampaignCard } from '@/components/campaigns/campaign-card'
 import { useBatchSelection } from '@/lib/hooks/use-batch-selection'
 import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
 import { formatDate } from '@/lib/utils/format-date'
+import {
+  BRAND_ONBOARDING_STEPS, CHECKLIST_HINT, CHECKLIST_LABEL,
+  REQUEST_KIND_CHECKLIST, REQUEST_KIND_REQUEST, isChecklistRequest,
+} from '@/lib/requests/kind'
 
 // Task-driven 5-stage flow. Request status mirrors the linked task (see
 // requestStatusFromTask): New → On Going → Under Review → Completed → Cancelled.
@@ -66,10 +70,11 @@ const NEW_REQUEST_TYPES: {
   label: string
   description: string
   icon: typeof Inbox
-  action: { kind: 'form' } | { kind: 'href'; href: string }
+  action: { kind: 'form' } | { kind: 'href'; href: string } | { kind: 'onboarding' }
   soon?: boolean
 }[] = [
   { key: 'design',      label: 'Design Request',       description: 'Brief a design / creative job for a client', icon: Inbox,        action: { kind: 'form' } },
+  { key: 'onboarding',  label: 'New Brand Setup',      description: 'Facebook page, Instagram, Meta config — the whole checklist', icon: ListChecks, action: { kind: 'onboarding' } },
   { key: 'offer',       label: 'Offer Flyer',          description: 'Weekly offer list → designer Google Sheet',  icon: BadgePercent, action: { kind: 'href', href: '/dashboard/offer-prepare' } },
   { key: 'advertising', label: 'Advertising Campaign', description: 'Paid-ads campaign brief and budget',         icon: Megaphone,    action: { kind: 'href', href: '/dashboard/advertising/new' } },
   { key: 'calendar',    label: 'Calendar Plan',        description: 'Monthly social content plan → push items to Requests', icon: CalendarDays, action: { kind: 'href', href: '/dashboard/social-calendar' } },
@@ -153,6 +158,9 @@ const EMPTY_NEW = {
   contentLink: '', referenceLink: '', isPlanned: false, serviceId: '',
   priority: 'normal', dueDate: '', assignedEmployeeId: '', estimatedValue: '',
   extraLinks: [] as { label: string; url: string }[],
+  // Complimentary / setup work: assigned and tracked, never a task, never
+  // billed, never shown to the client. See lib/requests/kind.
+  isChecklist: false,
 }
 
 const inrFmt = (n: number) =>
@@ -257,7 +265,10 @@ export default function RequestsClient({
     `${refLabel(r.ref_no)} ${r.title || ''} ${r.client?.name || ''} ${r.agency?.name || ''} ${r.submitter_name || ''} ${r.assigned_employee?.name || ''}`
   const [clientFilter, setClientFilter] = useState('')
   // Inbox type filter: design requests vs offer-campaign submissions.
-  const [typeFilter, setTypeFilter] = useState<'all' | 'request' | 'offer'>('all')
+  const [typeFilter, setTypeFilter] = useState<'all' | 'request' | 'offer' | 'checklist'>('all')
+  const [showOnboard, setShowOnboard] = useState(false)
+  const [onboarding, setOnboarding] = useState(false)
+  const [onboardForm, setOnboardForm] = useState({ clientId: '', assignedEmployeeId: '' })
   const [showNew, setShowNew] = useState(false)
   const [showNewMenu, setShowNewMenu] = useState(false)
   const [newForm, setNewForm] = useState(EMPTY_NEW)
@@ -329,16 +340,30 @@ export default function RequestsClient({
     campaign: c,
   })), [offerCampaigns])
 
+  /**
+   * Does this request match the type lens?
+   *
+   * Complimentary work sits alongside client requests in the inbox — it is real
+   * work somebody owes — but "Design Requests" means the billable kind, so the
+   * two lenses are mutually exclusive and "All types" shows both.
+   */
+  const matchesTypeFilter = useCallback((r: { kind?: string | null }) => {
+    if (typeFilter === 'checklist') return isChecklistRequest(r)
+    if (typeFilter === 'request') return !isChecklistRequest(r)
+    return true
+  }, [typeFilter])
+
   const counts = useMemo(() => {
     const m: Record<string, number> = {}
     const inclReq = typeFilter !== 'offer'
-    const inclOff = typeFilter !== 'request'
+    const inclOff = typeFilter === 'all' || typeFilter === 'offer'
     for (const t of TABS) {
       m[t.key] =
-        (inclReq ? requests.filter(r => t.statuses.includes(r.status)).length : 0) +
+        (inclReq ? requests.filter(r => t.statuses.includes(r.status) && matchesTypeFilter(r)).length : 0) +
         (inclOff ? offerItems.filter(o => t.statuses.includes(o.status)).length : 0)
     }
     return m
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requests, offerItems, typeFilter])
 
   // Only offer clients that actually have requests in the filter dropdown.
@@ -377,11 +402,15 @@ export default function RequestsClient({
     const t = TABS.find(x => x.key === tab)!
     const reqRows = typeFilter === 'offer' ? [] : requests.filter(r => {
       if (!t.statuses.includes(r.status)) return false
+      if (!matchesTypeFilter(r)) return false
       if (clientFilter && r.client?.id !== clientFilter) return false
       if (activeFacets.length && !recordMatchesFacets(activeFacets, r, REQUEST_FIELDS, requestGeneric)) return false
       return true
-    }).map((r: any) => ({ ...r, kind: 'request' as const }))
-    const offRows = typeFilter === 'request' ? [] : offerItems.filter(o => {
+      // `kind` here is the ROW TYPE (request vs offer) and shadows the column of
+      // the same name, so the database's answer is read first and carried as
+      // `checklist`. Renaming either would touch every row renderer below.
+    }).map((r: any) => ({ ...r, checklist: isChecklistRequest(r), kind: 'request' as const }))
+    const offRows = (typeFilter === 'request' || typeFilter === 'checklist') ? [] : offerItems.filter(o => {
       if (!t.statuses.includes(o.status)) return false
       if (clientFilter && o.client?.id !== clientFilter) return false
       // Facet/text search is request-oriented — keep offers out of search results.
@@ -402,7 +431,8 @@ export default function RequestsClient({
       return (b.updated_at || '').localeCompare(a.updated_at || '')
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requests, offerItems, tab, activeFacets, clientFilter, typeFilter])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requests, offerItems, tab, activeFacets, clientFilter, typeFilter, matchesTypeFilter])
 
   async function openRequest(r: any) {
     setOpen(r); setNotes(r.internal_notes || ''); setUpdateMsg('')
@@ -561,6 +591,7 @@ export default function RequestsClient({
       dueDate: newForm.dueDate || null,
       assignedEmployeeId: newForm.assignedEmployeeId || null,
       estimatedValue: newForm.estimatedValue ? parseFloat(newForm.estimatedValue) : null,
+      kind: newForm.isChecklist ? REQUEST_KIND_CHECKLIST : REQUEST_KIND_REQUEST,
     })
     setCreating(false)
     if (res.ok && res.data) {
@@ -568,8 +599,43 @@ export default function RequestsClient({
       setShowNew(false)
       setNewForm(EMPTY_NEW)
       setTab('new')
-      success(`${refLabel(res.data.ref_no)} created`, 'Visible on the client’s intake portal — press Start when work begins')
+      success(
+        `${refLabel(res.data.ref_no)} created`,
+        newForm.isChecklist
+          ? 'Complimentary — assigned and tracked, never billed, never shown to the client'
+          : 'Visible on the client’s intake portal — press Start when work begins',
+      )
     } else toastError('Could not create the request', res.error)
+  }
+
+  /**
+   * Start a brand: write the whole setup checklist at once.
+   *
+   * Re-runnable on purpose — the action skips steps this client already has, so
+   * a brand that arrives with a Facebook page keeps that item ticked instead of
+   * collecting a duplicate.
+   */
+  async function doStartOnboarding() {
+    if (onboarding || !onboardForm.clientId) return
+    setOnboarding(true)
+    const res = await createBrandOnboardingChecklist({
+      clientId: onboardForm.clientId,
+      assignedEmployeeId: onboardForm.assignedEmployeeId || null,
+    })
+    setOnboarding(false)
+    if (!res.ok) { toastError('Could not start the checklist', res.error); return }
+
+    setShowOnboard(false)
+    const { created, skipped } = res.data!
+    if (created === 0) {
+      success('Nothing to add', 'This client already has every setup step.')
+    } else {
+      success(
+        `${created} setup ${created === 1 ? 'step' : 'steps'} added`,
+        skipped > 0 ? `${skipped} already existed and were left alone` : 'Complimentary — assigned, tracked, never billed',
+      )
+      router.refresh()
+    }
   }
 
   async function doLinkSearch() {
@@ -763,6 +829,68 @@ export default function RequestsClient({
         )}
       </div>
 
+      {/* ── New brand setup: one click for the whole checklist ─────────────── */}
+      {showOnboard && (
+        <ModalOverlay onClose={() => setShowOnboard(false)} sheetOnMobile>
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md overflow-hidden">
+            <div className="px-5 py-4 border-b border-border">
+              <h2 className="font-bold text-base flex items-center gap-2">
+                <ListChecks className="w-4 h-4 text-emerald-500" /> New Brand Setup
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {BRAND_ONBOARDING_STEPS.length} steps — Facebook page, Instagram, Meta configuration,
+                the starter highlight icons. Complimentary: assigned and tracked, never billed.
+              </p>
+            </div>
+            <div className="p-5 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Client *</label>
+                <select value={onboardForm.clientId}
+                  onChange={e => setOnboardForm(f => ({ ...f, clientId: e.target.value }))}
+                  className="w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50">
+                  <option value="">Select a client…</option>
+                  {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Assign every step to</label>
+                <select value={onboardForm.assignedEmployeeId}
+                  onChange={e => setOnboardForm(f => ({ ...f, assignedEmployeeId: e.target.value }))}
+                  className="w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50">
+                  <option value="">Nobody yet — assign them later</option>
+                  {employees.map(e => <option key={e.id} value={e.id}>{dn(e)}</option>)}
+                </select>
+                <p className="text-[11px] text-muted-foreground mt-1.5">
+                  Assigned steps appear on that person&rsquo;s My Work board straight away.
+                </p>
+              </div>
+              <details className="rounded-xl border border-border bg-secondary/40 px-3 py-2">
+                <summary className="text-xs text-muted-foreground cursor-pointer select-none">
+                  What gets created
+                </summary>
+                <ul className="mt-2 space-y-1">
+                  {BRAND_ONBOARDING_STEPS.map(step => (
+                    <li key={step.title} className="text-[11px] text-muted-foreground flex gap-1.5">
+                      <span className="text-emerald-500 shrink-0">•</span>
+                      <span><strong className="text-foreground/80">{step.title}</strong> — {step.description}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </div>
+            <div className="px-5 py-4 border-t border-border flex justify-end gap-2">
+              <button onClick={() => setShowOnboard(false)}
+                className="px-4 py-2 text-sm rounded-xl bg-secondary border border-border hover:bg-secondary/70 transition-colors">Cancel</button>
+              <button onClick={doStartOnboarding} disabled={onboarding || !onboardForm.clientId}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-xl gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity">
+                {onboarding ? <Loader2 className="w-4 h-4 animate-spin" /> : <ListChecks className="w-4 h-4" />}
+                Create checklist
+              </button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
       {/* ── New Request type chooser — one front door for every request kind ── */}
       {showNewMenu && (
         <ModalOverlay onClose={() => setShowNewMenu(false)} sheetOnMobile>
@@ -779,6 +907,10 @@ export default function RequestsClient({
                   onClick={() => {
                     setShowNewMenu(false)
                     if (t.action.kind === 'form') setShowNew(true)
+                    else if (t.action.kind === 'onboarding') {
+                      setOnboardForm({ clientId: clientFilter || '', assignedEmployeeId: '' })
+                      setShowOnboard(true)
+                    }
                     else router.push(t.action.href)
                   }}
                   className="w-full text-left px-3 py-3 rounded-xl flex items-start gap-3 hover:bg-secondary/60 transition-colors disabled:opacity-45 disabled:cursor-not-allowed"
@@ -830,15 +962,14 @@ export default function RequestsClient({
           <option value="">All clients</option>
           {filterClients.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
-        {offerItems.length > 0 && (
-          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value as any)}
-            title="Filter by submission type"
-            className="bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 sm:w-44">
-            <option value="all">All types</option>
-            <option value="request">Design Requests</option>
-            <option value="offer">Offer Campaigns</option>
-          </select>
-        )}
+        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value as any)}
+          title="Filter by submission type"
+          className="bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 sm:w-44">
+          <option value="all">All types</option>
+          <option value="request">Design Requests</option>
+          {offerItems.length > 0 && <option value="offer">Offer Campaigns</option>}
+          <option value="checklist">Complimentary &amp; setup</option>
+        </select>
         <div className="flex rounded-xl border border-border overflow-hidden shrink-0">
           <button onClick={() => setView('list')} title="List view"
             className={`px-3 py-2 transition-colors ${view === 'list' ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>
@@ -1033,6 +1164,12 @@ export default function RequestsClient({
                           <span className="text-[11px] font-mono text-muted-foreground shrink-0">{refLabel(r.ref_no)}</span>
                           <p className="text-sm font-semibold truncate">{r.title}</p>
                           {r.is_planned && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-700 border border-blue-500/20 dark:text-blue-400">planned</span>}
+                          {isChecklistRequest(r) && (
+                            <span title={CHECKLIST_HINT}
+                              className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-700 border border-emerald-500/25 dark:text-emerald-300">
+                              {CHECKLIST_LABEL}
+                            </span>
+                          )}
                           {hasNewExternal(r) && (
                             <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
                               <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse" />
@@ -1486,6 +1623,20 @@ export default function RequestsClient({
                   onChange={e => setNewForm(f => ({ ...f, isPlanned: e.target.checked }))}
                   className="w-3.5 h-3.5 rounded accent-violet-500" />
                 Planned / future campaign (shows a “planned” tag in the inbox)
+              </label>
+              {/* Complimentary work — highlight icons thrown in with a package,
+                  the setup a new brand needs. Assigned and tracked like anything
+                  else; it just never becomes a task and never reaches a bill. */}
+              <label className="flex items-start gap-2 text-xs cursor-pointer select-none rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2.5">
+                <input type="checkbox" checked={newForm.isChecklist}
+                  onChange={e => setNewForm(f => ({ ...f, isChecklist: e.target.checked }))}
+                  className="w-3.5 h-3.5 rounded accent-emerald-500 mt-0.5" />
+                <span>
+                  <span className="font-medium text-emerald-700 dark:text-emerald-300">Complimentary / setup work</span>
+                  <span className="block text-muted-foreground mt-0.5">
+                    Never becomes a task, never billed, never shown to the client — it just has to get done.
+                  </span>
+                </span>
               </label>
             </div>
             <div className="px-5 py-4 border-t border-border flex justify-end gap-2 shrink-0">

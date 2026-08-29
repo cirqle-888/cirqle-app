@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isHidden } from '@/lib/requests/my-work'
+import { isChecklistRequest } from '@/lib/requests/kind'
+import { columnExists } from '@/lib/supabase/server'
 import { captionHtmlToText } from '@/lib/social/plan'
 
 /**
@@ -24,6 +26,8 @@ type Row = Record<string, unknown> & { [k: string]: any }   // eslint-disable-li
 export interface RawMyWorkRow {
   id: string
   source: 'request' | 'plan'
+  /** true = complimentary / setup work: ticked off, never a task, never billed. */
+  checklist?: boolean
   ref_no: number | null
   title: string
   description: string | null
@@ -43,10 +47,14 @@ export async function loadMyWork(
   const rows: RawMyWorkRow[] = []
 
   // ── Requests assigned to them ──────────────────────────────────────────────
+  // `kind` needs 20260829180000; without it every row reads as a plain request,
+  // which is what they all were before the column existed.
+  const hasKind = await columnExists(admin, 'task_requests', 'kind')
   try {
     const { data } = await admin
       .from('task_requests')
       .select('id, ref_no, title, description, status, due_date, priority, created_at, ' +
+        (hasKind ? 'kind, ' : '') +
         'client:clients(name), service:services(name), ' +
         'promoted_task:tasks!task_requests_promoted_task_id_fkey(task_number)')
       .eq('assigned_employee_id', employeeId)
@@ -62,6 +70,7 @@ export async function loadMyWork(
         priority: r.priority, created_at: r.created_at,
         client_name: c?.name ?? null, service_name: s?.name ?? null,
         task_number: t?.task_number ?? null,
+        checklist: isChecklistRequest(r as { kind?: string | null }),
       })
     }
   } catch { /* portal not migrated */ }

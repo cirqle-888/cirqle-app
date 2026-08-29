@@ -2,6 +2,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { getClientHubData } from '@/app/start/[token]/actions'
 import { intakeKindHref, INTAKE_KIND_META } from '@/lib/services/intake'
 import IntakeClient from './intake-client'
+import { columnExists } from '@/lib/supabase/server'
+import { REQUEST_KIND_CHECKLIST } from '@/lib/requests/kind'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,11 +55,15 @@ export default async function IntakePage({ params, searchParams }: {
   const requesterName = (link.client?.name as string) || (link.agency?.name as string) || null
 
   // Their own requests (external-safe fields only) + active services for routing.
+  // Checklist items — complimentary work and brand setup — are ours, not the
+  // client's, and must never appear here. See lib/requests/kind.
+  const hasKind = await columnExists(admin, 'task_requests', 'kind')
   const reqQuery = admin.from('task_requests').select(EXTERNAL_COLS)
-  const scoped =
+  const owned =
     link.type === 'client' ? reqQuery.eq('client_id', link.client_id)
     : link.type === 'agency' ? reqQuery.eq('agency_id', link.agency_id)
     : reqQuery.eq('link_id', link.id)
+  const scoped = hasKind ? owned.neq('kind', REQUEST_KIND_CHECKLIST) : owned
   const [requestsRes, servicesRes, logoRes, logoDarkRes] = await Promise.all([
     scoped.order('created_at', { ascending: false }).limit(100),
     admin.from('services').select('id, name').eq('is_active', true).order('display_order').order('name'),

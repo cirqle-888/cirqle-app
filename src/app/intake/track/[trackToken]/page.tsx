@@ -1,5 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { CLIENT_STATUS_LABEL } from '@/lib/requests/core'
+import { columnExists } from '@/lib/supabase/server'
+import { isChecklistRequest } from '@/lib/requests/kind'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,12 +15,20 @@ export default async function TrackPage({ params }: { params: Promise<{ trackTok
   let timeline: any[] = []
   try {
     const admin = createAdminClient()
+    // `kind` is selected only once its migration has run, and a checklist item
+    // is internal work: even holding its token must not open a tracking page.
+    // Falling through to the not-found view is deliberate — "this link is
+    // invalid" is all an outsider should learn.
+    const hasKind = await columnExists(admin, 'task_requests', 'kind')
+    const cols = 'id, ref_no, source, title, client_status, priority, due_date, created_at, '
+      + 'content_link, reference_link, deliverables_link, extra_links'
+      + (hasKind ? ', kind' : '')
     const { data } = await admin
       .from('task_requests')
-      .select('id, ref_no, source, title, client_status, priority, due_date, created_at, content_link, reference_link, deliverables_link, extra_links')
+      .select(cols)
       .eq('track_token', trackToken)
       .maybeSingle()
-    request = data
+    request = isChecklistRequest(data as { kind?: string | null } | null) ? null : data
     if (request) {
       const vis = request.source === 'agency' ? 'agency' : 'client'
       const { data: acts } = await admin

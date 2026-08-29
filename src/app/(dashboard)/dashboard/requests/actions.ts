@@ -15,7 +15,12 @@ import {
   setRequestStatus, logRequestActivity, requestStatusFromTask, type RequestStatus,
 } from '@/lib/requests/core'
 import { notifyRequesterStatus } from '@/lib/requests/notify'
+import { logActivity } from '@/lib/activity/log'
 import { aiParse, findClient, findService, normalizeDate } from '@/lib/ai/request-capture'
+import {
+  BRAND_ONBOARDING_STEPS, REQUEST_KIND_CHECKLIST, REQUEST_KIND_REQUEST,
+  isChecklistRequest, type RequestKind,
+} from '@/lib/requests/kind'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 const REVALIDATE = '/dashboard/requests'
@@ -262,10 +267,16 @@ export async function markRequestPromoted(
   const admin = createAdminClient()
   const { data: req, error } = await admin
     .from('task_requests')
-    .select('id, ref_no, title, status, source, track_token, client_id, agency_id, submitter_email, promoted_task_id, assigned_employee_id')
+    .select('id, ref_no, title, status, source, track_token, client_id, agency_id, submitter_email, promoted_task_id, assigned_employee_id, kind')
     .eq('id', requestId).single()
   if (error || !req) return { ok: false, error: 'Request not found.' }
   if (req.promoted_task_id) return { ok: false, error: 'This request was already promoted.' }
+  // Complimentary and setup work has no price and is not shown to the client:
+  // promoting one would put ₹0 work into the billing pipeline and email them
+  // that their request had started. Tick it off on the board instead.
+  if (isChecklistRequest(req as { kind?: string | null })) {
+    return { ok: false, error: 'Complimentary work does not become a task — mark it done on the board instead.' }
+  }
 
   const { error: upErr } = await admin.from('task_requests').update({
     promoted_task_id: taskId,
@@ -338,6 +349,80 @@ export async function assignRequestEmployee(
  */
 const OPEN_STATUSES = ['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested']
 
+/**
+ * Start a new brand: create the whole setup checklist for a client at once.
+ *
+ * Nine items typed by hand is how steps get skipped, and a half-configured Meta
+ * account is discovered weeks later when a post fails to publish. This writes
+ * the standard list (lib/requests/kind) as checklist items, optionally all
+ * assigned to one person, and reports how many it wrote.
+ *
+ * Idempotent by title: run it twice on the same client and the second run adds
+ * only whatever is missing, so a brand that already has a Facebook page keeps
+ * its ticked-off item instead of getting a duplicate.
+ */
+export async function createBrandOnboardingChecklist(input: {
+  clientId: string
+  assignedEmployeeId?: string | null
+  dueDate?: string | null
+}): Promise<ActionResult<{ created: number; skipped: number }>> {
+  const guard = await requirePermission(PERMS.REQUESTS_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!input.clientId) return { ok: false, error: 'Pick a client first.' }
+
+  const admin = createAdminClient()
+
+  // What this client already has, so a re-run tops up rather than duplicates.
+  let existing = new Set<string>()
+  try {
+    const { data, error } = await admin
+      .from('task_requests')
+      .select('title')
+      .eq('client_id', input.clientId)
+      .eq('kind', REQUEST_KIND_CHECKLIST)
+    if (error) {
+      return { ok: false, error: 'Complimentary items need migration 20260829180000. Apply it, then try again.' }
+    }
+    existing = new Set((data ?? []).map((r: { title: string }) => r.title.trim().toLowerCase()))
+  } catch {
+    return { ok: false, error: 'Could not read this client\u2019s existing checklist.' }
+  }
+
+  const wanted = BRAND_ONBOARDING_STEPS.filter(
+    step => !existing.has(step.title.trim().toLowerCase()),
+  )
+  if (wanted.length === 0) {
+    return { ok: true, data: { created: 0, skipped: BRAND_ONBOARDING_STEPS.length } }
+  }
+
+  const now = new Date().toISOString()
+  const rows = wanted.map(step => ({
+    source: 'manual',
+    kind: REQUEST_KIND_CHECKLIST,
+    client_id: input.clientId,
+    title: step.title,
+    description: step.description,
+    status: 'submitted',
+    client_status: 'submitted',
+    priority: 'normal',
+    due_date: input.dueDate || null,
+    assigned_employee_id: input.assignedEmployeeId || null,
+    last_staff_viewed_at: now,
+  }))
+
+  const { error } = await admin.from('task_requests').insert(rows)
+  if (error) return { ok: false, error: error.message }
+
+  void logActivity({
+    actorId: guard.employeeId, entityType: 'client', entityId: input.clientId,
+    action: 'created', category: 'crm', clientId: input.clientId,
+    note: `Brand onboarding checklist started — ${rows.length} step${rows.length === 1 ? '' : 's'}`,
+    detail: { created: rows.length, skipped: BRAND_ONBOARDING_STEPS.length - rows.length },
+  })
+
+  revalidatePath(REVALIDATE)
+  return { ok: true, data: { created: rows.length, skipped: BRAND_ONBOARDING_STEPS.length - rows.length } }
+}
 export async function createManualRequest(input: {
   clientId: string
   title: string
@@ -353,6 +438,12 @@ export async function createManualRequest(input: {
   dueDate?: string | null
   assignedEmployeeId?: string | null
   estimatedValue?: number | null
+  /**
+   * 'checklist' = complimentary or setup work: assigned and tracked, but never
+   * a task, never billed, and never shown to the client. Defaults to a normal
+   * request, so every existing caller is unaffected.
+   */
+  kind?: RequestKind
 }): Promise<ActionResult<any>> {
   const guard = await requirePermission(PERMS.REQUESTS_MANAGE)
   if (!guard.ok) return { ok: false, error: guard.error }
@@ -373,8 +464,10 @@ export async function createManualRequest(input: {
     nextRank = (count ?? 0) + 1
   } catch { /* defensive */ }
 
+  const isChecklist = input.kind === REQUEST_KIND_CHECKLIST
   const payload: Record<string, unknown> = {
     source: 'manual',
+    kind: input.kind || REQUEST_KIND_REQUEST,
     client_id: input.clientId,
     title,
     description: (input.description || '').trim() || null,
@@ -406,12 +499,24 @@ export async function createManualRequest(input: {
     delete payload.estimated_value
     ;({ data, error } = await admin.from('task_requests').insert(payload).select(SELECT_COLS).single())
   }
+  // Pre-migration (20260829180000): no kind column. A plain request is exactly
+  // what it becomes without it, so only a checklist item is worth refusing.
+  if (error && /\bkind\b/i.test(error.message || '')) {
+    if (isChecklist) {
+      return { ok: false, error: 'Complimentary items need migration 20260829180000. Apply it, then try again.' }
+    }
+    delete payload.kind
+    ;({ data, error } = await admin.from('task_requests').insert(payload).select(SELECT_COLS).single())
+  }
   if (error || !data) return { ok: false, error: error?.message || 'Could not create the request.' }
 
-  // Client-visible "submitted" entry so it reads naturally on their portal timeline.
+  // Client-visible "submitted" entry so it reads naturally on their portal
+  // timeline — but a checklist item is ours, not theirs: the entry is logged
+  // for staff only, or the client's timeline would announce work they are not
+  // being told about and cannot see.
   await logRequestActivity(admin, {
     requestId: data.id, actorType: 'admin', actorId: guard.employeeId, actorLabel: 'Cirqle',
-    action: 'submitted', visibility: 'client', detail: { title },
+    action: 'submitted', visibility: isChecklist ? 'internal' : 'client', detail: { title },
   })
 
   revalidatePath(REVALIDATE)

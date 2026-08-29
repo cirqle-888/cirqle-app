@@ -22,6 +22,7 @@ import { logActivity } from '@/lib/activity/log'
 import { syncRequestStatusFromTask } from '@/lib/requests/task-sync'
 import { serverFillTaskBilling } from '@/app/(dashboard)/dashboard/tasks/actions'
 import { autoLinkTaskPackage } from '@/lib/packages/auto-link'
+import { isChecklistRequest } from '@/lib/requests/kind'
 import { nextTaskNumber } from '@/lib/utils/task-code'
 import { todayISO } from '@/lib/utils/local-date'
 import { loadMyWork } from '@/lib/requests/my-work-load'
@@ -55,6 +56,11 @@ export interface MyWorkRow {
   client_name: string | null
   service_name: string | null
   task_number: number | null
+  /**
+   * Complimentary or setup work: it is ticked off in place and never becomes a
+   * task, so it never carries a task number and never reaches an invoice.
+   */
+  checklist?: boolean
 }
 
 /**
@@ -179,7 +185,7 @@ export async function moveMyWork(
   const admin = createAdminClient()
   const { data: req, error } = await admin
     .from('task_requests')
-    .select('id, ref_no, title, description, status, assigned_employee_id, promoted_task_id, client_id, service_id, due_date')
+    .select('id, ref_no, title, description, status, assigned_employee_id, promoted_task_id, client_id, service_id, due_date, kind')
     .eq('id', requestId).maybeSingle()
   if (error || !req) return { ok: false, error: 'That work item could not be found.' }
 
@@ -198,6 +204,30 @@ export async function moveMyWork(
 
   const taskStatus = STAGE_TASK_STATUS[toStage]
   if (!taskStatus) return { ok: false, error: moveRefusalReason(from, toStage) }
+
+  // ── Checklist item: ticked off, not delivered ─────────────────────────────
+  // Complimentary work and brand setup have no price, so promoting one to a
+  // task would put ₹0 work into the billing pipeline and — through the status
+  // sync below — tell the client their request had started. It simply carries
+  // its own status instead.
+  if (isChecklistRequest(req as { kind?: string | null })) {
+    const target = STAGE_TARGET_STATUS[toStage]!
+    const { error: updErr } = await admin
+      .from('task_requests')
+      .update({ status: target, updated_at: new Date().toISOString() })
+      .eq('id', requestId)
+    if (updErr) return { ok: false, error: 'Could not update this item. Try again.' }
+
+    void logActivity({
+      actorId: guard.employeeId, entityType: 'client', entityId: (req as Row).client_id ?? '',
+      action: 'updated', category: 'crm', clientId: (req as Row).client_id ?? null,
+      note: `Complimentary: ${(req as Row).title} → ${STAGE_LABEL[toStage]}`,
+      detail: { requestId, from, to: toStage, kind: 'checklist' },
+    })
+
+    revalidatePath(REVALIDATE); revalidatePath('/dashboard/requests')
+    return { ok: true, data: { status: target } }
+  }
 
   let taskId: string
   let created = false

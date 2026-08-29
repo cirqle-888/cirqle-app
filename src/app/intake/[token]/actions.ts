@@ -12,6 +12,8 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { logRequestActivity, bumpExternalActivity, type Visibility } from '@/lib/requests/core'
 import { notifyNewRequest } from '@/lib/requests/notify'
+import { columnExists } from '@/lib/supabase/server'
+import { REQUEST_KIND_CHECKLIST } from '@/lib/requests/kind'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
@@ -62,10 +64,25 @@ async function resolveToken(token: string): Promise<ResolvedLink | null> {
 }
 
 /** A request belongs to this token when tenant ids match (or generic: same link). */
-function ownershipFilter(q: any, link: ResolvedLink) {
-  if (link.type === 'client') return q.eq('client_id', link.clientId)
-  if (link.type === 'agency') return q.eq('agency_id', link.agencyId)
-  return q.eq('link_id', link.linkId)
+/**
+ * Scope a task_requests query to what this link's holder may see.
+ *
+ * Two filters, and the second matters as much as the first: CHECKLIST items are
+ * ours — complimentary work and brand setup — and must never appear on a
+ * client's portal, count toward their quota, or be reorderable by them. Every
+ * client-facing read of task_requests goes through here, which is the only
+ * reason that guarantee is checkable in one place.
+ *
+ * `kind` needs migration 20260829180000. Before it lands there are no checklist
+ * items to hide, so the filter is left off rather than failing the read.
+ */
+async function ownershipFilter(q: any, link: ResolvedLink) {
+  const scoped =
+    link.type === 'client' ? q.eq('client_id', link.clientId)
+    : link.type === 'agency' ? q.eq('agency_id', link.agencyId)
+    : q.eq('link_id', link.linkId)
+  const hasKind = await columnExists(createAdminClient(), 'task_requests', 'kind')
+  return hasKind ? scoped.neq('kind', REQUEST_KIND_CHECKLIST) : scoped
 }
 
 // ─── Submit ───────────────────────────────────────────────────────────────────
@@ -106,9 +123,9 @@ export async function submitIntakeRequest(
   // New requests join the END of the requester's priority queue (rank = open+1).
   let nextRank: number | null = null
   try {
-    const { count } = await ownershipFilter(
+    const { count } = await (await ownershipFilter(
       admin.from('task_requests').select('id', { count: 'exact', head: true }), link,
-    ).in('status', OPEN_STATUSES)
+    )).in('status', OPEN_STATUSES)
     nextRank = (count ?? 0) + 1
   } catch { /* defensive */ }
 
@@ -164,9 +181,9 @@ export async function getMyRequests(token: string): Promise<ActionResult<{ rows:
   const link = await resolveToken(token)
   if (!link) return { ok: false, error: 'This link is no longer valid.' }
   const admin = createAdminClient()
-  const { data, error } = await ownershipFilter(
+  const { data, error } = await (await ownershipFilter(
     admin.from('task_requests').select(EXTERNAL_COLS), link,
-  ).order('created_at', { ascending: false }).limit(100)
+  )).order('created_at', { ascending: false }).limit(100)
   if (error) return { ok: false, error: 'Could not load requests.' }
   return { ok: true, data: { rows: data || [] } }
 }
@@ -177,9 +194,9 @@ export async function getExternalTimeline(token: string, requestId: string): Pro
   const admin = createAdminClient()
 
   // Ownership check first — never leak another tenant's timeline.
-  const { data: own } = await ownershipFilter(
+  const { data: own } = await (await ownershipFilter(
     admin.from('task_requests').select('id'), link,
-  ).eq('id', requestId).maybeSingle()
+  )).eq('id', requestId).maybeSingle()
   if (!own) return { ok: false, error: 'Not found.' }
 
   const { data, error } = await admin
@@ -197,9 +214,9 @@ export async function getExternalTimeline(token: string, requestId: string): Pro
 
 async function ownRequest(link: ResolvedLink, requestId: string) {
   const admin = createAdminClient()
-  const { data } = await ownershipFilter(
+  const { data } = await (await ownershipFilter(
     admin.from('task_requests').select('id, status'), link,
-  ).eq('id', requestId).maybeSingle()
+  )).eq('id', requestId).maybeSingle()
   return data ? { admin, request: data } : null
 }
 
@@ -266,9 +283,9 @@ export async function reorderMyRequests(
 
   const admin = createAdminClient()
   // Ownership: fetch this tenant's open request ids, keep only those.
-  const { data: own } = await ownershipFilter(
+  const { data: own } = await (await ownershipFilter(
     admin.from('task_requests').select('id'), link,
-  ).in('status', OPEN_STATUSES)
+  )).in('status', OPEN_STATUSES)
   const ownIds = new Set((own || []).map((r: any) => r.id))
   const ranked = orderedIds.filter(id => ownIds.has(id))
 
