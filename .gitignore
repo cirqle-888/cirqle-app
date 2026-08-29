@@ -75,3 +75,12 @@ figma-plugin/*.zip
 # Archived code bundles — binary, kept locally for reference only
 docs/_archive/*.tgz
 /mobile/dist/
+
+# Local investigation scripts — kept on disk, never shipped.
+#
+# 93 one-off .mjs probes plus the August 2026 codemods live here. They are real
+# working history (how a bug was found, what a schema looked like on the day),
+# so they are ignored rather than deleted — but they are not the app, they are
+# already excluded from eslint and vitest, and committing them would triple the
+# tree for no reader.
+/scratch/
