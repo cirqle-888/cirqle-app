@@ -449,7 +449,8 @@ function normalizeDate(raw: string): string {
   // Slash-delimited: D/M/YYYY or M/D/YYYY — default to D/M/YYYY (Indian convention)
   const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/)
   if (slash) {
-    let [, a, b, y] = slash
+    const [, a, b] = slash
+    let y = slash[3]
     if (y.length === 2) y = (parseInt(y) >= 50 ? '19' : '20') + y
     const aNum = parseInt(a), bNum = parseInt(b)
     let d: string, m: string
