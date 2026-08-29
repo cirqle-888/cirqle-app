@@ -489,7 +489,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let q: any = supabase
         .from('tasks')
-        .select('*, client:clients(id, name, code), service:services(id, name)', { count: 'exact' })
+        .select('*, client:clients(id, name, code), service:services!service_id(id, name)', { count: 'exact' })
 
       if (hasSoftDelete) q = q.is('deleted_at', null)
 
@@ -1417,7 +1417,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       }
       const { data, error } = await retryWithoutScope(strip =>
         supabase.from('tasks').insert(strip ? withoutScope(duplicateRow) : duplicateRow)
-          .select('*, client:clients(id,name,code), service:services(id,name)').single()
+          .select('*, client:clients(id,name,code), service:services!service_id(id,name)').single()
       )
       if (data) {
         setTasks(prev => [data as Task, ...prev])
@@ -1542,7 +1542,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       } : {}),
     }
 
-    const selectCols = `*, client:clients(id, name, code), service:services(id, name)`
+    const selectCols = `*, client:clients(id, name, code), service:services!service_id(id, name)`
     let { data, error } = await supabase
       .from('tasks')
       .insert(billingSnapshot ? { ...insertPayload, billing_snapshot: billingSnapshot } : insertPayload)

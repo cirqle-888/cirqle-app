@@ -18,14 +18,14 @@ export const dynamic = 'force-dynamic'
 // visit, so per-row weight is multiplied by ~2,000; `*` also dragged along
 // scope, created_by, updated_at, billing_exchange_rate and contributions_locked,
 // which nothing on the page renders. Add new columns here deliberately.
-const ADMIN_TASK_SELECT = `id, task_number, title, description, client_id, service_id, status, billing_amount, billing_amount_inr, quantity, currency, task_date, created_at, deleted_at, is_recurring, recurring_interval, recurring_end_date, recurring_parent_id, cancelled_by, cancellation_notes, honor_contributions, loss_amount, completion_pct, parent_task_id, variant_type, variant_label, billing_mode, billing_percent, billing_override, is_billable, package_id, billing_rule, billing_snapshot, client:clients(id, name, code), service:services(id, name)`
+const ADMIN_TASK_SELECT = `id, task_number, title, description, client_id, service_id, status, billing_amount, billing_amount_inr, quantity, currency, task_date, created_at, deleted_at, is_recurring, recurring_interval, recurring_end_date, recurring_parent_id, cancelled_by, cancellation_notes, honor_contributions, loss_amount, completion_pct, parent_task_id, variant_type, variant_label, billing_mode, billing_percent, billing_override, is_billable, package_id, billing_rule, billing_snapshot, client:clients(id, name, code), service:services!service_id(id, name)`
 
 // Employee select — explicit column list with ALL financial fields stripped.
 // These never enter the client JS state for employees:
 //   billing_amount, billing_amount_inr, currency, loss_amount, billing_mode,
 //   billing_percent, billing_override, is_billable, honor_contributions.
 // Quantity is kept because it represents task count, not money.
-const EMPLOYEE_TASK_SELECT = `id, title, task_number, status, task_date, client_id, service_id, quantity, description, created_at, updated_at, parent_task_id, variant_type, variant_label, completion_pct, is_recurring, recurring_interval, recurring_end_date, recurring_parent_id, cancelled_by, cancellation_notes, client:clients(id, name, code), service:services(id, name)`
+const EMPLOYEE_TASK_SELECT = `id, title, task_number, status, task_date, client_id, service_id, quantity, description, created_at, updated_at, parent_task_id, variant_type, variant_label, completion_pct, is_recurring, recurring_interval, recurring_end_date, recurring_parent_id, cancelled_by, cancellation_notes, client:clients(id, name, code), service:services!service_id(id, name)`
 
 // Statuses that represent live work. These are ALWAYS loaded in full no matter
 // how old they are — an eighteen-month-old task still sitting in `pending` has

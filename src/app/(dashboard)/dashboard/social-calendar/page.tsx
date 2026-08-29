@@ -289,7 +289,7 @@ export default async function SocialCalendarPage({
 
       const { data: done } = await admin
         .from('tasks')
-        .select('id, task_number, title, task_date, status, service_id, service:services(name)')
+        .select('id, task_number, title, task_date, status, service_id, service:services!service_id(name)')
         .eq('client_id', selectedCalendar.client_id)
         .is('deleted_at', null)
         .in('status', ['delivered', 'done', 'invoiced', 'paid'])

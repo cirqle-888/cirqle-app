@@ -47,7 +47,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           .eq('client_id', id).order('created_at', { ascending: false }))
       : Promise.resolve({ data: [] as any[] }),
     supabase.from('tasks')
-      .select('id, task_number, title, status, task_date, service:services(id, name)')
+      .select('id, task_number, title, status, task_date, service:services!service_id(id, name)')
       .eq('client_id', id).is('deleted_at', null)
       .order('task_date', { ascending: false }).limit(400),
     supabase.from('client_service_pricing').select('service_id, price, commission_percentage, currency').eq('client_id', id),

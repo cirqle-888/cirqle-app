@@ -84,7 +84,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   const tasksRes = await fetchAllIn(
     (idChunk) => stablePaginationQuery(
       supabase.from('tasks')
-        .select('id, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services(id, name)')
+        .select('id, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services!service_id(id, name)')
         .in('id', idChunk)
         .in('status', ['pending', 'in_progress', 'done', 'delivered', 'invoiced', 'paid'])
         .gte('task_date', portalWindow.from!)

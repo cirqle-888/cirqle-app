@@ -1650,7 +1650,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     // Fetch done AND invoiced tasks in range (so we can warn about already-invoiced ones)
     const { data: rawTasks } = await supabase
       .from('tasks')
-      .select('id, title, task_date, billing_amount, billing_amount_inr, currency, status, quantity, unit_price, service:services(name)')
+      .select('id, title, task_date, billing_amount, billing_amount_inr, currency, status, quantity, unit_price, service:services!service_id(name)')
       .eq('client_id', genForm.client_id)
       .in('status', ['done', 'invoiced'])
       .gte('task_date', from)
@@ -2125,7 +2125,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     // Step 1: fetch cancelled tasks — simple join only (no triple-nested alias)
     const { data: tasks, error: tErr } = await supabase
       .from('tasks')
-      .select('id, title, task_date, billing_amount_inr, currency, cancelled_by, cancellation_notes, honor_contributions, loss_amount, completion_pct, client:clients(id, name), service:services(name)')
+      .select('id, title, task_date, billing_amount_inr, currency, cancelled_by, cancellation_notes, honor_contributions, loss_amount, completion_pct, client:clients(id, name), service:services!service_id(name)')
       .eq('status', 'cancelled')
       .order('task_date', { ascending: false })
     if (tErr) console.error('loadJobLosses tasks error:', tErr)

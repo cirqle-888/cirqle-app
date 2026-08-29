@@ -780,7 +780,7 @@ export async function serverSaveTask(
       task_date:          input.taskDate || null,
     })
     .eq('id', input.taskId)
-    .select('*, client:clients(id, name, code), service:services(id, name)')
+    .select('*, client:clients(id, name, code), service:services!service_id(id, name)')
     .single()
 
   if (error) return { ok: false, error: error.message }

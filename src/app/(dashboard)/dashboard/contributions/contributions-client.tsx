@@ -1284,7 +1284,7 @@ export default function ContributionsClient({
     const { data, error } = await supabase
       .from('tasks')
       .insert(payload)
-      .select('id, task_number, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services(id, name)')
+      .select('id, task_number, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services!service_id(id, name)')
       .single()
 
     if (!error && data) {
@@ -1317,7 +1317,7 @@ export default function ContributionsClient({
     const { data, error } = await supabase
       .from('tasks')
       .insert(payload)
-      .select('id, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services(id, name)')
+      .select('id, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services!service_id(id, name)')
       .single()
 
     if (error) { setAddTaskError(error.message); setAddingTask(false); return }

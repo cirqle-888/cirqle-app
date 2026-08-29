@@ -48,7 +48,7 @@ export default async function DashboardPage() {
   const allAnalyticsTasksPromise: Promise<any[]> = isAdmin
     ? fetchAll(supabase
         .from('tasks')
-        .select('id, billing_amount_inr, quantity, task_date, status, service_id, client:clients(id, name), service:services(id, name)')
+        .select('id, billing_amount_inr, quantity, task_date, status, service_id, client:clients(id, name), service:services!service_id(id, name)')
         .not('status', 'eq', 'cancelled')
         // Deleted work is not done work. Without this the Job Value, Count,
         // Jobs Done chart and period comparisons all counted soft-deleted
@@ -120,7 +120,7 @@ export default async function DashboardPage() {
     isAdmin
       ? fetchAll(stablePaginationQuery(supabase
           .from('tasks')
-          .select('id, title, status, billing_amount_inr, task_date, client:clients(id, name), service:services(id, name)')
+          .select('id, title, status, billing_amount_inr, task_date, client:clients(id, name), service:services!service_id(id, name)')
           .not('status', 'eq', 'cancelled')
           .is('deleted_at', null)
           .gte('task_date', displayFromStr)
@@ -152,7 +152,7 @@ export default async function DashboardPage() {
     isAdmin
       ? supabase
           .from('tasks')
-          .select('id, title, status, billing_amount_inr, task_date, client:clients(id, name), service:services(id, name)')
+          .select('id, title, status, billing_amount_inr, task_date, client:clients(id, name), service:services!service_id(id, name)')
           .eq('task_date', todayStr)
           // Same omission as the analytics query above — a task deleted today
           // would still sit in the Today's Focus widget asking to be worked on.

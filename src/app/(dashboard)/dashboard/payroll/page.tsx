@@ -75,7 +75,7 @@ export default async function PayrollPage() {
     fetchAll(stablePaginationQuery(
       supabase
         .from('tasks')
-        .select('id, title, task_date, status, billing_amount_inr, client:clients(name), service:services(name)')
+        .select('id, title, task_date, status, billing_amount_inr, client:clients(name), service:services!service_id(name)')
         .in('status', ['done', 'invoiced', 'paid'])
         .gte('task_date', `${currentYear - 1}-01-01`)
         .order('task_date', { ascending: false })
