@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { isNative, capPlugin } from '@/lib/native'
 import { routeForDeepLink } from '@/lib/deep-link'
+import { syncRoute } from '@/lib/mobile/last-route'
 import { OfflineIndicator } from '@/components/mobile/offline-indicator'
 import { UpdateBanner } from '@/components/mobile/update-banner'
 
@@ -34,12 +35,16 @@ interface AppPlugin {
  *   Style follows the app theme and re-syncs when the .dark class toggles.
  * - SplashScreen: hidden once the web app has mounted (config keeps it up until
  *   we call hide, avoiding a white flash while the remote URL loads).
+ * - Last route: remembered across launches, because Capacitor always boots the
+ *   WebView at the site root and keeps no page state of its own. See
+ *   @/lib/mobile/last-route.
  *
  * Plugins come from the runtime-injected window.Capacitor.Plugins, so nothing
  * is added to the web bundle. Every call is null-checked and wrapped.
  */
 export function MobileShell() {
   const router = useRouter()
+  const pathname = usePathname()
 
   useEffect(() => {
     if (!isNative()) return
@@ -98,6 +103,33 @@ export function MobileShell() {
 
     return () => { handles.forEach(h => { void h.remove().catch(() => {}) }) }
   }, [router])
+
+  // Remember the page across app launches, and restore it on the first mount of
+  // a fresh WebView session. Capacitor boots at the site root (which redirects
+  // to /dashboard) and saves no page state, so without this every process death
+  // or swipe-away relaunch drops the user on the dashboard. Off-native this
+  // no-ops entirely — the browser and the desktop app reload in place already.
+  //
+  // Restore and record are ONE ordered pass (syncRoute) on purpose: the restore
+  // has to read storage before the /dashboard landing page overwrites it, which
+  // makes it independent of effect declaration order. The once-per-launch flag
+  // burns on the first call, so every later navigation just records.
+  //
+  // A cirqle:// deep link still wins: its appUrlOpen listener fires
+  // asynchronously, after this, and pushes over whatever was restored.
+  //
+  // Two deliberate limits: a query-only change (a filter, a tab) does not move
+  // `pathname`, so the stored route is the URL as of the last real navigation;
+  // and a launch that lands on /login burns the flag, so signing in by hand
+  // takes you to the dashboard rather than back to a page whose permissions may
+  // have changed underneath you.
+  useEffect(() => {
+    if (!isNative()) return
+    syncRoute(
+      window.location.pathname + window.location.search,
+      (to) => router.replace(to),
+    )
+  }, [pathname, router])
 
   // Both render null off-native: offline/sync status + native update prompt.
   return (
