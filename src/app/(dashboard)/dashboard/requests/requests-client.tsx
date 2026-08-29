@@ -611,7 +611,6 @@ export default function RequestsClient({
     try {
       const text = await navigator.clipboard.readText()
       if (text) {
-        // @ts-ignore
         window.__pendingCirqleCapture = { text }
       }
     } catch {

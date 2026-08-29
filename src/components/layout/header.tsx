@@ -164,7 +164,6 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
     try {
       const text = await navigator.clipboard.readText()
       if (text) {
-        // @ts-expect-error Desktop and browser entry points share this handoff.
         window.__pendingCirqleCapture = { text }
       }
     } catch { /* manual paste remains available */ }

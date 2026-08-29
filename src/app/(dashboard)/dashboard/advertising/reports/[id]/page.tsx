@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
@@ -30,12 +31,12 @@ export default async function InteractiveReportPage({ params }: { params: { id: 
     <div className="min-h-screen bg-muted/20">
       <div className="border-b border-border bg-background px-6 py-4 flex items-center justify-between">
         <h1 className="font-medium text-foreground">Report Interactive View</h1>
-        <a 
-          href="/dashboard/advertising/reports" 
+        <Link
+          href="/dashboard/advertising/reports"
           className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
         >
           Back to Reports Hub
-        </a>
+        </Link>
       </div>
       <WebReportViewer data={renderData} />
     </div>
