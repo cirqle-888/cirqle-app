@@ -85,8 +85,8 @@ export async function ingestMetrics(
     const key = `${r.projectId}_${r.metricDate}`
     const existing = existingMap.get(key)
     
-    let isManual = source.toLowerCase() === 'manual'
-    let syncState = isManual ? 'manual' : 'imported'
+    const isManual = source.toLowerCase() === 'manual'
+    const syncState = isManual ? 'manual' : 'imported'
     
     // MERGE LOGIC
     if (existing) {

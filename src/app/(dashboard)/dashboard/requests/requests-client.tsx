@@ -477,7 +477,7 @@ export default function RequestsClient({
       if (ar !== br) return ar - br
       return (b.updated_at || '').localeCompare(a.updated_at || '')
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requests, offerItems, tab, activeFacets, clientFilter, typeFilter, assigneeFilter, matchesTypeFilter, matchesAssignee])
 
@@ -740,7 +740,7 @@ export default function RequestsClient({
 
   const shareClientName = useMemo(
     () => filterClients.find(([id]) => id === shareClientId)?.[1] || clients.find(c => c.id === shareClientId)?.name || '',
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [shareClientId, filterClients, clients],
   )
 

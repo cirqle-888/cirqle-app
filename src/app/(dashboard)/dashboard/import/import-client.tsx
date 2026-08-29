@@ -1131,7 +1131,7 @@ export default function ImportClient({ clients, services, employees, groups, par
       const invoice_id  = invMatch?.id || null
       const invoice_total_fallback = invMatch?.total || 0
       // Resolve client_id (required)
-      let client_id = clientRef ? clientMap[norm(clientRef)] : (invMatch?.client_id || '')
+      const client_id = clientRef ? clientMap[norm(clientRef)] : (invMatch?.client_id || '')
 
       const r: ParsedRow = {
         ...baseRow(i), row_id: g(iId),

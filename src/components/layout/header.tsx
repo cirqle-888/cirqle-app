@@ -54,7 +54,7 @@ const ROUTE_LABELS: Record<string, string> = {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-function Breadcrumbs({ isEmployee, crumbLabel }: { isEmployee: boolean; crumbLabel?: string }) { // eslint-disable-line @typescript-eslint/no-unused-vars
+function Breadcrumbs({ isEmployee, crumbLabel }: { isEmployee: boolean; crumbLabel?: string }) {  
   const pathname = usePathname()
   // e.g. /dashboard/tasks  →  ['dashboard', 'tasks']
   const segments = pathname.split('/').filter(Boolean)

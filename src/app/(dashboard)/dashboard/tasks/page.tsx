@@ -425,7 +425,7 @@ export default async function TasksPage({
   // Tasks promoted from external requests → "REQ-xxxx" chip on task rows so
   // employees can open the request brief (design plan, links) from the task.
   // Defensive: the portal tables may not exist pre-migration.
-  let requestRefByTaskId: Record<string, { id: string; ref_no: number }> = {}
+  const requestRefByTaskId: Record<string, { id: string; ref_no: number }> = {}
   try {
     const { data: promoted } = await supabase
       .from('task_requests')

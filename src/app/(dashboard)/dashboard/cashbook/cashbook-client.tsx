@@ -2516,7 +2516,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               }
             })
             
-            let firstClient = allocs.find(a => unwrap(unwrap(a.invoice)?.client)?.name)
+            const firstClient = allocs.find(a => unwrap(unwrap(a.invoice)?.client)?.name)
             let firstClientId = firstClient ? unwrap(unwrap(firstClient.invoice)?.client)?.id : undefined
             let firstClientName = firstClient ? unwrap(unwrap(firstClient.invoice)?.client)?.name : ''
             

@@ -147,7 +147,7 @@ function CardDetail({ row, onClose }: { row: MyWorkRow; onClose: () => void }) {
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">References</p>
               <div className="grid grid-cols-2 gap-2">
                 {images.map(u => (
-                  // eslint-disable-next-line @next/next/no-img-element
+                   
                   <a key={u} href={u} target="_blank" rel="noopener noreferrer" className="block rounded-lg overflow-hidden border border-border">
                     <img src={u} alt="Reference" className="w-full h-28 object-cover" loading="lazy" />
                   </a>

@@ -448,7 +448,7 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
         project: { col: 'project_id', table: 'ad_projects',      ids: [] },
         plan:    { col: 'plan_id',    table: 'social_calendars', ids: [] },
       }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const convByEntity = new Map<string, string>()
       for (const c of orphans as any[]) {
         const cfg = byType[c.type]

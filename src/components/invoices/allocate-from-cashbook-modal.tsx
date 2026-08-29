@@ -78,7 +78,7 @@ export default function AllocateFromCashbookModal({
   // entryId → amount string the user wants to allocate NOW (on top of any existing).
   const [inputs, setInputs] = useState<Record<string, string>>({})
 
-  useEffect(() => { void load() /* eslint-disable-next-line */ }, [])
+  useEffect(() => { void load()   }, [])
 
   async function load() {
     setLoading(true)

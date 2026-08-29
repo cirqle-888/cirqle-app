@@ -88,7 +88,7 @@ export default function AddExpenseModal({
   const [available, setAvailable] = useState<CashbookExpenseEntry[]>([])
   const [selections, setSelections] = useState<Record<string, SelectionState>>({})
 
-  useEffect(() => { void load() /* eslint-disable-next-line */ }, [])
+  useEffect(() => { void load()   }, [])
 
   async function load() {
     setLoading(true)

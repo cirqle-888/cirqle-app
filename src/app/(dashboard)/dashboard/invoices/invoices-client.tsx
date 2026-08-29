@@ -663,7 +663,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const invoiceGeneric = (inv: any) => `${inv.invoice_number || ''} ${inv.client?.name || ''}`
 
   const filtered = useMemo(() => {
-    let list = invoices.filter(inv => {
+    const list = invoices.filter(inv => {
       const inTab = tab === 'all'
         ? true
         : tab === 'active'
