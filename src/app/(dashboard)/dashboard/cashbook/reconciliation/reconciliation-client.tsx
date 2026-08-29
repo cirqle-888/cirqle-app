@@ -295,7 +295,7 @@ export default function ReconciliationClient() {
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="font-semibold">Orphaned Cashbook Payments</h3>
-                  <p className="text-sm text-muted-foreground mt-0.5">Inflow payments whose reference looks like an invoice number but which have <strong>no active allocation</strong> — so they aren't counting toward any invoice balance.</p>
+                  <p className="text-sm text-muted-foreground mt-0.5">Inflow payments whose reference looks like an invoice number but which have <strong>no active allocation</strong> — so they aren&apos;t counting toward any invoice balance.</p>
                 </div>
                 {orphans.length > 0 && (
                   <button onClick={fixOrphans} disabled={analyzing} className="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg gradient-bg text-white hover:opacity-90 disabled:opacity-50">

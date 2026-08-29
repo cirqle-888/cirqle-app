@@ -297,7 +297,7 @@ export function CampaignCard({
                           <span className="text-emerald-400">{log.new_value || '–'}</span>
                         </p>
                       )}
-                      {log.note && <p className="text-xs text-foreground/80 mt-0.5 italic">"{log.note}"</p>}
+                      {log.note && <p className="text-xs text-foreground/80 mt-0.5 italic">&quot;{log.note}&quot;</p>}
                       <p className="text-[10px] text-muted-foreground/50 mt-1">{fmtDateTime(log.created_at)}</p>
                     </div>
                     <button
@@ -390,7 +390,7 @@ export function CampaignCard({
                   : 'Not synced yet'}
               </p>
               {staleSinceSync && (
-                <p className="text-[10px] text-amber-400 mt-0.5">⚠ Edited since last sync — re-sync so the designer's sheet matches.</p>
+                <p className="text-[10px] text-amber-400 mt-0.5">⚠ Edited since last sync — re-sync so the designer&apos;s sheet matches.</p>
               )}
               {campaign.sheet_sync_error && (
                 <p className="text-[10px] text-red-400 mt-0.5">{campaign.sheet_sync_error}</p>
@@ -421,7 +421,7 @@ export function CampaignCard({
                 className="text-xs flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
               >
                 {linkLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />}
-                Get client's offer link
+                Get client&apos;s offer link
               </button>
             )}
           </div>

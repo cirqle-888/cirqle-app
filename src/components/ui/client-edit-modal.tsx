@@ -207,7 +207,7 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
             <h2 className="font-semibold">Edit Client</h2>
             {serviceId && (
               <p className="text-xs text-muted-foreground mt-0.5">
-                Showing pricing for this task's service
+                Showing pricing for this task&apos;s service
               </p>
             )}
           </div>

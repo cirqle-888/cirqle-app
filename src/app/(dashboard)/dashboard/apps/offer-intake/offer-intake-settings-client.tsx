@@ -318,7 +318,7 @@ function ClientCard({
           {/* Master sheet — only meaningful when Cirqle is the reader. */}
           {flowMode === 'pull' && (
             <div>
-              <p className="text-xs font-semibold text-foreground mb-2">Client's master Google Sheet</p>
+              <p className="text-xs font-semibold text-foreground mb-2">Client&apos;s master Google Sheet</p>
               <div className="flex items-center gap-2">
                 <input
                   value={masterDraft}
@@ -398,7 +398,7 @@ function ClientCard({
           <div className="flex items-center gap-3 p-3 bg-secondary/40 rounded-xl border border-border">
             <Store className="w-4 h-4 text-violet-400 shrink-0" />
             <p className="text-xs text-muted-foreground flex-1 min-w-0">
-              Enabled by this client's <span className="text-foreground font-medium">Offer Intake</span> service. To remove access, unassign that service from the client.
+              Enabled by this client&apos;s <span className="text-foreground font-medium">Offer Intake</span> service. To remove access, unassign that service from the client.
             </p>
             <Link
               href={`/dashboard/settings?tab=clients&editClient=${client.id}&returnTo=/dashboard/apps/offer-intake`}

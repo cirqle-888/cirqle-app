@@ -85,7 +85,7 @@ export default function ForgotPasswordPage() {
               </div>
               <h2 className="text-lg font-semibold">Check your email</h2>
               <p className="text-sm text-muted-foreground">
-                We've sent a password reset link to <strong className="text-foreground">{email}</strong>.
+                We&apos;ve sent a password reset link to <strong className="text-foreground">{email}</strong>.
                 The link is valid for 1 hour.
               </p>
               <Link href="/login" className="block text-sm text-primary hover:underline pt-2">
@@ -95,7 +95,7 @@ export default function ForgotPasswordPage() {
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Enter your email and we'll send you a link to set a new password.
+                Enter your email and we&apos;ll send you a link to set a new password.
               </p>
 
               <div>

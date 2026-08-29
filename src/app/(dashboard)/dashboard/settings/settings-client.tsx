@@ -1166,7 +1166,7 @@ export default function SettingsClient(props: Props) {
               <div className="space-y-4 border-t border-border pt-5">
                 <div>
                   <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Payment Details</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">Shown on printed invoices under "Payment Information"</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Shown on printed invoices under &quot;Payment Information&quot;</p>
                 </div>
                 {[
                   { key: 'bank_holder',  label: 'A/C Holder Name',  placeholder: 'e.g. Farooq Ahmed' },
@@ -3418,7 +3418,7 @@ export default function SettingsClient(props: Props) {
                     </div>
                     {form.billing_cycle === 'none' && (
                       <p className="text-xs text-amber-400/80 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
-                        ⚠️ No invoices will be auto-generated. Use "Generate Invoice" in the Invoices page to create them manually.
+                        ⚠️ No invoices will be auto-generated. Use &quot;Generate Invoice&quot; in the Invoices page to create them manually.
                       </p>
                     )}
                   </div>
@@ -3899,7 +3899,7 @@ export default function SettingsClient(props: Props) {
           <div className="relative bg-secondary border border-foreground/15 rounded-2xl shadow-2xl w-full max-w-sm p-5 animate-in fade-in zoom-in-95 duration-150">
             <h3 className="font-semibold text-sm mb-2">Archive {deleteConfirm.type}</h3>
             <p className="text-sm text-muted-foreground mb-1 leading-relaxed">
-              Archive <span className="text-foreground font-medium">"{deleteConfirm.name}"</span>?
+              Archive <span className="text-foreground font-medium">&quot;{deleteConfirm.name}&quot;</span>?
             </p>
             <p className="text-xs text-amber-400/80 mb-5">
               It will be hidden from lists. All past records that reference it are preserved.
@@ -3993,7 +3993,7 @@ export default function SettingsClient(props: Props) {
             </div>
 
             <p className="text-xs text-amber-400/80 mb-4">
-              ⚠️ Ask the employee to sign in with this temporary password and immediately change it via "Forgot password" if needed. This password will not be shown again.
+              ⚠️ Ask the employee to sign in with this temporary password and immediately change it via &quot;Forgot password&quot; if needed. This password will not be shown again.
             </p>
 
             <div className="flex gap-2">

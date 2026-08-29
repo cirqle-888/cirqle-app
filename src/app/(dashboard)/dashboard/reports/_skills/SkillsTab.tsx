@@ -320,7 +320,7 @@ export default function SkillsTab({ employees, contributions, parameters, groups
           <div className="px-5 py-3.5 border-b border-border">
             <h3 className="text-sm font-semibold">Group Radar</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Strength per contribution group for selected employees. Each axis = a group's
+              Strength per contribution group for selected employees. Each axis = a group&apos;s
               weighted roll-up of its parameters.
             </p>
           </div>

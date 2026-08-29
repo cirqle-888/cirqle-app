@@ -535,7 +535,7 @@ function AdminDashboard({
                 Live Outstanding
               </p>
               <p className="text-lg font-bold text-violet-600 dark:text-violet-300">{f(liveFx.outstanding)}</p>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Today's rate</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">Today&apos;s rate</p>
             </div>
             <div>
               <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">FX Variance</p>

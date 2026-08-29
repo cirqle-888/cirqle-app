@@ -271,7 +271,7 @@ export function FilterDropdown({
             )}
 
             {recent.length === 0 && frequent.length === 0 && rest.length === 0 && (
-              <p className="text-xs text-muted-foreground text-center py-6 opacity-60">No results for "{search}"</p>
+              <p className="text-xs text-muted-foreground text-center py-6 opacity-60">No results for &quot;{search}&quot;</p>
             )}
           </div>
         </div>,

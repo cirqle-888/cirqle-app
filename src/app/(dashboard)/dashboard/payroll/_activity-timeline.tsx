@@ -244,7 +244,7 @@ export function EmployeeActivityTimeline({ employeeId }: Props) {
 
                   {/* Note text */}
                   {row.note && (
-                    <p className="text-[12px] text-amber-700 dark:text-amber-300 mt-0.5 italic">"{row.note}"</p>
+                    <p className="text-[12px] text-amber-700 dark:text-amber-300 mt-0.5 italic">&quot;{row.note}&quot;</p>
                   )}
 
                   {/* Detail line */}

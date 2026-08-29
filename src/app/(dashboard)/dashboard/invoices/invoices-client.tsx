@@ -2952,7 +2952,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               )}
               {!detailPending && (inv.items || []).length === 0 && (
                 <div className="text-xs text-muted-foreground text-center py-8">
-                  No items yet — tasks marked "done" auto-appear here
+                  No items yet — tasks marked &quot;done&quot; auto-appear here
                 </div>
               )}
               {/* Copy before sorting — Array#sort mutates, and `inv.items` is React state. */}
@@ -4048,7 +4048,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
           {genTasks.length === 0 && !genLoading && genForm.client_id && (
             <div className="text-sm font-medium text-muted-foreground text-center py-12 bg-secondary/30 rounded-2xl border border-dashed border-border/60">
-              Click <span className="font-bold text-foreground">"Fetch Done Tasks"</span> to see available tasks
+              Click <span className="font-bold text-foreground">&quot;Fetch Done Tasks&quot;</span> to see available tasks
             </div>
           )}
         </div>
@@ -5400,7 +5400,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             <div className="text-center">
               <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
               <p className="text-sm">Select an invoice to view details</p>
-              <p className="text-xs mt-1 opacity-60">Tasks marked "done" auto-generate draft invoices</p>
+              <p className="text-xs mt-1 opacity-60">Tasks marked &quot;done&quot; auto-generate draft invoices</p>
             </div>
           </div>
         )}

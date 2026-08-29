@@ -4178,7 +4178,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
               <h3 className="text-sm font-semibold">Reassign {selectedTasks.size} task{selectedTasks.size !== 1 ? 's' : ''}</h3>
               <button onClick={() => setBulkAssignOpen(false)} className="p-1 rounded text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
             </div>
-            <p className="text-xs text-muted-foreground">Replaces each task's current assignees with the employees selected below.</p>
+            <p className="text-xs text-muted-foreground">Replaces each task&apos;s current assignees with the employees selected below.</p>
             <div className="max-h-64 overflow-y-auto space-y-1 border border-border rounded-xl p-2">
               {employees.filter(e => e.is_active).map(emp => (
                 <label key={emp.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-secondary cursor-pointer">
