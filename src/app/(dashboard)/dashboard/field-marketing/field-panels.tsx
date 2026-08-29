@@ -487,7 +487,7 @@ function BottomBarItem({ icon: Icon, label, onClick }: { icon: typeof Zap; label
 // Mobile bottom bar — the five primary field actions (§19).
 export function FieldBottomBar({ onNearby, onNextBest, onPlan, onOnTheWay, onQuick }: FieldActions) {
   return (
-    <div className="fixed bottom-0 inset-x-0 z-40 lg:hidden bg-card/95 backdrop-blur border-t border-border pb-[env(safe-area-inset-bottom)]">
+    <div className="fixed bottom-[var(--bottom-nav-h,0px)] inset-x-0 z-40 lg:hidden bg-card/95 backdrop-blur border-t border-border pb-[var(--bottom-safe-pb,env(safe-area-inset-bottom))]">
       <div className="flex items-stretch max-w-lg mx-auto">
         <BottomBarItem icon={Compass} label="Nearby" onClick={onNearby} />
         <BottomBarItem icon={Target} label="Next Best" onClick={onNextBest} />

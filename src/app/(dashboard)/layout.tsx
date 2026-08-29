@@ -190,7 +190,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
               designation={meResult.user.designationName}
             />
           )}
-          <div data-app-shell className={`flex h-dvh overflow-hidden ${meResult.user?.isViewAs ? 'pt-7' : ''}`}>
+          {/* data-bottom-nav: employees get the mobile bottom nav bar, which is
+              `fixed bottom-0 z-50` and therefore paints over any page-level
+              fixed action bar (e.g. Contributions' Save bar). The attribute
+              drives --bottom-nav-h in globals.css so those bars can sit above
+              it. Server-rendered so the offset is right on first paint. */}
+          <div
+            data-app-shell
+            data-bottom-nav={!user.isAdmin ? 'employee' : undefined}
+            className={`flex h-dvh overflow-hidden ${meResult.user?.isViewAs ? 'pt-7' : ''}`}
+          >
             {/* First tab stop on every dashboard page: lets keyboard users jump
                 past the full sidebar nav. Visually hidden until focused. */}
             <a

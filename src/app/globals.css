@@ -267,6 +267,37 @@
   }
 }
 
+/* ── Mobile bottom-nav clearance ──────────────────────────────────────────
+   Employees get the bottom nav bar (sidebar.tsx), which is `fixed bottom-0`
+   at z-50 and full width. Any page-level `fixed bottom-0` action bar — the
+   Contributions Save / Back / Discard bar — paints UNDER it and is simply
+   invisible on a phone, which is how "there is no Save button" happens.
+
+   --bottom-nav-h is how far such a bar must sit above the viewport bottom.
+   --bottom-bar-pb / --bottom-safe-pb are its own bottom padding (with and
+   without a 0.75rem floor): the nav already covers the home-indicator inset
+   for employees, so a bar sitting above it must not pad for that twice.
+   They all default to the no-nav case, so a bar using them is correct for
+   admins and on desktop with no extra classes. */
+:root {
+  --bottom-nav-h: 0px;
+  --bottom-bar-pb: max(0.75rem, env(safe-area-inset-bottom, 0px));
+  --bottom-safe-pb: env(safe-area-inset-bottom, 0px);
+}
+[data-bottom-nav='employee'] {
+  --bottom-nav-h: calc(57px + env(safe-area-inset-bottom, 0px));
+  --bottom-bar-pb: 0.75rem;
+  --bottom-safe-pb: 0px;
+}
+/* md+ hides the bottom nav (`md:hidden`) — back to the plain bottom edge. */
+@media (min-width: 768px) {
+  [data-bottom-nav='employee'] {
+    --bottom-nav-h: 0px;
+    --bottom-bar-pb: max(0.75rem, env(safe-area-inset-bottom, 0px));
+    --bottom-safe-pb: env(safe-area-inset-bottom, 0px);
+  }
+}
+
 /* The floating chat launcher sits at `fixed bottom-5 right-5 z-50` — the SAME
    stacking level as a modal overlay, and later in the DOM, so it paints on top
    of one. On a desktop dialog it lands harmlessly beside the card, but a mobile

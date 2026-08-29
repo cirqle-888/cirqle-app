@@ -3075,11 +3075,13 @@ export default function ContributionsClient({
       </div>
 
       {/* ── Fixed bottom action bar ──
-          On mobile: spans full width (sidebar is hidden behind hamburger).
+          On mobile: spans full width (sidebar is hidden behind hamburger), and
+          sits --bottom-nav-h above the bottom edge so the employee bottom nav
+          (fixed, z-50) cannot paint over it — see globals.css.
           On md+: clears the 240px desktop sidebar via left-60. */}
       {/* pr-20 reserves the bottom-right corner so the floating chat launcher
           (fixed bottom-right, ~4.25rem) never overlaps the last action button. */}
-      <div className="fixed bottom-[var(--bottom-nav-h,0px)] md:bottom-0 left-0 md:left-60 right-0 z-20 bg-card/95 backdrop-blur-md border-t border-border pl-4 sm:pl-6 pr-20 py-3 sm:py-3.5 flex items-center gap-2 sm:gap-3 flex-wrap pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      <div className="fixed bottom-[var(--bottom-nav-h,0px)] left-0 md:left-60 right-0 z-20 bg-card/95 backdrop-blur-md border-t border-border pl-4 sm:pl-6 pr-20 py-3 sm:py-3.5 flex items-center gap-2 sm:gap-3 flex-wrap pb-[var(--bottom-bar-pb,0.75rem)]">
         {/* whitespace-nowrap + a shorter mobile label: with the sibling buttons
             and pr-20 taking their share of a 375px bar, the flex-1 basis left
             here is ~100px — enough to wrap "Save & Mark Done" onto three lines
