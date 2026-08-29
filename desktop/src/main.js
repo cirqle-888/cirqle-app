@@ -36,7 +36,7 @@ const { buildMenu, wireContextMenu, truncate, FILE_URL_RE } = menus
 
 menus.init({
   getWin: () => win,
-  reloadCirqle: () => { if (cirqle) cirqle.webContents.loadURL(CIRQLE_URL) },
+  reloadCirqle: () => reloadCirqleView(),
   sendTextToCirqle: (t) => sendTextToCirqle(t),
   sendClipboardToCirqle: () => sendClipboardToCirqle(),
   navigate: (r) => navigate(r),
@@ -284,6 +284,21 @@ function loadError(view, url, pane) {
   view.webContents.loadFile(path.join(__dirname, 'error.html'), { query: { url, pane } })
 }
 
+// Reload the Cirqle pane IN PLACE. Both reload paths (Cmd/Ctrl+R and the
+// toolbar button) used to call loadURL(CIRQLE_URL), which is the site ROOT —
+// and the web app redirects / to /dashboard. So reloading from any working
+// page silently threw that page away and bounced you to the dashboard.
+// reload() keeps the current URL. The guard matters: after a failed load the
+// pane sits on the error.html file:// page, where reload() would just redraw
+// the error — there we still want the home URL. Retry (CH.RETRY) keeps its own
+// loadURL for the same reason.
+function reloadCirqleView() {
+  if (!cirqle) return
+  const wc = cirqle.webContents
+  if (wc.getURL().startsWith(CIRQLE_URL)) wc.reload()
+  else wc.loadURL(CIRQLE_URL)
+}
+
 function createViews() {
   // The 2nd Cirqle (compare) is never restored across restarts.
   chrome = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-ui.js') } })
@@ -394,7 +409,7 @@ notifications.register()
 // ── IPC from the toolbar / splitter / overlay / error page ────────────────────
 ipcMain.on(CH.LAYOUT_PRESET, (_e, p) => applyPreset(p))
 ipcMain.on(CH.RELOAD, (_e, which) => {
-  if (which === 'cirqle' && cirqle) cirqle.webContents.loadURL(CIRQLE_URL)
+  if (which === 'cirqle') reloadCirqleView()
   if (which === 'whatsapp' && whatsapps[state.activeWa]) whatsapps[state.activeWa].webContents.reload()
 })
 ipcMain.on(CH.GO_BACK, () => { if (cirqle && cirqle.webContents.canGoBack()) cirqle.webContents.goBack() })
