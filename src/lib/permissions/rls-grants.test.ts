@@ -107,6 +107,44 @@ describe('the migration matches what the source actually needs', () => {
     ).toEqual([])
   })
 
+  it('keeps the permission catalogue reachable — the lockout guard', () => {
+    // The failure this exists to prevent, found 2026-08-30:
+    //
+    // rls-keep-list.mjs derived the keep list from browser queries and Realtime
+    // subscriptions only, on the stated assumption that all server code uses
+    // the service role. Eight modules do not — they call `await createClient()`,
+    // the cookie-session client, which connects as `authenticated`.
+    //
+    // src/lib/permissions/check.ts was one of them. loadCurrentUser(), imported
+    // by 158 modules, read `permissions` and `designation_permissions` to decide
+    // what the signed-in user may do. Neither was in the derived list, so this
+    // migration would have revoked the permission catalogue from the query that
+    // reads it: hasPermission() returns the empty set, for every user, on every
+    // page. A total lockout — and the guard above passed, because it only ever
+    // compared the migration against a derivation that shared the same blind
+    // spot.
+    //
+    // check.ts now does its reads on the service role, but two Settings pages
+    // still read these through the session client, so the grants must stay.
+    const kept = migrationKeepList()
+    for (const table of ['permissions', 'designation_permissions', 'designations', 'employees']) {
+      expect(
+        kept,
+        `${table} is read by a server module on the cookie-session client, which ` +
+          `runs as \`authenticated\`. Revoking it locks users out of the app.`,
+      ).toContain(table)
+    }
+  })
+
+  it('derives from session-client server reads, not just the browser', () => {
+    // Guards the derivation itself: delete rule 3 and the keep list silently
+    // shrinks back to the shape that caused the lockout above.
+    const script = readFileSync(join(ROOT, 'scripts/rls-keep-list.mjs'), 'utf8')
+    expect(script, 'rls-keep-list.mjs must still detect `await createClient()` readers').toMatch(
+      /await\\s\+createClient/,
+    )
+  })
+
   it('does not grant relations nothing reads — least privilege stays least', () => {
     const derived = derivedKeepList()
     const kept = migrationKeepList()
