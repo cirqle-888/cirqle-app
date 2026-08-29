@@ -82,6 +82,54 @@ describe('the least-privilege migration exists and is intact', () => {
   })
 })
 
+const RLS_CLOSE = join(ROOT, 'supabase/migrations/20260830100000_rls_close_remaining_tables.sql')
+
+/** The two ARRAY[...] blocks in the RLS-close migration, as name lists. */
+function rlsCloseGroups(): { a: string[]; b: string[] } {
+  const sql = readFileSync(RLS_CLOSE, 'utf8')
+  const groups = [...sql.matchAll(/targets text\[\] := ARRAY\[([\s\S]*?)\]/g)].map((m) =>
+    [...m[1].matchAll(/'([a-z0-9_]+)'/g)].map((x) => x[1]).sort(),
+  )
+  return { a: groups[0] ?? [], b: groups[1] ?? [] }
+}
+
+describe('the RLS-close migration groups tables by who can actually reach them', () => {
+  it('every deny-all table is genuinely unreachable as `authenticated`', () => {
+    // Group B gets RLS with NO policy, which denies `authenticated` outright.
+    // If any of them is later read from the browser, from Realtime, or from a
+    // server module on the cookie-session client, that read starts returning
+    // nothing — silently, because PostgREST reports an empty result, not an
+    // error. This is the test that catches it at commit time instead.
+    const derived = derivedKeepList()
+    const { b } = rlsCloseGroups()
+    const wrongGroup = b.filter((t) => derived.includes(t))
+    expect(
+      wrongGroup,
+      `These are in the migration's deny-all group but something now reads them\n` +
+        `as \`authenticated\`. Move them to group A (permissive policy) or move the\n` +
+        `query to the service role:\n  ${wrongGroup.join('\n  ')}`,
+    ).toEqual([])
+  })
+
+  it('covers every table the audit found with RLS disabled', () => {
+    // The 18 measured against production on 2026-08-29.
+    const FOUND_DISABLED = [
+      'ad_accounts', 'ad_ai_cache', 'ad_ai_insights', 'ad_ai_usage', 'ad_benchmarks',
+      'ad_businesses', 'ad_forecast_accuracy', 'ad_sync_logs', 'ai_prompts',
+      'cashbook_categories', 'cashbook_payroll_allocations', 'contribution_groups',
+      'deductions', 'invoice_change_logs', 'parameter_services', 'quotation_items',
+      'task_tools', 'tool_services',
+    ].sort()
+    const { a, b } = rlsCloseGroups()
+    expect([...a, ...b].sort()).toEqual(FOUND_DISABLED)
+  })
+
+  it('puts a table in exactly one group', () => {
+    const { a, b } = rlsCloseGroups()
+    expect(a.filter((t) => b.includes(t))).toEqual([])
+  })
+})
+
 describe('the migration matches what the source actually needs', () => {
   it('grants every relation the browser queries or subscribes to', () => {
     const derived = derivedKeepList()
