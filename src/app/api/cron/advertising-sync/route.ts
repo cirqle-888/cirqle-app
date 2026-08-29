@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { enqueueJob } from '@/lib/jobs/engine'
 import { discoverAccountCampaigns } from '@/lib/advertising/discovery'
+import { logCronRun } from '@/lib/cron/log'
 
 export const dynamic = 'force-dynamic'
 
@@ -62,6 +63,7 @@ export async function GET(req: Request) {
       enqueued++
     }
 
+    await logCronRun(admin, 'advertising-sync', true, { discovered, enqueued })
     return NextResponse.json({
       ok: true,
       discovered,
@@ -69,6 +71,7 @@ export async function GET(req: Request) {
     })
   } catch (error: any) {
     console.error('Advertising sync cron failed:', error)
+    await logCronRun(admin, 'advertising-sync', false, undefined, error?.message ?? String(error))
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

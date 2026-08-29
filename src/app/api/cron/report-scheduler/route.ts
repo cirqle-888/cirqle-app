@@ -14,6 +14,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { enqueueReportGeneration } from '@/lib/reporting/orchestrator'
 import { computeDateRange, computeComparisonRange, computeNextRun } from '@/lib/reporting/scheduler-utils'
 import type { ReportConfig, ReportFormat } from '@/lib/reporting/types'
+import { logCronRun } from '@/lib/cron/log'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,10 +36,12 @@ export async function GET(req: NextRequest) {
 
   if (error) {
     console.error('[report-scheduler] Failed to fetch schedules:', error.message)
+    await logCronRun(admin, 'report-scheduler', false, undefined, error.message)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
   if (!schedules || schedules.length === 0) {
+    await logCronRun(admin, 'report-scheduler', true, { enqueued: 0, note: 'no schedules due' })
     return NextResponse.json({ ok: true, enqueued: 0, message: 'No schedules due' })
   }
 
@@ -82,6 +85,10 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  await logCronRun(admin, 'report-scheduler', errors.length === 0, {
+    enqueued,
+    total: schedules.length,
+  }, errors.length > 0 ? errors.join('; ') : undefined)
   return NextResponse.json({
     ok: true,
     enqueued,

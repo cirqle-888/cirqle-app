@@ -60,6 +60,24 @@ describe('cron route authentication', () => {
     ).toBe(true)
   })
 
+  it.each(routes)('%s records its run in cron_runs', (name) => {
+    // Four of the fifteen (advertising-sync, process-jobs, report-scheduler,
+    // token-refresh) shipped without this and were therefore invisible: the
+    // Business Health Center showed no run for them, and cron_runs had zero
+    // rows, which is indistinguishable from "the cron never fires". Confirmed
+    // 2026-08-30 — the four with no rows were exactly the four not calling
+    // logCronRun, so absence of a row proved nothing either way.
+    //
+    // A scheduled job that cannot be observed is a job nobody will notice
+    // failing, so logging is part of the contract, not a nicety.
+    const src = readFileSync(join(CRON_DIR, name, 'route.ts'), 'utf8')
+    expect(
+      src.includes('logCronRun'),
+      `${name} never records a run, so a silent failure is invisible.\n` +
+        `Call logCronRun(admin, '${name}', ok, summary, error) before each return.`,
+    ).toBe(true)
+  })
+
   it('every scheduled path in vercel.json has a route handler', () => {
     const vercel = JSON.parse(readFileSync(join(process.cwd(), 'vercel.json'), 'utf8'))
     const scheduled: string[] = (vercel.crons ?? []).map((c: { path: string }) => c.path)
