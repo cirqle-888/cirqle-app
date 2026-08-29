@@ -1,5 +1,7 @@
 'use client'
 
+import { resolveBrandingUrl } from '@/lib/utils/branding'
+
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
@@ -2559,7 +2561,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               // receipt rendering its built-in Cirqle defaults.
               // Receipt has a dark background — use dark logo when available,
               // fall back to the light/default logo otherwise.
-              companyLogoUrl: companySettings.logo_url_dark || companySettings.logo_url,
+              companyLogoUrl: resolveBrandingUrl(companySettings.logo_url_dark || companySettings.logo_url),
               companyName:    companySettings.company_name,
               companyPhone:   companySettings.company_phone,
               companyWebsite: companySettings.company_website,
