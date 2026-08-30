@@ -6,11 +6,16 @@
  * Mounted once in the dashboard layout, so every page gets dots without each
  * one fetching anything. Three jobs:
  *
- *   1. SYNC        One server action per tab per minute, while the tab is
- *                  visible: it writes this person's heartbeat and returns the
- *                  whole roster. Only ONE tab writes — they share a
- *                  localStorage lease — so six pinned tabs still produce one
+ *   1. SYNC        One server action per tab per minute, whenever the person
+ *                  is actually at this device: it writes their heartbeat and
+ *                  returns the whole roster. Only ONE tab writes — they share
+ *                  a localStorage lease — so six pinned tabs still produce one
  *                  heartbeat, and each costs a single round trip.
+ *
+ *                  "At this device" is NOT the same question in a browser tab,
+ *                  the desktop app and the phone — presence/activity.ts owns
+ *                  that, and getting it wrong on desktop is what makes a
+ *                  presence feature useless.
  *
  *   2. LISTEN      Subscribe to Realtime on top, so a status someone sets
  *                  reaches other people's screens in under a second instead of
@@ -35,6 +40,7 @@ import {
 } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useVisibleInterval } from '@/lib/hooks/use-visible-interval'
+import { currentDevice, isPresentHere, subscribeAppState } from '@/lib/presence/activity'
 import { syncPresence } from '@/lib/presence/actions'
 import {
   derivePresence, HEARTBEAT_MS,
@@ -59,17 +65,6 @@ function claimHeartbeatLease(now = Date.now()): boolean {
   } catch {
     return true   // no storage (private mode) → just beat; correctness over cost
   }
-}
-
-/** 'desktop' inside the Electron shell, else 'web'. Mobile ships the same web
- *  app in a native wrapper, which announces itself the same way. */
-function currentDevice(): 'web' | 'desktop' | 'mobile' {
-  if (typeof window === 'undefined') return 'web'
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const w = window as any
-  if (w.__CIRQLE_NATIVE__) return 'mobile'
-  if (w.__CIRQLE_DESKTOP__) return 'desktop'
-  return 'web'
 }
 
 // ── Context ──────────────────────────────────────────────────────────────────
@@ -137,6 +132,11 @@ export function PresenceProvider(
 
   // ── 1 + 2a. Sync: heartbeat out, roster back ───────────────────────────────
   const sync = useCallback(async () => {
+    // Is the person at THIS device? Platform-specific — a hidden browser tab
+    // means gone, a hidden desktop window does not. When the answer is no we
+    // make no request at all: no heartbeat to lie with, no roster to render.
+    if (!(await isPresentHere())) return
+
     // Only the lease-holding tab writes; the rest read. `beat` is decided here
     // rather than inside the action so the server never has to guess which of
     // someone's six tabs is the canonical one.
@@ -153,7 +153,29 @@ export function PresenceProvider(
     setAvailable(true)
   }, [myEmployeeId])
 
-  useVisibleInterval(() => { void sync() }, HEARTBEAT_MS, enabled)
+  // NOT useVisibleInterval: that hook is right for polls nobody is waiting on,
+  // and wrong here. On the desktop app a hidden window is not an absent person
+  // (see presence/activity.ts), so the tick has to keep running and `sync` has
+  // to be the thing that decides. The decision costs one IPC call on desktop
+  // and a boolean everywhere else, and a tick that decides "not here" makes no
+  // network request at all — so a backgrounded tab is still silent.
+  useEffect(() => {
+    if (!enabled) return
+    const tickNow = () => { void sync() }
+    tickNow()
+    const id = setInterval(tickNow, HEARTBEAT_MS)
+    // Coming back to the app should refresh the roster immediately rather than
+    // showing up to a minute of stale dots.
+    document.addEventListener('visibilitychange', tickNow)
+    // Native foreground/background is a separate signal from visibility, and on
+    // iOS it is the accurate one.
+    const stopAppState = subscribeAppState(tickNow)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', tickNow)
+      stopAppState()
+    }
+  }, [enabled, sync])
 
   // Hand the lease back when this tab goes away, so a sibling tab can beat
   // immediately instead of waiting out the dead tab's remaining interval.

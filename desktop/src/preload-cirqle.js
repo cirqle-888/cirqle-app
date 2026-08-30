@@ -9,7 +9,7 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('__CIRQLE_DESKTOP__', {
-  version: 3,
+  version: 4,
   retry: (pane) => ipcRenderer.send('retry', pane),
   updateLogo: (url) => ipcRenderer.send('cirqle:logo', url),
 
@@ -50,6 +50,20 @@ contextBridge.exposeInMainWorld('__CIRQLE_DESKTOP__', {
    */
   shareReceipt: (dataUrl, filename, action = 'copy', caption) =>
     ipcRenderer.invoke('share:receipt', { dataUrl, filename, action, caption }),
+
+  /**
+   * Whether the PERSON is at the machine (v4+). Resolves to
+   * `{ idleSeconds, locked }` straight from the OS.
+   *
+   * The web app's presence feature calls this once a minute instead of reading
+   * page visibility, because a desktop window is hidden most of the time while
+   * its owner is right in front of it — see src/main/presence.js and
+   * src/lib/presence/activity.ts. Older shells lack this, and the web app
+   * falls back to the browser rule.
+   */
+  presence: {
+    query: () => ipcRenderer.invoke('presence:query'),
+  },
 })
 
 ipcRenderer.on('cirqle:capture', (_e, payload) => {

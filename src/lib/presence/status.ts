@@ -109,6 +109,19 @@ export const HEARTBEAT_MS = 60_000
 export const ONLINE_WINDOW_MS = 3 * 60_000     // seen within 3 min → around
 export const AWAY_WINDOW_MS = 15 * 60_000      // within 15 min → away, past → offline
 
+/**
+ * How long the machine may sit untouched before the DESKTOP app stops saying
+ * "still here". Only the Electron shell can ask this — see presence/activity.ts.
+ *
+ * Five minutes, so someone reading a long document or on a call stays
+ * reachable, and combined with ONLINE_WINDOW_MS above they turn Away roughly
+ * five to eight minutes after their last keystroke. Teams uses five; Slack is
+ * nearer ten. Erring short is the safer direction: looking Away while you are
+ * there costs someone a second message, looking Available while you are gone
+ * costs them an hour of waiting.
+ */
+export const DESKTOP_IDLE_AWAY_MS = 5 * 60_000
+
 // ── The stored row ───────────────────────────────────────────────────────────
 
 export interface PresenceRow {

@@ -29,6 +29,7 @@ const wa = require('./main/whatsapp')
 const layoutMod = require('./main/layout')
 const menus = require('./main/menus')
 const notifications = require('./main/notifications')
+const presence = require('./main/presence')
 const updates = require('./main/updates')
 const tray = require('./main/tray')
 const deeplinks = require('./main/deeplinks')
@@ -140,7 +141,11 @@ function ensureSplitters(n) {
 
 function createCirqle2() {
   if (cirqle2) return
-  cirqle2 = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-cirqle.js') } })
+  // backgroundThrottling: Chromium slows timers in a hidden view to ~1/minute,
+  // which is the presence heartbeat's own period — beats get dropped and the
+  // person flickers to Away at their own desk. Also keeps chat's realtime
+  // listeners responsive while the window is behind something.
+  cirqle2 = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-cirqle.js'), backgroundThrottling: false } })
   cirqle2.webContents.loadURL(cirqle.webContents.getURL() || CIRQLE_URL)
   dl.wireDownloads(cirqle2.webContents.session, 'cirqle')
   wireContextMenu(cirqle2, true)
@@ -307,7 +312,8 @@ function createViews() {
 
   dl.wireEscToCloseDownloads(chrome) // Esc from the toolbar view closes the panel too
 
-  cirqle = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-cirqle.js') } })
+  // See createCirqle2 for why backgroundThrottling is off.
+  cirqle = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-cirqle.js'), backgroundThrottling: false } })
   cirqle.webContents.loadURL(CIRQLE_URL)
   dl.wireDownloads(cirqle.webContents.session, 'cirqle') // capture report / invoice / receipt downloads
   wireContextMenu(cirqle, true)                       // Chrome-style right-click menu
@@ -404,6 +410,9 @@ notifications.init({
   cirqleUrl: CIRQLE_URL,
 })
 notifications.register()
+
+// No init(): presence answers from the OS, not from any window or view.
+presence.register()
 
 
 // ── IPC from the toolbar / splitter / overlay / error page ────────────────────

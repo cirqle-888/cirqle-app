@@ -8,6 +8,14 @@
 
 export type ReceiptShareAction = 'copy' | 'paste' | 'download'
 
+/** What the desktop shell can tell us about the machine, not the window. */
+export interface DesktopActivity {
+  /** Seconds since the last keyboard or mouse input, OS-wide. */
+  idleSeconds: number
+  /** Screen locked, or the machine suspended. */
+  locked: boolean
+}
+
 export interface CirqleDesktopBridge {
   version: number
   retry?: (pane: string) => void
@@ -26,6 +34,9 @@ export interface CirqleDesktopBridge {
     action: ReceiptShareAction,
     caption?: string,
   ) => Promise<{ ok: boolean; action?: ReceiptShareAction; reason?: string; path?: string }>
+
+  /** OS idle time + screen lock, for presence (v4+). See lib/presence/activity.ts. */
+  presence?: { query: () => Promise<DesktopActivity> }
 }
 
 export function desktop(): CirqleDesktopBridge | null {
@@ -37,6 +48,26 @@ export function desktop(): CirqleDesktopBridge | null {
 /** True when running inside the desktop shell with the receipt-share bridge. */
 export function isDesktop(): boolean {
   return desktop() !== null
+}
+
+/**
+ * True inside the desktop shell of ANY version.
+ *
+ * Deliberately looser than isDesktop(), which gates on the receipt-share
+ * bridge and so answers "can this shell share a receipt?" rather than "is this
+ * the desktop app?". Presence needs the second question: an older shell is
+ * still the desktop app, it just has fewer capabilities.
+ */
+export function inDesktopShell(): boolean {
+  if (typeof window === 'undefined') return false
+  return !!(window as unknown as { __CIRQLE_DESKTOP__?: unknown }).__CIRQLE_DESKTOP__
+}
+
+/** The presence bridge, or null on the web and on desktop shells before v4. */
+export function desktopPresence(): { query: () => Promise<DesktopActivity> } | null {
+  if (typeof window === 'undefined') return null
+  const d = (window as unknown as { __CIRQLE_DESKTOP__?: CirqleDesktopBridge }).__CIRQLE_DESKTOP__
+  return typeof d?.presence?.query === 'function' ? d.presence : null
 }
 
 // ── Receipt share preference (persisted in localStorage) ──────────────────────

@@ -32,6 +32,9 @@ module.exports = Object.freeze({
   CAPTURE_CLIPBOARD: 'capture:clipboard',
   SHARE_RECEIPT: 'share:receipt',
   CLIPBOARD_WRITE: 'clipboard:write',
+  // OS idle time + screen-lock state, so the web app's presence feature can
+  // tell "window hidden" from "person gone". See src/main/presence.js.
+  PRESENCE_QUERY: 'presence:query',
 
   // Downloads
   DOWNLOADS: 'downloads',
