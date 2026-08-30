@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/server'
 import { CRITICAL_PERMS } from '@/lib/permissions/keys'
 import SettingsClient from './settings-client'
 
@@ -11,7 +11,22 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const { tab: rawTab, editClient, editService, returnTo } = await searchParams
   const initialTab = ALL_TABS.find(t => normalizeTab(t) === normalizeTab(rawTab ?? '')) ?? 'Company'
 
-  const supabase = await createClient()
+  // Service role, like every other data-heavy dashboard page (cashbook,
+  // invoices, tasks). Two reasons, and the first is a hard requirement:
+  //
+  //  1. The employee editor on this page reads base_salary, date_of_birth and
+  //     performance_rating. The least-privilege migration grants `authenticated`
+  //     eleven columns of `employees` and deliberately withholds those — they
+  //     are pay and PII, and no employee should be able to read another's from
+  //     the browser. A column-level GRANT is role-level: no RLS policy can widen
+  //     it, so `select('*')` here would fail outright with "permission denied
+  //     for column base_salary" once that migration lands.
+  //
+  //  2. Access is already decided before this code runs. The proxy gates
+  //     /dashboard/settings on `settings.access` (see supabase/middleware.ts),
+  //     so reaching this function at all means the check has passed. Re-deriving
+  //     it from table grants adds no safety and, as above, actively breaks.
+  const supabase = createAdminClient()
 
   const [
     groupsRes, paramsRes, toolsRes, servicesRes, clientsRes,
