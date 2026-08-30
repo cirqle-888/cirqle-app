@@ -141,3 +141,38 @@ export function addDaysISO(iso: string, delta: number): string {
   anchor.setUTCDate(anchor.getUTCDate() + delta)
   return `${anchor.getUTCFullYear()}-${pad2(anchor.getUTCMonth() + 1)}-${pad2(anchor.getUTCDate())}`
 }
+
+/** Month abbreviations, so formatting never depends on a runtime locale. */
+const SHORT_MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+]
+
+/**
+ * A `YYYY-MM-DD` date as `30 Aug 26`, for display in a table cell.
+ *
+ * Pure string-in/string-out, like {@link addDaysISO} and for the same reason:
+ * `new Date('2026-08-30')` parses as UTC midnight, so anywhere west of
+ * Greenwich it formats as the 29th. A cash-book row that shows the wrong day
+ * to a colleague travelling is a support ticket nobody enjoys.
+ *
+ * The month names are a literal table rather than toLocaleDateString, so the
+ * output cannot drift with the viewer's locale — this is a ledger, and the
+ * column has to read the same for everyone looking at it.
+ *
+ * The short year keeps the cell to one line at the narrow widths this column
+ * gets, which is the whole point: `2026-08-30` wraps at its hyphens.
+ *
+ * Returns '' for anything malformed, so a bad value renders as an empty cell
+ * rather than 'NaN NaN NaN'.
+ */
+export function formatISODateShort(iso: string | null | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((iso || '').trim())
+  if (!m) return ''
+  const [, y, mo, d] = m
+  const monthIndex = Number(mo) - 1
+  if (monthIndex < 0 || monthIndex > 11) return ''
+  const day = Number(d)
+  if (day < 1 || day > 31) return ''
+  return `${day} ${SHORT_MONTHS[monthIndex]} ${y.slice(2)}`
+}

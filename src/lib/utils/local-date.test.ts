@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   toISODate, todayISO, monthStartISO, monthEndISO, lastDayOfMonthISO, daysFromTodayISO,
-  addDaysISO,
+  addDaysISO, formatISODateShort,
 } from './local-date'
 
 /**
@@ -131,5 +131,35 @@ describe('agreement with the real clock', () => {
       timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
     }).format(now)
     expect(todayISO()).toBe(expected)
+  })
+})
+
+describe('formatISODateShort', () => {
+  it('formats a plain ISO date without wrapping', () => {
+    expect(formatISODateShort('2026-08-30')).toBe('30 Aug 26')
+    expect(formatISODateShort('2026-01-01')).toBe('1 Jan 26')
+    expect(formatISODateShort('2026-12-31')).toBe('31 Dec 26')
+  })
+
+  it('does not shift the day in a western timezone', () => {
+    // The bug this avoids: new Date('2026-08-30') is UTC midnight, so
+    // toLocaleDateString in, say, America/New_York renders the 29th. The
+    // function never constructs a Date, so the calendar day is whatever the
+    // string says, everywhere.
+    const original = process.env.TZ
+    try {
+      process.env.TZ = 'America/Los_Angeles'
+      expect(formatISODateShort('2026-08-30')).toBe('30 Aug 26')
+      process.env.TZ = 'Pacific/Kiritimati'
+      expect(formatISODateShort('2026-08-30')).toBe('30 Aug 26')
+    } finally {
+      process.env.TZ = original
+    }
+  })
+
+  it('returns an empty string rather than NaN for bad input', () => {
+    for (const bad of ['', null, undefined, 'not-a-date', '2026-8-3', '30-08-2026', '2026-13-01', '2026-00-10']) {
+      expect(formatISODateShort(bad as string)).toBe('')
+    }
   })
 })

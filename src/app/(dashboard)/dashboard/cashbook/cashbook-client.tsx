@@ -32,7 +32,7 @@ import { useRole } from '@/contexts/role-context'
 import type { ReceiptInput } from '@/components/cashbook/receipt-modal'
 
 import Link from 'next/link'
-import { todayISO } from '@/lib/utils/local-date'
+import { todayISO, formatISODateShort } from '@/lib/utils/local-date'
 
 // Allocation modals (253 + 313 lines) only mount when an admin clicks Allocate
 // on an entry. Split off the initial cashbook chunk.
@@ -1513,29 +1513,39 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                     </div>
 
                     {/* Date and actions */}
-                    <div className="flex justify-between items-center text-xs text-muted-foreground">
-                      <div className="flex items-center gap-3">
-                        <span>
+                    {/* Meta line: date · account on the left, actions on the right.
+                        Below md the meta takes the full first line and the buttons
+                        wrap beneath it, right-aligned. Sharing one line there meant
+                        six action icons left about three characters for the account,
+                        so "Kotak Bank" rendered as "K...".
+
+                        Within the meta line: the date never shrinks and never wraps
+                        (a two-line date was the original complaint), the account name
+                        truncates rather than wrapping, and the buttons never shrink —
+                        without that last rule the account grew underneath them. */}
+                    <div className="flex flex-wrap justify-between items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
+                      <div className="flex items-center gap-2 min-w-0 basis-full md:basis-auto md:flex-1">
+                        <span className="whitespace-nowrap tabular-nums shrink-0">
                           {isEditing ? (
                             <input type="date" value={editForm.entry_date || ''} onChange={e => setEditForm(p => ({...p, entry_date: e.target.value}))} className="bg-background border rounded px-2 py-1" />
                           ) : (
-                            entry.entry_date
+                            <span title={entry.entry_date}>{formatISODateShort(entry.entry_date)}</span>
                           )}
                         </span>
-                        <span>•</span>
-                        <span>
+                        <span aria-hidden className="shrink-0 opacity-60">•</span>
+                        <span className="truncate min-w-0">
                           {isEditing ? (
                             <select value={editForm.bank_account_id || ''} onChange={e => setEditForm(p => ({...p, bank_account_id: e.target.value}))} className="bg-background border rounded px-2 py-1">
                               <option value="">Cash</option>
                               {bankAccounts.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                             </select>
                           ) : (
-                            entry.bank_account?.name || 'Cash'
+                            <span title={entry.bank_account?.name || 'Cash'}>{entry.bank_account?.name || 'Cash'}</span>
                           )}
                         </span>
                       </div>
 
-                      <div className="flex items-center justify-end gap-2">
+                      <div className="flex items-center justify-end gap-1 shrink-0 ml-auto">
                         {isEditing ? (
                           <>
                             <button onClick={handleInlineSave} disabled={saving} className="p-1.5 rounded-md hover:bg-primary/20 text-primary transition-colors" title="Save changes"><Save className="w-3.5 h-3.5" /></button>
@@ -1619,7 +1629,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             <table className="w-full text-sm min-w-[600px]">
             <thead>
               <tr className="border-b border-border bg-secondary/50">
-                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Date</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground whitespace-nowrap w-px">Date</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Category</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Description</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-muted-foreground">Account</th>
@@ -1646,16 +1656,20 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 return (
                   <tr key={entry.id} data-entry-id={entry.id} className={`hover-gradient-row group ${isEditing ? 'ring-2 ring-inset ring-primary/30 bg-primary/3' : ''}`}>
                     {/* ── Date ────────────────────────────────────────────── */}
-                    <td className="px-4 py-3 text-muted-foreground text-xs">
+                    <td className="px-4 py-3 text-muted-foreground text-xs whitespace-nowrap tabular-nums align-top">
                       {isEditing ? (
                         <input
                           type="date"
                           value={editForm.entry_date || ''}
                           onChange={e => setEditForm(p => ({...p, entry_date: e.target.value}))}
-                          className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 w-full"
+                          className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 w-full min-w-[9rem]"
                         />
                       ) : (
-                        entry.entry_date
+                        /* `30 Aug 26`, not `2026-08-30` — the raw ISO form wraps at
+                           its hyphens as soon as the column is squeezed, which put
+                           every date on two lines. title= keeps the exact value one
+                           hover away for anyone reconciling against a statement. */
+                        <span title={entry.entry_date}>{formatISODateShort(entry.entry_date)}</span>
                       )}
                     </td>
 
