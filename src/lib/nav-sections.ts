@@ -14,7 +14,7 @@ import {
   Briefcase, ClipboardList, CalendarClock, CalendarDays, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
   BadgePercent, CalendarRange, HardHat, Repeat, Package as PackageIcon,
   Share2, UserPlus, Gauge, ShieldCheck, Grid3x3, MapPin,
-  Scale, Receipt, Send,
+  Scale, Receipt, Send, MessageCircle,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -141,6 +141,8 @@ export const navSections: NavSection[] = [
       // The step after the calendar: artwork is finished, now it has to go out.
       // Keyed on social.publish so a planner who never posts does not see it.
       { label: 'Posting Queue',    href: '/dashboard/social/queue',    icon: Send, requiredPerm: 'social.publish', keywords: ['to post', 'publish', 'caption', 'hashtags', 'alt text', 'scheduled', 'ready to post', 'instagram'] },
+      // The other half of running an account: answering the people on it.
+      { label: 'Comments',         href: '/dashboard/social/inbox',    icon: MessageCircle, requiredPerm: 'social.publish', keywords: ['inbox', 'reply', 'comment', 'engagement', 'moderate', 'hide', 'spam', 'instagram', 'facebook'] },
       { label: 'Leads',            href: '/dashboard/leads',           icon: UserPlus, requiredPerm: 'leads.view', keywords: ['crm', 'meta leads', 'lead ads', 'prospects', 'enquiries'] },
       // Door-to-door / direct marketing: physical prospects on a map, visit
       // tracking, follow-ups — distinct from the Meta-ads Leads CRM above.
