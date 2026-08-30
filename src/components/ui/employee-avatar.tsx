@@ -253,7 +253,18 @@ function getInitials(name: string | null, cqid: string | null): string {
     if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
     return parts[0].slice(0, 2).toUpperCase()
   }
-  if (cqid) return cqid.replace('CQID', '').slice(0, 2)
+  // Last two digits, not the first two. Every CQID is zero-padded to three
+  // (CQID001, CQID002, …), so slicing from the front returned '00' for the
+  // whole of CQID001-CQID099 — i.e. for essentially everyone — and the avatar
+  // told you nothing about who you were looking at.
+  //
+  // Matching on \D rather than the literal 'CQID' means a prefix change does not
+  // silently start returning the prefix's own characters. padStart keeps it two
+  // glyphs wide for a short id, so the circles stay visually uniform.
+  if (cqid) {
+    const digits = cqid.replace(/\D/g, '')
+    if (digits) return digits.slice(-2).padStart(2, '0')
+  }
   return '?'
 }
 
