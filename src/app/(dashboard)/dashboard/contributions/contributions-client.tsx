@@ -1778,7 +1778,14 @@ export default function ContributionsClient({
                             }
                           }}
                           className={`hover-gradient-card bg-card border rounded-xl px-4 py-3.5 group select-none border-border`}>
-                          <div className="flex items-start gap-3">
+                          {/* The action column is shrink-0, so on a phone it took ~130px
+                              of a 366px card and left the content 202px. Everything then
+                              wrapped: the title onto two lines, client and service onto
+                              their own rows, and the contributor chips one per row —
+                              CQID001 (64px) and CQID002 100% (115px) could not share a
+                              178px line. Below sm the content now takes the full width
+                              and the buttons wrap beneath it. */}
+                          <div className="flex flex-wrap sm:flex-nowrap items-start gap-x-3 gap-y-2">
                             {bulkMode && (
                               <div className="pt-1.5 shrink-0" onClick={e => e.stopPropagation()}>
                                 <input
@@ -1795,7 +1802,7 @@ export default function ContributionsClient({
                               </div>
                             )}
                             <div className={cn(
-                              "flex-1 min-w-0 flex flex-col items-start gap-0.5",
+                              "basis-full sm:basis-auto sm:flex-1 min-w-0 flex flex-col items-start gap-0.5",
                               BRANDED_PILL_BASE_CLASS,
                               highlightedTaskId === task.id ? BRANDED_PILL_ACTIVE_CLASS : (bulkMode && isSelected) ? BRANDED_PILL_SELECTED_CLASS : ''
                             )}>
@@ -1879,7 +1886,7 @@ export default function ContributionsClient({
                               )}
                             </div>
 
-                            <div className="flex items-center gap-1 shrink-0 ml-1" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center gap-1 shrink-0 ml-auto sm:ml-1" onClick={e => e.stopPropagation()}>
                               {/* Super admin: jump directly to task in Tasks page */}
                               {role === 'super_admin' && (
                                 <a
