@@ -211,6 +211,10 @@ export const META_OAUTH_SCOPES = [
   'instagram_manage_insights',
   'instagram_content_publish',
   'instagram_manage_comments',
+  // Deleting a published post needs this and nothing else — without it the
+  // Graph API answers (#10) Insufficient permissions, which reads like a token
+  // problem and is not one.
+  'instagram_manage_contents',
   // Lead ads
   'leads_retrieval',
 ]

@@ -400,6 +400,15 @@ export async function publishSocialPost(admin: SupabaseClient, postId: string): 
 export async function deletePostFromMeta(
   admin: SupabaseClient,
   postId: string,
+  /**
+   * true  → the post is removed from Instagram/Facebook but SURVIVES here as a
+   *         draft, ready to be edited and posted again. The caption, hashtags
+   *         and media are exactly what they were; only the things that describe
+   *         a live post — its Meta id, permalink and published time — are
+   *         cleared, because they no longer describe anything.
+   * false → it goes from the live account and from Cirqle together.
+   */
+  keepLocalCopy = false,
 ): Promise<{ ok: boolean; error?: string }> {
   const { data: post } = await admin
     .from('social_posts')
@@ -442,11 +451,23 @@ export async function deletePostFromMeta(
     return { ok: false, error: redactTokens(msg) }
   }
 
-  // Only after Meta confirms. Marking ours deleted first would leave a live
-  // post nothing in Cirqle points at.
+  // Only after Meta confirms. Touching our row first would, on a failed
+  // delete, leave a live post that nothing in Cirqle points at.
   await admin
     .from('social_posts')
-    .update({ status: 'cancelled', deleted_at: new Date().toISOString() })
+    .update(keepLocalCopy
+      ? {
+          // Back to a draft. external_media_id must go: it is the marker the
+          // publisher uses to decide a post has already been handed to Meta,
+          // and leaving it would make this row unpublishable forever.
+          status: 'draft',
+          published_at: null,
+          external_media_id: null,
+          permalink: null,
+          publish_error: null,
+          updated_at: new Date().toISOString(),
+        }
+      : { status: 'cancelled', deleted_at: new Date().toISOString() })
     .eq('id', postId)
 
   // The mirror row too, so the grid and the reports stop counting it.

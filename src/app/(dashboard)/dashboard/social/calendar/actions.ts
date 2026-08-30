@@ -375,7 +375,11 @@ export async function crossPost(
  * comments and the permalink go with it — so it is gated on social.approve,
  * the same permission as publishing, rather than on social.publish.
  */
-export async function deleteFromMeta(id: string): Promise<ActionResult> {
+export async function deleteFromMeta(
+  id: string,
+  /** 'keep_draft' leaves an editable copy here; 'both' removes it everywhere. */
+  mode: 'keep_draft' | 'both' = 'both',
+): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.SOCIAL_APPROVE)
   if (!guard.ok) return { ok: false, error: guard.error }
 
@@ -384,7 +388,7 @@ export async function deleteFromMeta(id: string): Promise<ActionResult> {
     .from('social_posts').select('id, client_id, account_id, permalink').eq('id', id).maybeSingle()
   if (!post) return { ok: false, error: 'Post not found.' }
 
-  const res = await deletePostFromMeta(admin, id)
+  const res = await deletePostFromMeta(admin, id, mode === 'keep_draft')
   if (!res.ok) return { ok: false, error: res.error }
 
   const p = post as Row
@@ -394,7 +398,7 @@ export async function deleteFromMeta(id: string): Promise<ActionResult> {
     entityId: (p.client_id ?? p.account_id) as string,
     clientId: (p.client_id ?? null) as string | null,
     category: 'crm', action: 'social_post_deleted_from_meta',
-    detail: { permalink: p.permalink ?? null },
+    detail: { permalink: p.permalink ?? null, kept_local_draft: mode === 'keep_draft' },
   }).catch(() => {})
 
   revalidatePath(REVALIDATE)

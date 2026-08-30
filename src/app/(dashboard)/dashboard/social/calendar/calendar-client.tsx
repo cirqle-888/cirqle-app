@@ -288,27 +288,69 @@ export default function CalendarClient({
         />
       )}
 
+      {/* Two genuinely different outcomes, so two buttons rather than one
+          button and a checkbox: whether a copy survives here decides if this
+          is "take it down and try again" or "this never happened". */}
       {unpublishTarget && (
-        <ConfirmDialog
-          title="Delete this from Instagram/Facebook?"
-          body={
-            'This removes the post from the live account. Its likes, comments and link ' +
-            'are deleted with it and Meta offers no undo — reposting creates a new post ' +
-            'with a new date. Cirqle cannot bring it back.'
-          }
-          confirmLabel="Delete from Meta"
-          danger
-          onConfirm={() => {
-            const id = unpublishTarget.id
-            setUnpublishTarget(null)
-            startTransition(async () => {
-              const r = await deleteFromMeta(id)
-              if (r.ok) { toast.success('Deleted from Meta'); router.refresh() }
-              else toast.error('Could not delete from Meta', r.error)
-            })
-          }}
-          onCancel={() => setUnpublishTarget(null)}
-        />
+        <div
+          className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
+          onMouseDown={e => { if (e.target === e.currentTarget) setUnpublishTarget(null) }}
+        >
+          <div className="bg-background rounded-xl shadow-2xl p-6 max-w-md w-full animate-in zoom-in-95">
+            <h3 className="font-semibold text-sm mb-2">Delete this from Instagram/Facebook?</h3>
+            <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
+              The post goes from the live account. Its likes, comments and link go with it,
+              and Meta has no undo — reposting makes a new post with a new date.
+            </p>
+
+            <div className="space-y-2">
+              <button
+                onClick={() => {
+                  const id = unpublishTarget.id
+                  setUnpublishTarget(null)
+                  startTransition(async () => {
+                    const r = await deleteFromMeta(id, 'keep_draft')
+                    if (r.ok) { toast.success('Removed from Meta', 'Kept here as a draft you can edit and post again.'); router.refresh() }
+                    else toast.error('Could not delete from Meta', r.error)
+                  })
+                }}
+                className="w-full text-left px-4 py-3 rounded-lg border border-border hover:border-primary/50 hover:bg-secondary/50 transition-colors"
+              >
+                <span className="text-sm font-medium">Delete from Meta, keep a draft here</span>
+                <span className="block text-xs text-muted-foreground mt-0.5">
+                  Caption, hashtags and media stay in Cirqle so you can fix it and post again.
+                </span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const id = unpublishTarget.id
+                  setUnpublishTarget(null)
+                  startTransition(async () => {
+                    const r = await deleteFromMeta(id, 'both')
+                    if (r.ok) { toast.success('Deleted everywhere'); router.refresh() }
+                    else toast.error('Could not delete from Meta', r.error)
+                  })
+                }}
+                className="w-full text-left px-4 py-3 rounded-lg border border-destructive/30 hover:bg-destructive/10 transition-colors"
+              >
+                <span className="text-sm font-medium text-destructive">Delete from Meta and from Cirqle</span>
+                <span className="block text-xs text-muted-foreground mt-0.5">
+                  Removes the copy here too. Nothing is left to repost from.
+                </span>
+              </button>
+            </div>
+
+            <div className="flex justify-end mt-4">
+              <button
+                onClick={() => setUnpublishTarget(null)}
+                className="px-4 py-2 text-sm font-medium hover:bg-muted rounded-md transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <ToastContainer toasts={toast.toasts} onDismiss={toast.dismiss} />
