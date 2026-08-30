@@ -22,7 +22,32 @@ disaster-recovery path from migrations. That needs a baseline dump — see
 | 2026-08-30 | `20260801000001_employee_client_preferences` | applied | table present; anon 401; upsert→read→delete round-trip clean, 0 rows residue; FK rejects a bad `employee_id` (409) |
 | 2026-08-30 | `20260815090000_company_settings_secret_rls` | applied | blanket policy gone; 4 scoped policies; RLS on; anon grants 0; `/api/invoice-logo` still 200 |
 | 2026-08-30 | `20260815110000_authenticated_least_privilege` (Part A) | applied | `authenticated` grant rows 1055 → **302**, tables 161 → **44**; `permissions`, `designation_permissions`, `designations` all still granted (the lockout guard); `ad_accounts`/`deductions`/`company_settings` now false; `tasks`/`invoices` still true; anon still 0; production `/api/health` 200 and all 12 revoked tables still readable by the service role |
+| 2026-08-31 | `20260831120000_employee_presence` | applied | Table present; `anon` read → **401** (`permission denied`), signed-in `authenticated` read → **200**; heartbeat writes a row through `syncPresence`; a status written externally is reflected in the UI on the next sync, and derives correctly (`dnd` + note → "Do not disturb — 🎧 Focusing", cleared → "Available · Active now"). **Realtime does NOT deliver events for this table** — see the follow-up above; the feature polls and is unaffected. |
 | 2026-08-30 | `20260830120000_employees_column_grants` (Part B) | applied | `employees` columns granted to `authenticated` **29 → 11**; the five sensitive ones (`base_salary`, `hourly_rate`, `bank_details`, `date_of_birth`, `invite_token`) now grant **NONE**; table-level `INSERT` and `DELETE` both **false**; `UPDATE` narrowed to `avatar_url, current_workspace_id`. Applied only after the code prerequisite (`9eb7490`) was live in `1b1d2dd`. Verified after: service role still reads sensitive columns (payroll/settings/import server code works), anon `select(*)` 401, `permissions` + `designation_permissions` still granted, production `/api/health` 200. |
+
+## Waiting to be applied
+
+Nothing.
+
+### Follow-up: Realtime is not delivering for `employee_presence`
+
+The migration runs `ALTER PUBLICATION supabase_realtime ADD TABLE
+public.employee_presence` and the browser's channel reports `SUBSCRIBED`, but no
+INSERT, UPDATE or DELETE event ever arrives (verified 2026-08-31 by writing rows
+with the service role while a subscribed tab watched). The feature does not
+depend on it — the roster is polled once a minute through `syncPresence`, so
+dots are correct within the minute either way — but statuses would land in under
+a second if this were fixed. To diagnose:
+
+```sql
+select * from pg_publication_tables
+where pubname = 'supabase_realtime' and tablename = 'employee_presence';
+```
+
+No row means the publication add did not stick; re-run the `ALTER PUBLICATION`
+on its own. If the row IS there, the next thing to try is
+`alter table public.employee_presence replica identity full;` — Realtime needs
+the full old record to evaluate RLS on updates and deletes.
 
 ## Rollbacks
 

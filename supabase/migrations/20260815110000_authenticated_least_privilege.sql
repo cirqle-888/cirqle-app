@@ -73,6 +73,11 @@ DECLARE
     'designations',
     'discount_logs',
     'employee_performance_history',
+    -- Online/away status only — no name, no email, nothing derived from them.
+    -- The browser subscribes to it via Realtime, which needs the role grant;
+    -- 20260831120000 issues that grant, and this entry stops a re-run of this
+    -- migration from taking it away again.
+    'employee_presence',
     'employees',
     'exchange_rates',
     'group_services',

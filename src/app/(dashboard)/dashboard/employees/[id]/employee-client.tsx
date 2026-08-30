@@ -10,6 +10,8 @@ import AppSelect from '@/components/ui/app-select'
 import { ChevronLeft, Plus, Edit2, Archive, ArchiveRestore } from 'lucide-react'
 import type { CommissionAgreement } from '@/lib/agreements/resolve-earning'
 import { saveCommissionAgreement } from './actions'
+import { PresenceAvatar, PresenceBadge } from '@/components/ui/presence-dot'
+import { useEmployeePresence } from '@/contexts/presence-context'
 
 export default function EmployeeProfileClient({ employee, agreements: initialAgreements, clients, services, canManageAgreements }: any) {
   const [activeTab, setActiveTab] = useState<'details' | 'agreements'>('details')
@@ -18,6 +20,7 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
   const [editingId, setEditingId] = useState<string | null>(null)
   
   const [form, setForm] = useState<any>({})
+  const presence = useEmployeePresence(employee.id)
   const toast = useToast()
   const supabase = createSupabaseClient()
 
@@ -108,10 +111,19 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
             <Link href="/dashboard/settings" className="p-2 -ml-2 rounded-lg hover:bg-secondary text-muted-foreground transition-colors">
               <ChevronLeft className="w-5 h-5" />
             </Link>
+            <PresenceAvatar
+              employeeId={employee.id}
+              avatarUrl={employee.avatar_url}
+              name={employee.name}
+              cqid={employee.cqid}
+              size={52}
+              rounded="xl"
+            />
             <div>
               {/* eslint-disable-next-line no-restricted-syntax -- deliberate: showing name on the dedicated employee profile page */}
               <h1 className="text-2xl font-bold">{employee.name}</h1>
               <p className="text-sm text-muted-foreground">{employee.cqid} • {employee.role}</p>
+              <PresenceBadge presence={presence} className="mt-1" />
             </div>
           </div>
         </div>

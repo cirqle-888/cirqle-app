@@ -36,6 +36,7 @@ import dynamic from 'next/dynamic'
 const RecalcCommissionsModal = dynamic(() => import('./recalc-commissions-modal').then(mod => mod.RecalcCommissionsModal), { ssr: false })
 const PerformanceHistoryModal = dynamic(() => import('./performance-history-modal').then(mod => mod.PerformanceHistoryModal), { ssr: false })
 import { EmployeeAvatar, AvatarPicker } from '@/components/ui/employee-avatar'
+import { PresenceAvatar } from '@/components/ui/presence-dot'
 import { DEFAULT_TEMPLATES, TEMPLATE_KEYS, TEMPLATE_DOCS, templatesFromSettings, type MessageTemplates } from '@/lib/messaging/templates'
 import { INTAKE_KINDS, INTAKE_KIND_META } from '@/lib/services/intake'
 import { normalizeGroupWeights } from '@/lib/contributions/weights'
@@ -1769,13 +1770,14 @@ export default function SettingsClient(props: Props) {
                 ) : filteredEmployees.map(emp => (
                   <div key={emp.id} className="group bg-card border border-border/40 rounded-2xl px-5 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-primary/20 hover:shadow-sm transition-all">
                     <div className="flex items-center gap-4">
-                      <EmployeeAvatar
+                      <PresenceAvatar
+                        employeeId={emp.id}
                         avatarUrl={(emp as any).avatar_url}
                         name={emp.name}
                         cqid={emp.cqid}
                         size={40}
                         rounded="xl"
-                        className="shadow-sm border border-border/50"
+                        className="shadow-sm"
                       />
                       <div>
                         <div className="flex items-center gap-2 mb-0.5">

@@ -5,6 +5,7 @@ import { PermissionProvider, type PermissionUser } from '@/contexts/permission-c
 import { FavoritesProvider } from '@/contexts/favorites-context'
 import { WorkspaceProvider } from '@/contexts/workspace-context'
 import { RequestsBadgeProvider } from '@/contexts/requests-badge-context'
+import { PresenceProvider } from '@/contexts/presence-context'
 import { CommandPalette } from '@/components/ui/command-palette'
 // TEMPORARY — remove with the bypass. See src/lib/permissions/dev-bypass.ts
 import { PermissionBypassBanner } from '@/components/dev/permission-bypass-banner'
@@ -156,6 +157,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <PrivacyProvider>
       <RoleProvider initialEmployee={serverEmployee}>
         <PermissionProvider user={user} logoUrl={logoUrl} logoUrlDark={logoUrlDark} faviconUrl={faviconUrl}>
+          {/* Online status + self-set status, app-wide. Disabled during a
+              view-as preview: an admin previewing someone must not send
+              heartbeats in their name and light them up green. */}
+          <PresenceProvider
+            myEmployeeId={me?.employeeId ?? ''}
+            enabled={!!me?.employeeId && !me.isViewAs}
+          >
           {/* key = whose favourites these are.
               FavoritesProvider seeds its state with useState(initialFavorites),
               which reads the prop ONLY on first mount. Across a client-side
@@ -232,6 +240,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </RequestsBadgeProvider>
           </WorkspaceProvider>
           </FavoritesProvider>
+          </PresenceProvider>
         </PermissionProvider>
       </RoleProvider>
     </PrivacyProvider>

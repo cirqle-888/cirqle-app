@@ -10,6 +10,9 @@ import { CommandPaletteTrigger } from '@/components/ui/command-palette'
 import { NotificationBell } from '@/components/layout/notification-bell'
 import { AppLauncherTrigger } from '@/components/layout/app-launcher'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
+import { EmployeePresenceDot, PresenceNote } from '@/components/ui/presence-dot'
+import { StatusMenu } from '@/components/layout/status-menu'
+import { usePresence } from '@/contexts/presence-context'
 import { LiveClock } from '@/components/layout/live-clock'
 import { ProfileActions, ChangePasswordModal } from '@/components/layout/sidebar'
 
@@ -124,6 +127,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
 ) {
   const { user } = usePermissions()
   const { isUnlocked } = usePrivacy()
+  const { mine, available: presenceAvailable } = usePresence()
   const router = useRouter()
   const isEmployee = !user.isAdmin
   
@@ -207,7 +211,12 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
           title="Account Settings"
         >
           {user.cqid ? (
-            <EmployeeAvatar avatarUrl={null} name={user.cqid} cqid={user.cqid} size={28} rounded="full" className="shrink-0 ring-1 ring-border/50 shadow-sm transition-transform group-hover:scale-105" />
+            <span className="relative inline-flex shrink-0">
+              <EmployeeAvatar avatarUrl={null} name={user.cqid} cqid={user.cqid} size={28} rounded="full" className="shrink-0 ring-1 ring-border/50 shadow-sm transition-transform group-hover:scale-105" />
+              {/* Your own dot, on every page — the same signal everyone else
+                  sees for you, so "am I showing as away?" never needs asking. */}
+              <EmployeePresenceDot employeeId={user.employeeId} size="sm" className="absolute -bottom-0.5 -right-0.5" />
+            </span>
           ) : (
             <UserCircle className="w-7 h-7 text-muted-foreground shrink-0 transition-transform group-hover:scale-105" />
           )}
@@ -216,17 +225,28 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
 
         {profileOpen && (
           <>
-            <div className="absolute right-0 top-full mt-2 w-64 bg-card border border-border shadow-xl shadow-black/5 rounded-xl p-2 z-50 animate-in fade-in zoom-in-95 duration-200">
+            <div className="absolute right-0 top-full mt-2 w-72 max-h-[80vh] overflow-y-auto bg-card border border-border shadow-xl shadow-black/5 rounded-xl p-2 z-50 animate-in fade-in zoom-in-95 duration-200">
               <div className="px-2 py-2 mb-2 border-b border-border/50">
                 <div className="font-semibold text-foreground text-sm truncate tracking-tight">{user.cqid ?? 'Account'}</div>
                 {/* eslint-disable-next-line no-restricted-syntax -- deliberate: the SIGNED-IN user's own name in their own account menu, and only while privacy is unlocked. Never another employee's name. */}
                 {isUnlocked && user.name && <div className="text-xs text-muted-foreground truncate">{user.name}</div>}
-                {user.designationName && (
-                  <span className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border/50 whitespace-nowrap mt-1.5">
-                    {user.designationName}
-                  </span>
+                {(user.designationName || mine.note || mine.emoji) && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    {user.designationName && (
+                      <span className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border/50 whitespace-nowrap">
+                        {user.designationName}
+                      </span>
+                    )}
+                    <PresenceNote presence={mine} />
+                  </div>
                 )}
               </div>
+              {presenceAvailable && (
+                <>
+                  <StatusMenu onDone={() => setProfileOpen(false)} />
+                  <div className="my-2 border-t border-border/50" />
+                </>
+              )}
               <ProfileActions onChangePassword={() => { setShowPwdModal(true); setProfileOpen(false) }} compact />
             </div>
           </>

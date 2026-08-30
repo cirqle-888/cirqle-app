@@ -25,6 +25,8 @@ import { createClient } from '@/lib/supabase/client'
 import { useVisibleInterval } from '@/lib/hooks/use-visible-interval'
 import { usePermissions } from '@/contexts/permission-context'
 import { displayEmployee } from '@/lib/utils/employee-display'
+import { EmployeePresenceDot, PresenceNote } from '@/components/ui/presence-dot'
+import { usePresence } from '@/contexts/presence-context'
 import { installChimeUnlock, playChime } from '@/lib/notifications/chime'
 import {
   listConversations, getMessages, sendMessage, markRead,
@@ -158,6 +160,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 export function FloatingCommsWidget() {
   const { user, revealNames } = usePermissions()
+  const { presenceOf } = usePresence()
   const employeeId = user.employeeId
   const router = useRouter()
 
@@ -504,23 +507,34 @@ export function FloatingCommsWidget() {
   const activeClient = clientId ? nav.clientGroups.find(g => g.clientId === clientId) ?? null : null
 
   /** One list row — used for channels, client threads and DMs alike. */
-  const convRow = (c: ChatConversation, indented = false) => (
+  const convRow = (c: ChatConversation, indented = false) => {
+    // DMs carry the other person's dot; a channel has no single presence.
+    const partnerId = c.type === 'dm'
+      ? c.members.find(m => m.employeeId !== employeeId)?.employeeId ?? null
+      : null
+    const partner = presenceOf(partnerId)
+    return (
     <button key={c.id} onClick={() => openConversation(c.id)}
       className={`flex w-full items-center gap-3 border-b border-border/50 py-2.5 pr-3 text-left hover:bg-muted/50 ${indented ? 'pl-6' : 'pl-3'}`}>
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
+      <span className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
         {c.type === 'dm' ? convTitle(c).slice(0, 2).toUpperCase()
           : c.isPrivate ? <Lock className="h-4 w-4" /> : <Hash className="h-4 w-4" />}
+        <EmployeePresenceDot employeeId={partnerId} size="sm" className="absolute -bottom-0.5 -right-0.5" />
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-medium">{convTitle(c)}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-sm font-medium">{convTitle(c)}</span>
+            {partnerId && <PresenceNote presence={partner} max={12} className="shrink-0" />}
+          </span>
           {c.lastMessage && <span className="shrink-0 text-[10px] text-muted-foreground">{timeLabel(c.lastMessage.createdAt)}</span>}
         </span>
         {c.lastMessage && <span className="block truncate text-xs text-muted-foreground">{c.lastMessage.body}</span>}
       </span>
       {c.unread > 0 && <span className="shrink-0 rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">{c.unread}</span>}
     </button>
-  )
+    )
+  }
 
   return (
     <>

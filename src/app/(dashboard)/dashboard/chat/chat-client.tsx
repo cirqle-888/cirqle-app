@@ -23,6 +23,9 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/contexts/permission-context'
 import { displayEmployee } from '@/lib/utils/employee-display'
+import { EmployeePresenceDot, PresenceNote } from '@/components/ui/presence-dot'
+import { usePresence } from '@/contexts/presence-context'
+import { lastSeenLabel } from '@/lib/presence/status'
 import { ApprovalCard } from '@/components/approvals/approval-card'
 import { VoiceRecorderButton, VoiceBubble, type VoiceRecording } from '@/components/chat/voice'
 import { RequestApprovalDialog } from '@/components/approvals/request-approval-dialog'
@@ -63,6 +66,12 @@ function dayLabel(iso: string): string {
 }
 function initials(name: string): string {
   return name.split(/\s+/).map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '?'
+}
+/** The other person in a DM, for their status dot. Null for every other kind
+ *  of conversation — a channel has no single presence to show. */
+function dmPartnerId(conv: ChatConversation, meId: string): string | null {
+  if (conv.type !== 'dm') return null
+  return conv.members.find(m => m.employeeId !== meId)?.employeeId ?? null
 }
 function typingLabel(names: string[]): string {
   if (names.length === 0) return ''
@@ -237,6 +246,12 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
 
   const [alerts, setAlerts] = useState<{ id: string; title: string; body: string; convId: string }[]>([])
   const [showMembers, setShowMembers] = useState(false)
+
+  // Presence of whoever is on the other end of the open DM — drives the dot on
+  // the header bubble and the "Active now" line beneath the name.
+  const { presenceOf, available: presenceAvailable } = usePresence()
+  const activePartnerId = active ? dmPartnerId(active, me.employeeId) : null
+  const activePartner = presenceOf(activePartnerId)
 
   const notifyIncoming = useCallback((convId: string, senderId: string | null, kind: string, body: string) => {
     const conv = conversationsRef.current.find(c => c.id === convId)
@@ -700,7 +715,7 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
                     <SectionLabel>{label}</SectionLabel>
                     {list.map(c => (
                       <ConversationRow key={c.id} conv={c} active={c.id === activeId}
-                        displayName={convDisplayName(c)} showName={showName}
+                        displayName={convDisplayName(c)} showName={showName} meId={me.employeeId}
                         onDelete={c.canDelete ? askDeleteConv : undefined}
                         onClick={() => (c.isMember ? openConversation(c.id) : handleJoin(c.id))} />
                     ))}
@@ -724,7 +739,7 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
                     <div key={g.clientId}>
                       {g.channel ? (
                         <ConversationRow conv={{ ...g.channel, unread: g.unreadTotal }} active={rowActive}
-                          displayName={convDisplayName(g.channel)} showName={showName}
+                          displayName={convDisplayName(g.channel)} showName={showName} meId={me.employeeId}
                           onDelete={g.channel.canDelete ? askDeleteConv : undefined}
                           onClick={() => (g.channel!.isMember ? openConversation(g.channel!.id) : handleJoin(g.channel!.id))} />
                       ) : (
@@ -749,7 +764,7 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
                   )})}
                   {ungroupedClientChannels.map(c => (
                     <ConversationRow key={c.id} conv={c} active={c.id === activeId}
-                      displayName={convDisplayName(c)} showName={showName}
+                      displayName={convDisplayName(c)} showName={showName} meId={me.employeeId}
                       onDelete={c.canDelete ? askDeleteConv : undefined}
                       onClick={() => (c.isMember ? openConversation(c.id) : handleJoin(c.id))} />
                   ))}
@@ -761,7 +776,7 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
                   <SectionLabel>Other discussions</SectionLabel>
                   {groups.discussion.map(c => (
                     <ConversationRow key={c.id} conv={c} active={c.id === activeId}
-                      displayName={convDisplayName(c)} showName={showName}
+                      displayName={convDisplayName(c)} showName={showName} meId={me.employeeId}
                       onDelete={c.canDelete ? askDeleteConv : undefined}
                       onClick={() => openConversation(c.id)} />
                   ))}
@@ -771,7 +786,7 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
               <SectionLabel>Direct messages</SectionLabel>
               {groups.dms.map(c => (
                 <ConversationRow key={c.id} conv={c} active={c.id === activeId}
-                  displayName={convDisplayName(c)} showName={showName}
+                  displayName={convDisplayName(c)} showName={showName} meId={me.employeeId}
                   onDelete={c.canDelete ? askDeleteConv : undefined}
                   onClick={() => openConversation(c.id)} />
               ))}
@@ -825,11 +840,25 @@ function ChatInner({ me, canCreateChannels }: { me: Me; canCreateChannels: boole
                 <ArrowLeft className="h-4 w-4" />
               </button>
               {active.type === 'dm'
-                ? <span className="flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-medium">{initials(convDisplayName(active))}</span>
+                ? (
+                  <span className="relative flex h-7 w-7 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                    {initials(convDisplayName(active))}
+                    <EmployeePresenceDot employeeId={activePartnerId} size="sm" className="absolute -bottom-0.5 -right-0.5" />
+                  </span>
+                )
                 : active.isPrivate ? <Lock className="h-4 w-4 text-muted-foreground" /> : <Hash className="h-4 w-4 text-muted-foreground" />}
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold">{convDisplayName(active)}</p>
-                {active.topic && <p className="truncate text-xs text-muted-foreground">{active.topic}</p>}
+                {/* In a DM the useful subtitle is whether they can answer you
+                    right now — it replaces the topic line channels use. */}
+                {activePartnerId && presenceAvailable ? (
+                  <p className="flex min-w-0 items-center gap-1.5 truncate text-xs text-muted-foreground">
+                    <span>{lastSeenLabel(activePartner) ?? 'Offline'}</span>
+                    <PresenceNote presence={activePartner} max={24} />
+                  </p>
+                ) : (
+                  active.topic && <p className="truncate text-xs text-muted-foreground">{active.topic}</p>
+                )}
               </div>
               <span className="ml-auto inline-flex items-center gap-2">
                 <button onClick={() => setShowApprovalDialog(true)}
@@ -1545,7 +1574,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return <p className="px-4 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">{children}</p>
 }
 
-function ConversationRow({ conv, active, onClick, onDelete, displayName, showName, indented }: {
+function ConversationRow({ conv, active, onClick, onDelete, displayName, showName, indented, meId }: {
   conv: ChatConversation; active: boolean; onClick: () => void
   /** Only passed when the server would actually allow this caller to delete. */
   onDelete?: (conv: ChatConversation, displayName: string) => void
@@ -1553,7 +1582,12 @@ function ConversationRow({ conv, active, onClick, onDelete, displayName, showNam
   showName: (name?: string | null, cqid?: string | null) => string
   /** Nested under a client channel — indented with a thread rail. */
   indented?: boolean
+  /** The viewer, so a DM row can find whose dot to show. */
+  meId?: string
 }) {
+  const { presenceOf } = usePresence()
+  const partnerId = meId ? dmPartnerId(conv, meId) : null
+  const partner = presenceOf(partnerId)
   // The row and the delete control are SIBLINGS, never nested. A button inside
   // a role="button" row swallows Enter/Space on the inner control (the outer
   // keydown handler preventDefaults it), so the confirm could never be
@@ -1566,11 +1600,17 @@ function ConversationRow({ conv, active, onClick, onDelete, displayName, showNam
       <button onClick={onClick}
         className="flex min-w-0 flex-1 items-center gap-2 py-2 pl-4 pr-1 text-left">
         {conv.type === 'dm'
-          ? <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium">{initials(displayName)}</span>
+          ? (
+            <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium">
+              {initials(displayName)}
+              <EmployeePresenceDot employeeId={partnerId} size="xs" className="absolute -bottom-0.5 -right-0.5" />
+            </span>
+          )
           : conv.isPrivate ? <Lock className="h-4 w-4 shrink-0 text-muted-foreground" /> : <Hash className={`${indented ? 'h-3 w-3' : 'h-4 w-4'} shrink-0 text-muted-foreground`} />}
         <span className="min-w-0 flex-1">
           <span className={`flex items-center gap-1.5 ${indented ? 'text-xs' : 'text-sm'}`}>
             <span className={`truncate ${conv.unread > 0 ? 'font-semibold' : ''}`}>{displayName}</span>
+            {partnerId && <PresenceNote presence={partner} max={14} className="shrink-0" />}
             {ENTITY_BADGE[conv.type] && (
               <span className={`shrink-0 rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide ${ENTITY_BADGE[conv.type].cls}`}>
                 {ENTITY_BADGE[conv.type].label}
@@ -1880,6 +1920,7 @@ function MembersDialog({ conversation, me, onClose }: {
   onClose: () => void
 }) {
   const { revealNames } = usePermissions()
+  const { presenceOf } = usePresence()
   const mask = (name?: string | null, cqid?: string | null) =>
     displayEmployee({ name: name ?? '', cqid: cqid ?? '' }, { revealNames, canReveal: true })
 
@@ -1955,8 +1996,9 @@ function MembersDialog({ conversation, me, onClose }: {
             <>
               {filteredMembers.map(m => (
                 <div key={m.employeeId} className="flex items-center gap-3 rounded-lg p-2 hover:bg-muted/50 transition-colors">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                  <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
                     {initials(mask(m.name, m.cqid))}
+                    <EmployeePresenceDot employeeId={m.employeeId} size="sm" className="absolute -bottom-0.5 -right-0.5" />
                   </span>
                   <div className="min-w-0 flex-1 flex flex-col justify-center">
                     <div className="flex items-center gap-2">
@@ -1967,6 +2009,9 @@ function MembersDialog({ conversation, me, onClose }: {
                       <span className="text-xs text-muted-foreground">{m.cqid}</span>
                       <RoleBadge role={m.role} />
                     </div>
+                    {/* Whatever they set for themselves, under the role badges —
+                        the reason someone isn't answering is worth a line. */}
+                    <PresenceNote presence={presenceOf(m.employeeId)} max={34} className="mt-0.5" />
                   </div>
                   {canRemove(m.employeeId, m.role) && (
                     <button 
@@ -1989,8 +2034,9 @@ function MembersDialog({ conversation, me, onClose }: {
               ) : (
                 filteredAddable.map(e => (
                   <div key={e.id} className="flex items-center gap-3 rounded-lg p-2 hover:bg-muted/50 transition-colors">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                    <span className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
                       {initials(mask(e.name, e.cqid))}
+                      <EmployeePresenceDot employeeId={e.id} size="sm" className="absolute -bottom-0.5 -right-0.5" />
                     </span>
                     <div className="min-w-0 flex-1 flex flex-col justify-center">
                       <span className="truncate text-sm font-medium">{mask(e.name, e.cqid)}</span>
