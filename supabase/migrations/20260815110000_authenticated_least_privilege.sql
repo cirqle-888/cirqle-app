@@ -129,14 +129,15 @@ END $$;
 -- salary_type, reveal_salary, bank_details, date_of_birth, phone,
 -- emergency_contact_name, emergency_contact_phone, invite_token,
 -- invite_token_expires_at, registered_at, joined_date, performance_rating.
-REVOKE ALL ON public.employees FROM authenticated;
-GRANT SELECT (
-  id, auth_id, cqid, name, email, avatar_url, role,
-  is_active, is_archived, designation_id, current_workspace_id
-) ON public.employees TO authenticated;
-
--- Employees still edit their own avatar/workspace from the browser.
-GRANT UPDATE (avatar_url, current_workspace_id) ON public.employees TO authenticated;
+-- The `employees` column-level grant that used to sit here has MOVED to
+-- 20260830120000_employees_column_grants.sql. It cannot be applied yet: the
+-- browser import/export screen does `.from('employees').select('*')` and
+-- writes rows directly, and a column-level GRANT is role-level, so `select(*)`
+-- fails outright the moment any column is ungranted. See that file for the
+-- order of operations.
+--
+-- Splitting it lets the broad revoke above — the bulk of the win, and verified
+-- safe against every reader — land on its own.
 
 -- Future tables must not silently hand authenticated a blanket grant.
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM authenticated;

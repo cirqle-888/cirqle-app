@@ -26,6 +26,10 @@ import { join } from 'path'
 const ROOT = process.cwd()
 const MIGRATION = join(ROOT, 'supabase/migrations/20260815110000_authenticated_least_privilege.sql')
 const ANON_MIGRATION = join(ROOT, 'supabase/migrations/20260815100000_revoke_anon_and_secure_views.sql')
+// The employees column grant was split out of MIGRATION on 2026-08-30: it is
+// blocked on moving the browser import/export off `.from('employees')
+// .select('*')`, while the broad revoke in MIGRATION could ship immediately.
+const EMPLOYEE_GRANTS = join(ROOT, 'supabase/migrations/20260830120000_employees_column_grants.sql')
 
 /** The `keep text[] := ARRAY[ ... ]` block, as a list of relation names. */
 function migrationKeepList(): string[] {
@@ -68,7 +72,7 @@ describe('the least-privilege migration exists and is intact', () => {
   })
 
   it('withholds pay and bank details from the authenticated role', () => {
-    const sql = readFileSync(MIGRATION, 'utf8')
+    const sql = readFileSync(EMPLOYEE_GRANTS, 'utf8')
     const grant = sql.slice(sql.indexOf('GRANT SELECT ('), sql.indexOf(') ON public.employees'))
     for (const secret of [
       'base_salary', 'hourly_rate', 'bank_details', 'date_of_birth', 'invite_token',

@@ -21,7 +21,8 @@ disaster-recovery path from migrations. That needs a baseline dump — see
 | 2026-08-30 | `20260830100000_rls_close_remaining_tables` | applied | RLS-disabled tables 18 → **0**; 7 group-A policies created; 11 group-B tables RLS-on with no policy; all 18 still readable by the service role |
 | 2026-08-30 | `20260801000001_employee_client_preferences` | applied | table present; anon 401; upsert→read→delete round-trip clean, 0 rows residue; FK rejects a bad `employee_id` (409) |
 | 2026-08-30 | `20260815090000_company_settings_secret_rls` | applied | blanket policy gone; 4 scoped policies; RLS on; anon grants 0; `/api/invoice-logo` still 200 |
-| 2026-08-30 | `20260815110000_authenticated_least_privilege` | applied | see report — applied only AFTER the `check.ts` service-role fix was deployed, because its `employees` column grant withholds `date_of_birth` which main's authz path read on the session client |
+| 2026-08-30 | `20260815110000_authenticated_least_privilege` (Part A) | applied | `authenticated` grant rows 1055 → **302**, tables 161 → **44**; `permissions`, `designation_permissions`, `designations` all still granted (the lockout guard); `ad_accounts`/`deductions`/`company_settings` now false; `tasks`/`invoices` still true; anon still 0; production `/api/health` 200 and all 12 revoked tables still readable by the service role |
+| — | `20260830120000_employees_column_grants` (Part B) | **NOT APPLIED** | Blocked. The browser import/export screen does `.from('employees').select('*')` and writes rows directly; a column-level GRANT is role-level, so `select(*)` fails the moment any column is ungranted. Needs the employees import/export path moved to a server action first. See that file's header. |
 
 ## Rollbacks
 
