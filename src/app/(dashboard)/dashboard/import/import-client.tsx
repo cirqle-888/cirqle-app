@@ -563,7 +563,7 @@ export default function ImportClient({ clients, services, employees, groups, par
     if (m === 'employees') {
       const res = await exportEmployeeRows()
       if (!res.ok) { toastError(`Export failed: ${res.error}`); return }
-      data = (res.data ?? []) as any[]
+      data = res.data ?? []
     } else {
       // Try ordered first; if the orderBy column is missing on this DB schema,
       // retry without ordering so the export still works.
@@ -1243,12 +1243,12 @@ export default function ImportClient({ clients, services, employees, groups, par
     const backupBeforeUpdate = async (table: string, ids: string[]) => {
       if (ids.length === 0) return
       // Same rule as the export: whole employee rows come from the server.
-      let data: any[] | null
+      let data: Record<string, unknown>[] | null
       if (table === 'employees') {
         const r = await fetchEmployeeRowsByIds(ids)
-        data = r.ok ? ((r.data ?? []) as any[]) : null
+        data = r.ok ? (r.data ?? []) : null
       } else {
-        data = (await supabase.from(table).select('*').in('id', ids)).data as any[] | null
+        data = (await supabase.from(table).select('*').in('id', ids)).data
       }
       if (!data || data.length === 0) return
       const allKeys = new Set<string>()
@@ -1866,7 +1866,7 @@ export default function ImportClient({ clients, services, employees, groups, par
     if (m === 'employees') {
       const r = await exportEmployeeRows()
       if (!r.ok) { toastError(`Failed to load: ${r.error}`); setCleanupLoading(false); return }
-      setCleanupRecords((r.data ?? []) as any[])
+      setCleanupRecords(r.data ?? [])
       setCleanupLoading(false)
       return
     }
