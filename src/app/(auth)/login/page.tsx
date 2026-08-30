@@ -227,7 +227,7 @@ function LoginInner() {
             </Button>
 
             <p className="text-center text-xs text-muted-foreground pt-1">
-              You'll stay signed in on this device.
+              You&apos;ll stay signed in on this device.
             </p>
           </form>
         </div>

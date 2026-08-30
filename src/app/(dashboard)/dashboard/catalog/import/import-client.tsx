@@ -275,7 +275,7 @@ export default function ImportClient() {
     const imgFiles = arr.filter(f => f.type.startsWith('image/'))
 
     // Extract ZIPs using JSZip
-    let extractedImgs: File[] = [...imgFiles]
+    const extractedImgs: File[] = [...imgFiles]
     if (zipFiles.length > 0) {
       try {
         const JSZip = (await import('jszip')).default

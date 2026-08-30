@@ -32,7 +32,9 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { isMonthFinalized } from './compute'
 import { monthBounds } from '@/lib/finance/profit'
 
-const r2 = (n: number) => Math.round(n * 100) / 100
+// Canonical money rounding — a local Math.round(n * 100) / 100 disagrees at
+// the .xx5 midpoints (1.005 -> 1.00 instead of 1.01). See currency.ts round2.
+import { round2 as r2 } from '@/lib/calculations/currency'
 
 /** Ignore sub-rupee drift — rounding noise is not an adjustment. */
 const MATERIALITY_INR = 1

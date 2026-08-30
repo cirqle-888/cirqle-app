@@ -5,58 +5,87 @@ export function norm(s: string): string {
   return s.toLowerCase().replace(/[\s_-]+/g, '_').replace(/[^a-z0-9_]/g, '').trim()
 }
 
-/** Normalize a date string to YYYY-MM-DD. Accepts DD-MM-YYYY, MM/DD/YYYY, and M/D/YY. */
+/**
+ * Normalize a date string to YYYY-MM-DD.
+ *
+ * Accepts YYYY-MM-DD, DD-MM-YYYY, DD-MMM-YYYY ('04-Dec-2023'), D/M/YY, and the
+ * long human forms a spreadsheet produces ('6 July 2024', '06-July-2024,
+ * Saturday'). Anything it cannot read is returned UNCHANGED so the schema's
+ * `/^\d{4}-\d{2}-\d{2}$/` validator rejects the row loudly — an unparseable
+ * date must never reach the database as NULL.
+ *
+ * ── Ambiguous dates are DAY-first ───────────────────────────────────────────
+ *
+ * When both leading numbers are <= 12 ('06/07/2024') the format alone cannot
+ * say which is the day. This used to branch on the SEPARATOR — '/' was read as
+ * US month-first, '-' as day-first — so the same calendar date imported as two
+ * different days depending on punctuation, with no error either way.
+ *
+ * That contradicted every schema in this folder: task_date, entry_date,
+ * issue_date, due_date and joined_date all document 'DD-MM-YYYY', and the
+ * business calendar is India (see src/lib/utils/local-date.ts). So '06/07/2024'
+ * from a Cirqle sheet means 6 July, and the old code silently stored 7 June.
+ *
+ * Day-first is now the single rule for the ambiguous case. Unambiguous input is
+ * unaffected: '12/25/2023' still reads as December 25 via the day > 12 branch.
+ *
+ * ── Impossible dates are rejected, not emitted ──────────────────────────────
+ *
+ * '2026-02-30' and '00-00-0000' previously passed straight through the regex
+ * and came out shaped like valid ISO ('2026-02-30', '2000-00-00'), so the
+ * validator accepted them and Postgres threw on insert — failing the batch
+ * instead of naming the bad row. Each candidate is now round-tripped through a
+ * real calendar check before being returned.
+ */
 export function normalizeDate(s: string): string {
   if (!s) return ''
-  
-  // 1. Already YYYY-MM-DD
-  const yyyymm = s.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/)
-  if (yyyymm) return `${yyyymm[1]}-${yyyymm[2].padStart(2,'0')}-${yyyymm[3].padStart(2,'0')}`
 
-  // 2. Contains 3 parts
-  const parts = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2}|\d{4})$/)
-  if (parts) {
-    let p1 = parseInt(parts[1], 10)
-    let p2 = parseInt(parts[2], 10)
-    let y  = parseInt(parts[3], 10)
-    
-    if (y < 100) {
-      // 2-digit year (assume 2000+)
-      y += 2000
-    }
-    
-    let month: number
-    let day: number
-
-    if (p1 > 12) {
-      // p1 must be Day (e.g., 25/12/2023)
-      day = p1
-      month = p2
-    } else if (p2 > 12) {
-      // p2 must be Day (e.g., 12/25/2023)
-      month = p1
-      day = p2
-    } else {
-      // Ambiguous (e.g. 12/04/2023)
-      // Check separator: Excel often uses / for MM/DD/YYYY in US locales, - for DD-MM-YYYY
-      if (s.includes('/')) {
-        month = p1
-        day = p2
-      } else {
-        day = p1
-        month = p2
-      }
-    }
-
-    if (month > 12 || day > 31) return s
-
-    return `${y}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+  // A real calendar date, or null. Rejects month 0/13, day 0, and 30 February.
+  const iso = (y: number, m: number, d: number): string | null => {
+    if (!(y >= 1000 && y <= 9999) || !(m >= 1 && m <= 12) || !(d >= 1 && d <= 31)) return null
+    const probe = new Date(Date.UTC(y, m - 1, d))
+    if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== m - 1 || probe.getUTCDate() !== d) return null
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
   }
 
-  // 3. Native fallback
-  const d = new Date(s)
-  if (!isNaN(d.getTime())) {
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+  // Drop a trailing weekday ('06-July-2024, Saturday'), which is how the
+  // historical Google Sheet wrote dates and the reason a bulk import once
+  // rejected thousands of rows.
+  const cleaned = s
+    .trim()
+    .replace(/[,\s]+(mon|tues?|wed(nes)?|thur?s?|fri|sat(ur)?|sun)(day)?\.?$/i, '')
+    .trim()
+
+  // 1. Already YYYY-MM-DD
+  const ymd = cleaned.match(/^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})$/)
+  if (ymd) return iso(+ymd[1], +ymd[2], +ymd[3]) ?? s
+
+  // 2. Three numeric parts, day-first unless the numbers say otherwise
+  const parts = cleaned.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2}|\d{4})$/)
+  if (parts) {
+    const p1 = +parts[1]
+    const p2 = +parts[2]
+    const y = +parts[3] < 100 ? +parts[3] + 2000 : +parts[3]
+
+    // p2 > 12 forces month-first ('12/25/2023'); everything else is day-first,
+    // which covers both '25/12/2023' and the ambiguous '06/07/2024'.
+    const [day, month] = p2 > 12 ? [p2, p1] : [p1, p2]
+    return iso(y, month, day) ?? s
+  }
+
+  // 3. Long forms: '04-Dec-2023', '6 July 2024', 'July 6, 2024'.
+  //    Parsed in UTC via Date.UTC below rather than read off a local Date, so
+  //    the host timezone cannot shift the calendar day (the same trap
+  //    local-date.ts exists to avoid).
+  const named = cleaned.match(/^(\d{1,2})[\s\-/]+([A-Za-z]{3,})[\s\-/]+(\d{4})$/)
+    || cleaned.match(/^([A-Za-z]{3,})[\s\-/]+(\d{1,2}),?[\s\-/]+(\d{4})$/)
+  if (named) {
+    const dayFirst = /^\d/.test(named[1])
+    const dayStr = dayFirst ? named[1] : named[2]
+    const monStr = dayFirst ? named[2] : named[1]
+    const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+    const m = MONTHS.indexOf(monStr.slice(0, 3).toLowerCase()) + 1
+    if (m > 0) return iso(+named[3], m, +dayStr) ?? s
   }
 
   return s

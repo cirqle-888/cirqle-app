@@ -2,22 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "cirqle-app",
+      "name": "cirqle-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "port": 3000,
-      "autoPort": true
-    },
-    {
-      "_comment": "Attach-only. `next dev` refuses to start a second server for the same project directory (it holds a lock in .next/dev), so autoPort cannot rescue a session when another one already has the app running. Use this to attach to that server instead of killing it; use 'cirqle-app' when nothing is running yet.",
-      "name": "cirqle-app-attach",
-      "url": "http://localhost:3000",
-      "port": 3000
-    },
-    {
-      "name": "cirqle-desktop",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "desktop", "run", "dev"],
       "port": 3000
     }
   ]

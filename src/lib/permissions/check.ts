@@ -1,5 +1,5 @@
 import { cache } from 'react'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import type { PermKey } from './keys'
 // TEMPORARY — remove with the bypass. See src/lib/permissions/dev-bypass.ts
 import { devPermissionBypass } from './dev-bypass'
@@ -42,12 +42,12 @@ async function readViewAsCookie(): Promise<string | null> {
  * non-admin, an unknown target, or any error.
  */
 async function resolveViewAs(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  db: ReturnType<typeof createAdminClient>,
   authId: string,
   targetEmployeeId: string,
 ): Promise<CurrentUser | null> {
   try {
-    const { data: realEmp } = await supabase
+    const { data: realEmp } = await db
       .from('employees')
       .select('cqid, is_archived, designation:designation_id ( is_admin )')
       .eq('auth_id', authId)
@@ -57,7 +57,7 @@ async function resolveViewAs(
     // Re-checked per request, never trusted from the cookie or a cache.
     if (realDesig?.is_admin !== true || (realEmp as any)?.is_archived === true) return null
 
-    const { data: target } = await supabase
+    const { data: target } = await db
       .from('employees')
       .select('id, cqid, name, email, is_archived, date_of_birth, designation:designation_id ( id, name, is_admin )')
       .eq('id', targetEmployeeId)
@@ -70,10 +70,10 @@ async function resolveViewAs(
 
     let permissions = new Set<string>()
     if (targetIsAdmin) {
-      const { data: all } = await supabase.from('permissions').select('key')
+      const { data: all } = await db.from('permissions').select('key')
       permissions = new Set((all ?? []).map((p: any) => p.key))
     } else if (d?.id) {
-      const { data: dp } = await supabase
+      const { data: dp } = await db
         .from('designation_permissions')
         .select('allowed, permission:permission_id(key)')
         .eq('designation_id', d.id).eq('allowed', true)
@@ -158,7 +158,27 @@ export function invalidateUserCache(authId?: string | null): void {
  * not the full employee + permissions lookup.
  */
 export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
+  // The cookie-session client is used for ONE thing: establishing who is
+  // signed in. Every read below goes through the service role instead.
+  //
+  // Authorization must not be subject to the grants it is deciding. This file
+  // is imported by 158 modules and answers "what may this user do?" by reading
+  // `permissions` and `designation_permissions`; running those reads as
+  // `authenticated` makes the answer depend on a grant on the permission
+  // catalogue itself. The least-privilege migration revokes exactly that grant,
+  // so on the session client hasPermission() would have returned the empty set
+  // for every user on every page — a full lockout, with no error to point at.
+  //
+  // It also lets `employees.date_of_birth` stay ungranted. The authz path needs
+  // the signed-in user's own birthday for the CurrentUser record, and the only
+  // alternative was a column grant that hands every employee's date of birth to
+  // every other employee.
+  //
+  // This widens nothing in practice: every query below is already pinned to a
+  // single row by auth_id or employee id, so the service role returns the same
+  // row RLS would have allowed.
   const supabase = await createClient()
+  const db = createAdminClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
@@ -190,7 +210,7 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   }
 
   if (viewAsId) {
-    const previewed = await resolveViewAs(supabase, user.id, viewAsId)
+    const previewed = await resolveViewAs(db, user.id, viewAsId)
     if (previewed) return cacheAndReturn(previewed)
     // Target missing, or the real user is not an admin → fall through and
     // resolve them normally. Failing closed to their OWN identity is right:
@@ -200,7 +220,7 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   // Try the new shape first (with designation_id + new columns)
   let emp: any = null
   try {
-    const { data } = await supabase
+    const { data } = await db
       .from('employees')
       .select(`
         id, cqid, name, email, is_archived, date_of_birth,
@@ -215,7 +235,7 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
 
   // Fallback: old shape (no designation_id, no is_archived, no date_of_birth)
   if (!emp) {
-    const { data } = await supabase
+    const { data } = await db
       .from('employees')
       .select('id, cqid, name, email, role')
       .eq('auth_id', user.id)
@@ -242,14 +262,14 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   let permissions = new Set<string>()
   if (isAdmin) {
     try {
-      const { data: all } = await supabase.from('permissions').select('key')
+      const { data: all } = await db.from('permissions').select('key')
       permissions = new Set((all ?? []).map((p: any) => p.key))
     } catch {
       // permissions table missing — admin-by-flag still works via isAdmin=true
     }
   } else if (designation?.id) {
     try {
-      const { data: dp } = await supabase
+      const { data: dp } = await db
         .from('designation_permissions')
         .select('allowed, permission:permission_id(key)')
         .eq('designation_id', designation.id)

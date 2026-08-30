@@ -128,7 +128,7 @@ export function ModalOverlay({
     // Intentionally empty: onClose/isConfirmation are read via refs above so
     // this setup (body-scroll lock, keydown listener, initial focus) runs
     // exactly once when the modal mounts, not on every parent re-render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   // Alignment: centered dialog by default; bottom-anchored sheet on mobile when opted in.

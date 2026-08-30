@@ -913,12 +913,13 @@ export async function createParameter(
   if (!auth.ok) return { ok: false, error: auth.error }
 
   const admin = createAdminClient()
-  let { data, error } = await admin
+  const first = await admin
     .from('parameters')
     .insert({ ...fullForm, is_active: true })
     .select()
     .single()
-  if (error || !data) {
+  let data = first.data
+  if (first.error || !data) {
     const res = await admin
       .from('parameters')
       .insert({ ...safeForm, is_active: true })

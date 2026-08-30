@@ -1,3 +1,4 @@
+import { resolveBrandingUrl } from '@/lib/utils/branding'
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
@@ -26,13 +27,13 @@ export async function GET() {
     const admin = createAdminClient()
     const { data: rows } = await admin
       .from('company_settings')
-      .select('key, value')
+      .select('key, value, updated_at')
       .in('key', ['logo_url_light', 'logo_url'])
 
     const settings: Record<string, string> = {}
     ;(rows || []).forEach((s: any) => { settings[s.key] = s.value })
 
-    const logoStr = settings.logo_url_light || settings.logo_url || ''
+    const logoStr = resolveBrandingUrl(settings.logo_url_light || settings.logo_url) || ''
 
     if (logoStr.startsWith('data:image/')) {
       const m = logoStr.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/)

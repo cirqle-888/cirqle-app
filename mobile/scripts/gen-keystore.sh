@@ -34,10 +34,10 @@ keytool -genkeypair -v \
 
 cat > keystore.properties <<EOF
 # Gitignored — consumed by scripts/build-android.sh. Do NOT commit.
-KEYSTORE_PATH=$(pwd)/$KEYSTORE
-KEYSTORE_PASSWORD=$STORE_PW
-KEY_ALIAS=$ALIAS
-KEY_PASSWORD=$STORE_PW
+KEYSTORE_PATH="$(pwd)/$KEYSTORE"
+KEYSTORE_PASSWORD="$STORE_PW"
+KEY_ALIAS="$ALIAS"
+KEY_PASSWORD="$STORE_PW"
 EOF
 
 echo

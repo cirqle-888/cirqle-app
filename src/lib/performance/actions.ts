@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
+import { round2 } from '@/lib/calculations/currency'
 import { logActivity } from '@/lib/activity/log'
 import { revalidatePath } from 'next/cache'
 import { calcAssessment } from './calc'
@@ -219,7 +220,7 @@ export async function applyToEmployee(assessmentId: string, effectiveFrom: strin
   if (asm.status !== 'final' || asm.final_score == null) return { ok: false, error: 'Finalize the scorecard first.' }
   if (asm.applied_history_id) return { ok: false, error: 'Already applied.' }
 
-  const rating = Math.round(asm.final_score * 100) / 100
+  const rating = round2(asm.final_score)
   const { data: hist, error: histErr } = await admin.from('employee_performance_history').insert({
     employee_id: asm.employee_id,
     effective_from: effectiveFrom,

@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ "main" ]
 
+env:
+  # Matches the Vercel project's runtime (nodeVersion: 24.x). CI ran 20.x until
+  # 2026-08-30, so the suite was green on a runtime production does not use.
+  NODE_VERSION: '24.x'
+
 jobs:
   lint-and-typecheck:
     runs-on: ubuntu-latest
@@ -14,9 +19,11 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - run: npm ci
+      # `lint` carries --max-warnings, pinned to the count on 2026-08-30, so the
+      # warning debt can shrink but never grow. See eslint.config.mjs.
       - run: npm run lint
       - run: npx tsc --noEmit
 
@@ -27,7 +34,7 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - run: npm ci
       - run: npm run test
@@ -36,18 +43,45 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v1
+      - name: Use Node.js
+        uses: actions/setup-node@v4
         with:
-          version: latest
-      - name: Start local Supabase
-        run: supabase start
-      - name: Check RLS is enabled on all tables
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+
+      # ── Why this job no longer runs `supabase start` ──────────────────────
+      #
+      # It used to boot a local Supabase from supabase/migrations and run
+      # scripts/check-rls.sql against it. That never once worked. The CLI skips
+      # files whose names are not <timestamp>_name.sql — seventeen of them —
+      # and then the first timestamped migration failed with
+      #     ERROR: relation "clients" does not exist
+      # because the base schema (clients, employees, tasks, invoices …) has no
+      # DDL in this repository at all; it was created outside migrations. The
+      # job spent ~80s pulling Docker images and died before the RLS check,
+      # which is why its step shows 0s in every one of 242 runs.
+      #
+      # Restoring a real rebuild needs a baseline schema dump from production,
+      # which is tracked separately. Until then this job runs the checks that
+      # genuinely can run, rather than pretending to run one that cannot.
+
+      - name: Security invariants (static — no database needed)
+        run: npx vitest run src/lib/permissions/
+
+      # Live check, and the only one that can prove the actual database state.
+      # Skipped automatically when the secrets are absent, so forks and PRs from
+      # outside the org do not fail on a missing credential.
+      - name: Anonymous-exposure sweep against the live database
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          # The query returns tables without RLS. If the output isn't empty, fail.
-          OUTPUT=$(supabase db psql -t -f scripts/check-rls.sql)
-          if [ -n "$(echo "$OUTPUT" | xargs)" ]; then
-            echo "Error: The following tables have RLS disabled:"
-            echo "$OUTPUT"
-            exit 1
+          if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "::notice::Supabase secrets not configured — skipping the live sweep."
+            echo "Add NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY and"
+            echo "SUPABASE_SERVICE_ROLE_KEY as repository secrets to enable it."
+            exit 0
           fi
+          node scripts/sweep-anon.mjs

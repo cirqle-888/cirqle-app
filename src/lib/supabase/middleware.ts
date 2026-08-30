@@ -216,6 +216,9 @@ export async function updateSession(request: NextRequest) {
                   || pathname.startsWith('/feed/')     // client feed approval — tokenized, no login
                   || pathname.startsWith('/start/')    // client hub — single link to all that client's intake apps
                   || pathname.startsWith('/careers')   // public job application form — no login
+                  || pathname.startsWith('/api/health') // Uptime monitoring — must answer without a session, or the
+                                                         // monitor only ever sees the 307 to /login and reports "up"
+                                                         // while the database is unreachable. Returns booleans only.
                   || pathname.startsWith('/api/shortcut') // iOS Shortcuts API — its own bearer-token auth
                   || pathname.startsWith('/api/cron/')  // Vercel Cron — its own CRON_SECRET bearer-token auth, no Supabase session.
                                                          // Pre-existing bug fixed here: this prefix was missing, so every cron

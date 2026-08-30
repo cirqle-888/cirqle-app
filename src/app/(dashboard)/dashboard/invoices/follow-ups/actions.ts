@@ -9,7 +9,7 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requireAnyPermission } from '@/lib/permissions/check'
+import { requireAnyPermission, loadCurrentUser } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
 import { revalidatePath } from 'next/cache'
 import { recordPayment as libRecordPayment } from '@/lib/finance/record-payment'
@@ -242,28 +242,54 @@ export async function recordPayment(
   }
 }
 
+/**
+ * Save (or clear) this employee's own greeting name for a client.
+ *
+ * Deliberately identical in shape to setPartnerGreeting in
+ * dashboard/partners/actions.ts — the Follow-ups screen reads both preference
+ * tables together and merges them into one greeting map, so they must agree.
+ *
+ * This previously failed three ways at once, which is why no greeting name has
+ * ever been saved for a client:
+ *
+ *   1. It called `auth.getUser()` on a service-role client. That client carries
+ *      no cookie session, so `user` was always null and every call returned
+ *      'Unauthorized' before touching the database.
+ *   2. It stored `user.id` — the auth.users id — as employee_id, while
+ *      follow-ups/page.tsx reads back with `.eq('employee_id', me.employeeId)`,
+ *      the employees-table id. Writer and reader disagreed, so even a
+ *      successful write could never have been read.
+ *   3. The table did not exist: its migration aborted on a CREATE TRIGGER
+ *      against a function that is not in this database (see
+ *      20260801000001_employee_client_preferences.sql).
+ */
 export async function setClientGreeting(clientId: string, greetingName: string | null) {
-  const supabase = createAdminClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { ok: false, error: 'Unauthorized' }
+  const me = await loadCurrentUser().catch(() => null)
+  if (!me) return { ok: false, error: 'Not logged in' }
 
-  if (!greetingName) {
-    const { error } = await supabase
-      .from('employee_client_preferences')
-      .delete()
-      .match({ employee_id: user.id, client_id: clientId })
+  const admin = createAdminClient()
+  const missingTable = (message: string) =>
+    /relation|does not exist|schema cache/i.test(message)
+      ? 'Apply migration 20260801000001_employee_client_preferences.sql first.'
+      : message
 
-    if (error) return { ok: false, error: error.message }
-  } else {
-    const { error } = await supabase
+  if (greetingName) {
+    const { error } = await admin
       .from('employee_client_preferences')
       .upsert({
-        employee_id: user.id,
+        employee_id: me.employeeId,
         client_id: clientId,
         greeting_name: greetingName,
-      })
-
-    if (error) return { ok: false, error: error.message }
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'employee_id, client_id' })
+    if (error) return { ok: false, error: missingTable(error.message) }
+  } else {
+    const { error } = await admin
+      .from('employee_client_preferences')
+      .delete()
+      .eq('employee_id', me.employeeId)
+      .eq('client_id', clientId)
+    if (error) return { ok: false, error: missingTable(error.message) }
   }
 
   return { ok: true }

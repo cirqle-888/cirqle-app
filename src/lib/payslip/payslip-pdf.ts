@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf'
 import sharp from 'sharp'
 import type { PayslipData } from './types'
+import { round2 } from '@/lib/calculations/currency'
 import { adjustmentLabel, ownershipRowLabel } from './payslip-html'
 
 // Professional light palette — A4, white background
@@ -51,7 +52,7 @@ function getMilestone(total: number): number | null {
 
 // Rs prefix — Rupee glyph not reliably embedded in jsPDF standard fonts
 const inr = (n: number) =>
-  'Rs ' + (Math.round(n * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  'Rs ' + round2(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 /** Fetch a remote image, resize to ≤240×72 px via sharp, return PNG data-URI (or null). */
 async function fetchLogoDataUrl(url: string): Promise<string | null> {

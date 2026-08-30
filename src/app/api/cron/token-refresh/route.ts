@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { enqueueJob } from '@/lib/jobs/engine'
+import { logCronRun } from '@/lib/cron/log'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,6 +31,7 @@ export async function GET(req: Request) {
 
     if (error) throw error
     if (!connections || connections.length === 0) {
+      await logCronRun(admin, 'token-refresh', true, { enqueued: 0, note: 'no tokens due' })
       return NextResponse.json({ message: 'No tokens require refreshing.' })
     }
 
@@ -43,12 +45,14 @@ export async function GET(req: Request) {
       enqueued++
     }
 
+    await logCronRun(admin, 'token-refresh', true, { enqueued })
     return NextResponse.json({ 
       ok: true, 
       message: `Enqueued ${enqueued} token refresh jobs` 
     })
   } catch (error: any) {
     console.error('Token refresh cron failed:', error)
+    await logCronRun(admin, 'token-refresh', false, undefined, error?.message ?? String(error))
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

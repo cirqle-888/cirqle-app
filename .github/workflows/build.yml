@@ -14,7 +14,9 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          # Must track the Vercel project's runtime (nodeVersion: 24.x),
+          # otherwise a green build here says nothing about the real deploy.
+          node-version: '24.x'
           cache: 'npm'
       - run: npm ci
       - run: npm run build

@@ -312,7 +312,7 @@ export function Composer({
                   {media.map((m, i) => (
                     <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-border bg-secondary group">
                       {m.type === 'image'
-                        ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={m.url} alt="" className="w-full h-full object-cover" />
+                        ?   <img src={m.url} alt="" className="w-full h-full object-cover" />
                         : <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs">Video</div>}
                       <button onClick={() => setMedia((prev) => prev.filter((_, x) => x !== i))} className="absolute top-1 right-1 bg-black/60 rounded p-0.5 opacity-0 group-hover:opacity-100"><Trash2 className="w-3 h-3 text-white" /></button>
                     </div>

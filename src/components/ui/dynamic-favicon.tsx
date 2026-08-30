@@ -1,40 +1,35 @@
 'use client'
 
 import { useEffect } from 'react'
-import { createClient } from '@/lib/supabase/client'
 
 /**
- * DynamicFavicon — runs once on mount, reads company_settings.favicon_url from
- * Supabase, and updates the browser tab icon to the custom favicon.
- * Falls back to the static /icon.svg if no custom URL is stored.
+ * DynamicFavicon — points the tab icon at /api/favicon, which serves the
+ * workspace icon configured in Settings (falling back to the static
+ * /icon.svg when none is set).
+ *
+ * This component mounts in the ROOT layout, so it runs on every page load of
+ * every route. It used to query `company_settings.favicon_url` directly with
+ * the browser Supabase client, which meant ~20 KB of un-cacheable Supabase
+ * egress on every one of those loads — the icon is stored as a base64 data
+ * URL — and it 401'd on every public page, where there is no session and the
+ * anon role cannot read that table.
+ *
+ * Handing the browser a same-origin URL fixes both: the response is cached
+ * for an hour like any other image, and the route reads through the service
+ * role so the custom icon now appears on the public invoice/intake/portal
+ * pages too. See src/app/api/favicon/route.ts.
  */
 export function DynamicFavicon() {
   useEffect(() => {
-    ;(async () => {
-      try {
-        const supabase = createClient()
-        const { data } = await supabase
-          .from('company_settings')
-          .select('value')
-          .eq('key', 'favicon_url')
-          .maybeSingle()
-
-        // Each setting is stored as its own row: { key: 'favicon_url', value: 'https://...' }
-        const faviconUrl: string = data?.value || ''
-        if (!faviconUrl) return   // nothing stored → keep the static /icon.svg
-
-        // Update (or create) the <link rel="icon"> element
-        let link = document.querySelector<HTMLLinkElement>('link[rel~="icon"]')
-        if (!link) {
-          link = document.createElement('link')
-          link.rel = 'icon'
-          document.head.appendChild(link)
-        }
-        link.href = faviconUrl
-      } catch {
-        // silently ignore — network errors, missing table, etc.
-      }
-    })()
+    // Unconditional: /api/favicon always resolves to an image (custom or the
+    // static default), so there is nothing to probe for first.
+    let link = document.querySelector<HTMLLinkElement>('link[rel~="icon"]')
+    if (!link) {
+      link = document.createElement('link')
+      link.rel = 'icon'
+      document.head.appendChild(link)
+    }
+    link.href = '/api/favicon'
   }, [])
 
   return null

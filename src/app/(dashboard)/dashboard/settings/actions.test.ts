@@ -39,8 +39,8 @@ vi.mock('@/lib/supabase/admin', () => {
   }
 })
 
-let mockRequirePermission = vi.fn()
-let mockRequireAdmin = vi.fn()
+const mockRequirePermission = vi.fn()
+const mockRequireAdmin = vi.fn()
 
 // One factory per module: a second vi.mock() for the same path silently replaces
 // this one, which is how requirePermission went missing and took the SEC-01

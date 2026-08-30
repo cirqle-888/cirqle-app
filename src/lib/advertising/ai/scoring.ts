@@ -37,7 +37,7 @@ export function calculateWeightedHealthScore(
   forecasts?: { roas?: ForecastResult; spend?: ForecastResult },
   weights: any = { budget: 20, performance: 40, benchmark: 20, forecast: 20 }
 ): HealthScoreResult {
-  let explanations: string[] = []
+  const explanations: string[] = []
   let budgetScore = 50, performanceScore = 50, benchmarkScore = 50, forecastScore = 50
   let confidence = 70 // Base confidence
   

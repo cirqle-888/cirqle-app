@@ -413,7 +413,7 @@ export default function BulkGenerateModal({
                       className="w-4 h-4 rounded accent-primary" />
                     <div>
                       <p className="text-sm font-medium">Skip zero-value payslips</p>
-                      <p className="text-xs text-muted-foreground">Don't create payslips where net salary = ₹0</p>
+                      <p className="text-xs text-muted-foreground">Don&apos;t create payslips where net salary = ₹0</p>
                     </div>
                   </label>
                   <label className="flex items-center gap-3 cursor-pointer group">
@@ -706,7 +706,7 @@ export default function BulkGenerateModal({
                 <div className="space-y-2 text-xs text-muted-foreground">
                   <div className="flex items-start gap-2">
                     <ArrowRight className="w-3.5 h-3.5 text-primary shrink-0 mt-0.5" />
-                    Go to the <strong className="text-foreground">Cashbook</strong> and click the link icon on any "Salary" payment to allocate it to these newly created payslips.
+                    Go to the <strong className="text-foreground">Cashbook</strong> and click the link icon on any &quot;Salary&quot; payment to allocate it to these newly created payslips.
                   </div>
                   <div className="flex items-start gap-2">
                     <ArrowRight className="w-3.5 h-3.5 text-primary shrink-0 mt-0.5" />

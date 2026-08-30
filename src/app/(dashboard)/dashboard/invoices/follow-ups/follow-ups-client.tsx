@@ -415,7 +415,7 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
         status:        inv.status,
       }))
     const total = lines.reduce((sum, line) => sum + line.pending, 0)
-    let greetingName = overrideGreeting !== undefined ? overrideGreeting : partnerGreetings[partner.id]
+    const greetingName = overrideGreeting !== undefined ? overrideGreeting : partnerGreetings[partner.id]
     return buildPartnerStatementTextFromLines(partner.name, lines, total, templates, greetingName || undefined)
   }, [pendingByPartner, templates, partnerGreetings])
 
@@ -1017,7 +1017,7 @@ function InvoiceCard(p: CardProps) {
                 className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors ml-auto"
                 title="Mark all these invoices as 'Reminder sent'"
               >
-                <CheckCircle2 className="w-3.5 h-3.5" /> Log "Reminder sent" for all
+                <CheckCircle2 className="w-3.5 h-3.5" /> Log &quot;Reminder sent&quot; for all
               </button>
             </div>
           </div>
@@ -1126,7 +1126,7 @@ function InvoiceCard(p: CardProps) {
               >
                 <Send className="w-3.5 h-3.5" /> {p.busy ? 'Saving…' : 'Save follow-up'}
               </button>
-              <p className="text-[10px] text-muted-foreground">A promised or next-follow-up date that's today/past moves this invoice to Urgent.</p>
+              <p className="text-[10px] text-muted-foreground">A promised or next-follow-up date that&apos;s today/past moves this invoice to Urgent.</p>
             </div>
           </div>
         )}

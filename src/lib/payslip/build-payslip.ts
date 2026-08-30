@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getQualityBand } from '@/lib/calculations/commission'
+import { round2 } from '@/lib/calculations/currency'
 import type { PayslipData, PayslipBand, PayslipTask, PayslipMonthEarning } from './types'
 import { loadAwardsForPayslip } from '@/lib/ownership/engine'
 
@@ -199,7 +200,7 @@ export async function buildPayslipData(
       band,
       label: BAND_LABELS[band],
       count: bandAgg[band].count,
-      earnings: Math.round(bandAgg[band].earnings * 100) / 100,
+      earnings: round2(bandAgg[band].earnings),
     }))
     .filter(b => b.count > 0)
 
@@ -245,7 +246,7 @@ export async function buildPayslipData(
     totals: {
       monthEarnings,
       monthTaskCount: monthTasks.length,
-      sixMonthTotal: Math.round(sixMonthTotal * 100) / 100,
+      sixMonthTotal: round2(sixMonthTotal),
     },
     company: {
       ...COMPANY_DEFAULTS,
