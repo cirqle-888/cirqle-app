@@ -3,6 +3,13 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { Download } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import {
+  exportEmployeeRows,
+  fetchEmployeeRowsByIds,
+  insertEmployeeRows,
+  updateEmployeeRows,
+  deleteEmployeeRows,
+} from './employee-data-actions'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ConfirmDialog, ConfirmModalProps } from '@/components/ui/confirm-dialog'
 import { todayISO } from '@/lib/utils/local-date'
@@ -544,25 +551,38 @@ export default function ImportClient({ clients, services, employees, groups, par
   // ── Export current data ────────────────────────────────────────────────────
   async function exportCurrentData(m: ImportMode) {
     const cfg = EXPORT_CONFIG[m]
-    // Try ordered first; if the orderBy column is missing on this DB schema,
-    // retry without ordering so the export still works.
     let data: any[] | null = null
     let lastError: any = null
-    if (cfg.orderBy) {
-      const ordered = await supabase.from(cfg.table).select('*').order(cfg.orderBy, { ascending: true, nullsFirst: false })
-      if (ordered.error) lastError = ordered.error
-      else data = ordered.data as any[]
-    }
-    if (!data) {
-      const plain = await supabase.from(cfg.table).select('*')
-      if (plain.error) {
-        toastError(`Export failed: ${plain.error.message}`)
-        return
+
+    // Employees never leave the server. This screen is reachable with
+    // `tasks.create`, and a whole employee row carries base_salary,
+    // bank_details and date_of_birth — so the read runs in a server action
+    // behind `employees.view_full`, on the service role, and is audit-logged.
+    // It also has to: the least-privilege migration narrows `authenticated` to
+    // eleven columns, and `select('*')` fails outright against a partial grant.
+    if (m === 'employees') {
+      const res = await exportEmployeeRows()
+      if (!res.ok) { toastError(`Export failed: ${res.error}`); return }
+      data = (res.data ?? []) as any[]
+    } else {
+      // Try ordered first; if the orderBy column is missing on this DB schema,
+      // retry without ordering so the export still works.
+      if (cfg.orderBy) {
+        const ordered = await supabase.from(cfg.table).select('*').order(cfg.orderBy, { ascending: true, nullsFirst: false })
+        if (ordered.error) lastError = ordered.error
+        else data = ordered.data as any[]
       }
-      data = plain.data as any[]
-      if (lastError) {
-        // Silent fallback worked — let the user know ordering was skipped
-        console.warn(`Export ordering by "${cfg.orderBy}" skipped: ${lastError.message}`)
+      if (!data) {
+        const plain = await supabase.from(cfg.table).select('*')
+        if (plain.error) {
+          toastError(`Export failed: ${plain.error.message}`)
+          return
+        }
+        data = plain.data as any[]
+        if (lastError) {
+          // Silent fallback worked — let the user know ordering was skipped
+          console.warn(`Export ordering by "${cfg.orderBy}" skipped: ${lastError.message}`)
+        }
       }
     }
     if (!data || data.length === 0) { toastError('No data to export'); return }
@@ -1204,6 +1224,13 @@ export default function ImportClient({ clients, services, employees, groups, par
     const batchInsert = async (table: string, records: any[], conflict?: string) => {
       for (let i = 0; i < records.length; i += BATCH) {
         const b = records.slice(i, i + BATCH)
+        // Employees go through a server action gated on `employees.create`.
+        if (table === 'employees') {
+          const r = await insertEmployeeRows(b, conflict)
+          if (!r.ok) { res.errors.push(`Batch ${Math.floor(i/BATCH)+1}: ${r.error}`); res.skipped += b.length }
+          else res.inserted += r.data?.inserted || 0
+          continue
+        }
         const q = conflict
           ? supabase.from(table).upsert(b, { onConflict: conflict }).select('id')
           : supabase.from(table).insert(b).select('id')
@@ -1215,7 +1242,14 @@ export default function ImportClient({ clients, services, employees, groups, par
 
     const backupBeforeUpdate = async (table: string, ids: string[]) => {
       if (ids.length === 0) return
-      const { data } = await supabase.from(table).select('*').in('id', ids)
+      // Same rule as the export: whole employee rows come from the server.
+      let data: any[] | null
+      if (table === 'employees') {
+        const r = await fetchEmployeeRowsByIds(ids)
+        data = r.ok ? ((r.data ?? []) as any[]) : null
+      } else {
+        data = (await supabase.from(table).select('*').in('id', ids)).data as any[] | null
+      }
       if (!data || data.length === 0) return
       const allKeys = new Set<string>()
       data.forEach((r: Record<string, unknown>) => Object.keys(r).forEach(k => allKeys.add(k)))
@@ -1225,6 +1259,14 @@ export default function ImportClient({ clients, services, employees, groups, par
     }
 
     const batchUpdate = async (table: string, records: { row_id: string; fields: any }[]) => {
+      // Employees go through a server action gated on `employees.edit`.
+      if (table === 'employees') {
+        const r = await updateEmployeeRows(records)
+        if (!r.ok) { res.errors.push(r.error || 'update failed'); res.skipped += records.length; return }
+        res.inserted += r.data?.updated || 0
+        ;(r.data?.errors || []).forEach(e => { res.errors.push(e); res.skipped += 1 })
+        return
+      }
       const UBATCH = 25
       for (let i = 0; i < records.length; i += UBATCH) {
         const batch = records.slice(i, i + UBATCH)
@@ -1238,6 +1280,13 @@ export default function ImportClient({ clients, services, employees, groups, par
 
     async function batchDelete(table: string, ids: string[]) {
       if (ids.length === 0) return
+      // Employees go through a server action gated on `employees.archive`.
+      if (table === 'employees') {
+        const r = await deleteEmployeeRows(ids)
+        if (!r.ok) { res.errors.push(`Delete failed: ${r.error}`); res.skipped += ids.length }
+        else res.inserted += r.data?.deleted || 0
+        return
+      }
       const BATCH = 25
       for (let i = 0; i < ids.length; i += BATCH) {
         const batch = ids.slice(i, i + BATCH)
@@ -1811,6 +1860,17 @@ export default function ImportClient({ clients, services, employees, groups, par
     setSelectedIds(new Set())
     setCleanupRecords([])
     const table = TABLE_FOR_MODE[m]
+
+    // Employees never come back through the browser client — see
+    // employee-data-actions.ts. Same rows as the export, same permission.
+    if (m === 'employees') {
+      const r = await exportEmployeeRows()
+      if (!r.ok) { toastError(`Failed to load: ${r.error}`); setCleanupLoading(false); return }
+      setCleanupRecords((r.data ?? []) as any[])
+      setCleanupLoading(false)
+      return
+    }
+
     let q: any
 
     if (m === 'parameters') {
