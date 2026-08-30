@@ -1,5 +1,5 @@
 -- ============================================================================
--- employees — column-level grants for `authenticated`   ** NOT YET APPLIED **
+-- employees — column-level grants for `authenticated`   ** READY TO APPLY **
 -- ============================================================================
 --
 -- Split out of 20260815110000 on 2026-08-30. That migration's broad revoke is
@@ -21,7 +21,22 @@
 -- so anyone who can create a task can export the whole salary table to a
 -- spreadsheet. This grant closes that.
 --
--- ── WHY IT CANNOT BE APPLIED YET ────────────────────────────────────────────
+-- ── STATUS: the blocker below is CLEARED (2026-08-30) ───────────────────────
+--
+-- Everything described in this section has been done and deployed. The employees
+-- import/export path now runs in server actions on the service role
+-- (dashboard/import/employee-data-actions.ts, commit 9eb7490, live in 1b1d2dd),
+-- and an audit of every reader confirmed:
+--
+--   * browser modules read only granted columns (role-context: 8 of them;
+--     settings-client: cqid). Enforced by employees-server-only.test.ts.
+--   * cookie-session server modules read only `id` / `designation_id`.
+--   * every employees WRITE already goes through the service role.
+--
+-- This file is safe to run as-is. It was not applied in the same session only
+-- because the Supabase dashboard session expired.
+--
+-- ── WHY IT WAS BLOCKED (historical) ─────────────────────────────────────────
 --
 -- A column-level GRANT is role-level: no RLS policy can widen it, and
 -- `select('*')` fails outright once some columns are ungranted. Two browser
