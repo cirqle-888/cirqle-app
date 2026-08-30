@@ -1,5 +1,5 @@
 -- ============================================================================
--- employees — column-level grants for `authenticated`   ** READY TO APPLY **
+-- employees — column-level grants for `authenticated`   ** APPLIED 2026-08-30 **
 -- ============================================================================
 --
 -- Split out of 20260815110000 on 2026-08-30. That migration's broad revoke is
