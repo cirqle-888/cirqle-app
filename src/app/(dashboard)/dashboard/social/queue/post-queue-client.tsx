@@ -16,6 +16,7 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
+import { SocialTabs } from '@/components/social-hub/social-tabs'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import {
   X, Check, Copy, ExternalLink, AlertTriangle, Loader2, Clock,
@@ -71,6 +72,7 @@ export default function PostQueueClient({
 
   return (
     <div className="p-4 sm:p-6 space-y-5">
+      {!compact && <SocialTabs />}
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>

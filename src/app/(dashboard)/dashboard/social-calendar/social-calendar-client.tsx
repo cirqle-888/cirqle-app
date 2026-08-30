@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
+import { SocialTabs } from '@/components/social-hub/social-tabs'
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
@@ -1225,6 +1226,8 @@ export default function SocialCalendarClient({
         subtitle="Plan a month of client content, then send planned items to the Requests inbox — they ride the normal request → task pipeline from there"
       />
       <div className="p-4 md:p-6 space-y-5">
+
+      <SocialTabs />
 
       {/* ── Toolbar: plan picker + primary actions + export group ── */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2.5">

@@ -16,6 +16,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/header'
+import { SocialTabs } from '@/components/social-hub/social-tabs'
 import AppSelect from '@/components/ui/app-select'
 import { EmptyState } from '@/components/ui/empty-state'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -318,6 +319,7 @@ export default function FeedPlannerClient({
       />
 
       <div className="p-4 md:p-6 space-y-4 max-w-3xl">
+        <div className="mb-3"><SocialTabs /></div>
         <div className="flex flex-wrap items-center gap-2">
           {accounts.length > 1 && (
             <AppSelect value={selectedId ?? ''} onChange={e => switchAccount(e.target.value)} wrapperClassName="max-w-xs">

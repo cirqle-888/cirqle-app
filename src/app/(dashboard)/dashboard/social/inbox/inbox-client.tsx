@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
+import { SocialTabs } from '@/components/social-hub/social-tabs'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { PlatformIcon } from '@/components/social-hub/platform-icon'
 import {
@@ -115,6 +116,7 @@ export default function InboxClient({ accounts, canDelete }: { accounts: Account
 
   return (
     <div className="p-4 sm:p-6 space-y-4">
+      <SocialTabs />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold flex items-center gap-2">

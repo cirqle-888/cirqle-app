@@ -11,10 +11,10 @@ import {
   LayoutDashboard, CheckSquare, Users2, FileText, BookOpen, Wallet, BarChart3, Sheet,
   Settings, TrendingUp, Upload, Inbox, PhoneCall, Award, Activity, Blocks, Megaphone, Handshake,
   SlidersHorizontal, MessageSquare, ClipboardCheck, NotebookPen, LayoutGrid,
-  Briefcase, ClipboardList, CalendarClock, CalendarDays, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
+  Briefcase, ClipboardList, CalendarClock, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
   BadgePercent, CalendarRange, HardHat, Repeat, Package as PackageIcon,
-  Share2, UserPlus, Gauge, ShieldCheck, Grid3x3, MapPin,
-  Scale, Receipt, Send, MessageCircle,
+  Share2, UserPlus, Gauge, ShieldCheck, MapPin,
+  Scale, Receipt,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -133,16 +133,12 @@ export const navSections: NavSection[] = [
       { label: 'Connections',      href: '/dashboard/connections',     icon: Blocks, requiredPerm: 'advertising.manage_providers', keywords: ['integrations', 'meta', 'oauth', 'connect', 'facebook', 'google ads', 'token', 'ad accounts'] },
       { label: 'Asset Assignment', href: '/dashboard/assets',          icon: Building2, requiredPerm: 'assets.assign', keywords: ['assign', 'ownership', 'unassigned', 'pages', 'ad accounts', 'lead forms', 'which client'] },
       { label: 'Cirqle Accounts',  href: '/dashboard/cirqle-accounts', icon: ShieldCheck, requiredPerm: 'assets.view_cirqle', keywords: ['our own', 'agency', 'internal', 'own marketing', 'cirqle owned'] },
-      { label: 'Social',           href: '/dashboard/social',          icon: Share2, requiredPerm: 'social.view_insights', keywords: ['instagram', 'facebook', 'pages', 'insights', 'reach', 'publishing', 'meta'] },
-      // Sits beside Social Calendar: the calendar answers WHEN, the planner
-      // answers HOW THE GRID LOOKS — the two halves of planning a feed.
-      { label: 'Feed Planner',     href: '/dashboard/social/feed',     icon: Grid3x3, requiredPerm: 'social.plan_feed', keywords: ['instagram grid', 'feed preview', 'mockup', 'creatives', 'profile', 'aesthetic', 'layout'] },
-      { label: 'Social Calendar',  href: '/dashboard/social-calendar', icon: CalendarDays, requiredPerm: 'social.view', keywords: ['content', 'planner', 'posts', 'instagram', 'social media'] },
-      // The step after the calendar: artwork is finished, now it has to go out.
-      // Keyed on social.publish so a planner who never posts does not see it.
-      { label: 'Posting Queue',    href: '/dashboard/social/queue',    icon: Send, requiredPerm: 'social.publish', keywords: ['to post', 'publish', 'caption', 'hashtags', 'alt text', 'scheduled', 'ready to post', 'instagram'] },
-      // The other half of running an account: answering the people on it.
-      { label: 'Comments',         href: '/dashboard/social/inbox',    icon: MessageCircle, requiredPerm: 'social.publish', keywords: ['inbox', 'reply', 'comment', 'engagement', 'moderate', 'hide', 'spam', 'instagram', 'facebook'] },
+      // ONE entry for the whole Instagram/Facebook workflow. It used to be six
+      // — hub, calendar, queue, comments, feed, composer — which had to be
+      // found separately in the sidebar despite being steps in one job. They
+      // now share a tab bar (components/social-hub/social-tabs) and this is the
+      // way in. Routes are unchanged, so every existing link still works.
+      { label: 'Social',           href: '/dashboard/social-calendar', icon: Share2, requiredPerm: 'social.view', keywords: ['content', 'planner', 'posts', 'instagram', 'facebook', 'calendar', 'publish', 'schedule', 'comments', 'inbox', 'reply', 'feed', 'grid', 'insights', 'reach', 'to post', 'caption', 'hashtags', 'stories', 'reels'] },
       { label: 'Leads',            href: '/dashboard/leads',           icon: UserPlus, requiredPerm: 'leads.view', keywords: ['crm', 'meta leads', 'lead ads', 'prospects', 'enquiries'] },
       // Door-to-door / direct marketing: physical prospects on a map, visit
       // tracking, follow-ups — distinct from the Meta-ads Leads CRM above.

@@ -9,6 +9,7 @@ import { useMemo, useState, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
+import { SocialTabs } from '@/components/social-hub/social-tabs'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -133,6 +134,7 @@ export default function CalendarClient({
       />
 
       <div className="px-4 sm:px-6 pb-16 max-w-[1400px] mx-auto w-full">
+        <div className="mb-4"><SocialTabs /></div>
         {/* Toolbar */}
         <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
           <div className="flex items-center gap-2">

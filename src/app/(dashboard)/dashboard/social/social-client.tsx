@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
+import { SocialTabs } from '@/components/social-hub/social-tabs'
 import { usePermissions } from '@/contexts/permission-context'
 import { PERMS } from '@/lib/permissions/keys'
 import { Badge } from '@/components/ui/badge'
@@ -237,6 +238,7 @@ export default function SocialClient({
       />
 
       <div className="p-4 lg:p-6 space-y-6">
+        <SocialTabs />
         {/* ── Summary strip ── */}
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
           {[
