@@ -104,3 +104,53 @@ describe('invoice portfolio aggregates are gated on billing.view_totals', () => 
     expect(followups).toContain('buildReminderText(')
   })
 })
+
+describe('cross-module links match the permission their target enforces', () => {
+  const read2 = (x: string) => readFileSync(join(ROOT, x), 'utf8')
+
+  it('Follow-ups hides Client Ranking unless the target would allow it', () => {
+    const client = read2('src/app/(dashboard)/dashboard/invoices/follow-ups/follow-ups-client.tsx')
+    const at = client.indexOf('/dashboard/clients/ranking')
+    expect(at, 'ranking link not found').toBeGreaterThan(-1)
+    expect(client.slice(Math.max(0, at - 300), at)).toContain('canSeeRanking &&')
+  })
+
+  it('and gates it on exactly what that page checks — reports.view', () => {
+    // clients/ranking/page.tsx accepts `reports.view` and nothing else.
+    // Gating the link on a wider set would offer it to someone the page
+    // bounces, which is the fault this whole file exists to prevent.
+    const page = read2('src/app/(dashboard)/dashboard/invoices/follow-ups/page.tsx')
+    const target = read2('src/app/(dashboard)/dashboard/clients/ranking/page.tsx')
+    expect(target).toContain("'reports.view'")
+    expect(page).toContain('PERMS.REPORTS_VIEW)')
+    expect(page).not.toContain('REPORTS_VIEW_CLIENT_FINANCIALS')
+  })
+
+  it('every sidebar item agrees with the route gate it points at', () => {
+    // A sidebar entry whose permission differs from the middleware rule for its
+    // href is either a link that bounces, or a page reachable while hidden.
+    // /dashboard/settings/workspaces was the former: the nav asked for
+    // workspaces.manage while the general /dashboard/settings rule caught the
+    // route first and demanded settings.access.
+    const nav = read2('src/lib/nav-sections.ts')
+    const mw = read2('src/lib/supabase/middleware.ts')
+    const rules = [...mw.matchAll(/\[\/\^([^,]+?)\/,\s*'([a-z_.]+)'\]/g)]
+      .map(m => ({ re: new RegExp('^' + m[1].replace(/\\\//g, '/')), key: m[2] }))
+
+    const mismatches: string[] = []
+    for (const m of nav.matchAll(/\{[^{}]*href:\s*'([^']+)'[^{}]*\}/g)) {
+      const block = m[0]
+      if (/adminOnly:\s*true/.test(block)) continue
+      const href = m[1]
+      const rule = rules.find(r => r.re.test(href))
+      if (!rule) continue
+      const perm = /requiredPerm:\s*'([^']+)'/.exec(block)?.[1]
+      const any = [...(/requiredAnyPerm:\s*\[([^\]]*)\]/.exec(block)?.[1] ?? '').matchAll(/'([a-z_.]+)'/g)].map(x => x[1])
+      const keys = [perm, ...any].filter(Boolean) as string[]
+      if (keys.length && !keys.includes(rule.key)) {
+        mismatches.push(`${href}: sidebar wants ${keys.join('|')}, route requires ${rule.key}`)
+      }
+    }
+    expect(mismatches, 'sidebar and middleware disagree:\n  ' + mismatches.join('\n  ')).toEqual([])
+  })
+})

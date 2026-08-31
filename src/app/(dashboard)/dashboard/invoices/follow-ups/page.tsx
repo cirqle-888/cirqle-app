@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { loadCurrentUser } from '@/lib/permissions/check'
+import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { financialVisibility } from '@/lib/permissions/strip'
+import { PERMS } from '@/lib/permissions/keys'
 import { templatesFromSettings } from '@/lib/messaging/templates'
 import { getCompanySettings } from '@/lib/settings/company-settings'
 import FollowUpsClient, { type FUPartner } from './follow-ups-client'
@@ -20,6 +21,15 @@ export default async function FollowUpsPage() {
   // collections role needs each client's balance to write the reminder; being
   // shown what the company is owed in total is a separate grant.
   const showTotals = (me?.isAdmin ?? false) || vis.billingTotals
+  // Client Ranking orders every client by financial contribution, so it follows
+  // the reports permission its own page checks — not billing.view_invoices.
+  // Offering the link to someone the target will bounce is the same fault the
+  // Cash Book header had.
+  //
+  // Matched to what clients/ranking/page.tsx actually checks — `reports.view`
+  // and nothing else. Gating on a wider set here would offer the link to
+  // someone that page then bounces, which is the fault being fixed.
+  const canSeeRanking = (me?.isAdmin ?? false) || hasPermission(me, PERMS.REPORTS_VIEW)
   const supabase = createAdminClient()
 
   // Independent of the invoice list — started now so they overlap it instead of
@@ -148,6 +158,7 @@ export default async function FollowUpsPage() {
       companyName={companyName}
       showAmounts={!!showAmounts}
       showTotals={!!showTotals}
+      canSeeRanking={!!canSeeRanking}
       setupNeeded={setupNeeded}
       templates={templates}
       partnerGreetings={partnerGreetings}

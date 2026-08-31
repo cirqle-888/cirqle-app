@@ -41,6 +41,11 @@ const ROUTE_PERMS: Array<[RegExp, string]> = [
   [/^\/dashboard\/quotations/,              'billing.view_quotations'],
   [/^\/dashboard\/settings\/designations/,  'settings.manage_designations'],
   [/^\/dashboard\/settings\/change-requests/, 'employees.review_change_requests'],
+  // Lives under /settings but is its own permission — the page checks
+  // `workspaces.manage` and nothing else. Without this line the general
+  // settings rule below caught it first, so anyone holding workspaces.manage
+  // without settings.access saw the sidebar link and was bounced on click.
+  [/^\/dashboard\/settings\/workspaces/,   'workspaces.manage'],
   [/^\/dashboard\/settings/,                'settings.access'],
   [/^\/dashboard\/import/,                  'tasks.create'],
   // Note: /dashboard (root) is intentionally NOT gated here.

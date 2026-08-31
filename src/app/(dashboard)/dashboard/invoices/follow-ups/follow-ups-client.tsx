@@ -58,6 +58,8 @@ interface Props {
   showAmounts: boolean
   /** `billing.view_totals` — the portfolio position, not per-invoice money. */
   showTotals: boolean
+  /** Reports permission — Client Ranking is a financial report, not billing. */
+  canSeeRanking: boolean
   setupNeeded: boolean
   templates:   MessageTemplates
   partnerGreetings: Record<string, string>
@@ -167,7 +169,7 @@ function clusterInvoices(list: FUInvoice[], mode: ViewMode): Cluster[] {
   return [...map.values()].sort((a, b) => a.order - b.order)
 }
 
-export default function FollowUpsClient({ invoices, followups, companyName, showAmounts, showTotals, setupNeeded, templates, partnerGreetings: initialPartnerGreetings, clientGreetings: initialClientGreetings }: Props) {
+export default function FollowUpsClient({ invoices, followups, companyName, showAmounts, showTotals, canSeeRanking, setupNeeded, templates, partnerGreetings: initialPartnerGreetings, clientGreetings: initialClientGreetings }: Props) {
   const router = useRouter()
   const { toasts, dismiss, success, error: toastError, info } = useToast()
 
@@ -446,10 +448,12 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
               className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors">
               <History className="w-3.5 h-3.5" /> Activity Log
             </Link>
-            <Link href="/dashboard/clients/ranking"
-              className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors">
-              <TrendingUp className="w-3.5 h-3.5" /> Client Ranking
-            </Link>
+            {canSeeRanking && (
+              <Link href="/dashboard/clients/ranking"
+                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors">
+                <TrendingUp className="w-3.5 h-3.5" /> Client Ranking
+              </Link>
+            )}
           </div>
         }
       />
