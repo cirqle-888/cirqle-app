@@ -513,12 +513,16 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
                 <span className="text-xs font-medium text-muted-foreground bg-secondary border border-border rounded-full px-2 py-0.5">
                   {list.length}
                 </span>
-                {showAmounts && (
+                {/* The sum across every client in this section is a portfolio
+                    figure, so it follows showTotals — not showAmounts, which
+                    governs the per-invoice and per-client numbers a collections
+                    role genuinely needs to chase and to write a reminder. */}
+                {showTotals && (
                   <span className="text-xs text-muted-foreground ml-auto mr-1">{fmtINR(groupOutstanding)}</span>
                 )}
                 {isCollapsed
-                  ? <ChevronRight className={`w-4 h-4 text-muted-foreground ${showAmounts ? '' : 'ml-auto'}`} />
-                  : <ChevronDown className={`w-4 h-4 text-muted-foreground ${showAmounts ? '' : 'ml-auto'}`} />}
+                  ? <ChevronRight className={`w-4 h-4 text-muted-foreground ${showTotals ? '' : 'ml-auto'}`} />
+                  : <ChevronDown className={`w-4 h-4 text-muted-foreground ${showTotals ? '' : 'ml-auto'}`} />}
               </button>
               <p className="text-[11px] text-muted-foreground/70 -mt-2 mb-3 ml-6">{meta.hint}</p>
 

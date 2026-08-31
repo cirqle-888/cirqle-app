@@ -154,3 +154,58 @@ describe('cross-module links match the permission their target enforces', () => 
     expect(mismatches, 'sidebar and middleware disagree:\n  ' + mismatches.join('\n  ')).toEqual([])
   })
 })
+
+describe('portfolio aggregates are gated on showTotals, not showAmounts', () => {
+  const read3 = (x: string) => readFileSync(join(ROOT, x), 'utf8')
+
+  /**
+   * The distinction the billing keys draw, and the one that kept slipping:
+   *
+   *   billing.view_amounts  — what THIS invoice is worth. A collections role
+   *                           needs it to chase a client and write a reminder.
+   *   billing.view_totals   — what the BOOK is worth. Portfolio position:
+   *                           outstanding, overdue, dues by month, a section
+   *                           sum, the total of a hand-picked selection.
+   *
+   * Gating an aggregate on showAmounts looks correct and is not — it hands the
+   * portfolio to exactly the role the split exists to keep it from. Every case
+   * below was doing that, or nothing at all, before 2026-08-31.
+   */
+  const cases: Array<[string, string, string]> = [
+    ['invoices-client.tsx', 'list footer portfolio total', 'Total: {fmt(filtered.reduce'],
+    ['invoices-client.tsx', 'bulk-selection sum', 'Due: {fmt(invoices.filter(i => selectedForBulk'],
+    ['follow-ups/follow-ups-client.tsx', 'section aggregate', '{fmtINR(groupOutstanding)}'],
+  ]
+
+  for (const [file, what, needle] of cases) {
+    it(`${what} is behind showTotals`, () => {
+      const src = read3(`src/app/(dashboard)/dashboard/invoices/${file}`)
+      const at = src.indexOf(needle)
+      expect(at, `${what}: anchor not found — did the markup change?`).toBeGreaterThan(-1)
+      const before = src.slice(Math.max(0, at - 400), at)
+      expect(before, `${what} must be guarded by showTotals`).toContain('showTotals &&')
+    })
+  }
+
+  it('the stage-value cards show counts without showTotals, but not amounts', () => {
+    const src = read3('src/app/(dashboard)/dashboard/invoices/invoices-client.tsx')
+    const at = src.indexOf("{s.count > 0 ? fmt(s.amount) : '—'}")
+    expect(at, 'stage card amount not found').toBeGreaterThan(-1)
+    expect(src.slice(Math.max(0, at - 300), at)).toContain('showTotals &&')
+    // The count itself must stay — nine drafts to send is the work, not a figure.
+    expect(src).toContain("<span className=\"ml-auto font-semibold text-foreground/70\">{s.count}</span>")
+  })
+
+  it('dues-by-month is hidden wholesale, being nothing but money', () => {
+    const src = read3('src/app/(dashboard)/dashboard/invoices/invoices-client.tsx')
+    expect(src).toContain('{showTotals && stats.monthDues.length > 0 && (')
+  })
+
+  it('per-client and per-invoice figures still follow showAmounts', () => {
+    // The other half of the contract: these must NOT be swept up, or the
+    // reminder text loses the numbers that make it worth sending.
+    const src = read3('src/app/(dashboard)/dashboard/invoices/follow-ups/follow-ups-client.tsx')
+    expect(src).toContain('{showAmounts && ` · ${fmtINR(cluster.items.reduce')
+    expect(src).toContain('{showAmounts && ` · ${fmtINR(partnerPending.reduce')
+  })
+})

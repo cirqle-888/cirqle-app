@@ -2408,7 +2408,12 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
           <div className="flex justify-between items-center px-1 pt-1 mt-1">
             <span className="text-[11px] font-medium text-muted-foreground">{filtered.length} invoice{filtered.length !== 1 ? 's' : ''}</span>
-            <span className="text-xs font-bold text-foreground tracking-tight">Total: {fmt(filtered.reduce((s, i) => s + invTotalInr(i), 0))}</span>
+            {/* Portfolio sum — the book's size, not any one invoice. Gated with
+                the other aggregates so a collections role sees the invoices it
+                chases without the total they add up to. */}
+            {showTotals && (
+              <span className="text-xs font-bold text-foreground tracking-tight">Total: {fmt(filtered.reduce((s, i) => s + invTotalInr(i), 0))}</span>
+            )}
           </div>
           
           {/* Bulk Action Bar — wraps onto multiple lines: this list panel is a
@@ -2420,9 +2425,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-3">
                   <span className="text-xs font-medium text-violet-700 dark:text-violet-300">{selectedForBulk.size} selected</span>
-                  <span className="text-xs font-bold text-violet-700 dark:text-violet-300 border-l border-violet-500/30 pl-3">
-                    Due: {fmt(invoices.filter(i => selectedForBulk.has(i.id)).reduce((s, i) => s + balanceDueInr(i), 0))}
-                  </span>
+                  {/* Summing a hand-picked set is still a portfolio figure — and
+                      selecting every row would otherwise rebuild the book total
+                      the other gates remove. */}
+                  {showTotals && (
+                    <span className="text-xs font-bold text-violet-700 dark:text-violet-300 border-l border-violet-500/30 pl-3">
+                      Due: {fmt(invoices.filter(i => selectedForBulk.has(i.id)).reduce((s, i) => s + balanceDueInr(i), 0))}
+                    </span>
+                  )}
                 </div>
                 <button
                   aria-label="Clear selection"
@@ -5323,16 +5333,21 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                     {st.label}
                     <span className="ml-auto font-semibold text-foreground/70">{s.count}</span>
                   </div>
-                  <div className={cn('text-xs font-bold', s.count > 0 ? 'text-foreground' : 'text-muted-foreground')}>
-                    {s.count > 0 ? fmt(s.amount) : '—'}
-                  </div>
+                  {/* The count is how the work is triaged — nine drafts to send
+                      is the job. The value of those nine is a portfolio figure
+                      and follows showTotals. */}
+                  {showTotals && (
+                    <div className={cn('text-xs font-bold', s.count > 0 ? 'text-foreground' : 'text-muted-foreground')}>
+                      {s.count > 0 ? fmt(s.amount) : '—'}
+                    </div>
+                  )}
                 </button>
               )
             })}
           </div>
 
           {/* ── Month-wise outstanding dues ── */}
-          {stats.monthDues.length > 0 && (
+          {showTotals && stats.monthDues.length > 0 && (
             <div className="px-4 pb-3 flex items-center gap-1.5 overflow-x-auto hide-scrollbar [&>*]:shrink-0">
               <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground mr-0.5">Dues by month</span>
               {stats.monthDues.map(m => (
