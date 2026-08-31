@@ -92,6 +92,10 @@ comes back on its own (all persisted per user via `figma.clientStorage`):
 
 - **Auto-connect** — after the one-time sign-in the plugin connects on
   open; the sign-in card only reappears when connecting fails.
+- **Client + Offer sit above the tabs** — they are context for both, not a
+  step of one. + Catalog, ↑ Shot, ⇈ Shots and Save all refuse to work without
+  a client, so the picker has to be reachable from the Sheet tab where that
+  work happens.
 - **Offer-flyer clients only** — the Client dropdown lists the clients in
   the **Offer Flyers** department (service category), not every client in
   the workspace. This plugin only ever makes offer flyers, so the rest were

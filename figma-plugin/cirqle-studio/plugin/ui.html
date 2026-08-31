@@ -224,6 +224,27 @@
     </div>
   </section>
 
+  <!-- Client + Offer sit ABOVE the tabs because they are context for
+       everything below, not a step of one tab. They used to live inside
+       Build, which was survivable while Build was the landing tab — but the
+       Sheet is the front door now, and + Catalog, ↑ Shot, ⇈ Shots and Save
+       every one of them refuse to work without a client. Asking someone to
+       switch tabs to satisfy the tab they are on is the kind of thing that
+       reads as the tool being broken. -->
+  <section class="card" id="context-card">
+    <div class="row2">
+      <div>
+        <label style="margin-top:0">Client</label>
+        <select id="client" disabled><option>— connect first —</option></select>
+      </div>
+      <div>
+        <label style="margin-top:0">Offer</label>
+        <select id="offer" disabled><option>—</option></select>
+      </div>
+    </div>
+    <p class="hint">Picking an offer loads it and fills the sheet. ↻ reloads.</p>
+  </section>
+
   <div class="tabs">
     <div class="tab active" data-panel="paste">Sheet</div>
     <div class="tab" data-panel="build">Build</div>
@@ -232,16 +253,7 @@
   <div class="panel" id="p-build">
 
   <section class="card">
-    <div class="sec"><span class="n">1</span>Offer</div>
-    <label>Client</label>
-    <select id="client" disabled><option>— connect first —</option></select>
-    <label>Offer</label>
-    <select id="offer" disabled><option>—</option></select>
-    <p class="hint">Picking an offer loads it and fills the sheet. ↻ reloads.</p>
-  </section>
-
-  <section class="card">
-    <div class="sec"><span class="n">2</span>Template &amp; layout</div>
+    <div class="sec"><span class="n">1</span>Template &amp; layout</div>
     <label>Template <span id="template-hint" style="font-weight:400"></span></label>
     <select id="template" disabled><option>— none found on this page —</option></select>
     <div id="variant-default-row" style="display:none">
@@ -324,7 +336,7 @@
   </section>
 
   <section class="card">
-    <div class="sec"><span class="n">3</span>Build</div>
+    <div class="sec"><span class="n">2</span>Build</div>
     <div class="grid2">
       <button class="secondary" id="preview" disabled>Preview</button>
       <button class="secondary" id="validate" disabled>Validate</button>
@@ -3585,7 +3597,7 @@ async function uploadShot(bytes, rowIndex) {
     return
   }
   if (!clientId) {
-    reportError('No client selected.', 'Upload shot', 'Pick the client at the top of the Build tab — the photo is filed under that client in the product database.')
+    reportError('No client selected.', 'Upload shot', 'Pick the client at the top of the panel — the photo is filed under that client in the product database.')
     return
   }
   const name = String(row.name || '').trim()
@@ -4077,7 +4089,7 @@ $('catalog-q').oninput = () => {
 
 async function searchCatalog(q) {
   const clientId = $('client').value
-  if (!clientId) { $('catalog-results').textContent = 'Pick a client at the top first.'; return }
+  if (!clientId) { $('catalog-results').textContent = 'Pick a client at the top of the panel first.'; return }
   $('catalog-results').textContent = 'Searching…'
   try {
     const data = await api('/api/figma/catalog?clientId=' + encodeURIComponent(clientId) + '&q=' + encodeURIComponent(q))
@@ -4309,7 +4321,7 @@ async function doPasteSave(force) {
   clearLog()
   $('conflict-box').style.display = 'none'
   const clientId = $('client').value
-  if (!clientId) { reportError('No client selected.', 'Save', 'Pick a client at the top, then save.'); return }
+  if (!clientId) { reportError('No client selected.', 'Save', 'Pick a client at the top of the panel, then save.'); return }
   if (!filledRows().length) {
     reportError('The sheet is empty.', 'Save', 'Type a product into the sheet, pull one in with + Catalog, or open Advanced — import a list.')
     return
