@@ -117,11 +117,15 @@ table has been looked at**.
 
 ---
 
-## 3 · Plugin — Paste tab
+## 3 · Plugin — Sheet tab
 
 | # | Step | Expected |
 |---|------|----------|
-| 12 | Switch to **Paste offer** | Panel widens to ~720px. |
+| 11a | Open the plugin fresh (no saved settings) | Opens on **Sheet**, ~780×840, grid visible with 8 blank rows, count reads "empty". |
+| 11b | Press **Save** on the untouched sheet | Refused: "The sheet is empty." — nothing is sent. |
+| 11c | Fill 2 rows, leave the rest blank, Save | Exactly 2 products reach Cirqle; the blank rows are not saved. |
+| 11d | Check the **Client** dropdown | Lists only Offer Flyers department clients, not every active client. |
+| 12 | Switch to **Build**, then back to **Sheet** | Panel narrows to 380px, then widens to ~780px. |
 | 13 | Paste a message with `Sunday 100gm` … `1kg` … `Sunday 3 page`, press **Parse with AI** | Log shows "N product lines · N section(s) · days: … · packs: … · pages: Sunday=3". Weight column filled per section. Day separators in the table. |
 | 14 | Paste the same, press **Split to columns** | Instant, no AI. Column-role dropdowns appear above the table. |
 

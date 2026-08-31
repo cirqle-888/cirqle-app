@@ -225,11 +225,11 @@
   </section>
 
   <div class="tabs">
-    <div class="tab active" data-panel="build">Build</div>
-    <div class="tab" data-panel="paste">Paste offer</div>
+    <div class="tab active" data-panel="paste">Sheet</div>
+    <div class="tab" data-panel="build">Build</div>
   </div>
 
-  <div class="panel active" id="p-build">
+  <div class="panel" id="p-build">
 
   <section class="card">
     <div class="sec"><span class="n">1</span>Offer</div>
@@ -341,29 +341,11 @@
 
   </div><!-- /p-build -->
 
-  <div class="panel" id="p-paste">
+  <div class="panel active" id="p-paste">
 
-  <section class="card">
-    <div class="sec"><span class="n">1</span>Paste</div>
-    <label>Offer list — WhatsApp, Google Sheets, Excel or CSV</label>
-    <textarea id="paste-text" placeholder="Paste straight from WhatsApp:&#10;Cashew 240  93&#10;Pista 149&#10;&#10;…or copy cells from Google Sheets / Excel:&#10;Product&#9;SALE&#9;MRP&#10;Cashew 240&#9;93&#9;120"></textarea>
-    <div class="grid2">
-      <button id="paste-split">Split to columns</button>
-      <button class="secondary" id="paste-parse" title="Only for loose English WhatsApp text with 'Sunday 100gm' style headers. Non-English lists should use Split — it copies your text exactly.">Parse with AI</button>
-    </div>
-    <p class="hint"><b>Split</b> — instant, no AI, copies your text exactly.</p>
-    <div class="fold-head" id="ai-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ai-body">
-      <span class="chev">▶</span>AI options<span class="sum" id="ai-sum"></span>
-    </div>
-    <div id="ai-body" style="display:none">
-      <label style="margin-top:4px">AI hint (only used by Parse with AI)</label>
-      <input type="text" id="paste-hint" placeholder="e.g. the second number is MRP">
-    </div>
-  </section>
-
-  <div id="paste-review" style="display:none">
+  <div id="paste-review">
     <section class="card">
-      <div class="sec"><span class="n">2</span>Review<span class="right" id="paste-count"></span></div>
+      <div class="sec"><span class="n">1</span>Sheet<span class="right" id="paste-count"></span></div>
       <div class="toolbar" id="paste-toolbar">
         <button class="tool" data-case="upper" title="UPPERCASE — selected rows, or all">AA</button>
         <button class="tool" data-case="sentence" title="First letter capital">Aa</button>
@@ -437,8 +419,35 @@
         drag the corner square to fill · <b>⌘C/⌘V</b> · <b>⌘Z</b> · <b>⌘D</b> fill down</p>
     </section>
 
+    <!-- Importing a list is the ADVANCED path, not the front door. The sheet
+         above is where the work happens: type in it, or pull rows in from the
+         catalog. Pasting a WhatsApp message and letting the AI read it are
+         both powerful and both occasional, so they fold away here instead of
+         standing between the designer and the grid. -->
     <section class="card">
-      <div class="sec"><span class="n">3</span>Save</div>
+      <div class="fold-head" id="import-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="import-body">
+        <span class="chev">▶</span>Advanced — import a list<span class="sum" id="import-sum"></span>
+      </div>
+      <div id="import-body" style="display:none">
+        <label>Offer list — WhatsApp, Google Sheets, Excel or CSV</label>
+        <textarea id="paste-text" placeholder="Paste straight from WhatsApp:&#10;Cashew 240  93&#10;Pista 149&#10;&#10;…or copy cells from Google Sheets / Excel:&#10;Product&#9;SALE&#9;MRP&#10;Cashew 240&#9;93&#9;120"></textarea>
+        <div class="grid2">
+          <button id="paste-split">Split to columns</button>
+          <button class="secondary" id="paste-parse" title="Only for loose English WhatsApp text with 'Sunday 100gm' style headers. Non-English lists should use Split — it copies your text exactly.">Parse with AI</button>
+        </div>
+        <p class="hint"><b>Split</b> — instant, no AI, copies your text exactly. Both replace what is in the sheet.</p>
+        <div class="fold-head" id="ai-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ai-body">
+          <span class="chev">▶</span>AI options<span class="sum" id="ai-sum"></span>
+        </div>
+        <div id="ai-body" style="display:none">
+          <label style="margin-top:4px">AI hint (only used by Parse with AI)</label>
+          <input type="text" id="paste-hint" placeholder="e.g. the second number is MRP">
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="sec"><span class="n">2</span>Save</div>
       <label>Offer title</label>
       <input type="text" id="paste-title" placeholder="e.g. Sunday Shop Fest">
       <label>Offer date</label>
@@ -813,6 +822,7 @@ function layoutSummary() {
 function updateLayoutSummary() { $('layout-sum').textContent = layoutSummary() }
 
 wireFold('layout-toggle', 'layout-body', (open) => { state.layoutOpen = open; saveSettings() })
+wireFold('import-toggle', 'import-body', null)
 wireFold('ai-toggle', 'ai-body', null)
 wireFold('log-toggle', 'log', (open) => { state.logOpen = open; saveSettings() })
 wireFold('tag-toggle', 'tag-body', () => renderTagPanel())
@@ -1984,6 +1994,25 @@ document.querySelectorAll('.tab').forEach(tab => {
   }
 })
 
+/** Rows the designer has actually put something in. A sheet that is always on
+ *  screen is always partly empty — those trailing blanks are scaffolding for
+ *  typing, not products, and nothing downstream may treat them as rows. */
+function filledRows() {
+  return (state.parsed || []).filter(hasContent)
+}
+function hasContent(p) {
+  if (!p) return false
+  if (String(p.name || '').trim()) return true
+  if (p.price != null && p.price !== '') return true
+  if (p.mrp != null && p.mrp !== '') return true
+  return !!(String(p.weight || '').trim() || String(p.badge || '').trim())
+}
+
+/** How many blank rows a fresh sheet offers. Enough to look like a sheet and
+ *  to take a first list without reaching for + Row; short enough that the Save
+ *  card stays visible under it in the default panel height. */
+const STARTER_ROWS = 8
+
 state.parsed = []
 state.picked = new Set()      // row indices ticked for bulk tools
 state.customCols = []         // design-only columns → custom #layers
@@ -3049,7 +3078,8 @@ function renderTable() {
 
   renderColMap()
   updateCount()
-  $('paste-review').style.display = state.parsed.length ? 'block' : 'none'
+  // The sheet no longer hides itself when empty: it is the plugin's main work
+  // area, so an empty one is a place to start typing, not a thing to conceal.
 }
 
 function paintP1P2(cell, r) {
@@ -3066,7 +3096,8 @@ function renderSplit(i) {
 }
 
 function updateCount() {
-  const missing = state.parsed.filter(p => p.price == null).length
+  const rows = filledRows()
+  const missing = rows.filter(p => p.price == null).length
   const rect = selRect()
   const selText = rect
     ? (rect.r0 === rect.r1 && rect.c0 === rect.c1
@@ -3074,7 +3105,7 @@ function updateCount() {
         : (rect.r1 - rect.r0 + 1) + '×' + (rect.c1 - rect.c0 + 1) + ' selected')
     : ''
   $('paste-count').textContent =
-    state.parsed.length + ' rows' + (selText ? ' · ' + selText : '') +
+    (rows.length ? rows.length + ' rows' : 'empty') + (selText ? ' · ' + selText : '') +
     (missing ? ' · ' + missing + ' with no price' : '')
 }
 
@@ -3474,6 +3505,20 @@ $('tool-weight').onclick = () => {
 
 function blankRow() {
   return { name: '', price: null, mrp: null, weight: null, badge: null, day: null, offerType: 'price' }
+}
+
+/**
+ * Give an empty sheet somewhere to start typing.
+ *
+ * Called on open and after anything clears the grid. Never touches a sheet
+ * that already holds rows, so it cannot dilute a loaded offer, and the blanks
+ * it adds are invisible to save/count via filledRows().
+ */
+function ensureStarterRows() {
+  if ((state.parsed || []).length) return
+  state.parsed = []
+  for (let i = 0; i < STARTER_ROWS; i++) state.parsed.push(blankRow())
+  renderTable()
 }
 
 /** Insert `count` blank rows AT index `at` — everything from `at` moves down. */
@@ -4121,6 +4166,8 @@ $('tool-del').onclick = () => {
   }
   pushUndo()
   state.parsed = state.parsed.filter((_, i) => !state.picked.has(i))
+  // Clearing the sheet out entirely leaves the grid, not a blank panel.
+  if (!state.parsed.length) for (let i = 0; i < STARTER_ROWS; i++) state.parsed.push(blankRow())
   state.picked.clear()
   gridSel = null
   renderTable()
@@ -4220,7 +4267,9 @@ function buildSavePayload(force) {
     // Who saved it — the server turns this into a task on the Tasks page.
     createdBy: state.user || undefined,
     serviceId: $('paste-service').value || undefined,
-    products: state.parsed.map(p => ({
+    // filledRows(), not state.parsed: the trailing blank rows that make the
+    // sheet typeable are not products and must never be saved as any.
+    products: filledRows().map(p => ({
       // Row id + photo + extra badges ride along invisibly so an update
       // diffs cleanly and never wipes what the sheet doesn't show.
       id: p._id || undefined,
@@ -4261,7 +4310,10 @@ async function doPasteSave(force) {
   $('conflict-box').style.display = 'none'
   const clientId = $('client').value
   if (!clientId) { reportError('No client selected.', 'Save', 'Pick a client at the top, then save.'); return }
-  if (!state.parsed.length) { reportError('Nothing to save.', 'Save', 'Parse a list first.'); return }
+  if (!filledRows().length) {
+    reportError('The sheet is empty.', 'Save', 'Type a product into the sheet, pull one in with + Catalog, or open Advanced — import a list.')
+    return
+  }
 
   const days = [...new Set(state.parsed.map(p => p.day).filter(Boolean))]
   if (days.length > 1) {
@@ -4574,7 +4626,9 @@ onmessage = (event) => {
         state.logOpen = msg.settings.logOpen === true
         setFold('layout-toggle', 'layout-body', state.layoutOpen)
         setFold('log-toggle', 'log', state.logOpen)
-        if (msg.settings.activeTab === 'paste') document.querySelector('.tab[data-panel="paste"]').click()
+        // The sheet is the default now, so only a remembered Build tab is
+        // worth restoring — 'paste' is already where the plugin opens.
+        if (msg.settings.activeTab === 'build') document.querySelector('.tab[data-panel="build"]').click()
         updateLayoutSummary()
         // A saved connection means the setup step is already done — connect
         // straight away instead of asking for a click on every open.
@@ -4583,6 +4637,10 @@ onmessage = (event) => {
           connect()
         }
       }
+      // OUTSIDE the settings branch on purpose: a first-ever open sends
+      // `settings: null`, and a brand-new designer is exactly who must not be
+      // met by an empty panel. Never touches a sheet a draft just restored.
+      ensureStarterRows()
       break
     case 'templates':
       state.templates = msg.templates || []

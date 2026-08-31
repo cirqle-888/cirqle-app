@@ -14,7 +14,10 @@
  *    uncaught past the message router.
  */
 
-figma.showUI(__html__, { width: 380, height: 720, themeColors: true })
+// Opens on the Sheet tab, so it opens at sheet size. Reviewing 60 rows in a
+// 380px column is the difference between this replacing the spreadsheet and
+// not; the Build tab shrinks it back on switch (see the tab handler in ui.html).
+figma.showUI(__html__, { width: 780, height: 840, themeColors: true })
 
 /* ================================================================== *
  * Layer-name matching

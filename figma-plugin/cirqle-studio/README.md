@@ -92,10 +92,18 @@ comes back on its own (all persisted per user via `figma.clientStorage`):
 
 - **Auto-connect** — after the one-time sign-in the plugin connects on
   open; the sign-in card only reappears when connecting fails.
+- **Offer-flyer clients only** — the Client dropdown lists the clients in
+  the **Offer Flyers** department (service category), not every client in
+  the workspace. This plugin only ever makes offer flyers, so the rest were
+  wrong answers, and picking one filed a flyer against a client who does not
+  buy them. Membership is `client_service_pricing`, which includes a client
+  set up but not yet worked on. If the category is ever renamed or emptied
+  the server falls back to every active client, so the dropdown can never
+  come back empty.
 - **Picking is loading** — there is no Load Offers button: choosing a
   client or offer loads it (a sequence guard drops stale responses when
   selections change quickly), and the sheet fills itself. The old "Edit
-  offer in sheet" button is gone too — the Paste tab always holds the
+  offer in sheet" button is gone too — the Sheet tab always holds the
   loaded offer. Manual paths that remain: ↻ re-scan/reload, and the
   Advanced shared-secret connect.
 - **Resume last offer** — the last client, offer and template are
@@ -108,9 +116,20 @@ comes back on its own (all persisted per user via `figma.clientStorage`):
 - **Activity fold** — the log collapses to its latest line under the status
   chips, and pops open automatically whenever an error needs the full
   what/where/how-to-fix story.
+- **The sheet IS the plugin** — it opens on the **Sheet** tab with a live,
+  always-visible grid, at sheet width (780×840). No paste is required to
+  reach it: type straight in, or pull rows from **+ Catalog**. Blank rows
+  are scaffolding for typing — they are never counted, never saved, and
+  never become products.
+- **Importing a list is advanced** — pasting a WhatsApp/Sheets/Excel/CSV
+  list and reading it with AI both live behind "Advanced — import a list",
+  folded under the sheet. Powerful, occasional, and no longer standing
+  between the designer and the grid.
 - **Contextual hints** — the template how-to shows only while the page has
-  no template; the AI-hint field lives behind "AI options" on the Paste tab.
-- The last-used tab (Build / Paste offer) is also restored.
+  no template; the AI-hint field lives behind "AI options" inside that
+  advanced fold.
+- The last-used tab (Sheet / Build) is also restored — Sheet is the default,
+  so only a remembered Build tab changes anything.
 - **Tag layers** — select any layer on the canvas and click the #token it
   holds (#product, #price1, #mrp, #imageurl, …); the plugin renames it, and
   for a component-set template it renames the matching layer in **every
@@ -242,7 +261,10 @@ behaviour. Cards are matched in reading order (top row left-to-right, then
 down), *not* click order. Extra selected cards are left untouched rather than
 blanked.
 
-### Paste offer — WhatsApp, Sheets, Excel or CSV → Cirqle → cards
+### Importing a list — WhatsApp, Sheets, Excel or CSV → Cirqle → cards
+
+The sheet is the main way in; this is the bulk path, under
+**Advanced — import a list**.
 
 1. Paste the list. Any of these work:
    - copied cells from **Google Sheets** or **Excel** (tab-separated),
