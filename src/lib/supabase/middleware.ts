@@ -21,6 +21,14 @@ const ROUTE_PERMS: Array<[RegExp, string]> = [
   [/^\/dashboard\/cirqle-accounts/,         'assets.view_cirqle'],
   [/^\/dashboard\/chat/,                    'chat.access'],
   [/^\/dashboard\/recruitment/,             'recruitment.view'],
+  // More specific first — this list is first-match-wins, like the settings
+  // entries below. Both of these screens exist to show money: Accounts is the
+  // balance-and-ledger view and Reconciliation matches amounts against the
+  // bank. Gating them on `cashbook.view` alone let anyone who could browse
+  // entries — with the amount column deliberately stripped — read every balance
+  // by typing the URL.
+  [/^\/dashboard\/cashbook\/accounts/,       'cashbook.view_amounts'],
+  [/^\/dashboard\/cashbook\/reconciliation/, 'cashbook.view_amounts'],
   [/^\/dashboard\/cashbook/,                'cashbook.view'],
   [/^\/dashboard\/partners/,                'finance.partner.view'],
   [/^\/dashboard\/payroll/,                 'payroll.view'],

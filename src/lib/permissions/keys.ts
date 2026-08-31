@@ -94,8 +94,21 @@ export const PERMS = {
   BILLING_VIEW_PRICING:      'billing.view_pricing',
   /** Open invoices and change status (sent / paid / reviewed). */
   BILLING_VIEW_WORKFLOW:     'billing.view_workflow',
-  /** See ₹ totals, paid totals, outstanding, payment amounts. */
+  /** See ₹ on a SINGLE invoice — its total, what is paid, what is outstanding,
+   *  and the amounts that go into a client's payment reminder. */
   BILLING_VIEW_AMOUNTS:      'billing.view_amounts',
+  /**
+   * See ₹ AGGREGATED ACROSS INVOICES — the portfolio position: total
+   * outstanding, total overdue, draft value.
+   *
+   * Deliberately separate from BILLING_VIEW_AMOUNTS, because the two answer
+   * different questions and are wanted by different people. Someone chasing
+   * payment needs each client's balance to write the reminder; that is not the
+   * same as being shown what the company is owed in total. Collapsing both into
+   * one grant meant a collections role could not be given the first without
+   * also being given the second.
+   */
+  BILLING_VIEW_TOTALS:       'billing.view_totals',
   /** See per-item / per-task pricing on invoice detail. */
   BILLING_VIEW_LINE_PRICING: 'billing.view_line_pricing',
 
@@ -299,6 +312,7 @@ export const FINANCIAL_VISIBILITY_PERMS = [
   PERMS.CONTRIBUTIONS_VIEW_EARNINGS,
   PERMS.PAYROLL_VIEW_AMOUNTS,
   PERMS.BILLING_VIEW_AMOUNTS,
+  PERMS.BILLING_VIEW_TOTALS,
   PERMS.BILLING_VIEW_LINE_PRICING,
   PERMS.CASHBOOK_VIEW_AMOUNTS,
 ] as const

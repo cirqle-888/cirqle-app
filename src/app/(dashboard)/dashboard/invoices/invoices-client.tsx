@@ -189,6 +189,16 @@ interface Props {
    */
   visibility: {
     amounts:     boolean
+    /**
+     * `billing.view_totals` — the portfolio position across every invoice:
+     * total outstanding, how many are overdue, draft value.
+     *
+     * Separate from `amounts`, which is per-invoice. Someone chasing payment
+     * needs each client's balance to write a reminder; that is a different
+     * question from what the company is owed in total, and the two are
+     * wanted by different people.
+     */
+    totals:      boolean
     linePricing: boolean
   }
 }
@@ -269,6 +279,7 @@ function findLinkedCashbookEntry(inv: Invoice, p: Payment) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function InvoicesClient({ initialInvoices, clients, bankAccounts, cashbookCategories, services, companySettings, exchangeRates, visibility, agreementBreakdowns }: Props) {
   const showAmounts     = visibility.amounts
+  const showTotals      = visibility.totals
   const showLinePricing = visibility.linePricing
   const supabase = createClient()
   const { toasts, dismiss, success, error: toastError } = useToast()
@@ -5174,17 +5185,22 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           className={cn("w-full border-b border-border/40 px-4 py-2.5 flex items-center justify-between text-left", ROW_INTERACTIVE_CLASS)}
         >
           <div className="flex items-center gap-2.5 text-xs flex-wrap min-w-0">
-            <span className="flex items-center gap-1.5">
-              <span className="text-muted-foreground">Outstanding</span>
-              <span className="font-bold text-foreground">{fmt(stats.outstanding)}</span>
-            </span>
-            {stats.overdueCount > 0 && (
+            {/* Portfolio position — every figure here sums across clients, so
+                the whole strip follows billing.view_totals rather than the
+                per-invoice `amounts` grant. */}
+            {showTotals && (
+              <span className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">Outstanding</span>
+                <span className="font-bold text-foreground">{fmt(stats.outstanding)}</span>
+              </span>
+            )}
+            {showTotals && stats.overdueCount > 0 && (
               <>
                 <span className="text-muted-foreground/30">·</span>
                 <span className="font-semibold text-red-400">{stats.overdueCount} overdue</span>
               </>
             )}
-            {stats.draftCount > 0 && (
+            {showTotals && stats.draftCount > 0 && (
               <>
                 <span className="text-muted-foreground/30">·</span>
                 <span className="font-semibold text-amber-400 flex items-center gap-1">
@@ -5210,10 +5226,17 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             </button>
           </div>
           <div className="px-4 pt-1 pb-2.5 grid grid-cols-2 sm:grid-cols-6 gap-3">
+            {/* Same rule as the collapsed strip: these tiles sum across every
+                client, so they follow billing.view_totals. Without it the panel
+                still opens — it just carries the action buttons and not the
+                portfolio position. */}
+            {showTotals && (
             <div className="bg-foreground/[0.03] rounded-xl p-3 border border-border/30">
               <div className="text-[10px] text-muted-foreground mb-0.5">Outstanding</div>
               <div className="text-sm font-bold text-foreground">{fmt(stats.outstanding)}</div>
             </div>
+            )}
+            {showTotals && (
             <div className={`bg-foreground/[0.03] rounded-xl p-3 border ${stats.overdueCount > 0 ? 'border-red-500/30' : 'border-border/30'}`}>
               <div className="text-[10px] text-muted-foreground mb-0.5">Overdue</div>
               <div className={`text-sm font-bold flex flex-wrap items-baseline gap-1 ${stats.overdueCount > 0 ? 'text-red-400' : 'text-foreground'}`}>
@@ -5221,12 +5244,16 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                 {stats.overdueCount > 0 && <span className="text-[10px]">({stats.overdueCount})</span>}
               </div>
             </div>
+            )}
             <div className={`bg-foreground/[0.03] rounded-xl p-3 border ${stats.draftCount > 0 ? 'border-amber-500/30' : 'border-border/30'}`}>
               <div className="text-[10px] text-muted-foreground mb-0.5 flex items-center gap-1">
                 <Zap className="w-2.5 h-2.5" />Auto Drafts
               </div>
+              {/* The count is workload and stays; the value is portfolio money. */}
               <div className={`text-sm font-bold ${stats.draftCount > 0 ? 'text-amber-400' : 'text-muted-foreground'}`}>
-                {stats.draftCount > 0 ? `${stats.draftCount} · ${fmt(stats.draftTotal)}` : '—'}
+                {stats.draftCount > 0
+                  ? (showTotals ? `${stats.draftCount} · ${fmt(stats.draftTotal)}` : String(stats.draftCount))
+                  : '—'}
               </div>
             </div>
             <button

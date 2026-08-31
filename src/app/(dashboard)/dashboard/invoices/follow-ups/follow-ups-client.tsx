@@ -56,6 +56,8 @@ interface Props {
   followups:   FollowupRow[]
   companyName: string
   showAmounts: boolean
+  /** `billing.view_totals` — the portfolio position, not per-invoice money. */
+  showTotals: boolean
   setupNeeded: boolean
   templates:   MessageTemplates
   partnerGreetings: Record<string, string>
@@ -165,7 +167,7 @@ function clusterInvoices(list: FUInvoice[], mode: ViewMode): Cluster[] {
   return [...map.values()].sort((a, b) => a.order - b.order)
 }
 
-export default function FollowUpsClient({ invoices, followups, companyName, showAmounts, setupNeeded, templates, partnerGreetings: initialPartnerGreetings, clientGreetings: initialClientGreetings }: Props) {
+export default function FollowUpsClient({ invoices, followups, companyName, showAmounts, showTotals, setupNeeded, templates, partnerGreetings: initialPartnerGreetings, clientGreetings: initialClientGreetings }: Props) {
   const router = useRouter()
   const { toasts, dismiss, success, error: toastError, info } = useToast()
 
@@ -458,7 +460,10 @@ export default function FollowUpsClient({ invoices, followups, companyName, show
           <KpiTile label="Pending invoices" value={String(invoices.length)} icon={Inbox} tint="text-foreground" />
           <KpiTile label="Urgent" value={String(groups.urgent.length)} icon={AlertTriangle} tint="text-red-600 dark:text-red-400" />
           <KpiTile label="To be sent" value={String(groups.needs_sent.length)} icon={Send} tint="text-blue-600 dark:text-blue-400" />
-          <KpiTile label="Total outstanding" value={showAmounts ? fmtINR(totalOutstanding) : '—'} icon={CircleDollarSign} tint="text-foreground" />
+          {/* The only tile that aggregates across clients, so it is the only
+              one that follows billing.view_totals. The three counts beside it
+              say how much work there is to do, not what the company is owed. */}
+          <KpiTile label="Total outstanding" value={showTotals ? fmtINR(totalOutstanding) : '—'} icon={CircleDollarSign} tint="text-foreground" />
         </div>
 
         {setupNeeded && (

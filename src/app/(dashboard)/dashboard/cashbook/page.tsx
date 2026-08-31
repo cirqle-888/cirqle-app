@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
-import { loadCurrentUser } from '@/lib/permissions/check'
+import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { financialVisibility, stripCashbookList } from '@/lib/permissions/strip'
+import { PERMS } from '@/lib/permissions/keys'
 import CashBookClient from './cashbook-client'
 
 export const dynamic = 'force-dynamic'
@@ -156,6 +157,7 @@ export default async function CashBookPage() {
       pendingPayrolls={(pendingPayrollsRes.data || []) as any[]}
       companySettings={companySettings}
       showAmounts={vis.cashbookAmounts}
+      canEditEntries={hasPermission(me, PERMS.CASHBOOK_EDIT)}
       allTags={((tagsRes as any)?.data || []).map((t: any) => t.name as string)}
     />
   )

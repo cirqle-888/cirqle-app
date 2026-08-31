@@ -217,13 +217,15 @@ interface Props {
    * inflow/outflow KPI cards, and the entry-row amount column.
    */
   showAmounts: boolean
+  /** `cashbook.edit` — may create or change entries. */
+  canEditEntries: boolean
   /** All known tag names, for the TagPicker's autocomplete. */
   allTags: string[]
 }
 
 const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 
-export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts, allTags }: Props) {
+export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts, canEditEntries, allTags }: Props) {
   const { role } = useRole()
   const isAdmin = role === 'super_admin'
   // Employee names are private: show CQID by default and the real name only
@@ -1214,28 +1216,50 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         subtitle="Track all income and expenses"
         actions={
           <div className="flex items-center gap-2">
-            <Link href="/dashboard/cashbook/accounts"
-              className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap"
-              title="Account balances & ledger">
-              <Landmark className="h-4 w-4 shrink-0" />
-              <span className="hidden sm:inline">Accounts</span>
-            </Link>
-            <Link href="/dashboard/cashbook/reconciliation"
-              className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap">
-              <ShieldAlert className="h-4 w-4 shrink-0" />
-              <span className="hidden sm:inline">Reconciliation</span>
-            </Link>
+            {/* Every control here is gated on the permission it actually needs.
+                A button you are not allowed to use is worse than no button: it
+                reads as available, and the refusal only arrives after the click.
 
-            <button onClick={() => setShowTransfer(true)}
-              className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap">
-              <ArrowLeftRight className="w-4 h-4 shrink-0" />
-              <span className="hidden sm:inline">Transfer</span>
-            </button>
-            <button onClick={() => setShowForm(true)}
-              className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-3 py-2 rounded-lg hover:opacity-90 transition-opacity whitespace-nowrap">
-              <Plus className="w-4 h-4 shrink-0" />
-              Add Entry
-            </button>
+                Accounts and Reconciliation both exist to show money — balances,
+                a ledger, amounts matched against the bank — so they follow
+                `cashbook.view_amounts`, the same permission that strips the
+                Amount column. Someone browsing entries with amounts hidden was
+                being offered two routes straight to the totals. The routes are
+                gated to match in supabase/middleware.ts; hiding the link alone
+                would have left the URL working. */}
+            {showAmounts && (
+              <Link href="/dashboard/cashbook/accounts"
+                className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap"
+                title="Account balances & ledger">
+                <Landmark className="h-4 w-4 shrink-0" />
+                <span className="hidden sm:inline">Accounts</span>
+              </Link>
+            )}
+            {showAmounts && (
+              <Link href="/dashboard/cashbook/reconciliation"
+                className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap">
+                <ShieldAlert className="h-4 w-4 shrink-0" />
+                <span className="hidden sm:inline">Reconciliation</span>
+              </Link>
+            )}
+
+            {/* Transfer and Add Entry write entries, so they follow
+                `cashbook.edit` rather than the amount permission. A data-entry
+                user who cannot see totals can still record them. */}
+            {canEditEntries && (
+              <button onClick={() => setShowTransfer(true)}
+                className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap">
+                <ArrowLeftRight className="w-4 h-4 shrink-0" />
+                <span className="hidden sm:inline">Transfer</span>
+              </button>
+            )}
+            {canEditEntries && (
+              <button onClick={() => setShowForm(true)}
+                className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-3 py-2 rounded-lg hover:opacity-90 transition-opacity whitespace-nowrap">
+                <Plus className="w-4 h-4 shrink-0" />
+                Add Entry
+              </button>
+            )}
             {realisedFxGainLoss !== 0 && (
               <button onClick={() => setShowFxReportModal(true)}
                 className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap"

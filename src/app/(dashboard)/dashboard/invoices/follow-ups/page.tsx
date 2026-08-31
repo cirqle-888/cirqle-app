@@ -16,6 +16,10 @@ export default async function FollowUpsPage() {
   const me = await loadCurrentUser().catch(() => null)
   const vis = financialVisibility(me)
   const showAmounts = (me?.isAdmin ?? false) || vis.billingAmounts
+  // Per-invoice money and the portfolio total are different questions. A
+  // collections role needs each client's balance to write the reminder; being
+  // shown what the company is owed in total is a separate grant.
+  const showTotals = (me?.isAdmin ?? false) || vis.billingTotals
   const supabase = createAdminClient()
 
   // Independent of the invoice list — started now so they overlap it instead of
@@ -143,6 +147,7 @@ export default async function FollowUpsPage() {
       followups={followups}
       companyName={companyName}
       showAmounts={!!showAmounts}
+      showTotals={!!showTotals}
       setupNeeded={setupNeeded}
       templates={templates}
       partnerGreetings={partnerGreetings}

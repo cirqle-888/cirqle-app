@@ -109,6 +109,7 @@ export default async function InvoicesPage() {
       visibility={{
         amounts:     vis.billingAmounts,
         linePricing: vis.billingLinePricing,
+        totals:      (me?.isAdmin ?? false) || vis.billingTotals,
       }}
     />
     </>

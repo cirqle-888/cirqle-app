@@ -35,6 +35,8 @@ export interface FinancialVisibility {
   contributionEarnings: boolean
   payrollAmounts:       boolean
   billingAmounts:       boolean
+  /** Portfolio aggregates: total outstanding / overdue / draft value. */
+  billingTotals:        boolean
   billingLinePricing:   boolean
   cashbookAmounts:      boolean
 }
@@ -45,6 +47,7 @@ export function financialVisibility(user: CurrentUser | null): FinancialVisibili
     contributionEarnings: userCanSee(user, PERMS.CONTRIBUTIONS_VIEW_EARNINGS),
     payrollAmounts:       userCanSee(user, PERMS.PAYROLL_VIEW_AMOUNTS),
     billingAmounts:       userCanSee(user, PERMS.BILLING_VIEW_AMOUNTS),
+    billingTotals:        userCanSee(user, PERMS.BILLING_VIEW_TOTALS),
     billingLinePricing:   userCanSee(user, PERMS.BILLING_VIEW_LINE_PRICING),
     cashbookAmounts:      userCanSee(user, PERMS.CASHBOOK_VIEW_AMOUNTS),
   }
