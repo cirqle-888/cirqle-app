@@ -7,6 +7,7 @@
 import { buildPageDecor } from '@/lib/invoices/render-html'
 import { getCurrencySymbol } from '@/lib/calculations/currency'
 import type { StatementResult } from './build'
+import { unitPriceOf } from '@/lib/invoices/line-math'
 
 export interface StatementParty {
   name: string
@@ -76,8 +77,12 @@ export function renderStatementHtml(
     if (!items?.length) return ''
     const lines = items.map(it => {
       const when = it.task_date || it.line_date
-      const qty = (it.quantity ?? 1) > 1 && it.unit_price != null
-        ? `<span style="color:#94a3b8">&nbsp;·&nbsp;${it.quantity} × ${money(it.unit_price)}</span>` : ''
+      // Derived, not stored — see lib/invoices/line-math.ts. A stored rate that
+      // contradicts the line total printed "2 × ₹600.00" beside a ₹600.00
+      // total on a document that goes to the client.
+      const unit = unitPriceOf(it)
+      const qty = (it.quantity ?? 1) > 1 && unit != null
+        ? `<span style="color:#94a3b8">&nbsp;·&nbsp;${it.quantity} × ${money(unit)}</span>` : ''
       return `<div style="display:flex;gap:8px;font-size:9px;color:#475569;padding:1.5px 0">
           <span style="width:44px;color:#94a3b8;flex-shrink:0">${when ? fmtDate(when) : ''}</span>
           <span style="flex:1">${esc(it.description || it.task_title || 'Item')}${it.service_name ? `<span style="color:#94a3b8"> · ${esc(it.service_name)}</span>` : ''}${qty}</span>

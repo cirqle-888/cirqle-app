@@ -49,6 +49,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useRole } from '@/contexts/role-context'
 import { usePermissions } from '@/contexts/permission-context'
 import { PERMS } from '@/lib/permissions/keys'
+import { unitPriceOf } from '@/lib/invoices/line-math'
 import type { Currency } from '@/types'
 import { formatTaskDate } from '@/lib/utils/format-date'
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
@@ -3065,12 +3066,13 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                       <input
                         type="number" min="0" step="0.01"
                         title="Rate per unit"
-                        defaultValue={item.unit_price}
+                        defaultValue={unitPriceOf(item) ?? ''}
                         onBlur={e => {
                           const v = parseFloat(e.target.value)
                           // Blank/garbage would otherwise write NaN to unit_price AND total.
-                          if (!Number.isFinite(v) || v < 0) { e.target.value = String(item.unit_price); return }
-                          if (v !== item.unit_price) updateItemPrice(item.id, inv.id, v)
+                          const shown = unitPriceOf(item)
+                          if (!Number.isFinite(v) || v < 0) { e.target.value = shown === null ? '' : String(shown); return }
+                          if (v !== shown) updateItemPrice(item.id, inv.id, v)
                         }}
                         className="w-24 bg-background border border-border/50 rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:border-violet-500/50 transition-colors"
                       />
@@ -3079,7 +3081,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                     )}
                     {item.quantity !== 1 && (
                       <div className="text-[11px] text-muted-foreground mt-0.5">
-                        {item.quantity} × {fmt(item.unit_price, inv.currency)}
+                        {item.quantity} × {fmt(unitPriceOf(item), inv.currency)}
                         {editable && <> = <span className="font-semibold text-foreground">{fmt(item.total, inv.currency)}</span></>}
                       </div>
                     )}

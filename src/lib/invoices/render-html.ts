@@ -18,6 +18,7 @@ import { formatBillingPeriod, compareInvoiceItems } from '@/lib/utils/invoice'
 import { resolveBrandingUrl } from '@/lib/utils/branding'
 import type { AgreementBreakdown } from '@/lib/packages/invoice-breakdown'
 import type { Currency } from '@/types'
+import { unitPriceOf } from './line-math'
 
 function escapeHtml(unsafe: string | null | undefined, keepNewlines = false): string {
   if (!unsafe) return ''
@@ -377,7 +378,7 @@ export function buildInvoiceParts(
         <td style="${td('text-align:center;color:#222;white-space:nowrap')}">${taskDate}</td>
         <td style="${td('text-align:left;color:#222')}">${escapeHtml(it.description, true)}</td>
         <td style="${td('text-align:center;color:#222')}">${it.quantity}</td>
-        <td style="${td('text-align:center;color:#222;white-space:nowrap')}">${inr(it.unit_price)}</td>
+        <td style="${td('text-align:center;color:#222;white-space:nowrap')}">${inr(unitPriceOf(it))}</td>
         <td style="${td('text-align:right;color:#111;font-weight:700;white-space:nowrap')}">${inr(it.total)}</td>
       </tr>`
   })

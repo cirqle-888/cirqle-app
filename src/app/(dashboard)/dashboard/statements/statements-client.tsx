@@ -16,6 +16,7 @@ import { getCurrencySymbol } from '@/lib/calculations/currency'
 import { todayISO, monthStartISO, lastDayOfMonthISO } from '@/lib/utils/local-date'
 import { whatsappShareUrl } from '@/lib/invoices/share'
 import { cn } from '@/lib/utils'
+import { unitPriceOf } from '@/lib/invoices/line-math'
 
 interface Client {
   id: string; name: string; code: string | null
@@ -483,9 +484,9 @@ function StatementsInner({
                                           {it.description || it.task_title || 'Item'}
                                           {it.service_name && <span className="text-muted-foreground"> · {it.service_name}</span>}
                                         </span>
-                                        {(it.quantity ?? 1) > 1 && it.unit_price != null && (
+                                        {(it.quantity ?? 1) > 1 && unitPriceOf(it) != null && (
                                           <span className="text-muted-foreground tabular-nums whitespace-nowrap">
-                                            {it.quantity} × {money(it.unit_price)}
+                                            {it.quantity} × {money(unitPriceOf(it)!)}
                                           </span>
                                         )}
                                         <span className="tabular-nums w-24 text-right shrink-0">
