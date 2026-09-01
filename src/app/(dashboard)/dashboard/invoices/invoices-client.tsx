@@ -48,7 +48,7 @@ import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useRole } from '@/contexts/role-context'
 import { usePermissions } from '@/contexts/permission-context'
-import { PERMS } from '@/lib/permissions/keys'
+import { PERMS, RECORD_PAYMENT_PERMS } from '@/lib/permissions/keys'
 import { unitPriceOf } from '@/lib/invoices/line-math'
 import type { Currency } from '@/types'
 import { formatTaskDate } from '@/lib/utils/format-date'
@@ -303,6 +303,15 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
    */
   const canSharePdf =
     permUser.isAdmin || (can(PERMS.BILLING_VIEW_AMOUNTS) && can(PERMS.BILLING_VIEW_LINE_PRICING))
+  /**
+   * Mirrors the server's RECORD_PAYMENT_PERMS exactly. The button used to be
+   * gated on invoice status alone, so it was offered to everyone and then
+   * refused — the person filled in amount, date, bank and method before the
+   * app said "Permission denied." A control that cannot work should not be
+   * presented as though it can.
+   */
+  const canRecordPayment =
+    permUser.isAdmin || RECORD_PAYMENT_PERMS.some(k => can(k))
   const noShareReason =
     'Invoice prices are hidden from your role, so the PDF would show a dash in every '
     + 'price. Ask an admin for "View line pricing" to send invoices to clients.'
@@ -2832,7 +2841,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   {nextAct.label}
                 </button>
               )}
-              {['sent', 'partial', 'overdue'].includes(inv.status) && (
+              {canRecordPayment && ['sent', 'partial', 'overdue'].includes(inv.status) && (
                 <button
                   onClick={() => openPayPanel(inv)}
                   className="py-1.5 px-3.5 bg-green-600 hover:bg-green-500 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors">

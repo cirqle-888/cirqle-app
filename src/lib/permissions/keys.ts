@@ -303,6 +303,25 @@ export const PERMS = {
 export type PermKey = typeof PERMS[keyof typeof PERMS]
 
 /**
+ * Who may record that a client's money arrived.
+ *
+ * Recording a payment is a COLLECTIONS act, not an edit: it changes nothing
+ * about what was billed, it records that the money came in and moves the
+ * invoice toward paid. The follow-ups screen has always treated it that way
+ * and accepted either key; the invoices screen demanded billing.edit alone.
+ *
+ * So the same person could record the same payment against the same invoice
+ * from one screen and be told "Permission denied." on another — which is not a
+ * policy, because the stricter gate protected nothing that the looser one two
+ * clicks away did not already allow. One list, used by both, so they cannot
+ * drift apart again.
+ */
+export const RECORD_PAYMENT_PERMS = [
+  PERMS.BILLING_EDIT,
+  PERMS.BILLING_VIEW_WORKFLOW,
+] as const
+
+/**
  * Convenience: every "view amounts/earnings/pricing" perm that, when missing,
  * means the relevant ₹ fields must be stripped server-side before the data
  * reaches the client JS state.

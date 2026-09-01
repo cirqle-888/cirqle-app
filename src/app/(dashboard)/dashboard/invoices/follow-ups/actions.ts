@@ -14,9 +14,13 @@ import { logActivity } from '@/lib/activity/log'
 import { revalidatePath } from 'next/cache'
 import { recordPayment as libRecordPayment } from '@/lib/finance/record-payment'
 import { toISODate, todayISO } from '@/lib/utils/local-date'
+import { RECORD_PAYMENT_PERMS } from '@/lib/permissions/keys'
 
 const ROUTE = '/dashboard/invoices/follow-ups'
-const WRITE_PERMS = ['billing.edit', 'billing.view_workflow']
+// Recording a payment and logging a follow-up are the same class of act; the
+// list lives in permissions/keys.ts so the invoices screen cannot drift from
+// this one again.
+const WRITE_PERMS = RECORD_PAYMENT_PERMS
 
 export interface LogFollowupInput {
   invoiceId:         string

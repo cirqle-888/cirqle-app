@@ -8,9 +8,9 @@
  */
 
 import { revalidatePath } from 'next/cache'
-import { loadCurrentUser, requirePermission, requireReadPermission } from '@/lib/permissions/check'
+import { loadCurrentUser, requireAnyPermission, requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { financialVisibility, stripInvoiceList } from '@/lib/permissions/strip'
-import { PERMS } from '@/lib/permissions/keys'
+import { PERMS, RECORD_PAYMENT_PERMS } from '@/lib/permissions/keys'
 import { recordPayment } from '@/lib/finance/record-payment'
 import type { RecordInvoicePaymentInput } from '@/lib/finance/record-payment'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -40,7 +40,7 @@ type RecordInvoicePaymentArgs = Omit<RecordInvoicePaymentInput, 'employeeId'>
 export async function recordInvoicePayment(
   input: RecordInvoicePaymentArgs,
 ): Promise<ActionResult<{ paymentId: string; cashbookEntryId: string | null; receiptNumber: string | null }>> {
-  const guard = await requirePermission(PERMS.BILLING_EDIT)
+  const guard = await requireAnyPermission(RECORD_PAYMENT_PERMS)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   // A throw here (missing service-role key, DB connection error) would reject on

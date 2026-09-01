@@ -390,7 +390,7 @@ export async function requirePermission(key: PermKey | string): Promise<GuardRes
 }
 
 /** Require the caller to hold ANY of the supplied keys, for a MUTATION. */
-export async function requireAnyPermission(keys: (PermKey | string)[]): Promise<GuardResult> {
+export async function requireAnyPermission(keys: readonly (PermKey | string)[]): Promise<GuardResult> {
   return guardWith(u => keys.some(k => u.permissions.has(k)), { allowViewAs: false })
 }
 
@@ -415,7 +415,7 @@ export async function requireReadPermission(key: PermKey | string): Promise<Guar
 }
 
 /** Read-only counterpart of requireAnyPermission. */
-export async function requireAnyReadPermission(keys: (PermKey | string)[]): Promise<GuardResult> {
+export async function requireAnyReadPermission(keys: readonly (PermKey | string)[]): Promise<GuardResult> {
   return guardWith(u => keys.some(k => u.permissions.has(k)), { allowViewAs: true })
 }
 
