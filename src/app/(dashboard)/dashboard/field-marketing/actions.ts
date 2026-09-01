@@ -17,7 +17,7 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { createNotification } from '@/lib/notifications/create'
@@ -460,7 +460,7 @@ export async function quickVisit(
 export async function getPlaceDetail(
   placeId: string,
 ): Promise<ActionResult<{ contacts: FieldContact[]; visits: FieldVisit[] }>> {
-  const guard = await requirePermission(PERMS.FIELD_VIEW)
+  const guard = await requireReadPermission(PERMS.FIELD_VIEW)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()
@@ -491,7 +491,7 @@ export async function getDailyReport(dayIso?: string): Promise<ActionResult<{
   followupsCreated: number
   distanceM: number
 }>> {
-  const guard = await requirePermission(PERMS.FIELD_VIEW)
+  const guard = await requireReadPermission(PERMS.FIELD_VIEW)
   if (!guard.ok) return { ok: false, error: guard.error }
   const me = guard.employeeId
   const admin = createAdminClient()

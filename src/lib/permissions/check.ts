@@ -319,50 +319,104 @@ export type GuardFail = { ok: false; error: string }
 export type GuardResult = GuardOk | GuardFail
 
 /**
- * Require the caller to hold a specific permission key.
- * Admins always pass. Archived employees are always denied.
+ * The shared body of every permission guard.
+ *
+ * `allowViewAs` is the ONLY axis that separates the read guards from the write
+ * guards, and it is the whole reason this is one function instead of four
+ * near-copies that drift.
  */
-export async function requirePermission(key: PermKey | string): Promise<GuardResult> {
-  const user = await loadCurrentUser()
-  if (!user)              return { ok: false, error: 'Not signed in.' }
-  if (user.isArchived)    return { ok: false, error: 'Your account is archived.' }
-  // View-as is READ-ONLY, and this is where that is enforced. Every mutation in
-  // the app passes through here, so refusing at this one point blocks them all
-  // — including any action added later, which is the property that makes the
-  // guarantee hold over time rather than depending on remembering.
-  //
-  // It fails CLOSED: a handful of read-only actions are refused too, and that
-  // is the right trade. Pages render server-side from loadCurrentUser, so the
-  // preview still shows what the employee sees; what it will not do is let an
-  // admin change something while wearing someone else's face.
+/** The identity facts a guard decision turns on — everything else is noise. */
+export interface GuardSubject {
+  isArchived: boolean
+  isViewAs?: boolean
+  isAdmin: boolean
+  designationId: string | null
+  /** Whether this subject holds the key(s) the caller asked about. */
+  hasPermission: boolean
+}
+
+/**
+ * The guard rule, as a pure function — no database, no cookies, no request.
+ *
+ * Extracted so the security behaviour can be pinned by tests instead of
+ * inferred by reading. The order of these checks IS the policy; see check.test.ts.
+ */
+export function guardDecision(
+  subject: GuardSubject | null,
+  { allowViewAs, devBypass = false }: { allowViewAs: boolean; devBypass?: boolean },
+): { ok: true; isAdmin: boolean } | GuardFail {
+  if (!subject)           return { ok: false, error: 'Not signed in.' }
+  if (subject.isArchived) return { ok: false, error: 'Your account is archived.' }
+  // View-as is READ-ONLY, and this is where that is enforced for writes. Every
+  // mutation in the app passes through a guard with allowViewAs:false, so
+  // refusing at this one point blocks them all — including any added later,
+  // which is the property that makes the guarantee hold over time rather than
+  // depending on remembering.
   //
   // Checked BEFORE the isAdmin short-circuit on purpose — previewing an admin
   // must not hand the writes back.
-  if (user.isViewAs)      return { ok: false, error: 'Preview is read-only. Exit preview to make changes.' }
-  if (user.isAdmin)       return { ok: true, employeeId: user.employeeId, isAdmin: true }
+  if (subject.isViewAs && !allowViewAs) {
+    return { ok: false, error: 'Preview is read-only. Exit preview to make changes.' }
+  }
+  if (subject.isAdmin) return { ok: true, isAdmin: true }
   // TEMPORARY (dev only, dead code in production builds) — src/lib/permissions/dev-bypass.ts
-  if (devPermissionBypass()) return { ok: true, employeeId: user.employeeId, isAdmin: false }
-  if (!user.designationId) return { ok: false, error: 'No designation assigned.' }
-  if (!user.permissions.has(key)) return { ok: false, error: 'Permission denied.' }
-  return { ok: true, employeeId: user.employeeId, isAdmin: false }
+  if (devBypass) return { ok: true, isAdmin: false }
+  if (!subject.designationId) return { ok: false, error: 'No designation assigned.' }
+  if (!subject.hasPermission) return { ok: false, error: 'Permission denied.' }
+  return { ok: true, isAdmin: false }
 }
 
-/** Require the caller to hold ANY of the supplied permission keys. */
-export async function requireAnyPermission(keys: (PermKey | string)[]): Promise<GuardResult> {
+async function guardWith(
+  check: (user: CurrentUser) => boolean,
+  { allowViewAs }: { allowViewAs: boolean },
+): Promise<GuardResult> {
   const user = await loadCurrentUser()
-  if (!user)              return { ok: false, error: 'Not signed in.' }
-  if (user.isArchived)    return { ok: false, error: 'Your account is archived.' }
-  // Same read-only block as requirePermission — this is the OTHER door every
-  // mutation can come through, so leaving it open would defeat the guarantee.
-  if (user.isViewAs)      return { ok: false, error: 'Preview is read-only. Exit preview to make changes.' }
-  if (user.isAdmin)       return { ok: true, employeeId: user.employeeId, isAdmin: true }
-  // TEMPORARY (dev only, dead code in production builds) — src/lib/permissions/dev-bypass.ts
-  if (devPermissionBypass()) return { ok: true, employeeId: user.employeeId, isAdmin: false }
-  if (!user.designationId) return { ok: false, error: 'No designation assigned.' }
+  const decision = guardDecision(
+    user && { ...user, hasPermission: check(user) },
+    { allowViewAs, devBypass: devPermissionBypass() },
+  )
+  if (!decision.ok) return decision
+  return { ok: true, employeeId: user!.employeeId, isAdmin: decision.isAdmin }
+}
 
-  const has = keys.some(k => user.permissions.has(k))
-  if (!has) return { ok: false, error: 'Permission denied.' }
-  return { ok: true, employeeId: user.employeeId, isAdmin: false }
+/**
+ * Require the caller to hold a specific permission key, for a MUTATION.
+ * Admins always pass. Archived employees are always denied. Refused outright
+ * while an admin is previewing another employee — use requireReadPermission
+ * for anything that only reads.
+ */
+export async function requirePermission(key: PermKey | string): Promise<GuardResult> {
+  return guardWith(u => u.permissions.has(key), { allowViewAs: false })
+}
+
+/** Require the caller to hold ANY of the supplied keys, for a MUTATION. */
+export async function requireAnyPermission(keys: (PermKey | string)[]): Promise<GuardResult> {
+  return guardWith(u => keys.some(k => u.permissions.has(k)), { allowViewAs: false })
+}
+
+/**
+ * The same permission check, for an action that ONLY READS.
+ *
+ * Reads have to survive view-as, and putting them behind the write guard broke
+ * the preview in the one way that matters: it did not show the employee being
+ * previewed seeing less, it showed the app FAILING. The invoice panel spun on
+ * "Loading line items…" forever and its PDF rendered a total with no lines —
+ * a document that, if sent, would have been wrong. An admin checking what a
+ * Task Manager can see concluded the Task Manager could not see invoices, when
+ * in fact they hold billing.view_invoices and can see them perfectly well.
+ *
+ * A preview that lies is worse than no preview, because people act on it.
+ *
+ * Use this ONLY where nothing is written and no write capability is handed out
+ * — a signed upload URL is a write, and stays on requirePermission.
+ */
+export async function requireReadPermission(key: PermKey | string): Promise<GuardResult> {
+  return guardWith(u => u.permissions.has(key), { allowViewAs: true })
+}
+
+/** Read-only counterpart of requireAnyPermission. */
+export async function requireAnyReadPermission(keys: (PermKey | string)[]): Promise<GuardResult> {
+  return guardWith(u => keys.some(k => u.permissions.has(k)), { allowViewAs: true })
 }
 
 /** Require the caller to be an admin. */

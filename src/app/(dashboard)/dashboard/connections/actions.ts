@@ -1,14 +1,14 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { publishAdEvent } from '@/lib/advertising/events'
 import { getProvider } from '@/lib/advertising/providers'
 import { decryptToken } from '@/lib/integrations/tokens'
 
 export async function fetchProviderConnections(clientId?: string) {
-  const guard = await requirePermission(PERMS.ADVERTISING_MANAGE_PROVIDERS)
+  const guard = await requireReadPermission(PERMS.ADVERTISING_MANAGE_PROVIDERS)
   if (!guard.ok) throw new Error(guard.error)
   const admin = createAdminClient()
   let query = admin
@@ -42,7 +42,7 @@ export async function fetchProviderConnections(clientId?: string) {
 }
 
 export async function fetchActiveClients() {
-  const guard = await requirePermission(PERMS.ADVERTISING_MANAGE_PROVIDERS)
+  const guard = await requireReadPermission(PERMS.ADVERTISING_MANAGE_PROVIDERS)
   if (!guard.ok) throw new Error(guard.error)
   const admin = createAdminClient()
   
@@ -205,7 +205,7 @@ export async function createAdProject(payload: {
 }
 
 export async function fetchSyncStatus(clientId?: string) {
-  const guard = await requirePermission(PERMS.ADVERTISING_MANAGE_PROVIDERS)
+  const guard = await requireReadPermission(PERMS.ADVERTISING_MANAGE_PROVIDERS)
   if (!guard.ok) throw new Error(guard.error)
   const admin = createAdminClient()
   

@@ -9,7 +9,7 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { revalidatePath } from 'next/cache'
@@ -24,7 +24,7 @@ const REVALIDATE = '/dashboard/social/inbox'
 
 /** Recent posts and their comment threads for one account. */
 export async function loadInbox(accountId: string): Promise<ActionResult<{ posts: InboxPost[] }>> {
-  const guard = await requirePermission(PERMS.SOCIAL_PUBLISH)
+  const guard = await requireReadPermission(PERMS.SOCIAL_PUBLISH)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()

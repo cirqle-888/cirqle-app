@@ -13,7 +13,7 @@
  * only ever expands a handful, and all 1,909 item rows would dwarf the ledger
  * payload itself.
  */
-import { requirePermission, loadCurrentUser } from '@/lib/permissions/check'
+import { loadCurrentUser, requireReadPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { financialVisibility } from '@/lib/permissions/strip'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -38,7 +38,7 @@ interface Result {
 }
 
 export async function getStatementLineItems(invoiceIds: string[]): Promise<Result> {
-  const guard = await requirePermission(PERMS.BILLING_VIEW_INVOICES)
+  const guard = await requireReadPermission(PERMS.BILLING_VIEW_INVOICES)
   if (!guard.ok) return { ok: false, error: guard.error }
   if (!invoiceIds.length) return { ok: true, data: [] }
 

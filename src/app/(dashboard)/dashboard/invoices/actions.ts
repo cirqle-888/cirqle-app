@@ -8,7 +8,7 @@
  */
 
 import { revalidatePath } from 'next/cache'
-import { requirePermission, loadCurrentUser } from '@/lib/permissions/check'
+import { loadCurrentUser, requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { financialVisibility, stripInvoiceList } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
 import { recordPayment } from '@/lib/finance/record-payment'
@@ -157,7 +157,7 @@ export async function serverResyncInvoiceTasks(
 export async function getInvoiceDetails(
   invoiceIds: string[],
 ): Promise<ActionResult<Record<string, unknown>[]>> {
-  const guard = await requirePermission(PERMS.BILLING_VIEW_INVOICES)
+  const guard = await requireReadPermission(PERMS.BILLING_VIEW_INVOICES)
   if (!guard.ok) return { ok: false, error: guard.error }
   if (!invoiceIds.length) return { ok: true, data: [] }
 

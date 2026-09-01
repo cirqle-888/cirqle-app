@@ -10,7 +10,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { getPartnerStatementData, type PartnerStatementData } from '@/lib/partners/queries'
@@ -278,7 +278,7 @@ export async function deleteCommissionPayment(id: string, partnerId: string): Pr
 
 /** Fetch the client-wise statement data for export (WhatsApp/Image/PDF/Email). */
 export async function fetchPartnerStatement(partnerId: string): Promise<ActionResult<PartnerStatementData>> {
-  const guard = await requirePermission(PERMS.PARTNERS_EXPORT)
+  const guard = await requireReadPermission(PERMS.PARTNERS_EXPORT)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const data = await getPartnerStatementData(partnerId)

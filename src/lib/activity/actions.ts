@@ -11,7 +11,7 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requireAnyPermission } from '@/lib/permissions/check'
+import { requireAnyPermission, requireAnyReadPermission } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
 import type { EntityType } from '@/lib/activity/log'
 
@@ -49,7 +49,7 @@ export async function fetchEntityActivity(
   entityId: string,
   limit = 50,
 ): Promise<FetchActivityResult> {
-  const guard = await requireAnyPermission(READ_PERMS[entityType] ?? ['tasks.view_all'])
+  const guard = await requireAnyReadPermission(READ_PERMS[entityType] ?? ['tasks.view_all'])
   if (!guard.ok) return { ok: false, error: guard.error }
 
   try {

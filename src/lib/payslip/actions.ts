@@ -10,7 +10,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { getResend, payslipFrom, isEmailConfigured } from '@/lib/email/resend'
 import { buildPayslipData } from './build-payslip'
@@ -29,7 +29,7 @@ function defaultSubject(d: PayslipData): string {
 export async function getPayslipPreview(
   employeeId: string, month: number, year: number,
 ): Promise<ActionResult<{ data: PayslipData; html: string; subject: string; recipient: string; emailConfigured: boolean }>> {
-  const guard = await requirePermission(PERMS.PAYROLL_EDIT)
+  const guard = await requireReadPermission(PERMS.PAYROLL_EDIT)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const built = await buildPayslipData(employeeId, month, year)

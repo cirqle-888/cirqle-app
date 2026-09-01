@@ -9,7 +9,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { fetchRates } from '@/lib/fx/sync'
 import { syncDraftInvoiceExpenses } from '@/lib/sync/integrity'
@@ -589,7 +589,7 @@ export async function fetchRebuildData(): Promise<ActionResult<{
   invoices: any[]
   clients: any[]
 }>> {
-  const guard = await requirePermission('settings.manage_company')
+  const guard = await requireReadPermission('settings.manage_company')
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()

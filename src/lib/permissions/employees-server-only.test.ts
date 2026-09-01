@@ -114,9 +114,11 @@ describe('employees is server-only', () => {
     ]) {
       expect(actions, `${fn} is missing`).toContain(`export async function ${fn}`)
     }
-    // Each one must actually check a permission, not just run as the service role.
-    const guards = actions.match(/await requirePermission\(/g) ?? []
-    expect(guards.length, 'every exported action must call requirePermission').toBeGreaterThanOrEqual(5)
+    // Each one must actually check a permission, not just run as the service
+    // role. requireReadPermission counts: it enforces the same key and differs
+    // only in surviving a view-as preview, which reads must.
+    const guards = actions.match(/await require(Read)?Permission\(/g) ?? []
+    expect(guards.length, 'every exported action must check a permission').toBeGreaterThanOrEqual(5)
   })
 
   it('is gated on employee permissions, not on the page gate', () => {
@@ -127,7 +129,7 @@ describe('employees is server-only', () => {
     // /dashboard/import is gated on tasks.create, which is far too wide for
     // payroll data — the whole point of moving this server-side.
     expect(
-      /requirePermission\([^)]*tasks\.create/.test(actions),
+      /require(Read)?Permission\([^)]*tasks\.create/.test(actions),
       'these actions must not be gated on tasks.create — that is the page gate, ' +
         'and it is far too wide for payroll data',
     ).toBe(false)

@@ -1,12 +1,12 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { enqueueJob } from '@/lib/jobs/engine'
 
 export async function fetchSyncLogs(projectId: string) {
-  const guard = await requirePermission(PERMS.ADVERTISING_VIEW)
+  const guard = await requireReadPermission(PERMS.ADVERTISING_VIEW)
   if (!guard.ok) throw new Error(guard.error)
   const admin = createAdminClient()
   const { data, error } = await admin
@@ -64,7 +64,7 @@ export async function saveCampaignMapping(projectId: string, adAccountId: string
 }
 
 export async function fetchAdAccounts(connectionId: string) {
-  const guard = await requirePermission(PERMS.ADVERTISING_VIEW)
+  const guard = await requireReadPermission(PERMS.ADVERTISING_VIEW)
   if (!guard.ok) throw new Error(guard.error)
   const admin = createAdminClient()
   const { data, error } = await admin

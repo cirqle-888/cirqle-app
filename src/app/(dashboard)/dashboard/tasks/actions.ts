@@ -15,7 +15,7 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
 import { PERMS } from '@/lib/permissions/keys'
 import { revalidatePath } from 'next/cache'
@@ -1123,7 +1123,7 @@ export async function serverSetDerivedRuleState(
 export interface RuleTemplate { id: string; name: string; rule: unknown }
 
 export async function listBillingRuleTemplates(): Promise<ActionResult<RuleTemplate[]>> {
-  const guard = await requirePermission(PERMS.TASKS_CREATE)
+  const guard = await requireReadPermission(PERMS.TASKS_CREATE)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()

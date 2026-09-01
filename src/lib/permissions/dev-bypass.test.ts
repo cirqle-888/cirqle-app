@@ -81,21 +81,34 @@ describe('the bypass widens rights but never invents a user', () => {
     expect(body).toMatch(/!user\.isViewAs\s*&&\s*devPermissionBypass\(\)/)
   })
 
-  it.each(['requirePermission', 'requireAnyPermission'])(
-    '%s refuses every mutation while previewing, ahead of the admin short-circuit',
-    (fn) => {
-      const at = check.indexOf(`export async function ${fn}`)
-      const body = check.slice(at, at + 2600)
-      const viewAs = body.indexOf('user.isViewAs')
-      const adminShortCircuit = body.indexOf('if (user.isAdmin)')
-      const bypass = body.indexOf('devPermissionBypass()')
-      expect(viewAs).toBeGreaterThan(-1)
-      // Previewing an ADMIN must not hand the writes back, and the dev bypass
-      // must not either — so the read-only check has to come before both.
-      expect(viewAs).toBeLessThan(adminShortCircuit)
-      expect(viewAs).toBeLessThan(bypass)
-    },
-  )
+  // Every guard — read and write alike — now shares one body, guardDecision,
+  // so the ordering invariant is asserted there instead of once per wrapper.
+  // The BEHAVIOUR this protects is covered directly in guard-decision.test.ts;
+  // this keeps the source-order property that makes it hard to get wrong.
+  it('guardDecision refuses a previewed mutation ahead of admin and the bypass', () => {
+    const at = check.indexOf('export function guardDecision')
+    expect(at, 'guardDecision has moved or been renamed').toBeGreaterThan(-1)
+    const body = check.slice(at, at + 2600)
+    const viewAs = body.indexOf('subject.isViewAs')
+    const adminShortCircuit = body.indexOf('if (subject.isAdmin)')
+    // The CHECK, not the destructured parameter in the signature above it.
+    const bypass = body.indexOf('if (devBypass)')
+    expect(viewAs).toBeGreaterThan(-1)
+    // Previewing an ADMIN must not hand the writes back, and the dev bypass
+    // must not either — so the read-only check has to come before both.
+    expect(viewAs).toBeLessThan(adminShortCircuit)
+    expect(viewAs).toBeLessThan(bypass)
+  })
+
+  it('both write wrappers really are write wrappers', () => {
+    // The refusal above only binds mutations if requirePermission and
+    // requireAnyPermission actually ask for allowViewAs:false.
+    for (const fn of ['requirePermission', 'requireAnyPermission']) {
+      const at = check.indexOf(`export async function ${fn}(`)
+      expect(at, `${fn} has moved or been renamed`).toBeGreaterThan(-1)
+      expect(check.slice(at, at + 400)).toMatch(/allowViewAs:\s*false/)
+    }
+  })
 })
 
 describe('removal is a documented, greppable operation', () => {

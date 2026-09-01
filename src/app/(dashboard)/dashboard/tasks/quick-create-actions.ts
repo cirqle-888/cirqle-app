@@ -10,7 +10,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requireAnyPermission, requirePermission } from '@/lib/permissions/check'
+import { requireAnyPermission, requireAnyReadPermission, requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
@@ -148,7 +148,7 @@ export async function getTitleSuggestions(
   query: string,
 ): Promise<ActionResult<{ suggestions: { title: string; count: number }[] }>> {
   // Any task creator can use suggestions.
-  const guard = await requireAnyPermission([PERMS.TASKS_CREATE, PERMS.TASKS_EDIT, PERMS.TASKS_VIEW_ALL])
+  const guard = await requireAnyReadPermission([PERMS.TASKS_CREATE, PERMS.TASKS_EDIT, PERMS.TASKS_VIEW_ALL])
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()
@@ -188,7 +188,7 @@ export async function getTitleSuggestions(
  * Sale"). Fetched once when the title field is first focused.
  */
 export async function getRecentTitlePool(): Promise<ActionResult<{ titles: string[] }>> {
-  const guard = await requireAnyPermission([PERMS.TASKS_CREATE, PERMS.TASKS_EDIT, PERMS.TASKS_VIEW_ALL])
+  const guard = await requireAnyReadPermission([PERMS.TASKS_CREATE, PERMS.TASKS_EDIT, PERMS.TASKS_VIEW_ALL])
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()

@@ -14,7 +14,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import type { PackageRow, PackageItemRow, PackageBillingType, PackageStatus } from '@/lib/packages/types'
@@ -69,7 +69,7 @@ export interface PackageWithItems extends PackageRow {
  * pre-migration environment shows an empty screen rather than an error page.
  */
 export async function listPackages(): Promise<ActionResult<PackageWithItems[]>> {
-  const guard = await requirePermission(PERMS.PACKAGES_VIEW)
+  const guard = await requireReadPermission(PERMS.PACKAGES_VIEW)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()

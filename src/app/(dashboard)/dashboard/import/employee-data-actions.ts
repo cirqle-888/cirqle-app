@@ -1,7 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { loadCurrentUser } from '@/lib/permissions/check'
@@ -75,7 +75,7 @@ export async function exportEmployeeRows(): Promise<Result<Record<string, unknow
  * before it changes anything. Same data as an export, so the same permission.
  */
 export async function fetchEmployeeRowsByIds(ids: string[]): Promise<Result<Record<string, unknown>[]>> {
-  const auth = await requirePermission(PERMS.EMPLOYEES_VIEW_FULL)
+  const auth = await requireReadPermission(PERMS.EMPLOYEES_VIEW_FULL)
   if (!auth.ok) return { ok: false, error: auth.error }
   if (!ids.length) return { ok: true, data: [] }
 

@@ -47,6 +47,8 @@ import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useRole } from '@/contexts/role-context'
+import { usePermissions } from '@/contexts/permission-context'
+import { PERMS } from '@/lib/permissions/keys'
 import type { Currency } from '@/types'
 import { formatTaskDate } from '@/lib/utils/format-date'
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
@@ -284,6 +286,25 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const supabase = createClient()
   const { toasts, dismiss, success, error: toastError } = useToast()
   const { role } = useRole()
+  const { can, user: permUser } = usePermissions()
+  /**
+   * May this person produce a CLIENT-FACING document?
+   *
+   * The PDF is for the client, so it has to carry real prices. A role without
+   * billing.view_line_pricing has `unit_price` stripped from every item before
+   * it ever reaches the browser, so the invoice it would generate shows a dash
+   * in every price cell. That is not a degraded document, it is a wrong one —
+   * and it would go out under the company's name.
+   *
+   * So the answer is not "render it anyway" and not "crash" (which is what it
+   * used to do): it is to say plainly that the prices are hidden from them and
+   * which permission changes that.
+   */
+  const canSharePdf =
+    permUser.isAdmin || (can(PERMS.BILLING_VIEW_AMOUNTS) && can(PERMS.BILLING_VIEW_LINE_PRICING))
+  const noShareReason =
+    'Invoice prices are hidden from your role, so the PDF would show a dash in every '
+    + 'price. Ask an admin for "View line pricing" to send invoices to clients.'
   const { dn } = usePrivacy()
   const [copiedInvNum, copyInvNum] = useCopy()
 
@@ -442,6 +463,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const [expandedAgreements, setExpandedAgreements] = useState<Set<string>>(new Set())
   // Invoices whose line items / allocations have been pulled in. See ensureDetails.
   const [detailLoaded, setDetailLoaded] = useState<Set<string>>(new Set())
+  // Ids whose detail fetch FAILED. Without this the panel had no third state:
+  // "not loaded" rendered as a spinner, so a refused or failed fetch span
+  // forever with nothing to click and nothing said. See ensureDetails.
+  const [detailFailed, setDetailFailed] = useState<Set<string>>(new Set())
   const [isUpdatingBulk, setIsUpdatingBulk] = useState(false)
 
   // Confirmation modal
@@ -656,11 +681,11 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // invoice; ensureDetails no-ops for anything already loaded.
   useEffect(() => {
     const id = previewInv?.id || selectedId
-    if (id && !detailLoaded.has(id)) void ensureDetails([id])
+    if (id && !detailLoaded.has(id) && !detailFailed.has(id)) void ensureDetails([id])
     // ensureDetails closes over `invoices`; re-running it on every list change
     // would refetch endlessly. `detailLoaded` is the real guard.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, previewInv?.id, detailLoaded])
+  }, [selectedId, previewInv?.id, detailLoaded, detailFailed])
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const selectedInv = useMemo(() => invoices.find(i => i.id === selectedId) || null, [invoices, selectedId])
@@ -2219,8 +2244,16 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       const res = await getInvoiceDetails(missing)
       if (!res.ok) {
         toastError(res.error || 'Could not load invoice line items')
+        // Record the failure so the panel can offer a retry instead of
+        // spinning, and so Preview/Print/Download can refuse to render a
+        // document they know is incomplete.
+        setDetailFailed(prev => { const n = new Set(prev); missing.forEach(id => n.add(id)); return n })
         return invoices.filter(i => wanted.includes(i.id))
       }
+      setDetailFailed(prev => {
+        if (!missing.some(id => prev.has(id))) return prev
+        const n = new Set(prev); missing.forEach(id => n.delete(id)); return n
+      })
       const byId = new Map((res.data || []).map((d: any) => [d.id, d]))
       const applyTo = (list: Invoice[]) => list.map(i => {
         const d = byId.get(i.id)
@@ -2627,7 +2660,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     // billing screen: rendering the empty state during the ~1.5s fetch read as
     // "auto-collection produced nothing", inviting someone to re-add lines
     // that already existed.
-    const detailPending = !detailLoaded.has(inv.id)
+    const detailFailedHere = detailFailed.has(inv.id)
+    const detailPending = !detailLoaded.has(inv.id) && !detailFailedHere
     const knownItemCount = detailPending ? taskCountOf(inv) : (inv.items?.length || 0)
     const forceEdit = forceEditId === inv.id
     const editable = isEditable(inv.status) || forceEdit
@@ -2701,12 +2735,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               className="p-2 text-muted-foreground hover:text-violet-500 hover:bg-violet-500/10 rounded-lg transition-colors border border-transparent hover:border-violet-500/20">
               <Eye className="w-4 h-4" />
             </button>
-            <button onClick={() => printInvoice(inv)} title="Print"
-              className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors border border-transparent hover:border-border/50">
+            <button onClick={() => printInvoice(inv)} disabled={!canSharePdf}
+              title={canSharePdf ? 'Print' : noShareReason}
+              className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors border border-transparent hover:border-border/50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground">
               <Printer className="w-4 h-4" />
             </button>
-            <button onClick={() => downloadInvoicePdf(inv)} disabled={downloadingInvId === inv.id} title="Download PDF"
-              className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors border border-transparent hover:border-border/50 disabled:opacity-50">
+            <button onClick={() => downloadInvoicePdf(inv)} disabled={!canSharePdf || downloadingInvId === inv.id}
+              title={canSharePdf ? 'Download PDF' : noShareReason}
+              className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors border border-transparent hover:border-border/50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground">
               {downloadingInvId === inv.id
                 ? <RefreshCw className="w-4 h-4 animate-spin" />
                 : <Download className="w-4 h-4" />}
@@ -2971,7 +3007,24 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   Loading line items…
                 </div>
               )}
-              {!detailPending && (inv.items || []).length === 0 && (
+              {detailFailedHere && (
+                <div className="flex flex-col items-center justify-center gap-2 text-xs py-8 px-4 text-center">
+                  <span className="text-muted-foreground">
+                    Couldn&apos;t load this invoice&apos;s line items, so they aren&apos;t shown here
+                    and the PDF would be incomplete.
+                  </span>
+                  <button
+                    onClick={() => {
+                      setDetailFailed(prev => { const n = new Set(prev); n.delete(inv.id); return n })
+                      void ensureDetails([inv.id])
+                    }}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 border border-foreground/15 font-medium transition-colors"
+                  >
+                    <RefreshCw className="w-3 h-3" />Try again
+                  </button>
+                </div>
+              )}
+              {!detailPending && !detailFailedHere && (inv.items || []).length === 0 && (
                 <div className="text-xs text-muted-foreground text-center py-8">
                   No items yet — tasks marked &quot;done&quot; auto-appear here
                 </div>
@@ -5450,7 +5503,16 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
       {/* ── Edit Reason Modal ─────────────────────────────────────────────────── */}
       {/* ── Invoice Preview Modal ───────────────────────────────────────────── */}
-      {previewInv && (
+      {previewInv && (() => {
+        // An invoice whose line items have not arrived still has a client, a
+        // number and a TOTAL — so it renders as a complete-looking document
+        // with an empty table. That is the one output here that can do real
+        // damage: printed or sent, it bills a client an amount with nothing
+        // itemised behind it. Print and Download stay disabled, and the paper
+        // is not drawn at all, until the lines are actually in hand.
+        const previewReady = detailLoaded.has(previewInv.id)
+        const previewFailed = detailFailed.has(previewInv.id)
+        return (
         <ModalOverlay onClose={() => setPreviewInv(null)} zIndex="z-[300]">
           <div className="flex flex-col bg-secondary border border-foreground/15 rounded-2xl shadow-2xl overflow-hidden"
             style={{ width: 'min(860px, 96vw)', height: 'min(92vh, 900px)' }}>
@@ -5474,11 +5536,13 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                         className="rounded accent-violet-500 cursor-pointer" />}
                   Include Outstanding
                 </label>
-                <button onClick={() => printInvoice(previewInv)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 text-xs font-medium text-foreground transition-colors border border-foreground/15">
+                <button onClick={() => printInvoice(previewInv)} disabled={!previewReady || !canSharePdf}
+                  title={!canSharePdf ? noShareReason : previewReady ? undefined : 'Line items are still loading'}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 text-xs font-medium text-foreground transition-colors border border-foreground/15 disabled:opacity-50 disabled:cursor-not-allowed">
                   <Printer className="w-3.5 h-3.5" />Print
                 </button>
-                <button onClick={() => downloadInvoicePdf(previewInv)} disabled={downloadingInvId === previewInv.id}
+                <button onClick={() => downloadInvoicePdf(previewInv)} disabled={!previewReady || !canSharePdf || downloadingInvId === previewInv.id}
+                  title={!canSharePdf ? noShareReason : previewReady ? undefined : 'Line items are still loading'}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 text-xs font-medium text-foreground transition-colors border border-foreground/15 disabled:opacity-50">
                   {downloadingInvId === previewInv.id
                     ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -5491,23 +5555,57 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               </div>
             </div>
             {/* Invoice rendered in iframe — scrollable on mobile */}
+            {!canSharePdf && (
+              <div className="shrink-0 px-4 py-2 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400 bg-amber-500/10 border-b border-amber-500/20">
+                {noShareReason}
+              </div>
+            )}
             <div className="flex-1 overflow-auto bg-[#f5f7fa] rounded-b-2xl" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
               <div style={{ minWidth: 680, height: '100%' }}>
-                <iframe
-                  // key forces a full remount on toggle — changing srcDoc on an
-                  // already-mounted iframe doesn't reliably reload its content.
-                  key={`${previewInv.id}-${includeOutstanding.has(previewInv.id)}`}
-                  srcDoc={buildInvoiceHtml(previewInv)}
-                  className="w-full h-full border-0"
-                  style={{ minHeight: 600 }}
-                  title="Invoice Preview"
-                  sandbox="allow-same-origin"
-                />
+                {previewReady ? (
+                  <iframe
+                    // key forces a full remount on toggle — changing srcDoc on an
+                    // already-mounted iframe doesn't reliably reload its content.
+                    key={`${previewInv.id}-${includeOutstanding.has(previewInv.id)}`}
+                    srcDoc={buildInvoiceHtml(previewInv)}
+                    className="w-full h-full border-0"
+                    style={{ minHeight: 600 }}
+                    title="Invoice Preview"
+                    sandbox="allow-same-origin"
+                  />
+                ) : (
+                  <div className="flex h-full min-h-[600px] flex-col items-center justify-center gap-3 px-6 text-center text-sm text-[#5b6472]">
+                    {previewFailed ? (
+                      <>
+                        <span className="max-w-sm">
+                          The line items for this invoice couldn&apos;t be loaded, so the
+                          document would show a total with nothing itemised. It isn&apos;t
+                          safe to print or send in that state.
+                        </span>
+                        <button
+                          onClick={() => {
+                            setDetailFailed(prev => { const n = new Set(prev); n.delete(previewInv.id); return n })
+                            void ensureDetails([previewInv.id])
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#c9d2de] bg-white px-3 py-1.5 text-xs font-medium text-[#1f2a37] transition-colors hover:bg-[#eef2f7]"
+                        >
+                          <RefreshCw className="h-3 w-3" />Try again
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-5 w-5 animate-spin" />
+                        <span>Loading line items…</span>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
         </ModalOverlay>
-      )}
+        )
+      })()}
 
       {editReasonModal && (
         <ModalOverlay onClose={() => { setEditReasonModal(null); setEditReasonInput('') }}>

@@ -1,7 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveCurrentEmployeeId, requirePermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { selectWithOptionalColumns } from '@/lib/offer-columns'
 import { revalidatePath } from 'next/cache'
@@ -28,7 +28,7 @@ export async function getProducts(filters?: {
   brand?: string
   status?: string
 }): Promise<ActionResult<{ products: any[] }>> {
-  const guard = await requirePermission(PERMS.OFFER_PREPARE)
+  const guard = await requireReadPermission(PERMS.OFFER_PREPARE)
   if (!guard.ok) return { ok: false, error: guard.error }
   const empId = guard.employeeId
 
@@ -359,7 +359,7 @@ export async function getCatalogMeta(): Promise<ActionResult<{
   brands: string[]
   clients: { id: string; name: string }[]
 }>> {
-  const guard = await requirePermission(PERMS.OFFER_PREPARE)
+  const guard = await requireReadPermission(PERMS.OFFER_PREPARE)
   if (!guard.ok) return { ok: false, error: guard.error }
   const empId = guard.employeeId
 

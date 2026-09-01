@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { publishAdEvent } from '@/lib/advertising/events'
 import { discoverAccountCampaigns } from '@/lib/advertising/discovery'
@@ -20,7 +20,7 @@ function mappingPath(accountId: string) {
 // ── Read ────────────────────────────────────────────────────────────────────
 
 export async function fetchMappingAccount(accountId: string) {
-  const guard = await requirePermission(PERMS.ADVERTISING_MAP_CAMPAIGNS)
+  const guard = await requireReadPermission(PERMS.ADVERTISING_MAP_CAMPAIGNS)
   if (!guard.ok) throw new Error(guard.error)
   const admin = createAdminClient()
   const { data, error } = await admin
@@ -36,7 +36,7 @@ export async function fetchAccountCampaigns(
   accountId: string,
   filters?: { search?: string; mapping?: string; status?: string },
 ) {
-  const guard = await requirePermission(PERMS.ADVERTISING_MAP_CAMPAIGNS)
+  const guard = await requireReadPermission(PERMS.ADVERTISING_MAP_CAMPAIGNS)
   if (!guard.ok) throw new Error(guard.error)
   const admin = createAdminClient()
 
@@ -63,7 +63,7 @@ export async function fetchAccountCampaigns(
 
 /** Projects for a client that can still be linked 1:1 (no campaign attached). */
 export async function fetchLinkableProjects(clientId: string) {
-  const guard = await requirePermission(PERMS.ADVERTISING_MAP_CAMPAIGNS)
+  const guard = await requireReadPermission(PERMS.ADVERTISING_MAP_CAMPAIGNS)
   if (!guard.ok) throw new Error(guard.error)
   const admin = createAdminClient()
   const { data, error } = await admin

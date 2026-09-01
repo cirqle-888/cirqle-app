@@ -1,7 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
 import type { LogActivityInput } from '@/lib/activity/log'
 
@@ -26,7 +26,7 @@ export async function fetchEmployeeActivity(
   employeeId: string,
   limit = 50,
 ): Promise<{ ok: true; rows: ActivityLogRow[] } | { ok: false; error: string }> {
-  const guard = await requirePermission('payroll.view')
+  const guard = await requireReadPermission('payroll.view')
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()

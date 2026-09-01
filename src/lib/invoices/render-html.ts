@@ -332,7 +332,21 @@ export function buildInvoiceParts(
     const mon = dt.toLocaleDateString('en-GB', { month: 'short' })
     return `${String(dt.getDate()).padStart(2,'0')}-${mon}-${dt.getFullYear()}`
   }
-  function inr(n: number, c = inv.currency || 'INR') {
+  /**
+   * Money, or a dash when there is no number to show.
+   *
+   * The null branch is not defensive padding — it is reachable. Roles without
+   * billing.view_line_pricing get `unit_price` DELETED from every item by
+   * stripInvoiceAmounts, and this function was then called on undefined:
+   * `undefined.toLocaleString` threw, React unmounted the page to its error
+   * boundary, and the invoice screen died the moment such a user opened a
+   * preview. A formatter must never be the thing that takes a page down.
+   *
+   * Rendering '—' is the honest output, and the caller is responsible for not
+   * SENDING a document full of them — see canSharePdf in invoices-client.
+   */
+  function inr(n: number | null | undefined, c = inv.currency || 'INR') {
+    if (typeof n !== 'number' || !Number.isFinite(n)) return '—'
     return getCurrencySymbol(c as Currency) + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
 

@@ -14,7 +14,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { isMonthFinalized } from '@/lib/payroll/compute'
@@ -219,7 +219,7 @@ export async function previewMonth(month: number, year: number): Promise<ActionR
   totalInr: number
   profitSharePercent: number
 }>> {
-  const guard = await requirePermission(PERMS.PAYROLL_MANAGE_OWNERSHIP)
+  const guard = await requireReadPermission(PERMS.PAYROLL_MANAGE_OWNERSHIP)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()

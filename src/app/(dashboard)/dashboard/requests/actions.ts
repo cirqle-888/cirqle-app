@@ -9,7 +9,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission, resolveCurrentEmployeeId } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission, resolveCurrentEmployeeId } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import {
   setRequestStatus, logRequestActivity, requestStatusFromTask, type RequestStatus,
@@ -166,7 +166,7 @@ export async function markRequestViewed(requestId: string): Promise<ActionResult
 
 /** Full timeline (internal view) — all visibilities. */
 export async function getRequestTimeline(requestId: string): Promise<ActionResult<{ rows: any[]; revisions: any[] }>> {
-  const guard = await requirePermission(PERMS.REQUESTS_VIEW)
+  const guard = await requireReadPermission(PERMS.REQUESTS_VIEW)
   if (!guard.ok) return { ok: false, error: guard.error }
   const admin = createAdminClient()
   const [acts, revs] = await Promise.all([
@@ -531,7 +531,7 @@ export async function createManualRequest(input: {
 export async function searchTasksForLink(
   q: string, clientId?: string | null,
 ): Promise<ActionResult<any[]>> {
-  const guard = await requirePermission(PERMS.REQUESTS_START)
+  const guard = await requireReadPermission(PERMS.REQUESTS_START)
   if (!guard.ok) return { ok: false, error: guard.error }
   const query = (q || '').trim()
   if (!query) return { ok: true, data: [] }
