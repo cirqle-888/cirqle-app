@@ -365,7 +365,11 @@ export function buildInvoiceParts(
   const expensesMode = inv.expenses_mode || companySettings.expense_display_mode || 'mode_a'
   // Optional Service column: this invoice's override, else the client's rule.
   const withService = showServiceColumn(inv, inv.client)
-  const SERVICE_COL_W = 150
+  // Jobs Done is the only elastic column — it takes whatever the fixed ones
+  // leave. Job titles here run to three lines of Malayalam, so the fixed
+  // columns are kept as narrow as their content allows, and Service (the
+  // newest claim on that space) is the narrowest of them.
+  const SERVICE_COL_W = 104
   /**
    * Where a line's service actually lives.
    *
@@ -720,13 +724,13 @@ export function buildInvoiceParts(
   <table style="width:100%;border-collapse:collapse;margin:14px 0 12px">
     <thead>
       <tr style="background:linear-gradient(180deg,${HEAD_TOP} 0%,${HEAD_BOT} 100%);height:${ROW_H}px">
-        <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;width:46px">No.</th>
-        <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:118px">Date</th>
+        <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;width:38px">No.</th>
+        <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:96px">Date</th>
         <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff">Jobs Done</th>
         ${withService ? `<th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;width:${SERVICE_COL_W}px">Service</th>` : ''}
         <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;width:54px">Qty</th>
-        <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:118px">Rate</th>
-        <th class="disp" style="height:${ROW_H}px;padding:0 10px 8px 8px;line-height:${ROW_H - 8}px;text-align:right;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:130px">Total Amount</th>
+        <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:96px">Rate</th>
+        <th class="disp" style="height:${ROW_H}px;padding:0 10px 8px 8px;line-height:${ROW_H - 8}px;text-align:right;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:112px">Total Amount</th>
       </tr>
     </thead>
     <tbody>

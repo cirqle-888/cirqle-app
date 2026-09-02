@@ -71,7 +71,7 @@ import {
 } from '@/lib/packages/task-status'
 import type { PackageItemRow } from '@/lib/packages/types'
 import { TaskBillingSection } from '@/components/ui/task-billing-section'
-import { computeTaskAmount, resolveTaskQuantity, resolvePricingType } from '@/lib/tasks/pricing'
+import { computeTaskAmount, computeVariantAmount, resolvePricingType, resolveTaskQuantity } from '@/lib/tasks/pricing'
 import {
   emptyBillingRule, isBasisTask, sumBasis, computeRule, findDuplicateRules,
   type BillingRule,
@@ -1105,26 +1105,33 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
 
     // Variant of a parent task
     if (parentTask) {
-      const parentBilling = parentTask.billing_amount_inr || 0
-      let baseVariantAmount = 0
-      if (form.billing_mode === 'percent_of_parent') {
-        const pct = parseFloat(form.billing_percent) || 0
-        baseVariantAmount = Math.round((parentBilling * pct / 100) * 100) / 100
-      } else if (form.billing_mode === 'parameter_driven') {
-        // Phase 1: surfaced as percent input; Phase 2 will sum parameter weights from contributions
-        const pct = parseFloat(form.billing_percent) || 0
-        baseVariantAmount = Math.round((parentBilling * pct / 100) * 100) / 100
-      } else {
-        // billing_mode === 'fixed' on a variant: user enters manual amount via manual_billing_amount
-        baseVariantAmount = parseFloat(form.manual_billing_amount) || 0
+      // A percentage of the parent's RATE, not of its total — see
+      // computeVariantAmount. Taking it off the total made the same 15%
+      // variant cost ₹75 or ₹150 for identical work, depending only on how
+      // many creatives the PARENT happened to order.
+      if (form.billing_mode === 'percent_of_parent' || form.billing_mode === 'parameter_driven') {
+        // parameter_driven is surfaced as a percent input today; Phase 2 sums
+        // parameter weights from contributions and will diverge here.
+        return computeVariantAmount({
+          parent: parentTask,
+          percent: form.billing_percent,
+          pricingType,
+          quantity: form.quantity,
+          hours: form.hours,
+          spend: form.spend,
+        })
       }
 
-      // Apply standard quantity scaling based on service type
-      if (pricingType === 'fixed_per_creative') return baseVariantAmount * (parseFloat(form.quantity) || 1)
-      if (pricingType === 'hourly') return baseVariantAmount * (parseFloat(form.hours) || 1)
-      if (pricingType === 'percentage_of_spend') return baseVariantAmount * (parseFloat(form.spend) || 0)
-      
-      return baseVariantAmount
+      // billing_mode === 'fixed' on a variant: the user types the amount, and
+      // it scales by quantity like any other fixed price.
+      const baseVariantAmount = parseFloat(form.manual_billing_amount) || 0
+      return computeTaskAmount({
+        pricingType,
+        unitPrice: baseVariantAmount,
+        quantity: form.quantity,
+        hours: form.hours,
+        spend: form.spend,
+      })
     }
 
     // Standard pricing-matrix calculation (original task) — shared engine.

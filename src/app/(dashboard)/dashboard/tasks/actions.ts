@@ -20,7 +20,7 @@ import { logActivity } from '@/lib/activity/log'
 import { PERMS } from '@/lib/permissions/keys'
 import { revalidatePath } from 'next/cache'
 import { recalcTaskCommissions, syncDraftInvoices } from '@/lib/sync/integrity'
-import { computeTaskAmount, resolvePricingType } from '@/lib/tasks/pricing'
+import { computeTaskAmount, rescaleAmountForQuantity, resolvePricingType } from '@/lib/tasks/pricing'
 import { parseBillingRule, isDerivedTask } from '@/lib/tasks/derived-billing'
 import {
   recomputeDerivedTask, resyncDerivedForSource, resyncDerivedForMovedTask,
@@ -803,6 +803,43 @@ export async function serverSaveTask(
     ? await toInr(admin, input.billingAmount!, input.currency)
     : undefined
 
+  // ── Quantity changed, but no amount came with it ───────────────────────────
+  // An editor without pricing visibility sends the new quantity and NO billing
+  // fields — correctly, since they must not be able to set an amount they
+  // cannot see. Left there, the task kept the old amount: one creative's price
+  // for two creatives' work. Three tasks reached production that way and two
+  // were invoiced.
+  //
+  // Scale the existing amount by the quantity ratio (see
+  // rescaleAmountForQuantity) rather than re-pricing from the matrix, so a
+  // negotiated rate or a variant's percentage survives untouched. Derived
+  // tasks are excluded: their amount comes from their rule, and syncDerived
+  // recomputes it below.
+  let rescaled: { amount: number; inr: number } | null = null
+  if (!acceptAmount && !isDerived && input.quantity !== undefined) {
+    const { data: before } = await admin
+      .from('tasks')
+      .select('quantity, billing_amount, billing_override, currency')
+      .eq('id', input.taskId)
+      .maybeSingle()
+    const prev = before as {
+      quantity?: number | null; billing_amount?: number | null
+      billing_override?: boolean | null; currency?: string | null
+    } | null
+    // An explicit manual override is a decision about the total, not a rate;
+    // scaling it would silently undo what someone deliberately typed.
+    if (prev && !prev.billing_override) {
+      const next = rescaleAmountForQuantity({
+        currentAmount: prev.billing_amount,
+        currentQuantity: prev.quantity,
+        nextQuantity: input.quantity,
+      })
+      if (next !== null) {
+        rescaled = { amount: next, inr: await toInr(admin, next, prev.currency ?? undefined) }
+      }
+    }
+  }
+
   const updates: Record<string, unknown> = {
     ...(input.taskNumber != null ? { task_number: input.taskNumber } : {}),
     title:              input.title,
@@ -812,6 +849,7 @@ export async function serverSaveTask(
     status:             input.status,
     ...(acceptAmount ? { billing_amount: input.billingAmount } : {}),
     ...(billingInr !== undefined ? { billing_amount_inr: billingInr } : {}),
+    ...(rescaled ? { billing_amount: rescaled.amount, billing_amount_inr: rescaled.inr } : {}),
     ...(ruleJson !== undefined ? { billing_mode: 'percent_of_services', billing_rule: ruleJson } : {}),
     ...(input.quantity         !== undefined ? { quantity:           input.quantity } : {}),
     ...(input.currency         !== undefined ? { currency:           input.currency } : {}),
