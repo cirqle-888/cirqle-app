@@ -48,13 +48,18 @@ export async function getStatementLineItems(invoiceIds: string[]): Promise<Resul
   const admin = createAdminClient()
   const { data, error } = await admin
     .from('invoice_items')
-    .select('id, invoice_id, description, quantity, unit_price, total, line_date, task:tasks(title, task_date), service:services(name)')
+    // The task's service is joined as well as the line's own: no invoice_item
+    // in production carries service_id, because the auto-collect path files the
+    // task and lets the task hold the service. `services!service_id` is
+    // mandatory — tasks has two foreign keys to services and an unqualified
+    // embed silently returns nothing.
+    .select('id, invoice_id, description, quantity, unit_price, total, line_date, task:tasks(title, task_date, service:services!service_id(name)), service:services(name)')
     .in('invoice_id', invoiceIds)
 
   if (error) return { ok: false, error: error.message }
 
   const rows: StatementLineItem[] = (data || []).map((r: Record<string, unknown>) => {
-    const task = r.task as { title?: string; task_date?: string } | null
+    const task = r.task as { title?: string; task_date?: string; service?: { name?: string } | null } | null
     const service = r.service as { name?: string } | null
     return {
       id: String(r.id),
@@ -68,7 +73,7 @@ export async function getStatementLineItems(invoiceIds: string[]): Promise<Resul
       line_date: (r.line_date as string) ?? null,
       task_title: task?.title ?? null,
       task_date: task?.task_date ?? null,
-      service_name: service?.name ?? null,
+      service_name: service?.name ?? task?.service?.name ?? null,
     }
   })
 

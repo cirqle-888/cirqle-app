@@ -1868,7 +1868,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       await supabase.from('invoices').update({ subtotal, total_amount: totalAmount, updated_at: new Date().toISOString() }).eq('id', invId)
 
       const { data: full } = await supabase.from('invoices')
-        .select('*, client:clients(id,name,code,phone,email,address), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency), service:services(id,name)), payments(*)')
+        .select('*, client:clients(id,name,code,phone,email,address), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency,service:services!service_id(id,name)), service:services(id,name)), payments(*)')
         .eq('id', invId).single()
 
       const fullInv = full as any
@@ -2164,7 +2164,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     // Reload invoices
     const { data: newInvoices } = await supabase
       .from('invoices')
-      .select('*, client:clients(id,name,code,phone,email,address), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency), service:services(id,name)), payments(*)')
+      .select('*, client:clients(id,name,code,phone,email,address), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency,service:services!service_id(id,name)), service:services(id,name)), payments(*)')
       .order('created_at', { ascending: false })
 
     if (newInvoices) setInvoices(newInvoices.map(inv => ({
@@ -2328,7 +2328,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
   async function refreshInvoice(invoiceId: string) {
     const { data } = await supabase.from('invoices')
-      .select('*, client:clients(id,name,code,phone,email), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency), service:services(id,name)), payments(*), cashbook_invoice_allocations(id, deleted_at, allocated_amount, cashbook_entry:cashbook_entries(id, reference, entry_date, description, receipt_number, bank_account:bank_accounts(name)))')
+      .select('*, client:clients(id,name,code,phone,email), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency,service:services!service_id(id,name)), service:services(id,name)), payments(*), cashbook_invoice_allocations(id, deleted_at, allocated_amount, cashbook_entry:cashbook_entries(id, reference, entry_date, description, receipt_number, bank_account:bank_accounts(name)))')
       .eq('id', invoiceId).single()
     if (data) {
       setInvoices(prev => prev.map(i => i.id === invoiceId ? data as any : i))
@@ -5545,14 +5545,21 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       {/* ── Edit Reason Modal ─────────────────────────────────────────────────── */}
       {/* ── Invoice Preview Modal ───────────────────────────────────────────── */}
       {previewInv && (() => {
+        // previewInv is the invoice as it was WHEN THE MODAL OPENED. Toggling
+        // the Service column updates `invoices`, not this snapshot, so the
+        // checkbox appeared dead and the paper never changed — it only looked
+        // right after closing and reopening the preview. Every read below goes
+        // through `live` so the modal shows what was just saved.
+        const live = invoices.find(i => i.id === previewInv.id) ?? previewInv
+
         // An invoice whose line items have not arrived still has a client, a
         // number and a TOTAL — so it renders as a complete-looking document
         // with an empty table. That is the one output here that can do real
         // damage: printed or sent, it bills a client an amount with nothing
         // itemised behind it. Print and Download stay disabled, and the paper
         // is not drawn at all, until the lines are actually in hand.
-        const previewReady = detailLoaded.has(previewInv.id)
-        const previewFailed = detailFailed.has(previewInv.id)
+        const previewReady = detailLoaded.has(live.id)
+        const previewFailed = detailFailed.has(live.id)
         return (
         <ModalOverlay onClose={() => setPreviewInv(null)} zIndex="z-[300]">
           <div className="flex flex-col bg-secondary border border-foreground/15 rounded-2xl shadow-2xl overflow-hidden"
@@ -5562,18 +5569,18 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               <div className="flex items-center gap-2.5">
                 <Eye className="w-4 h-4 text-violet-400" />
                 <div>
-                  <h3 className="font-semibold text-sm">{previewInv.invoice_number}</h3>
-                  <p className="text-[11px] text-muted-foreground">{previewInv.client?.name}</p>
+                  <h3 className="font-semibold text-sm">{live.invoice_number}</h3>
+                  <p className="text-[11px] text-muted-foreground">{live.client?.name}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <label
                   title="Add the client's other overdue/pending invoices as an extra line on this PDF — not saved to the invoice, for sharing only"
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-foreground/[0.06] text-xs font-medium text-foreground cursor-pointer border border-foreground/15">
-                  {loadingOutstandingId === previewInv.id
+                  {loadingOutstandingId === live.id
                     ? <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
-                    : <input type="checkbox" checked={includeOutstanding.has(previewInv.id)}
-                        onChange={() => toggleIncludeOutstanding(previewInv)}
+                    : <input type="checkbox" checked={includeOutstanding.has(live.id)}
+                        onChange={() => toggleIncludeOutstanding(live)}
                         className="rounded accent-violet-500 cursor-pointer" />}
                   Include Outstanding
                 </label>
@@ -5581,25 +5588,25 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                     Persisted, unlike Include Outstanding: the shape of a
                     client's invoice is a decision, not a one-off view. */}
                 <label
-                  title={serviceColumnSource(previewInv, previewInv.client) === 'client'
-                    ? `On by default for ${previewInv.client?.name ?? 'this client'}`
+                  title={serviceColumnSource(live, live.client) === 'client'
+                    ? `On by default for ${live.client?.name ?? 'this client'}`
                     : 'Show which service each line belongs to'}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-foreground/[0.06] text-xs font-medium text-foreground cursor-pointer border border-foreground/15">
                   <input type="checkbox"
-                    checked={showServiceColumn(previewInv, previewInv.client)}
-                    onChange={() => toggleServiceColumn(previewInv)}
+                    checked={showServiceColumn(live, live.client)}
+                    onChange={() => toggleServiceColumn(live)}
                     className="rounded accent-violet-500 cursor-pointer" />
                   Service column
                 </label>
-                <button onClick={() => printInvoice(previewInv)} disabled={!previewReady || !canSharePdf}
+                <button onClick={() => printInvoice(live)} disabled={!previewReady || !canSharePdf}
                   title={!canSharePdf ? noShareReason : previewReady ? undefined : 'Line items are still loading'}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 text-xs font-medium text-foreground transition-colors border border-foreground/15 disabled:opacity-50 disabled:cursor-not-allowed">
                   <Printer className="w-3.5 h-3.5" />Print
                 </button>
-                <button onClick={() => downloadInvoicePdf(previewInv)} disabled={!previewReady || !canSharePdf || downloadingInvId === previewInv.id}
+                <button onClick={() => downloadInvoicePdf(live)} disabled={!previewReady || !canSharePdf || downloadingInvId === live.id}
                   title={!canSharePdf ? noShareReason : previewReady ? undefined : 'Line items are still loading'}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 text-xs font-medium text-foreground transition-colors border border-foreground/15 disabled:opacity-50">
-                  {downloadingInvId === previewInv.id
+                  {downloadingInvId === live.id
                     ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                     : <Download className="w-3.5 h-3.5" />}Download
                 </button>
@@ -5617,15 +5624,15 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             )}
             {/* Offered only while this invoice disagrees with the client's rule
                 — otherwise it is a button that would change nothing. */}
-            {serviceColumnSource(previewInv, previewInv.client) === 'invoice' && previewInv.client?.id && (
+            {serviceColumnSource(live, live.client) === 'invoice' && live.client?.id && (
               <div className="shrink-0 flex items-center justify-between gap-3 px-4 py-1.5 text-[11px] text-muted-foreground bg-foreground/[0.03] border-b border-border/40">
                 <span>
-                  {showServiceColumn(previewInv, previewInv.client) ? 'Service column on' : 'Service column off'} for this invoice only.
+                  {showServiceColumn(live, live.client) ? 'Service column on' : 'Service column off'} for this invoice only.
                 </span>
                 <button
-                  onClick={() => makeServiceColumnClientDefault(previewInv)}
+                  onClick={() => makeServiceColumnClientDefault(live)}
                   className="shrink-0 rounded-md border border-border/60 px-2 py-0.5 font-medium text-foreground transition-colors hover:bg-foreground/[0.06]">
-                  Always for {previewInv.client?.name ?? 'this client'}
+                  Always for {live.client?.name ?? 'this client'}
                 </button>
               </div>
             )}
@@ -5635,8 +5642,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                   <iframe
                     // key forces a full remount on toggle — changing srcDoc on an
                     // already-mounted iframe doesn't reliably reload its content.
-                    key={`${previewInv.id}-${includeOutstanding.has(previewInv.id)}`}
-                    srcDoc={buildInvoiceHtml(previewInv)}
+                    key={`${live.id}-${includeOutstanding.has(live.id)}`}
+                    srcDoc={buildInvoiceHtml(live)}
                     className="w-full h-full border-0"
                     style={{ minHeight: 600 }}
                     title="Invoice Preview"
@@ -5653,8 +5660,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                         </span>
                         <button
                           onClick={() => {
-                            setDetailFailed(prev => { const n = new Set(prev); n.delete(previewInv.id); return n })
-                            void ensureDetails([previewInv.id])
+                            setDetailFailed(prev => { const n = new Set(prev); n.delete(live.id); return n })
+                            void ensureDetails([live.id])
                           }}
                           className="inline-flex items-center gap-1.5 rounded-lg border border-[#c9d2de] bg-white px-3 py-1.5 text-xs font-medium text-[#1f2a37] transition-colors hover:bg-[#eef2f7]"
                         >

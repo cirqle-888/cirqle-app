@@ -366,6 +366,18 @@ export function buildInvoiceParts(
   // Optional Service column: this invoice's override, else the client's rule.
   const withService = showServiceColumn(inv, inv.client)
   const SERVICE_COL_W = 150
+  /**
+   * Where a line's service actually lives.
+   *
+   * Almost nowhere on invoice_items: NOT ONE row in production carries
+   * service_id, because the auto-collect path files the task and lets the
+   * task hold the service. So the line's own service_id is only ever set by
+   * hand, and the task behind it is the real source — which is why this
+   * column printed blank for every invoice until the fallback existed.
+   */
+  const serviceNameOf = (
+    it: { service?: { name?: string | null } | null; task?: { service?: { name?: string | null } | null } | null },
+  ): string => it.service?.name || it.task?.service?.name || ''
   const ROW_H = 38
   const td = (extra: string) => `height:${ROW_H}px;padding:0 10px 8px 10px;line-height:${ROW_H - 8}px;border-bottom:1px solid ${CELL_BORD};border-left:1px solid ${CELL_BORD};font-size:13px;${extra}`
 
@@ -381,7 +393,7 @@ export function buildInvoiceParts(
         <td style="${td('border-left:none;text-align:center;color:#222')}">${idx + 1}</td>
         <td style="${td('text-align:center;color:#222;white-space:nowrap')}">${taskDate}</td>
         <td style="${td('text-align:left;color:#222')}">${escapeHtml(it.description, true)}</td>
-        ${withService ? `<td style="${td('text-align:left;color:#444')}">${escapeHtml(it.service?.name || '', true)}</td>` : ''}
+        ${withService ? `<td style="${td('text-align:left;color:#444')}">${escapeHtml(serviceNameOf(it), true)}</td>` : ''}
         <td style="${td('text-align:center;color:#222')}">${it.quantity}</td>
         <td style="${td('text-align:center;color:#222;white-space:nowrap')}">${inr(unitPriceOf(it))}</td>
         <td style="${td('text-align:right;color:#111;font-weight:700;white-space:nowrap')}">${inr(it.total)}</td>

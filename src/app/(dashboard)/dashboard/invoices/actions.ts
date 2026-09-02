@@ -168,7 +168,7 @@ export async function getInvoiceDetails(
   const { data, error } = await admin
     .from('invoices')
     .select(`id,
-      items:invoice_items(*, task:tasks(id, title, task_date, status, billing_amount_inr, currency), service:services(id, name)),
+      items:invoice_items(*, task:tasks(id, title, task_date, status, billing_amount_inr, currency, service:services!service_id(id, name)), service:services(id, name)),
       cashbook_invoice_allocations(id, deleted_at, allocated_amount, cashbook_entry:cashbook_entries(id, reference, entry_date, description, receipt_number, bank_account:bank_accounts(name)))
     `)
     .in('id', invoiceIds)
