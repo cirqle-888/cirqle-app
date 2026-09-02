@@ -39,7 +39,7 @@ import {
   Wallet, Link2, ShoppingBag, Share2, Layers, ListTree, ScrollText, Check, AlertCircle,
 } from 'lucide-react'
 import { logFollowup } from "./follow-ups/actions"
-import { recordInvoicePayment, serverResyncInvoiceTasks, getInvoiceDetails } from "./actions"
+import { recordInvoicePayment, serverResyncInvoiceTasks, getInvoiceDetails, setInvoiceServiceColumn, setClientServiceColumnDefault } from "./actions"
 
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
@@ -50,6 +50,7 @@ import { useRole } from '@/contexts/role-context'
 import { usePermissions } from '@/contexts/permission-context'
 import { PERMS, RECORD_PAYMENT_PERMS } from '@/lib/permissions/keys'
 import { unitPriceOf } from '@/lib/invoices/line-math'
+import { showServiceColumn, serviceColumnSource } from '@/lib/invoices/service-column'
 import type { Currency } from '@/types'
 import { formatTaskDate } from '@/lib/utils/format-date'
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
@@ -136,7 +137,11 @@ interface Invoice {
   discount_amount?: number; previous_balance?: number
   notes?: string; created_at: string; updated_at: string
   expenses_mode?: string   // 'mode_a' | 'mode_b' | 'mode_c' — client display style
-  client?: { id: string; name: string; code: string; phone?: string; email?: string; address?: string }
+  /** Service column override. null/undefined = follow the client's default. */
+  show_service_column?: boolean | null
+  client?: { id: string; name: string; code: string; phone?: string; email?: string; address?: string
+    /** The client's standing rule for the printed Service column. */
+    invoice_show_services?: boolean | null }
   items?: InvoiceItem[]
   payments?: Payment[]
   // Client expense items billed via cashbook outflow entries.
@@ -1010,6 +1015,31 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       ? { ...i, items: newItems, subtotal: newSubtotal, tax_amount: taxAmt, total_amount: newTotalAmt }
       : i
     ))
+  }
+
+  /** Toggle the Service column for this invoice only. */
+  async function toggleServiceColumn(inv: Invoice) {
+    const next = !showServiceColumn(inv, inv.client)
+    setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, show_service_column: next } : i))
+    const res = await setInvoiceServiceColumn(inv.id, next)
+    if (!res.ok) {
+      setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, show_service_column: inv.show_service_column ?? null } : i))
+      toastError(res.error || 'Could not save')
+    }
+  }
+
+  /** Make the current choice this client's standing rule, on every future invoice. */
+  async function makeServiceColumnClientDefault(inv: Invoice) {
+    const value = showServiceColumn(inv, inv.client)
+    const clientId = inv.client?.id
+    if (!clientId) return
+    setInvoices(prev => prev.map(i => i.client?.id === clientId
+      ? { ...i, show_service_column: i.id === inv.id ? null : i.show_service_column,
+          client: { ...i.client!, invoice_show_services: value } }
+      : i))
+    const res = await setClientServiceColumnDefault(clientId, value, inv.id)
+    if (!res.ok) toastError(res.error || 'Could not save')
+    else success(value ? 'Service column is now the default for this client' : 'Service column off by default for this client')
   }
 
   async function addManualItem(invoiceId: string, description: string, unitPrice: number) {
@@ -5547,6 +5577,20 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                         className="rounded accent-violet-500 cursor-pointer" />}
                   Include Outstanding
                 </label>
+                {/* Service column — a PDF option, so it sits with the other one.
+                    Persisted, unlike Include Outstanding: the shape of a
+                    client's invoice is a decision, not a one-off view. */}
+                <label
+                  title={serviceColumnSource(previewInv, previewInv.client) === 'client'
+                    ? `On by default for ${previewInv.client?.name ?? 'this client'}`
+                    : 'Show which service each line belongs to'}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-foreground/[0.06] text-xs font-medium text-foreground cursor-pointer border border-foreground/15">
+                  <input type="checkbox"
+                    checked={showServiceColumn(previewInv, previewInv.client)}
+                    onChange={() => toggleServiceColumn(previewInv)}
+                    className="rounded accent-violet-500 cursor-pointer" />
+                  Service column
+                </label>
                 <button onClick={() => printInvoice(previewInv)} disabled={!previewReady || !canSharePdf}
                   title={!canSharePdf ? noShareReason : previewReady ? undefined : 'Line items are still loading'}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 text-xs font-medium text-foreground transition-colors border border-foreground/15 disabled:opacity-50 disabled:cursor-not-allowed">
@@ -5569,6 +5613,20 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             {!canSharePdf && (
               <div className="shrink-0 px-4 py-2 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400 bg-amber-500/10 border-b border-amber-500/20">
                 {noShareReason}
+              </div>
+            )}
+            {/* Offered only while this invoice disagrees with the client's rule
+                — otherwise it is a button that would change nothing. */}
+            {serviceColumnSource(previewInv, previewInv.client) === 'invoice' && previewInv.client?.id && (
+              <div className="shrink-0 flex items-center justify-between gap-3 px-4 py-1.5 text-[11px] text-muted-foreground bg-foreground/[0.03] border-b border-border/40">
+                <span>
+                  {showServiceColumn(previewInv, previewInv.client) ? 'Service column on' : 'Service column off'} for this invoice only.
+                </span>
+                <button
+                  onClick={() => makeServiceColumnClientDefault(previewInv)}
+                  className="shrink-0 rounded-md border border-border/60 px-2 py-0.5 font-medium text-foreground transition-colors hover:bg-foreground/[0.06]">
+                  Always for {previewInv.client?.name ?? 'this client'}
+                </button>
               </div>
             )}
             <div className="flex-1 overflow-auto bg-[#f5f7fa] rounded-b-2xl" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>

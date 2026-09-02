@@ -182,3 +182,85 @@ export async function getInvoiceDetails(
   )
   return { ok: true, data: stripped }
 }
+
+// ── Service column on the printed invoice ────────────────────────────────────
+//
+// Who may reshape a client-facing document is the same question as who may
+// move an invoice through its workflow — the people who send them. Gated on
+// the pair rather than billing.edit alone for the reason recorded in
+// RECORD_PAYMENT_PERMS: a collections role that sends invoices is exactly who
+// needs this, and refusing them would repeat the split that made "Permission
+// denied." appear on one screen for something allowed on another.
+const INVOICE_PRESENTATION_PERMS = [PERMS.BILLING_EDIT, PERMS.BILLING_VIEW_WORKFLOW] as const
+
+/**
+ * Set (or clear) the Service column override for ONE invoice.
+ * `null` means "follow the client's default" — see lib/invoices/service-column.
+ */
+export async function setInvoiceServiceColumn(
+  invoiceId: string,
+  value: boolean | null,
+): Promise<ActionResult<null>> {
+  const guard = await requireAnyPermission(INVOICE_PRESENTATION_PERMS)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!invoiceId) return { ok: false, error: 'Missing invoice.' }
+
+  try {
+    const admin = createAdminClient()
+    const { error } = await admin
+      .from('invoices')
+      .update({ show_service_column: value, updated_at: new Date().toISOString() })
+      .eq('id', invoiceId)
+    if (error) return { ok: false, error: missingColumn(error.message) }
+    revalidatePath('/dashboard/invoices')
+    return { ok: true, data: null }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? missingColumn(err.message) : 'Could not save.' }
+  }
+}
+
+/** Set the client's standing rule, and clear this invoice's override so it follows. */
+export async function setClientServiceColumnDefault(
+  clientId: string,
+  value: boolean,
+  alsoClearInvoiceId?: string,
+): Promise<ActionResult<null>> {
+  const guard = await requireAnyPermission(INVOICE_PRESENTATION_PERMS)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!clientId) return { ok: false, error: 'Missing client.' }
+
+  try {
+    const admin = createAdminClient()
+    const { error } = await admin
+      .from('clients')
+      .update({ invoice_show_services: value })
+      .eq('id', clientId)
+    if (error) return { ok: false, error: missingColumn(error.message) }
+    if (alsoClearInvoiceId) {
+      await admin.from('invoices').update({ show_service_column: null }).eq('id', alsoClearInvoiceId)
+    }
+    revalidatePath('/dashboard/invoices')
+    return { ok: true, data: null }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? missingColumn(err.message) : 'Could not save.' }
+  }
+}
+
+/**
+ * Turn "that column isn't there" into something a person can act on.
+ *
+ * Two different wordings reach here and both had to be matched by hand:
+ * Postgres says `column "x" does not exist`, while PostgREST answers a write
+ * against an unknown column with PGRST204 — "Could not find the 'x' column of
+ * 'invoices' in the schema cache". Only the second one actually shows up on
+ * this path, which is exactly what the first version of this function missed.
+ */
+function missingColumn(message: string): string {
+  const unknownColumn =
+    /column .* does not exist/i.test(message) ||
+    /could not find the .* column/i.test(message) ||
+    /schema cache/i.test(message)
+  return unknownColumn
+    ? 'The Service column needs migration 20260902100000 applied first — see supabase/APPLIED.md.'
+    : message
+}

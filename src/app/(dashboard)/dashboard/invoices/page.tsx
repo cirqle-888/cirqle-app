@@ -77,6 +77,28 @@ export default async function InvoicesPage() {
     { amounts: vis.billingAmounts, linePricing: vis.billingLinePricing },
   )
 
+  // The client's standing rule for the printed Service column, fetched on its
+  // own and tolerantly ON PURPOSE. Folding `invoice_show_services` into the
+  // main invoice join would take the whole page down with a "column does not
+  // exist" until migration 20260902100000 is applied; a separate query that is
+  // allowed to fail just leaves every client on the default instead.
+  const serviceColumnDefaults = await (async () => {
+    try {
+      const r = await supabase.from('clients').select('id, invoice_show_services')
+      if (r.error) return new Map<string, boolean>()
+      return new Map<string, boolean>(
+        (r.data as { id: string; invoice_show_services: boolean | null }[])
+          .map(c => [c.id, c.invoice_show_services === true]),
+      )
+    } catch {
+      return new Map<string, boolean>()
+    }
+  })()
+
+  for (const inv of initialInvoices as { client?: { id: string; invoice_show_services?: boolean } | null }[]) {
+    if (inv.client?.id) inv.client.invoice_show_services = serviceColumnDefaults.get(inv.client.id) === true
+  }
+
   // Agreement breakdowns: a package fee replaces the task lines it covers, so
   // the covered work has no rows left to render. Rebuilt here (display only) so
   // both the invoice panel and the PDF can show what an agreement included.

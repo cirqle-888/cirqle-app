@@ -27,7 +27,14 @@ disaster-recovery path from migrations. That needs a baseline dump — see
 
 ## Waiting to be applied
 
-Nothing.
+| Migration | What it adds | Until it is applied |
+|---|---|---|
+| `20260902100000_invoice_service_column` | `clients.invoice_show_services` (the client's standing rule) and `invoices.show_service_column` (nullable per-invoice override) for the optional Service column on the printed invoice. | The toggle appears in the invoice preview but saving it answers "needs migration 20260902100000 applied first". Every invoice renders exactly as it does today. The invoices page itself is unaffected: the client default is read by a separate query that is allowed to fail, deliberately, so a missing column cannot take the page down. |
+
+After applying, verify: tick **Service column** in an invoice preview and the
+PDF gains a Service column between Jobs Done and Qty; untick it and the column
+goes. Then use **Always for {client}** and confirm the client's next invoice
+starts with the column already on.
 
 ### Follow-up: Realtime is not delivering for `employee_presence`
 

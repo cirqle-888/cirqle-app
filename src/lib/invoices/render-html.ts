@@ -19,6 +19,7 @@ import { resolveBrandingUrl } from '@/lib/utils/branding'
 import type { AgreementBreakdown } from '@/lib/packages/invoice-breakdown'
 import type { Currency } from '@/types'
 import { unitPriceOf } from './line-math'
+import { showServiceColumn } from './service-column'
 
 function escapeHtml(unsafe: string | null | undefined, keepNewlines = false): string {
   if (!unsafe) return ''
@@ -362,6 +363,9 @@ export function buildInvoiceParts(
   const expenseItems = inv.expense_items || []
   // Per-invoice override → company default → 'mode_a'
   const expensesMode = inv.expenses_mode || companySettings.expense_display_mode || 'mode_a'
+  // Optional Service column: this invoice's override, else the client's rule.
+  const withService = showServiceColumn(inv, inv.client)
+  const SERVICE_COL_W = 150
   const ROW_H = 38
   const td = (extra: string) => `height:${ROW_H}px;padding:0 10px 8px 10px;line-height:${ROW_H - 8}px;border-bottom:1px solid ${CELL_BORD};border-left:1px solid ${CELL_BORD};font-size:13px;${extra}`
 
@@ -377,12 +381,13 @@ export function buildInvoiceParts(
         <td style="${td('border-left:none;text-align:center;color:#222')}">${idx + 1}</td>
         <td style="${td('text-align:center;color:#222;white-space:nowrap')}">${taskDate}</td>
         <td style="${td('text-align:left;color:#222')}">${escapeHtml(it.description, true)}</td>
+        ${withService ? `<td style="${td('text-align:left;color:#444')}">${escapeHtml(it.service?.name || '', true)}</td>` : ''}
         <td style="${td('text-align:center;color:#222')}">${it.quantity}</td>
         <td style="${td('text-align:center;color:#222;white-space:nowrap')}">${inr(unitPriceOf(it))}</td>
         <td style="${td('text-align:right;color:#111;font-weight:700;white-space:nowrap')}">${inr(it.total)}</td>
       </tr>`
   })
-  const emptyRow = `<tr><td colspan="6" style="padding:20px;text-align:center;color:#999;font-size:12px">No items</td></tr>`
+  const emptyRow = `<tr><td colspan="${withService ? 7 : 6}" style="padding:20px;text-align:center;color:#999;font-size:12px">No items</td></tr>`
 
   // Expenses section block (separate from main item table in all modes)
   const expensesTotal = expenseItems.reduce((s: number, e: any) => s + (e.amount || 0), 0)
@@ -706,6 +711,7 @@ export function buildInvoiceParts(
         <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;width:46px">No.</th>
         <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:118px">Date</th>
         <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff">Jobs Done</th>
+        ${withService ? `<th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;width:${SERVICE_COL_W}px">Service</th>` : ''}
         <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;width:54px">Qty</th>
         <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:118px">Rate</th>
         <th class="disp" style="height:${ROW_H}px;padding:0 10px 8px 8px;line-height:${ROW_H - 8}px;text-align:right;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:130px">Total Amount</th>
