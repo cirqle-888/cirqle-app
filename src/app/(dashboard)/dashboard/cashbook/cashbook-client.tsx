@@ -2389,6 +2389,43 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                       <ChevronDown className="w-4 h-4 text-muted-foreground group-open:rotate-180 transition-transform" />
                     </summary>
                     <div className="px-3 pb-3 space-y-4">
+              {/* ── Client — link the entry so it can be rebilled ──────────────
+                   The category-driven picker above only appears for the four
+                   names in SMART (visiting charge, commission, online spend,
+                   cost recovery). Every other category — Printing & Stationery,
+                   Courier, anything else bought for a client — had NO way to
+                   name the client at all, which left "Client — tag later" as a
+                   promise the form could not keep: the triage queue sent you
+                   back to this modal, which still had no field to tag with.
+                   It also kept those costs out of Add Expenses on the invoice,
+                   because that picker lists a client's outflows by client_id.
+                   Saved through the same client_filter_id the invoice flow
+                   already writes, so nothing new is persisted. ── */}
+              {smartMode !== 'client_linked' && smartMode !== 'invoice' && (
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                    Client <span className="font-normal">— optional; links this cost so it can be rebilled</span>
+                  </label>
+                  <Combobox
+                    options={clients.map((c: { id: string; name: string; code?: string }) =>
+                      ({ id: c.id, label: c.name, sub: c.code }))}
+                    value={form.client_filter_id || ''}
+                    onChange={id => setForm(p => ({ ...p, client_filter_id: id }))}
+                    placeholder="Not linked — leave empty to tag later"
+                    sortKey="clients"
+                  />
+                  {form.client_filter_id && (
+                    <button
+                      type="button"
+                      onClick={() => setForm(p => ({ ...p, client_filter_id: '' }))}
+                      className="mt-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Clear client
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* ── Books — which economy this money belongs to. Hidden when a
                    client is tagged (client money by definition). ── */}
               {!(smartExtra.client_id || form.client_filter_id) && (
