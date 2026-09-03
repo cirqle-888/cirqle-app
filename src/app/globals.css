@@ -284,14 +284,14 @@
   --bottom-bar-pb: max(0.75rem, env(safe-area-inset-bottom, 0px));
   --bottom-safe-pb: env(safe-area-inset-bottom, 0px);
 }
-[data-bottom-nav='employee'] {
+[data-bottom-nav] {
   --bottom-nav-h: calc(57px + env(safe-area-inset-bottom, 0px));
   --bottom-bar-pb: 0.75rem;
   --bottom-safe-pb: 0px;
 }
 /* md+ hides the bottom nav (`md:hidden`) — back to the plain bottom edge. */
 @media (min-width: 768px) {
-  [data-bottom-nav='employee'] {
+  [data-bottom-nav] {
     --bottom-nav-h: 0px;
     --bottom-bar-pb: max(0.75rem, env(safe-area-inset-bottom, 0px));
     --bottom-safe-pb: env(safe-area-inset-bottom, 0px);

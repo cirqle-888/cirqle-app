@@ -585,11 +585,14 @@ export default function Sidebar() {
     setIsPinned(next)
     localStorage.setItem('sidebar-pinned', String(next))
   }
-  const { user } = usePermissions()
   const pathname = usePathname()
 
   const { favorites } = useFavorites()
-  const isEmployee = !user.isAdmin
+  // Dashboard is a common favourite and it is already the fixed Home tab, so
+  // taking the first two favourites verbatim gave admins "Home" and
+  // "Dashboard" side by side, both going to the same page. Drop anything that
+  // duplicates a tab we already show.
+  const shortcutFavorites = favorites.filter((f: FavoriteEntry) => f.href !== '/dashboard')
   const isCollapsed = !isPinned && !isHovered
 
   // Default to pinned state when rendering on server to avoid layout shift,
@@ -623,17 +626,6 @@ export default function Sidebar() {
           </div>
         </aside>
       </div>
-
-      {/* ── Mobile: hamburger (admin only) ── */}
-      {!mobileOpen && !isEmployee && (
-        <button
-          onClick={() => setMobileOpen(true)}
-          aria-label="Open menu"
-          className="md:hidden fixed top-4 left-4 z-50 w-9 h-9 flex items-center justify-center rounded-lg bg-sidebar border border-sidebar-border shadow-md text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
-        >
-          <Menu className="w-5 h-5" />
-        </button>
-      )}
 
       {/* ── Mobile: backdrop (drawer) ── */}
       {mobileOpen && (
@@ -673,8 +665,14 @@ export default function Sidebar() {
         </aside>
       )}
 
-      {/* ── Mobile: Employee Bottom Nav Bar ── */}
-      {isEmployee && (
+      {/* ── Mobile: Bottom Nav Bar ──
+          Admins used to get only a top-left hamburger and no shortcuts at all,
+          which on a phone meant every destination was two taps behind a menu.
+          The bar is the same for everyone now — the shortcuts differ, because
+          they come from each person's own Favorites — and it replaces the
+          hamburger rather than sitting beside it: More opens the same drawer,
+          from where a thumb already is. */}
+      {(
         <div className="md:hidden fixed bottom-0 left-0 w-full z-50 bg-sidebar border-t border-sidebar-border pb-safe pt-1 px-2 flex items-center justify-around shadow-[0_-4px_20px_rgba(0,0,0,0.2)]">
           {/* Home is fixed; the shortcuts beside it are the person's own first
               Favorites, which they already curate from ⌘K or the star and which
@@ -687,8 +685,8 @@ export default function Sidebar() {
               nonsense at that width. */}
           {[
             { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
-            ...(favorites.length
-              ? favorites.slice(0, 2).map((f: FavoriteEntry) => ({
+            ...(shortcutFavorites.length
+              ? shortcutFavorites.slice(0, 2).map((f: FavoriteEntry) => ({
                   href: f.href,
                   label: f.label,
                   icon: resolveFavoriteIcon(f.iconKey),
@@ -722,14 +720,18 @@ export default function Sidebar() {
               daily destinations; this is the rest of what their permissions
               allow, which used to be unreachable on a phone entirely. */}
           <button
-            onClick={() => { setProfileSheetOpen(false); setMobileOpen(true) }}
-            aria-label="More sections"
+            // Toggles, like every other tab in this bar: the drawer sits above
+            // its own backdrop, so tapping More again is the natural way to
+            // dismiss it and reaching for the backdrop's edge is not.
+            onClick={() => { setProfileSheetOpen(false); setMobileOpen(o => !o) }}
+            aria-label={mobileOpen ? 'Close menu' : 'More sections'}
+            aria-expanded={mobileOpen}
             className="flex flex-col items-center justify-center py-2 px-1 w-1/5"
           >
-            <div className="w-10 h-8 flex items-center justify-center rounded-full transition-all text-muted-foreground">
+            <div className={`w-10 h-8 flex items-center justify-center rounded-full transition-all ${mobileOpen ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}>
               <Menu className="w-5 h-5" />
             </div>
-            <span className="text-[10px] mt-1 font-medium text-muted-foreground">More</span>
+            <span className={`text-[10px] mt-1 font-medium transition-colors ${mobileOpen ? 'text-foreground' : 'text-muted-foreground'}`}>More</span>
           </button>
 
           {/* Profile tab */}
@@ -747,8 +749,8 @@ export default function Sidebar() {
         </div>
       )}
 
-      {/* ── Employee profile sheet ── */}
-      {isEmployee && profileSheetOpen && (
+      {/* ── Profile sheet (the Me tab) ── */}
+      {profileSheetOpen && (
         <EmployeeProfileSheet
           onClose={() => setProfileSheetOpen(false)}
           onChangePassword={() => setShowPwdModal(true)}

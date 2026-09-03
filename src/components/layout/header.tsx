@@ -258,7 +258,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
   return (
     <div
       ref={ref}
-      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 pr-3 md:px-5 border-b border-border/80 bg-background/95 supports-[backdrop-filter]:bg-background/60 backdrop-blur-md sticky top-0 z-30 transition-all ${isEmployee ? 'pl-3 py-2 sm:pl-16 sm:py-3.5' : 'pl-14 sm:pl-16 py-2.5 sm:py-3.5'}`}
+      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 pr-3 md:px-5 border-b border-border/80 bg-background/95 supports-[backdrop-filter]:bg-background/60 backdrop-blur-md sticky top-0 z-30 transition-all ${isEmployee ? 'pl-3 py-2 sm:pl-16 sm:py-3.5' : 'pl-3 sm:pl-16 py-2.5 sm:py-3.5'}`}
     >
       <div className="flex items-center justify-between w-full sm:w-auto sm:flex-1 min-w-0 gap-2">
         {/* Left: Branding & Title */}

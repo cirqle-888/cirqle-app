@@ -198,14 +198,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
               designation={meResult.user.designationName}
             />
           )}
-          {/* data-bottom-nav: employees get the mobile bottom nav bar, which is
-              `fixed bottom-0 z-50` and therefore paints over any page-level
-              fixed action bar (e.g. Contributions' Save bar). The attribute
-              drives --bottom-nav-h in globals.css so those bars can sit above
-              it. Server-rendered so the offset is right on first paint. */}
+          {/* data-bottom-nav: the mobile bottom nav bar is `fixed bottom-0
+              z-50` and therefore paints over any page-level fixed action bar
+              (e.g. Contributions' Save bar). The attribute drives
+              --bottom-nav-h in globals.css so those bars can sit above it.
+              Server-rendered so the offset is right on first paint.
+              Everyone gets the bar now, admins included, so the value no
+              longer names a role. */}
           <div
             data-app-shell
-            data-bottom-nav={!user.isAdmin ? 'employee' : undefined}
+            data-bottom-nav="mobile"
             className={`flex h-dvh overflow-hidden ${meResult.user?.isViewAs ? 'pt-7' : ''}`}
           >
             {/* First tab stop on every dashboard page: lets keyboard users jump
@@ -219,7 +221,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <Sidebar />
             {/* pb-16 on mobile gives clearance above the employee bottom nav bar.
                 md:pb-0 restores normal layout on desktop where sidebar is visible. */}
-            <main id="main-content" tabIndex={-1} className={`flex-1 overflow-y-auto overscroll-none bg-background w-full ${!user.isAdmin ? 'pb-16 md:pb-0' : ''}`}>
+            {/* pb-16 on mobile clears the bottom nav bar; md:pb-0 restores the
+                normal layout on desktop, where the bar is hidden. */}
+            <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto overscroll-none bg-background w-full pb-16 md:pb-0">
               {children}
             </main>
             {/* TEMPORARY — remove with the permission bypass.
