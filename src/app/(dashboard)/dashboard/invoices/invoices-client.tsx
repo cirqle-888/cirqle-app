@@ -1344,7 +1344,16 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         : i
       ))
       const label = isAdvancePayment ? `Advance ${fmt(foreign, payForm.currency)} recorded` : `Payment of ${fmt(foreign, payForm.currency)} recorded — added to Cashbook`
-      success(label)
+      // Sending the receipt is the next thing that happens after taking money,
+      // and it was four steps away: close the panel, find the payment row in
+      // the list, hover it, click a small icon. Offer it here instead, while
+      // the payment is still the thing on screen. Longer-lived than a plain
+      // toast because it now has something to click — the progress bar shows
+      // the window.
+      success(label, undefined, 9000, {
+        label: 'Send receipt',
+        onClick: () => setReceiptPayment({ pmt, invoice: inv }),
+      })
       setPayForm({ amount: '', currency: (inv.currency || 'INR') as Currency, rate: '', amountInr: '', rateSource: 'settings', payment_date: todayISO(), payment_method: 'bank_transfer', reference: '', notes: '', bank_account_id: defaultBankAccountId })
       setIsAdvancePayment(false)
       setPanelMode('detail')
@@ -3711,13 +3720,41 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                           )}
                         </div>
                       </div>
-                      <a
-                        href={`/dashboard/cashbook?client=${inv.client_id}&focus=${a.cashbook_entry!.id}`}
-                        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-violet-500/10 text-muted-foreground hover:text-violet-500 transition-all ml-2 shrink-0"
-                        title="View in Cash Book"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                      </a>
+                      <div className="flex items-center gap-1 ml-2 shrink-0">
+                        {/* Money that arrived through the Cash Book settles an
+                            invoice exactly like a payment recorded here does —
+                            311 of the 333 settlements on this system, in fact —
+                            but only the other 22 could produce a receipt. The
+                            customer does not care which screen it was entered
+                            on, so the button belongs on both. */}
+                        <button
+                          onClick={() => setReceiptPayment({
+                            pmt: {
+                              id: a.id,
+                              amount: a.allocated_amount,
+                              amount_inr: a.allocated_amount,
+                              currency: 'INR',
+                              payment_date: a.cashbook_entry!.entry_date,
+                              payment_method: 'bank_transfer',
+                              reference: a.cashbook_entry!.reference,
+                              receipt_number: a.cashbook_entry!.receipt_number,
+                              bank_account_name: a.cashbook_entry!.bank_account?.name ?? null,
+                            },
+                            invoice: inv,
+                          })}
+                          title="Get / share receipt"
+                          className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted-foreground hover:text-emerald-500 transition-all"
+                        >
+                          <Receipt className="w-4 h-4" />
+                        </button>
+                        <a
+                          href={`/dashboard/cashbook?client=${inv.client_id}&focus=${a.cashbook_entry!.id}`}
+                          className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-violet-500/10 text-muted-foreground hover:text-violet-500 transition-all"
+                          title="View in Cash Book"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </a>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -5799,8 +5836,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       {receiptPayment && (
         <ReceiptModal
           input={((): ReceiptInput => {
-            const inv = receiptPayment.invoice
-            const pmt = receiptPayment.pmt
+            // Resolved from state, not from the object the opener captured. A
+            // receipt opened straight after recording a payment would otherwise
+            // print the outstanding balance from BEFORE that payment — the one
+            // number on it the customer is most likely to check.
+            const snapInv = receiptPayment.invoice
+            const inv = invoices.find(i => i.id === snapInv?.id) ?? snapInv
+            const snapPmt = receiptPayment.pmt
+            const pmt = (inv?.payments || []).find((x: Payment) => x.id === snapPmt.id) ?? snapPmt
             const compact = (pmt.payment_date || '').replace(/-/g, '')
             const legacyNo = `RCPT-${compact}-${pmt.id.slice(-4).toUpperCase()}`
             // `payments` doesn't store its own receipt number / bank account — pull
