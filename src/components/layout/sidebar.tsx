@@ -37,6 +37,9 @@ import { EmployeeAvatar } from '@/components/ui/employee-avatar'
 import { FavoritesSection } from '@/components/layout/favorites-section'
 import { FavoriteToggle } from '@/components/ui/favorite-toggle'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { resolveFavoriteIcon } from '@/lib/favorites/icon-map'
+import { useFavorites } from '@/contexts/favorites-context'
+import type { FavoriteEntry } from '@/lib/favorites/queries'
 
 // ─────────────────────────────────────────────────────
 // Change Password Modal
@@ -585,6 +588,7 @@ export default function Sidebar() {
   const { user } = usePermissions()
   const pathname = usePathname()
 
+  const { favorites } = useFavorites()
   const isEmployee = !user.isAdmin
   const isCollapsed = !isPinned && !isHovered
 
@@ -672,10 +676,27 @@ export default function Sidebar() {
       {/* ── Mobile: Employee Bottom Nav Bar ── */}
       {isEmployee && (
         <div className="md:hidden fixed bottom-0 left-0 w-full z-50 bg-sidebar border-t border-sidebar-border pb-safe pt-1 px-2 flex items-center justify-around shadow-[0_-4px_20px_rgba(0,0,0,0.2)]">
+          {/* Home is fixed; the shortcuts beside it are the person's own first
+              Favorites, which they already curate from ⌘K or the star and which
+              only ever contain pages their permissions allow. Someone with no
+              favourites keeps the original Tasks/Activity pair, so nothing
+              regresses for anyone who has never used the feature.
+
+              Two, not three: at 375px a sixth tab leaves ~62px each, and
+              favourite labels ("Contributions", "Social Calendar") truncate to
+              nonsense at that width. */}
           {[
-            { href: '/dashboard',              label: 'Home',     icon: LayoutDashboard },
-            { href: '/dashboard/tasks',        label: 'Tasks',    icon: CheckSquare },
-            { href: '/dashboard/contributions',label: 'Activity', icon: TrendingUp },
+            { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
+            ...(favorites.length
+              ? favorites.slice(0, 2).map((f: FavoriteEntry) => ({
+                  href: f.href,
+                  label: f.label,
+                  icon: resolveFavoriteIcon(f.iconKey),
+                }))
+              : [
+                  { href: '/dashboard/tasks',         label: 'Tasks',    icon: CheckSquare },
+                  { href: '/dashboard/contributions', label: 'Activity', icon: TrendingUp },
+                ]),
           ].map(item => {
             // Dashboard root: exact match only so Tasks/Contributions don't highlight it
             const active = item.href === '/dashboard'
@@ -687,7 +708,10 @@ export default function Sidebar() {
                 <div className={`w-10 h-8 flex items-center justify-center rounded-full transition-all ${active ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}>
                   <Icon className="w-5 h-5" />
                 </div>
-                <span className={`text-[10px] mt-1 font-medium transition-colors ${active ? 'text-foreground' : 'text-muted-foreground'}`}>
+                <span
+                  title={item.label}
+                  className={`text-[10px] mt-1 font-medium transition-colors max-w-full truncate ${active ? 'text-foreground' : 'text-muted-foreground'}`}
+                >
                   {item.label}
                 </span>
               </Link>
