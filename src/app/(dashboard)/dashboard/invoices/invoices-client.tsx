@@ -20,10 +20,7 @@ import {
   formatLocalDate,
 } from '@/lib/invoices/numbering'
 import { createClient } from '@/lib/supabase/client'
-import {
-  getStatusColor, getStatusLabel, isOverdue,
-  isEditable, formatBillingPeriod, getNextAction, compareInvoiceItems,
-} from '@/lib/utils/invoice'
+import { compareInvoiceItems, formatBillingPeriod, getNextAction, getStatusColor, getStatusLabel, isDueToSend, isEditable, isOverdue } from '@/lib/utils/invoice'
 import { publicInvoiceUrl, buildInvoiceShareText, whatsappShareUrl } from '@/lib/invoices/share'
 import { TEMPLATE_KEYS } from '@/lib/messaging/templates'
 import { renderInvoiceHtml } from '@/lib/invoices/render-html'
@@ -726,6 +723,20 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       // "Overdue" badge on each row uses, not a literal status-column equality.
       if (filterStatus === 'overdue') {
         if (!isOverdue(inv.due_date || '', inv.status, inv.issue_date) || inv.status === 'paid') return false
+      } else if (filterStatus === 'to_send') {
+        // Not a status — the daily question. See isDueToSend.
+        if (!isDueToSend(inv, todayISO())) return false
+      } else if (filterStatus === 'sent') {
+        // Overdue has its own filter, and a sent-but-late invoice was showing
+        // under both. Sent now means "out with the client and still inside its
+        // terms"; once it passes its due date it belongs to Overdue alone.
+        //
+        // Deliberately NOT applied to Partial. "Part-paid" and "late" are
+        // different questions, and every partial invoice happens to be overdue
+        // right now — so excluding them would empty that filter rather than
+        // tidy it.
+        if (inv.status !== 'sent') return false
+        if (isOverdue(inv.due_date || '', inv.status, inv.issue_date)) return false
       } else if (filterStatus && inv.status !== filterStatus) {
         return false
       }
@@ -767,6 +778,9 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   const stats = useMemo(() => {
     const active = invoices.filter(i => !['paid', 'cancelled', 'bad_debt'].includes(i.status))
     const drafts = invoices.filter(i => i.status === 'draft')
+    // Counted over every invoice, not the filtered view — the pill has to show
+    // the size of the job even while a different filter is on.
+    const dueToSend = invoices.filter(i => isDueToSend(i, todayISO()))
     const overdue = invoices.filter(i => isOverdue(i.due_date || '', i.status, i.issue_date))
     return {
       // Company-wide KPI cards are shown in ₹ — sum the INR snapshots, not the
@@ -775,6 +789,8 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       overdueAmt: overdue.reduce((s, i) => s + balanceDueInr(i), 0),
       draftCount: drafts.length,
       draftTotal: drafts.reduce((s, i) => s + invTotalInr(i), 0),
+      toSendCount: dueToSend.length,
+      toSendTotal: dueToSend.reduce((s, i) => s + invTotalInr(i), 0),
       overdueCount: overdue.length,
       // Stage-wise value cards: count + ₹ value sitting in each pipeline stage.
       // 'overdue' is derived (due_date vs today), matching the list filter and
@@ -2430,7 +2446,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           />
           <div className="flex flex-col lg:flex-row gap-2 items-start lg:items-center justify-between w-full">
             <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar w-full lg:w-auto shrink-0 pb-1 lg:pb-0 [&>*]:shrink-0">
-              {['', 'draft', 'reviewed', 'sent', 'partial', 'overdue'].map(s => (
+              {['', 'to_send', 'draft', 'reviewed', 'sent', 'partial', 'overdue'].map(s => (
                 <button key={s}
                   onClick={() => setFilterStatus(s)}
                   className={cn(
@@ -2439,7 +2455,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                       ? "bg-foreground text-background border-foreground shadow-sm"
                       : "bg-background text-muted-foreground border-border hover:border-foreground/30 hover:text-foreground"
                   )}
-                >{s ? getStatusLabel(s) : 'All'}</button>
+                  title={s === 'to_send'
+                    ? 'Not sent yet, and its issue date has arrived — what needs to go out today'
+                    : undefined}
+                >{s ? `${getStatusLabel(s)}${s === 'to_send' && stats.toSendCount ? ` ${stats.toSendCount}` : ''}` : 'All'}</button>
               ))}
             </div>
             <div className="flex items-center gap-3 shrink-0">

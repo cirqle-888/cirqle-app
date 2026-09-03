@@ -75,6 +75,9 @@ export function getStatusLabel(status: string): string {
     partial:     'Partial',
     paid:        'Paid',
     overdue:     'Overdue',
+    // Not a stored status — a list filter (see isDueToSend). Named here so the
+    // active-filter chip reads "To send" instead of the raw key.
+    to_send:     'To send',
     cancelled:   'Cancelled',
     bad_debt:    'Bad Debt',
     approved:    'Approved',
@@ -133,4 +136,37 @@ export function formatBillingPeriod(start?: string, end?: string): string {
   if (!start) return '—'
   const d = new Date(start + 'T00:00:00')
   return d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+}
+
+/**
+ * Statuses an invoice can be in before it has gone to the client.
+ * `sent`, `partial`, `paid` and the closed states are all past this point.
+ */
+const NOT_YET_SENT = ['draft', 'reviewed'] as const
+
+/**
+ * Is this invoice waiting to be sent NOW?
+ *
+ * The list mixes two billing cycles for most of a month. On the 4th of
+ * September the drafts on screen are next month's — auto-collecting September's
+ * work, issue date 1 October — sitting alongside the one August invoice that
+ * actually needs to go out today. Filtering by "draft" shows the wrong five;
+ * filtering by "reviewed" only helps if someone already reviewed it.
+ *
+ * The invoice's own `issue_date` is what separates them: it is the day the
+ * invoice is meant to be raised. Not yet sent, and that day has arrived, means
+ * it is late or due — and that is the whole answer to "what do I send today".
+ *
+ * An invoice with no issue date is treated as due, on the grounds that it has
+ * nothing scheduling it for later and should not hide from the one view whose
+ * job is to catch stragglers.
+ */
+export function isDueToSend(
+  inv: { status?: string | null; issue_date?: string | null },
+  todayIso: string,
+): boolean {
+  if (!NOT_YET_SENT.includes((inv.status ?? '') as typeof NOT_YET_SENT[number])) return false
+  const issue = (inv.issue_date ?? '').slice(0, 10)
+  if (!issue) return true
+  return issue <= todayIso
 }
