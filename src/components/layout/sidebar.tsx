@@ -631,8 +631,8 @@ export default function Sidebar() {
         </button>
       )}
 
-      {/* ── Mobile: backdrop (admin drawer) ── */}
-      {mobileOpen && !isEmployee && (
+      {/* ── Mobile: backdrop (drawer) ── */}
+      {mobileOpen && (
         <div
           className="md:hidden fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
           onClick={() => setMobileOpen(false)}
@@ -640,8 +640,19 @@ export default function Sidebar() {
         />
       )}
 
-      {/* ── Mobile: slide-out drawer (admin) ── */}
-      {!isEmployee && (
+      {/* ── Mobile: slide-out drawer ──
+          Was admin-only, alongside a three-item bottom bar for everyone else.
+          That assumed an employee only ever needs Home, Tasks and Activity —
+          true when employees were designers, and false now: a Task Manager
+          holds Invoices, Cash Book, Statements, Follow-ups, Clients, Requests
+          and Approvals on desktop and could reach none of them on a phone.
+
+          The drawer already renders exactly what the person is allowed to see
+          (SidebarContent filters through isNavItemVisible), so it needed no
+          new nav logic — only for the gate to come off. Admins open it from
+          the hamburger; employees open it from the More tab below, since the
+          employee header reserves no room at top-left for one. */}
+      {(
         <aside
           className={`md:hidden fixed top-0 left-0 z-50 h-full w-72 bg-sidebar border-r border-sidebar-border shadow-2xl flex flex-col
             transition-transform duration-300 ease-in-out
@@ -672,7 +683,7 @@ export default function Sidebar() {
               : pathname.startsWith(item.href)
             const Icon = item.icon
             return (
-              <Link key={item.href} href={item.href} className="flex flex-col items-center justify-center py-2 px-1 w-1/4">
+              <Link key={item.href} href={item.href} className="flex flex-col items-center justify-center py-2 px-1 w-1/5">
                 <div className={`w-10 h-8 flex items-center justify-center rounded-full transition-all ${active ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}>
                   <Icon className="w-5 h-5" />
                 </div>
@@ -683,10 +694,24 @@ export default function Sidebar() {
             )
           })}
 
+          {/* Everything else they can reach. The three tabs above are the
+              daily destinations; this is the rest of what their permissions
+              allow, which used to be unreachable on a phone entirely. */}
+          <button
+            onClick={() => { setProfileSheetOpen(false); setMobileOpen(true) }}
+            aria-label="More sections"
+            className="flex flex-col items-center justify-center py-2 px-1 w-1/5"
+          >
+            <div className="w-10 h-8 flex items-center justify-center rounded-full transition-all text-muted-foreground">
+              <Menu className="w-5 h-5" />
+            </div>
+            <span className="text-[10px] mt-1 font-medium text-muted-foreground">More</span>
+          </button>
+
           {/* Profile tab */}
           <button
             onClick={() => setProfileSheetOpen(o => !o)}
-            className="flex flex-col items-center justify-center py-2 px-1 w-1/4"
+            className="flex flex-col items-center justify-center py-2 px-1 w-1/5"
           >
             <div className={`w-10 h-8 flex items-center justify-center rounded-full transition-all ${profileSheetOpen ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}>
               <UserCircle className="w-5 h-5" />
