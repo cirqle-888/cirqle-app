@@ -588,11 +588,6 @@ export default function Sidebar() {
   const pathname = usePathname()
 
   const { favorites } = useFavorites()
-  // Dashboard is a common favourite and it is already the fixed Home tab, so
-  // taking the first two favourites verbatim gave admins "Home" and
-  // "Dashboard" side by side, both going to the same page. Drop anything that
-  // duplicates a tab we already show.
-  const shortcutFavorites = favorites.filter((f: FavoriteEntry) => f.href !== '/dashboard')
   const isCollapsed = !isPinned && !isHovered
 
   // Default to pinned state when rendering on server to avoid layout shift,
@@ -683,19 +678,21 @@ export default function Sidebar() {
               Two, not three: at 375px a sixth tab leaves ~62px each, and
               favourite labels ("Contributions", "Social Calendar") truncate to
               nonsense at that width. */}
-          {[
-            { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
-            ...(shortcutFavorites.length
-              ? shortcutFavorites.slice(0, 2).map((f: FavoriteEntry) => ({
-                  href: f.href,
-                  label: f.label,
-                  icon: resolveFavoriteIcon(f.iconKey),
-                }))
-              : [
-                  { href: '/dashboard/tasks',         label: 'Tasks',    icon: CheckSquare },
-                  { href: '/dashboard/contributions', label: 'Activity', icon: TrendingUp },
-                ]),
-          ].map(item => {
+          {(favorites.length
+            ? favorites.slice(0, 3).map((f: FavoriteEntry) => ({
+                href: f.href,
+                label: f.label,
+                icon: resolveFavoriteIcon(f.iconKey),
+              }))
+            // Never favourited anything: the original three, so the bar is
+            // still useful on day one and nothing regresses for people who
+            // have not discovered Favorites.
+            : [
+                { href: '/dashboard',               label: 'Home',     icon: LayoutDashboard },
+                { href: '/dashboard/tasks',         label: 'Tasks',    icon: CheckSquare },
+                { href: '/dashboard/contributions', label: 'Activity', icon: TrendingUp },
+              ]
+          ).map(item => {
             // Dashboard root: exact match only so Tasks/Contributions don't highlight it
             const active = item.href === '/dashboard'
               ? pathname === '/dashboard'
