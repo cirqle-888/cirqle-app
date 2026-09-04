@@ -1202,9 +1202,25 @@ export default function ContributionsClient({
       const notice = closedPeriodNotice(saveRes.correctedMonth, saveRes.adjustmentsRecorded)
       toast.info(notice.title, notice.body, 10000)
     } else if (calculatedResult && calculatedResult.employeeEarnings.length > 0) {
-      // Auto-dismiss toast showing who was paid what
+      // WHO was scored, and — only for someone allowed to see earnings — what
+      // each of them made.
+      //
+      // The amounts are computed in the browser from the task's billing, so
+      // they exist here whether or not the person may see them. Every other
+      // site checks `canSeeFinancials && showFinancials`; this toast did not,
+      // and printed "CQID002 ₹99" to a Task Manager who holds neither
+      // contributions.view_earnings nor payroll.view_amounts — including her
+      // own pay, and everyone else's, on a screen that is often shared.
+      //
+      // Saving contributions is exactly the action such a role performs all
+      // day, so this fired constantly. The confirmation is still useful
+      // without the money, so the CQIDs stay and only the ₹ drops out.
+      const showMoney = canSeeFinancials && showFinancials
       const lines = calculatedResult.employeeEarnings
-        .map((e: any) => `${employees.find((emp: any) => emp.id === e.employeeId)?.cqid ?? '?'} ₹${Math.round(e.earnings).toLocaleString('en-IN')}`)
+        .map((e: any) => {
+          const cqid = employees.find((emp: any) => emp.id === e.employeeId)?.cqid ?? '?'
+          return showMoney ? `${cqid} ₹${Math.round(e.earnings).toLocaleString('en-IN')}` : cqid
+        })
         .join(' · ')
       toast.success('Contributions saved', lines, 3500)
     } else {
@@ -2987,7 +3003,7 @@ export default function ContributionsClient({
         )}
 
         {/* ── Commission Breakdown ── */}
-        {calculatedResult && showFinancials && (
+        {calculatedResult && canSeeFinancials && showFinancials && (
           <div className="rounded-2xl overflow-hidden shadow-xl shadow-green-500/5 border border-green-500/20">
             {/* Header */}
             <div className="px-5 py-4 bg-gradient-to-r from-green-500/10 to-emerald-500/5 border-b border-green-500/15 flex items-center gap-3">
@@ -3132,7 +3148,7 @@ export default function ContributionsClient({
             <span className="hidden sm:inline">Discard draft</span>
           </button>
         )}
-        {calculatedResult && showFinancials && (
+        {calculatedResult && canSeeFinancials && showFinancials && (
           <div className="ml-auto text-right">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wide leading-tight">Total payable</p>
             <p className="text-2xl font-black gradient-text leading-tight">₹{totalEarnings.toFixed(0)}</p>

@@ -465,8 +465,16 @@ export function ContributionEntryPanel({
       const notice = closedPeriodNotice(res.correctedMonth, res.adjustmentsRecorded)
       toast.info(notice.title, notice.body, 10000)
     } else if (calculatedResult?.employeeEarnings.length) {
+      // Same rule the on-screen amounts below already follow (canSeeFinancials):
+      // the ₹ only appear for someone permitted to see earnings. This toast
+      // used to print them unconditionally, leaking each employee's pay — and
+      // the saver's own — to a role without contributions.view_earnings.
+      const showMoney = showEarnings && showFinancials
       const lines = calculatedResult.employeeEarnings
-        .map((e: any) => `${employees.find(em => em.id === e.employeeId)?.cqid ?? '?'} ₹${Math.round(e.earnings).toLocaleString('en-IN')}`)
+        .map((e: any) => {
+          const cqid = employees.find(em => em.id === e.employeeId)?.cqid ?? '?'
+          return showMoney ? `${cqid} ₹${Math.round(e.earnings).toLocaleString('en-IN')}` : cqid
+        })
         .join(' · ')
       toast.success('Contributions saved', lines, 3500)
     } else {

@@ -34,6 +34,7 @@ import type { ReceiptInput } from '@/components/cashbook/receipt-modal'
 import Link from 'next/link'
 import { todayISO, formatISODateShort } from '@/lib/utils/local-date'
 import { computeMarkup, markupLabel, type MarkupType } from '@/lib/finance/markup'
+import { suggestEntryDescription } from '@/lib/cashbook/describe-entry'
 
 // Allocation modals (253 + 313 lines) only mount when an admin clicks Allocate
 // on an entry. Split off the initial cashbook chunk.
@@ -565,7 +566,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         rate_date,
         category_id:     form.category_id,
         bank_account_id: form.bank_account_id || null,
-        description:     form.description,
+        description:     effectiveDescription,
         reference:       form.reference,
         client_id:       savedClientId,
         scope:           savedScope,
@@ -594,7 +595,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 exchange_rate,
                 rate_source,
                 entry_date:      form.entry_date,
-                description:     form.description,
+                description:     effectiveDescription,
                 reference:       form.reference,
                 client_id:       savedClientId || undefined,
                 scope:           savedScope,
@@ -667,7 +668,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         exchange_rate,
         rate_source,
         rate_date,
-        description: form.description,
+        description: effectiveDescription,
         reference: form.reference,
         invoice_id: isLegacySingle ? splitLines[0].invoice_id : null,
         allocations: isLegacySingle ? [] : splitLines,
@@ -679,7 +680,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         markup_type:  markupForSave(insertClientId).type,
         markup_value: markupForSave(insertClientId).value,
       },
-      form.description,
+      effectiveDescription,
       {
         mode: (smartMode as 'credit_given' | 'credit_return' | null),
         entity_type: smartExtra.entity_type,
@@ -873,14 +874,6 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   }, [sortedDueInvoices, form.allocations, allocClientId])
 
   /** Auto description for a split — kept in sync until the user types their own. */
-  function describeAllocations(lines: AllocLine[]): string {
-    if (lines.length === 0) return ''
-    const invs = lines.map(l => dueInvoices.find(i => i.id === l.invoice_id)).filter(Boolean) as DueInvoice[]
-    if (invs.length === 0) return ''
-    const client = invs[0].client?.name
-    return `Payment for ${invs.map(i => i.invoice_number).join(', ')}${client ? ` — ${client}` : ''}`
-  }
-
   /** Add an invoice to the split, taking as much of the unassigned balance as it can absorb. */
   function addAllocation(invoiceId: string) {
     const inv = dueInvoices.find(i => i.id === invoiceId)
@@ -916,7 +909,6 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       client_filter_id: inv.client?.id || p.client_filter_id,
       fully_paid:       false,
       reference:        lines.length === 1 ? (inv.invoice_number || '') : '',
-      description:      descTouched ? p.description : describeAllocations(lines),
     }))
   }
 
@@ -930,7 +922,6 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       ...p,
       allocations: lines,
       reference:   lines.length === 1 ? (dueInvoices.find(i => i.id === lines[0].invoice_id)?.invoice_number || '') : '',
-      description: descTouched ? p.description : describeAllocations(lines),
     }))
   }
 
@@ -965,12 +956,12 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       // A single invoice number is a useful entry reference; across a split it
       // just duplicates what the allocations already say.
       reference:        lines.length === 1 ? (firstInv?.invoice_number || '') : '',
-      description:      descTouched ? p.description : describeAllocations(lines),
     }))
   }
 
   // Determine smart mode from selected category name
   const selectedCat = categories.find(c => c.id === form.category_id)
+
   const smartMode = selectedCat ? (SMART[selectedCat.name.toLowerCase()] || null) : null
 
   // Tokenized search field map (Description / Reference / Category / Amount + operators).
@@ -986,6 +977,45 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
   // Extra smart state (credit given/return, salary, client link)
   const [smartExtra, setSmartExtra] = useState<Record<string, string>>({})
+
+  /**
+   * What the Description box offers when it is empty. Recomputed from what
+   * has been filled in so far — the invoices being settled, the client the
+   * cost is for, the category, the tags — so it sharpens as the form is
+   * completed rather than being a one-shot guess at the moment it opens.
+   */
+  const descSuggestion = useMemo(() => {
+    const clientId = smartExtra.client_id || form.client_filter_id || ''
+    const invNumbers = form.allocations
+      .map(l => dueInvoices.find(i => i.id === l.invoice_id)?.invoice_number)
+      .filter(Boolean) as string[]
+    const invClient = form.allocations.length
+      ? dueInvoices.find(i => i.id === form.allocations[0].invoice_id)?.client?.name
+      : undefined
+    const emp = smartExtra.employee_id
+      ? employees.find((e: { id: string }) => e.id === smartExtra.employee_id)
+      : undefined
+    return suggestEntryDescription({
+      invoiceNumbers: invNumbers,
+      clientName: invClient || clients.find((c: { id: string; name: string }) => c.id === clientId)?.name,
+      categoryName: selectedCat?.name,
+      tags: form.tags,
+      employeeName: emp ? maskEmployee(emp) : undefined,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.allocations, form.client_filter_id, form.tags, smartExtra.client_id, smartExtra.employee_id, selectedCat?.name, dueInvoices, clients, employees])
+
+  /**
+   * What the box shows and what gets saved: the user's own words the moment
+   * they type any, the live suggestion until then.
+   *
+   * Derived rather than synced into form state — an effect that wrote the
+   * suggestion into `description` would re-render on every keystroke-adjacent
+   * change and, worse, make "what the user actually typed" and "what we
+   * guessed" the same field, so nothing could tell them apart afterwards.
+   */
+  const effectiveDescription = descTouched ? form.description : descSuggestion
+
 
   function resetSmart() { setSmartExtra({}) }
 
@@ -2060,6 +2090,50 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 )}
               </div>
 
+              {/* ── Description ───────────────────────────────────────────────
+                   The line every later screen shows — the Cash Book list, the
+                   expense line on the client's invoice, a P&L drilldown. It sat
+                   last, below Recurring and More options, so the one field that
+                   has to read like a sentence was the one you reached by
+                   scrolling past everything optional. It belongs with the
+                   fields that define the entry.
+
+                   Suggested from what is already filled in, and only while
+                   untouched: type a single character and the suggestion stops
+                   for good. Clearing the box hands it back. ── */}
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <label className="block text-xs font-medium text-muted-foreground">
+                    Description
+                  </label>
+                  {descSuggestion && !descTouched && (
+                    <span className="text-[10px] text-muted-foreground/70">Suggested — edit freely</span>
+                  )}
+                  {descSuggestion && descTouched && form.description !== descSuggestion && (
+                    <button
+                      type="button"
+                      onClick={() => { setDescTouched(false); setForm(p => ({ ...p, description: descSuggestion })) }}
+                      className="text-[10px] text-primary hover:underline"
+                    >
+                      Use suggestion
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  value={effectiveDescription}
+                  onChange={e => {
+                    const v = e.target.value
+                    // Emptying the box is a request for help again, not a
+                    // deliberate blank description.
+                    setDescTouched(v.trim().length > 0)
+                    setForm(p => ({ ...p, description: v }))
+                  }}
+                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
+                  placeholder={descSuggestion || 'What is this for?'}
+                />
+              </div>
+
               {/* ── Invoice split ──────────────────────────────────────────────
                   One receipt, any number of invoices. The client's money is
                   divided in ₹ right here, so a ₹2,750 deposit covering a ₹1,000
@@ -2637,10 +2711,6 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 )
               })()}
 
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Description</label>
-                <input type="text" value={form.description} onChange={e => { setDescTouched(true); setForm(p => ({ ...p, description: e.target.value })) }} className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none" placeholder="What is this for?" />
-              </div>
 
               {/* Recurring entry — hidden when editing an existing entry */}
 
