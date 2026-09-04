@@ -382,7 +382,11 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
       <WorkspaceSwitcher isCollapsed={isCollapsed} />
 
       {/* Nav */}
-      <nav className={`flex-1 py-4 overflow-y-auto ${isCollapsed ? 'px-2' : 'px-3'}`}>
+      {/* pb-20 on mobile clears the fixed bottom nav bar this same content
+          renders inside of on a phone (the desktop rail has none, hence
+          md:pb-4) — without it the last section(s) sat underneath the bar,
+          unreachable no matter how far you scrolled. */}
+      <nav className={`flex-1 pt-4 pb-20 md:pb-4 overflow-y-auto ${isCollapsed ? 'px-2' : 'px-3'}`}>
         <FavoritesSection isCollapsed={isCollapsed} activeHref={activeHref} onNavClick={onNavClick} />
         {visibleNavSections.map((section, sIdx) => {
           const visibleItems = section.items
