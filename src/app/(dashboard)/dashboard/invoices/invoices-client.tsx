@@ -937,7 +937,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
     // Recalculate totals
     const newItems = (inv.items || []).filter(it => it.id !== itemId)
-    const newSubtotal = newItems.reduce((s, it) => s + it.total, 0)
+    const newSubtotal = newItems.reduce((s, it) => s + (it.total || 0), 0)
     const newTax = newSubtotal * (inv.tax_rate || 0) / 100
     const newTotal = newSubtotal + newTax - (inv.discount_amount || 0) + (inv.previous_balance || 0)
     await supabase.from('invoices').update({
@@ -1079,7 +1079,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     await supabase.from('invoice_items').update({ unit_price: unitPrice, total: newTotal }).eq('id', itemId)
     if (forceEditId === invoiceId) await logChange(invoiceId, 'item_price', String(oldPrice), String(unitPrice))
     const newItems = (inv!.items || []).map(it => it.id === itemId ? { ...it, unit_price: unitPrice, total: newTotal } : it)
-    const newSubtotal = newItems.reduce((s, it) => s + it.total, 0)
+    const newSubtotal = newItems.reduce((s, it) => s + (it.total || 0), 0)
     const taxAmt = newSubtotal * (inv!.tax_rate || 0) / 100
     const newTotalAmt = Math.max(0, newSubtotal + taxAmt - (inv!.discount_amount || 0) + (inv!.previous_balance || 0))
     await supabase.from('invoices').update({ subtotal: newSubtotal, tax_amount: taxAmt, total_amount: newTotalAmt }).eq('id', invoiceId)
@@ -1125,7 +1125,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
     }).select().single()
     if (!newItem) return
     const newItems = [...(inv.items || []), newItem]
-    const newSubtotal = newItems.reduce((s, it) => s + it.total, 0)
+    const newSubtotal = newItems.reduce((s, it) => s + (it.total || 0), 0)
     const taxAmt = newSubtotal * (inv.tax_rate || 0) / 100
     const newTotalAmt = Math.max(0, newSubtotal + taxAmt - (inv.discount_amount || 0) + (inv.previous_balance || 0))
     await supabase.from('invoices').update({ subtotal: newSubtotal, tax_amount: taxAmt, total_amount: newTotalAmt }).eq('id', invoiceId)
@@ -1752,7 +1752,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         await generateInvoiceNumber(supabase, invoiceDate, clientCode)
 
       const validItems = newForm.items.filter(it => it.description.trim())
-      const subtotal = validItems.reduce((s, it) => s + it.total, 0)
+      const subtotal = validItems.reduce((s, it) => s + (it.total || 0), 0)
 
       // Base insert with columns that always exist
       const { data: inv, error } = await supabase.from('invoices').insert({

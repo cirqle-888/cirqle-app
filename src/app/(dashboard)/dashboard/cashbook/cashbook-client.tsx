@@ -575,8 +575,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         // Cushion only rides on a client-tagged expense — an untagged or
         // incoming entry is never rebilled, so it is stored as 'none'
         // rather than kept around to surprise a later re-tag.
-        markup_type:  markupForSave(savedClientId).type,
-        markup_value: markupForSave(savedClientId).value,
+        // Omitted entirely — not sent as 0 — when this person cannot see the
+        // cushion. markup_value is stripped from their payload, so the form
+        // loads it blank; sending that back would silently wipe a real margin
+        // on every edit. Leaving the keys out means the column is untouched.
+        ...(canSeeMarkup ? {
+          markup_type:  markupForSave(savedClientId).type,
+          markup_value: markupForSave(savedClientId).value,
+        } : {}),
       })
       if (result.ok) {
         const savedSplitIds = form.type === 'outflow' ? form.splitEmployeeIds : []
@@ -677,8 +683,10 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         scope: insertClientId ? 'client' : (form.scope || null),
         tags: form.tags,
         employee_split_ids: form.type === 'outflow' ? form.splitEmployeeIds : [],
-        markup_type:  markupForSave(insertClientId).type,
-        markup_value: markupForSave(insertClientId).value,
+        ...(canSeeMarkup ? {
+          markup_type:  markupForSave(insertClientId).type,
+          markup_value: markupForSave(insertClientId).value,
+        } : {}),
       },
       effectiveDescription,
       {
@@ -963,6 +971,12 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const selectedCat = categories.find(c => c.id === form.category_id)
 
   const smartMode = selectedCat ? (SMART[selectedCat.name.toLowerCase()] || null) : null
+
+  // markupAvailable only answers "does the column exist" — a schema probe, not
+  // a permission. On its own it showed the rebill cushion, and let it be
+  // overwritten, by anyone who can edit an entry. The margin belongs with the
+  // amounts it is a margin on.
+  const canSeeMarkup = markupAvailable && showAmounts
 
   // Tokenized search field map (Description / Reference / Category / Amount + operators).
   const CASHBOOK_FIELDS: Record<string, FacetFieldDef> = useMemo(() => ({
@@ -2638,7 +2652,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                    where it means anything — and stays shut otherwise. ── */}
               {(() => {
                 const rebillClientId = smartExtra.client_id || form.client_filter_id || ''
-                const rebillable = markupAvailable && form.type === 'outflow' && !!rebillClientId
+                const rebillable = canSeeMarkup && form.type === 'outflow' && !!rebillClientId
                 if (!rebillable) return null
 
                 const cost = parseFloat(form.amount) || 0

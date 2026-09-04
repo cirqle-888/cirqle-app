@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { stripCashbookAmounts, stripCashbookList, isSalaryCashbookEntry } from './strip'
+import {
+  isSalaryCashbookEntry,
+  stripCashbookAmounts,
+  stripCashbookList,
+  stripInvoiceAmounts,
+  stripPayrollAmounts,
+} from './strip'
 
 describe('stripCashbookAmounts — salary is a separate axis from cashbook amounts', () => {
   const entry = () => ({
@@ -92,5 +98,67 @@ describe('stripCashbookList — salary rows are removed, not masked', () => {
   it('an all-salary list without payroll visibility comes back empty, not stripped-but-present', () => {
     const out = stripCashbookList([salary(1), salary(2)], true, false)
     expect(out).toEqual([])
+  })
+})
+
+/**
+ * The four gaps found in the 2026-09-04 audit.
+ *
+ * Every one had the same shape: the strip named columns that DO NOT EXIST
+ * (`line_total`, `deductions_total`, `advances_total`, `credits_total`) while
+ * the real ones went straight through. A no-op that reads as thorough is worse
+ * than no strip at all, because nobody looks at it twice.
+ *
+ * These assert against the column names the tables actually have.
+ */
+describe('audit 2026-09-04 — the columns that really exist are the ones removed', () => {
+  it('an invoice line loses its total, not just a field named amount', () => {
+    // Evidence: a Task Manager without view_line_pricing saw "2 × — = ₹600.00".
+    // The dash was unit_price, correctly stripped. The ₹600.00 was `total`.
+    const out = stripInvoiceAmounts(
+      { id: 'i1', items: [{ id: 'l1', unit_price: 300, total: 600, description: 'x' }] },
+      { amounts: true, linePricing: false },
+    )
+    const line = (out.items as Record<string, unknown>[])[0]
+    expect(line).not.toHaveProperty('total')
+    expect(line).not.toHaveProperty('unit_price')
+    expect(line.description).toBe('x')   // non-money survives
+  })
+
+  it('an invoice loses its carried-forward balance', () => {
+    const out = stripInvoiceAmounts(
+      { id: 'i1', total_amount: 100, previous_balance: 250 },
+      { amounts: false, linePricing: false },
+    )
+    expect(out).not.toHaveProperty('previous_balance')
+  })
+
+  it('payroll loses the deduction columns the table actually has', () => {
+    const out = stripPayrollAmounts(
+      { id: 'p1', net_salary: 1000, advances_deducted: 200, other_deductions: 50, month: 8 },
+      false,
+    )
+    expect(out).not.toHaveProperty('advances_deducted')
+    expect(out).not.toHaveProperty('other_deductions')
+    expect(out.month).toBe(8)
+  })
+
+  it('a cashbook entry loses the rebill cushion, which is the margin', () => {
+    const out = stripCashbookAmounts(
+      { id: 'c1', amount: 2330, markup_value: 750, markup_amount: 750, description: 'print' },
+      false,
+    )
+    expect(out).not.toHaveProperty('markup_value')
+    expect(out).not.toHaveProperty('markup_amount')
+    expect(out.description).toBe('print')
+  })
+
+  it('none of it happens to someone who IS permitted', () => {
+    const inv = { id: 'i1', previous_balance: 250, items: [{ id: 'l1', unit_price: 300, total: 600 }] }
+    expect(stripInvoiceAmounts(inv, { amounts: true, linePricing: true })).toEqual(inv)
+    const pay = { id: 'p1', advances_deducted: 200, other_deductions: 50 }
+    expect(stripPayrollAmounts(pay, true)).toEqual(pay)
+    const cb = { id: 'c1', amount: 2330, markup_value: 750 }
+    expect(stripCashbookAmounts(cb, true)).toEqual(cb)
   })
 })

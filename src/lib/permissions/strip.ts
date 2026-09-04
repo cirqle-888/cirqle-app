@@ -111,11 +111,17 @@ export function stripPayrollAmounts<T extends Record<string, any>>(row: T, canVi
     // Every money column on payroll must be listed here — one omission and
     // the amount reaches a viewer who is not allowed to see pay.
     adjustment_earned, ownership_earned, bonus,
+    advances_deducted, other_deductions,
     ...rest
   } = row
   void base_salary; void commission_earned; void net_salary; void gross_salary
   void deductions_total; void advances_total; void credits_total; void paid_amount
   void adjustment_earned; void ownership_earned; void bonus
+  // advances_deducted / other_deductions are the columns the table really has.
+  // The three *_total names above do not exist on it, so this function read as
+  // thorough while every actual deduction amount reached the browser — for 12
+  // of 13 roles, Finance Controller and Accountant among them.
+  void advances_deducted; void other_deductions
   return rest as T
 }
 export function stripPayrollListAmounts<T extends Record<string, any>>(rows: T[], canView: boolean): T[] {
@@ -151,6 +157,8 @@ export function stripInvoiceAmounts<T extends Record<string, any>>(
     delete out.subtotal
     delete out.tax_amount
     delete out.discount_amount
+    // Carried-forward balance is money owed, and it prints on the invoice.
+    delete out.previous_balance
     if (Array.isArray(out.payments)) {
       out.payments = out.payments.map((p: any) => {
         const { amount, amount_inr, ...rest } = p
@@ -162,8 +170,13 @@ export function stripInvoiceAmounts<T extends Record<string, any>>(
   if (!flags.linePricing) {
     if (Array.isArray(out.items)) {
       out.items = out.items.map((it: any) => {
-        const { amount, unit_price, line_total, ...rest } = it
-        void amount; void unit_price; void line_total
+        // `total` is the column that actually exists. `amount` and
+        // `line_total` never have — they were removed here for years while the
+        // real per-line figure went straight through, which is exactly what
+        // billing.view_line_pricing exists to hide. The dead names are kept so
+        // an older row shape cannot slip past.
+        const { amount, unit_price, line_total, total, ...rest } = it
+        void amount; void unit_price; void line_total; void total
         // task nested join may carry billing_amount_inr — strip that too
         if (rest.task) rest.task = stripTaskPricing(rest.task, false)
         return rest
@@ -202,6 +215,10 @@ export function stripCashbookAmounts<T extends Record<string, any>>(
   if (!canView) {
     delete out.amount
     delete out.amount_inr
+    // The rebill cushion IS the margin on a client cost. Someone who may not
+    // see what was spent must not see what it is marked up by.
+    delete out.markup_value
+    delete out.markup_amount
     if (Array.isArray(out.allocations)) {
       out.allocations = out.allocations.map((a: any) => {
         const { allocated_amount, ...rest } = a
