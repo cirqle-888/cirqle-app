@@ -219,3 +219,55 @@ describe('portfolio aggregates are gated on showTotals, not showAmounts', () => 
     expect(src).toContain('{showAmounts && ` · ${fmtINR(partnerPending.reduce')
   })
 })
+
+/**
+ * Contribution earnings never reach a toast that outranks the screen behind it.
+ *
+ * Found 2026-09-04. Saving contributions popped "Contributions saved · CQID002
+ * ₹99" — every scored employee's pay, and the saver's own. Every on-screen
+ * amount in that view checks the earnings permission; the toast checked
+ * nothing. It is computed in the browser from the task's billing, so the number
+ * exists there whether or not the person may see it.
+ *
+ * The role that hit it is the one that hits it most: a Task Manager scores
+ * other people's contributions all day and holds neither
+ * contributions.view_earnings nor payroll.view_amounts. A confirmation popup is
+ * also the worst possible carrier — it appears unbidden, over whatever is on
+ * screen, on a monitor other people can see.
+ */
+describe('contribution earnings toasts obey the earnings permission', () => {
+  const cases: { file: string; flag: string }[] = [
+    { file: 'src/app/(dashboard)/dashboard/contributions/contributions-client.tsx', flag: 'canSeeFinancials && showFinancials' },
+    { file: 'src/components/ui/contribution-entry-panel.tsx', flag: 'showEarnings && showFinancials' },
+  ]
+
+  for (const { file, flag } of cases) {
+    it(`${file.split('/').pop()} decides the ₹ from the permission before building the toast`, () => {
+      const src = read(file)
+      const at = src.indexOf("toast.success('Contributions saved', lines")
+      expect(at, 'the saved-contributions toast has moved or been renamed').toBeGreaterThan(-1)
+
+      // The 900 characters before the toast build its `lines`. The money must
+      // be behind a permission decision taken there, not printed regardless.
+      const build = src.slice(Math.max(0, at - 900), at)
+      expect(build, `${file}: no showMoney gate found before the toast`).toContain('showMoney')
+      expect(build, `${file}: showMoney must derive from ${flag}`).toContain(flag)
+      // The unconditional template that leaked is gone: every ₹ in that block
+      // is now behind the ternary.
+      expect(
+        /\$\{cqid\} ₹\$\{Math\.round\(e\.earnings\)/.test(build) && !build.includes('showMoney ?'),
+        `${file}: earnings are interpolated without the showMoney check`,
+      ).toBe(false)
+    })
+  }
+
+  it('the money panels check the permission, not just the Show-₹ toggle', () => {
+    // `showFinancials` is a display toggle. It was the ONLY guard on the
+    // earnings breakdown and the "Total payable" footer, which made those
+    // amounts depend on a button being hidden rather than on the grant itself
+    // — the same shape of mistake as the toast.
+    const src = read('src/app/(dashboard)/dashboard/contributions/contributions-client.tsx')
+    expect(src).not.toContain('{calculatedResult && showFinancials && (')
+    expect(src).toContain('{calculatedResult && canSeeFinancials && showFinancials && (')
+  })
+})
