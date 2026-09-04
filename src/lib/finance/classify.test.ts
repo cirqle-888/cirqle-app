@@ -5,6 +5,9 @@ import {
   isScopeColumnMissing,
   withoutScope,
   retryWithoutScope,
+  missingColumnName,
+  withoutKeys,
+  retryWithoutMissingColumns,
 } from './classify'
 
 describe('deriveWorkScope', () => {
@@ -97,5 +100,72 @@ describe('retryWithoutScope', () => {
     })
     expect(calls).toEqual([false])
     expect(res.error?.code).toBe('23505')
+  })
+})
+
+describe('missingColumnName', () => {
+  it('reads the column out of both error shapes', () => {
+    expect(missingColumnName({ code: 'PGRST204', message: "Could not find the 'markup_type' column of 'cashbook_entries'" })).toBe('markup_type')
+    expect(missingColumnName({ code: '42703', message: 'column "scope" of relation "cashbook_entries" does not exist' })).toBe('scope')
+  })
+
+  it('is null for any other failure — a real error must not be retried away', () => {
+    expect(missingColumnName({ code: '23505', message: 'duplicate key value' })).toBeNull()
+    expect(missingColumnName(null)).toBeNull()
+    expect(missingColumnName({ code: 'PGRST204', message: 'no quoted name here' })).toBeNull()
+  })
+})
+
+describe('withoutKeys', () => {
+  it('drops only the named keys', () => {
+    expect(withoutKeys({ a: 1, scope: 'company', markup_type: 'none' }, ['scope', 'markup_type'])).toEqual({ a: 1 })
+  })
+
+  it('returns the row untouched when nothing is omitted', () => {
+    const row = { a: 1 }
+    expect(withoutKeys(row, [])).toBe(row)
+  })
+})
+
+describe('retryWithoutMissingColumns', () => {
+  const missing = (col: string) => ({ error: { code: 'PGRST204', message: `Could not find the '${col}' column` } })
+
+  it('drops columns one at a time until the write lands', async () => {
+    const seen: string[][] = []
+    const res = await retryWithoutMissingColumns(async omit => {
+      seen.push([...omit])
+      if (!omit.includes('scope')) return missing('scope')
+      if (!omit.includes('markup_type')) return missing('markup_type')
+      return { error: null }
+    })
+    expect(res.error).toBeNull()
+    expect(seen).toEqual([[], ['scope'], ['scope', 'markup_type']])
+  })
+
+  it('returns a real error without retrying', async () => {
+    let calls = 0
+    const res = await retryWithoutMissingColumns(async () => {
+      calls++
+      return { error: { code: '23505', message: 'duplicate key' } }
+    })
+    expect(calls).toBe(1)
+    expect(res.error?.code).toBe('23505')
+  })
+
+  it('stops rather than looping when the same column is named twice', async () => {
+    let calls = 0
+    const res = await retryWithoutMissingColumns(async () => {
+      calls++
+      return missing('scope')
+    })
+    expect(calls).toBe(2)          // first attempt, one retry, then give up
+    expect(res.error).not.toBeNull()
+  })
+
+  it('is bounded by maxAttempts even with fresh column names each time', async () => {
+    let calls = 0
+    const res = await retryWithoutMissingColumns(async () => missing(`col_${calls++}`), 3)
+    expect(calls).toBe(3)
+    expect(res.error).not.toBeNull()
   })
 })
