@@ -157,6 +157,7 @@ export default async function CashBookPage() {
       pendingPayrolls={(pendingPayrollsRes.data || []) as any[]}
       companySettings={companySettings}
       showAmounts={vis.cashbookAmounts}
+      showTotals={vis.cashbookTotals}
       canEditEntries={hasPermission(me, PERMS.CASHBOOK_EDIT)}
       allTags={((tagsRes as any)?.data || []).map((t: any) => t.name as string)}
     />

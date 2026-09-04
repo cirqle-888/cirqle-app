@@ -29,16 +29,26 @@ import { join } from 'path'
 const ROOT = process.cwd()
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8')
 
-describe('cash book money screens are gated on cashbook.view_amounts', () => {
+describe('cash book money screens are gated on cashbook.view_amounts / cashbook.view_totals', () => {
   const middleware = read('src/lib/supabase/middleware.ts')
   const client = read('src/app/(dashboard)/dashboard/cashbook/cashbook-client.tsx')
 
-  it.each(['accounts', 'reconciliation'])('the /%s route requires the amount permission', (sub) => {
+  // Accounts shows BALANCES — an aggregate across entries — so it moved onto
+  // cashbook.view_totals on 2026-09-04, the same split this file's own header
+  // comment describes for billing.view_totals. Reconciliation stays on
+  // view_amounts: its page is requireAdmin() regardless, so the finer split
+  // does not matter there.
+  const routePerm: Record<string, string> = {
+    accounts: 'cashbook.view_totals',
+    reconciliation: 'cashbook.view_amounts',
+  }
+
+  it.each(['accounts', 'reconciliation'])('the /%s route requires the correct permission', (sub) => {
     const line = middleware
       .split('\n')
       .find((l) => l.includes(`dashboard\\/cashbook\\/${sub}`))
     expect(line, `no middleware entry for /dashboard/cashbook/${sub}`).toBeTruthy()
-    expect(line).toContain('cashbook.view_amounts')
+    expect(line).toContain(routePerm[sub])
   })
 
   it('the specific cashbook routes are matched before the general one', () => {
@@ -56,16 +66,16 @@ describe('cash book money screens are gated on cashbook.view_amounts', () => {
     }
   })
 
-  it('the Accounts and Reconciliation links are hidden without it', () => {
-    for (const href of ['/dashboard/cashbook/accounts', '/dashboard/cashbook/reconciliation']) {
+  it('the Accounts and Reconciliation links are hidden without their permission', () => {
+    const linkGuard: Record<string, string> = {
+      '/dashboard/cashbook/accounts':       'showTotals &&',
+      '/dashboard/cashbook/reconciliation': 'showAmounts &&',
+    }
+    for (const [href, guard] of Object.entries(linkGuard)) {
       const at = client.indexOf(href)
       expect(at, `${href} link not found`).toBeGreaterThan(-1)
-      // The nearest preceding conditional must be the amount flag.
       const before = client.slice(Math.max(0, at - 400), at)
-      expect(
-        before.includes('showAmounts &&'),
-        `${href} is rendered without a showAmounts guard`,
-      ).toBe(true)
+      expect(before.includes(guard), `${href} is rendered without a ${guard} guard`).toBe(true)
     }
   })
 

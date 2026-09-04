@@ -217,6 +217,7 @@ interface Props {
    * inflow/outflow KPI cards, and the entry-row amount column.
    */
   showAmounts: boolean
+  showTotals: boolean
   /** `cashbook.edit` — may create or change entries. */
   canEditEntries: boolean
   /** All known tag names, for the TagPicker's autocomplete. */
@@ -225,7 +226,7 @@ interface Props {
 
 const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 
-export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts, canEditEntries, allTags }: Props) {
+export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts, showTotals, canEditEntries, allTags }: Props) {
   const { role } = useRole()
   const isAdmin = role === 'super_admin'
   // Employee names are private: show CQID by default and the real name only
@@ -1220,14 +1221,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 A button you are not allowed to use is worse than no button: it
                 reads as available, and the refusal only arrives after the click.
 
-                Accounts and Reconciliation both exist to show money — balances,
-                a ledger, amounts matched against the bank — so they follow
-                `cashbook.view_amounts`, the same permission that strips the
-                Amount column. Someone browsing entries with amounts hidden was
-                being offered two routes straight to the totals. The routes are
-                gated to match in supabase/middleware.ts; hiding the link alone
-                would have left the URL working. */}
-            {showAmounts && (
+                Accounts shows balances — an aggregate, not one entry's own
+                figure — so it follows `cashbook.view_totals`, the same
+                permission that gates the summary cards above. Reconciliation
+                stays on `cashbook.view_amounts`: its own page is admin-only
+                regardless, so the finer split does not matter there. Both
+                routes are gated to match in supabase/middleware.ts; hiding the
+                link alone would have left the URL working. */}
+            {showTotals && (
               <Link href="/dashboard/cashbook/accounts"
                 className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap"
                 title="Account balances & ledger">
@@ -1273,9 +1274,13 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       />
 
       <div className="p-6 space-y-5">
-        {/* Summary — only rendered when the viewer can see ₹ amounts. Without
-            cashbook.view_amounts the totals would collapse to ₹0 and mislead. */}
-        {showAmounts && (
+        {/* Summary — the AGGREGATE across every visible entry, gated on
+            cashbook.view_totals rather than cashbook.view_amounts: someone who
+            can see one entry's amount does not thereby need the company's
+            whole cash position. Without cashbook.view_amounts these figures
+            would also be wrong (built from amounts that are not there), so
+            showTotals alone is not sufficient either — both must hold. */}
+        {showAmounts && showTotals && (
           <div className={`grid gap-4 ${realisedFxGainLoss !== 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3'}`}>
             <div className="bg-card border border-border rounded-xl p-4">
               <div className="flex items-center gap-2 mb-1">

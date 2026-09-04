@@ -27,7 +27,12 @@ const ROUTE_PERMS: Array<[RegExp, string]> = [
   // bank. Gating them on `cashbook.view` alone let anyone who could browse
   // entries — with the amount column deliberately stripped — read every balance
   // by typing the URL.
-  [/^\/dashboard\/cashbook\/accounts/,       'cashbook.view_amounts'],
+  //
+  // Accounts is on `cashbook.view_totals`, not `cashbook.view_amounts`: a
+  // balance is an aggregate across entries, the same distinction the summary
+  // cards on the main page draw. Reconciliation stays on `view_amounts` — its
+  // own page requires admin regardless, so the finer split does not matter.
+  [/^\/dashboard\/cashbook\/accounts/,       'cashbook.view_totals'],
   [/^\/dashboard\/cashbook\/reconciliation/, 'cashbook.view_amounts'],
   [/^\/dashboard\/cashbook/,                'cashbook.view'],
   [/^\/dashboard\/partners/,                'finance.partner.view'],

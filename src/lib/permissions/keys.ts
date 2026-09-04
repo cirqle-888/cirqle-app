@@ -49,6 +49,15 @@ export const PERMS = {
   TASKS_TRASH:        'tasks.trash',
   /** See billing_amount / billing_amount_inr / loss_amount / currency / billing_mode on tasks. */
   TASKS_VIEW_PRICING: 'tasks.view_pricing',
+  /**
+   * See a SUMMED ₹ total for a group of tasks (e.g. a day's worth in the
+   * table view), as distinct from one task's own billing amount.
+   *
+   * Same split as CASHBOOK_VIEW_TOTALS / BILLING_VIEW_TOTALS: every task's own
+   * amount already requires tasks.view_pricing, so this is narrowly about the
+   * arithmetic sum shown next to a date header, not a separate data source.
+   */
+  TASKS_VIEW_TOTALS: 'tasks.view_totals',
 
   // Contributions
   CONTRIBUTIONS_VIEW_OWN:      'contributions.view_own',
@@ -116,8 +125,17 @@ export const PERMS = {
   CASHBOOK_VIEW:         'cashbook.view',
   /** Create / update / delete cashbook entries. */
   CASHBOOK_EDIT:         'cashbook.edit',
-  /** See ₹ inflow/outflow values and bank balance figures. */
+  /** See ₹ on a SINGLE entry — its own inflow/outflow amount. */
   CASHBOOK_VIEW_AMOUNTS: 'cashbook.view_amounts',
+  /**
+   * See ₹ AGGREGATED ACROSS ENTRIES — the Inflow/Outflow/Net/FX summary cards,
+   * and the Accounts tab's balances and running/closing figures.
+   *
+   * Same split as BILLING_VIEW_TOTALS, for the same reason: someone entering
+   * and reconciling individual transactions does not need the company's cash
+   * position handed to them as a side effect of doing their job.
+   */
+  CASHBOOK_VIEW_TOTALS:  'cashbook.view_totals',
 
   // Business Partners — referral/collection-partner statements (read-only over invoices)
   PARTNERS_VIEW:   'finance.partner.view',
@@ -328,12 +346,14 @@ export const RECORD_PAYMENT_PERMS = [
  */
 export const FINANCIAL_VISIBILITY_PERMS = [
   PERMS.TASKS_VIEW_PRICING,
+  PERMS.TASKS_VIEW_TOTALS,
   PERMS.CONTRIBUTIONS_VIEW_EARNINGS,
   PERMS.PAYROLL_VIEW_AMOUNTS,
   PERMS.BILLING_VIEW_AMOUNTS,
   PERMS.BILLING_VIEW_TOTALS,
   PERMS.BILLING_VIEW_LINE_PRICING,
   PERMS.CASHBOOK_VIEW_AMOUNTS,
+  PERMS.CASHBOOK_VIEW_TOTALS,
 ] as const
 
 /**
@@ -357,6 +377,9 @@ export const CRITICAL_PERMS: ReadonlySet<string> = new Set<string>([
   // split here — seeing the page means seeing what the client pays.
   PERMS.PACKAGES_VIEW,
   PERMS.CASHBOOK_VIEW_AMOUNTS,
+  // The bank's actual cash position — company-sensitive the same way a single
+  // entry's amount is, just aggregated.
+  PERMS.CASHBOOK_VIEW_TOTALS,
   // Report money layers — the company's own P&L and everyone's earnings are at
   // least as sensitive as the figures they aggregate.
   PERMS.REPORTS_VIEW_COMPANY_FINANCIALS,

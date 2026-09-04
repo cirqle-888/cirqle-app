@@ -10,7 +10,7 @@ export default async function AccountsPage() {
   const me = await loadCurrentUser().catch(() => null)
   if (!me) redirect('/login')
   const vis = financialVisibility(me)
-  if (!vis.cashbookAmounts) redirect('/dashboard/cashbook')   // amounts-only page
+  if (!vis.cashbookTotals) redirect('/dashboard/cashbook')   // balances = totals, not a single entry's amount
 
   const supabase = createAdminClient()
 

@@ -22,6 +22,7 @@ disaster-recovery path from migrations. That needs a baseline dump — see
 | 2026-08-30 | `20260801000001_employee_client_preferences` | applied | table present; anon 401; upsert→read→delete round-trip clean, 0 rows residue; FK rejects a bad `employee_id` (409) |
 | 2026-08-30 | `20260815090000_company_settings_secret_rls` | applied | blanket policy gone; 4 scoped policies; RLS on; anon grants 0; `/api/invoice-logo` still 200 |
 | 2026-08-30 | `20260815110000_authenticated_least_privilege` (Part A) | applied | `authenticated` grant rows 1055 → **302**, tables 161 → **44**; `permissions`, `designation_permissions`, `designations` all still granted (the lockout guard); `ad_accounts`/`deductions`/`company_settings` now false; `tasks`/`invoices` still true; anon still 0; production `/api/health` 200 and all 12 revoked tables still readable by the service role |
+| 2026-09-01 | `20260902100000_invoice_service_column` | applied | Both columns reachable via PostgREST (`invoices.show_service_column`, `clients.invoice_show_services`, both 200). Verified live: toggling **Service column** in an invoice preview adds/removes the column and the PDF reflows; **Always for {client}** persists the client default and clears the per-invoice override. |
 | 2026-08-31 | `20260831120000_employee_presence` | applied | Table present; `anon` read → **401** (`permission denied`), signed-in `authenticated` read → **200**; heartbeat writes a row through `syncPresence`; a status written externally is reflected in the UI on the next sync, and derives correctly (`dnd` + note → "Do not disturb — 🎧 Focusing", cleared → "Available · Active now"). **Realtime does NOT deliver events for this table** — see the follow-up above; the feature polls and is unaffected. |
 | 2026-08-30 | `20260830120000_employees_column_grants` (Part B) | applied | `employees` columns granted to `authenticated` **29 → 11**; the five sensitive ones (`base_salary`, `hourly_rate`, `bank_details`, `date_of_birth`, `invite_token`) now grant **NONE**; table-level `INSERT` and `DELETE` both **false**; `UPDATE` narrowed to `avatar_url, current_workspace_id`. Applied only after the code prerequisite (`9eb7490`) was live in `1b1d2dd`. Verified after: service role still reads sensitive columns (payroll/settings/import server code works), anon `select(*)` 401, `permissions` + `designation_permissions` still granted, production `/api/health` 200. |
 
@@ -29,13 +30,7 @@ disaster-recovery path from migrations. That needs a baseline dump — see
 
 | Migration | What it adds | Until it is applied |
 |---|---|---|
-| `20260902100000_invoice_service_column` | `clients.invoice_show_services` (the client's standing rule) and `invoices.show_service_column` (nullable per-invoice override) for the optional Service column on the printed invoice. | The toggle appears in the invoice preview but saving it answers "needs migration 20260902100000 applied first". Every invoice renders exactly as it does today. The invoices page itself is unaffected: the client default is read by a separate query that is allowed to fail, deliberately, so a missing column cannot take the page down. |
-
-After applying, verify: tick **Service column** in an invoice preview and the
-PDF gains a Service column between Jobs Done and Qty; untick it and the column
-goes. Then use **Always for {client}** and confirm the client's next invoice
-starts with the column already on.
-
+| `20260904130000_cashbook_tasks_view_totals` | `cashbook.view_totals` + `tasks.view_totals` permission rows, granted (matching each designation's existing `cashbook.view_amounts` / `tasks.view_pricing`) to every designation except Task Manager, which gets an explicit `FALSE`. | `financialVisibility()` reads both new keys and gets `false` for everyone — no such permission rows exist yet — so the Cash Book summary cards, the Accounts tab, and Tasks' per-day totals disappear for **every non-admin designation**, not just Task Manager, until this runs. The salary-row-hiding fix in the same change does NOT depend on this migration — it reads only columns that already exist and is live now. |
 ### Follow-up: Realtime is not delivering for `employee_presence`
 
 The migration runs `ALTER PUBLICATION supabase_realtime ADD TABLE

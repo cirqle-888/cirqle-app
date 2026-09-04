@@ -256,6 +256,9 @@ interface Props {
    */
   permissionFlags?: {
     pricing: boolean
+    /** Summed ₹ for a group of tasks (a day's worth) — separate from `pricing`,
+     *  which covers one task's own billing amount. */
+    totals?: boolean
     contribView?: boolean
     contribViewAll?: boolean
     contribEdit?: boolean
@@ -3080,7 +3083,14 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                               : 'No date'}
                           </span>
                           <div className="flex-1 h-px bg-border/60" />
-                          {showBilling && (() => {
+                          {/* An AGGREGATE across the day's tasks, not one task's own
+                              amount — gated on tasks.view_totals rather than
+                              tasks.view_pricing. showBilling still has to hold
+                              too: without it there is no billing_amount_inr to
+                              sum in the first place. Defaults closed like
+                              `pricing` beside it — the one real caller always
+                              passes this explicitly. */}
+                          {showBilling && (permissionFlags?.totals ?? false) && (() => {
                             const dayTotal = dateTasks.reduce((s, t) => s + (t.billing_amount_inr ?? 0), 0)
                             return dayTotal > 0 ? (
                               <span className="text-[11px] font-semibold text-foreground tabular-nums">₹{dayTotal.toLocaleString('en-IN')}</span>

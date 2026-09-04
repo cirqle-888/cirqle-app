@@ -535,6 +535,7 @@ export default async function TasksPage({
       }}
       permissionFlags={{
         pricing: vis.tasksPricing,
+        totals: vis.tasksTotals,
         contribView: canViewContribs,
         contribViewAll: isAdmin || userCanSee(me, PERMS.CONTRIBUTIONS_VIEW_ALL),
         contribEdit: canEditContribs,
