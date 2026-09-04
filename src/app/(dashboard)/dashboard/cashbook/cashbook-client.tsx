@@ -33,6 +33,7 @@ import type { ReceiptInput } from '@/components/cashbook/receipt-modal'
 
 import Link from 'next/link'
 import { todayISO, formatISODateShort } from '@/lib/utils/local-date'
+import { computeMarkup, markupLabel, type MarkupType } from '@/lib/finance/markup'
 
 // Allocation modals (253 + 313 lines) only mount when an admin clicks Allocate
 // on an entry. Split off the initial cashbook chunk.
@@ -74,6 +75,11 @@ interface Entry {
   client_id?: string        // entity tag for per-client FIFO allocation
   // Finance dimension: 'client' | 'company'; null/undefined = untriaged.
   scope?: 'client' | 'company' | null
+  // Rebill cushion chosen when the expense was recorded. Optional because the
+  // columns arrive with migration 20260904150000 — a pre-migration row simply
+  // has no cushion, which is exactly 'none'.
+  markup_type?: string | null
+  markup_value?: number | null
   exchange_rate?: number
   rate_source?: string
   receipt_number?: string | null
@@ -218,6 +224,8 @@ interface Props {
    */
   showAmounts: boolean
   showTotals: boolean
+  /** False until migration 20260904150000 runs — hides the cushion inputs. */
+  markupAvailable: boolean
   /** `cashbook.edit` — may create or change entries. */
   canEditEntries: boolean
   /** All known tag names, for the TagPicker's autocomplete. */
@@ -226,7 +234,7 @@ interface Props {
 
 const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 
-export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts, showTotals, canEditEntries, allTags }: Props) {
+export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts, showTotals, markupAvailable, canEditEntries, allTags }: Props) {
   const { role } = useRole()
   const isAdmin = role === 'super_admin'
   // Employee names are private: show CQID by default and the real name only
@@ -355,6 +363,11 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     tags: [] as string[],
     // Employees sharing this expense — split equally on save.
     splitEmployeeIds: [] as string[],
+    // Rebill cushion for a client expense — the margin added on top of cost
+    // when this lands on the client's invoice. Only meaningful for a
+    // client-tagged outflow; cleared whenever the entry stops being one.
+    markupType: 'none' as MarkupType,
+    markupValue: '',
   })
 
   // True once the user edits the description by hand — stops the invoice
@@ -458,6 +471,10 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       // split re-decided (recomputing from the same employee set still works
       // via the form if the user re-adds them).
       splitEmployeeIds: [],
+      // The cushion IS carried: duplicating a client expense almost always
+      // means the same rebill rule, and it is visible in the form to change.
+      markupType:      (entry.markup_type as MarkupType) ?? 'none',
+      markupValue:     entry.markup_value ? String(entry.markup_value) : '',
     })
     setFormEditingId(null)
     setRecurringMonths(0)
@@ -491,6 +508,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       scope:           entry.scope === 'company' ? 'company' : '',
       tags:            (entry.tags ?? []).map(t => t.tag.name),
       splitEmployeeIds: (entry.employee_splits ?? []).map(s => s.employee_id),
+      markupType:      (entry.markup_type as MarkupType) ?? 'none',
+      markupValue:     entry.markup_value ? String(entry.markup_value) : '',
     })
     setSmartExtra(entry.client_id ? { client_id: entry.client_id } : {})
     setFormEditingId(entry.id)
@@ -507,6 +526,18 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     // without waiting for a page reload.
     rateMap[currency] = res.data.rate
     return res.data
+  }
+
+  /**
+   * What to persist for the cushion. A markup is meaningless unless this is
+   * an OUTFLOW tagged to a CLIENT — that is the only entry the invoice
+   * auto-copy ever looks at — so anything else saves as 'none' regardless of
+   * what the (then hidden) inputs still hold.
+   */
+  function markupForSave(clientId: string | null): { type: MarkupType; value: number } {
+    const rebillable = form.type === 'outflow' && !!clientId
+    if (!rebillable || form.markupType === 'none') return { type: 'none', value: 0 }
+    return { type: form.markupType, value: parseFloat(form.markupValue) || 0 }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -540,6 +571,11 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         scope:           savedScope,
         tags:            form.tags,
         employee_split_ids: form.type === 'outflow' ? form.splitEmployeeIds : [],
+        // Cushion only rides on a client-tagged expense — an untagged or
+        // incoming entry is never rebilled, so it is stored as 'none'
+        // rather than kept around to surprise a later re-tag.
+        markup_type:  markupForSave(savedClientId).type,
+        markup_value: markupForSave(savedClientId).value,
       })
       if (result.ok) {
         const savedSplitIds = form.type === 'outflow' ? form.splitEmployeeIds : []
@@ -575,7 +611,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         ))
         setShowForm(false)
         setFormEditingId(null)
-        setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [] })
+        setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [], markupType: 'none', markupValue: '' })
         setDescTouched(false)
       }
       setSaving(false)
@@ -640,6 +676,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         scope: insertClientId ? 'client' : (form.scope || null),
         tags: form.tags,
         employee_split_ids: form.type === 'outflow' ? form.splitEmployeeIds : [],
+        markup_type:  markupForSave(insertClientId).type,
+        markup_value: markupForSave(insertClientId).value,
       },
       form.description,
       {
@@ -671,7 +709,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       setEntries(prev => [...[...allInserted].reverse(), ...prev])
       setShowForm(false)
       setRecurringMonths(0)
-      setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [] })
+      setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [], markupType: 'none', markupValue: '' })
       setDescTouched(false)
       // The entry saved but the DB rejected the split (over-allocation, or an
       // invoice that was settled from another tab meanwhile). Say so — the
@@ -1925,7 +1963,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   <button
                     key={t}
                     type="button"
-                    onClick={() => { setForm(p => ({ ...p, type: t, category_id: t === 'inflow' ? invoiceCategoryId : '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', splitEmployeeIds: [] })); resetSmart() }}
+                    onClick={() => { setForm(p => ({ ...p, type: t, category_id: t === 'inflow' ? invoiceCategoryId : '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', splitEmployeeIds: [], markupType: 'none', markupValue: '' })); resetSmart() }}
                     className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${form.type === t
                       ? t === 'inflow' ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'
                       : 'bg-secondary text-muted-foreground border border-transparent hover:text-foreground'
@@ -2512,6 +2550,92 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   )}
                 </div>
               )}
+
+              {/* ── Rebill cushion ────────────────────────────────────────────
+                   A client-tagged expense is copied onto that client's draft
+                   invoice automatically, and until now it went across at cost:
+                   the only way to add a margin was to remember, later, to open
+                   the invoice and use Add Expenses. Anything recorded and never
+                   revisited was billed at exactly what we paid.
+
+                   Setting it here, while the cost and the reason are in front
+                   of you, is the moment the decision is actually cheap. Opens
+                   by itself once the entry is a client expense — the only case
+                   where it means anything — and stays shut otherwise. ── */}
+              {(() => {
+                const rebillClientId = smartExtra.client_id || form.client_filter_id || ''
+                const rebillable = markupAvailable && form.type === 'outflow' && !!rebillClientId
+                if (!rebillable) return null
+
+                const cost = parseFloat(form.amount) || 0
+                const value = parseFloat(form.markupValue) || 0
+                const { billed, markupAmount } = computeMarkup(cost, form.markupType, value)
+                const badge = markupLabel(form.markupType, value, form.currency === 'INR' ? '₹' : form.currency + ' ')
+                const sym = form.currency === 'INR' ? '₹' : form.currency + ' '
+                const money = (n: number) => sym + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+                return (
+                  <details open className="group rounded-xl border border-border bg-secondary/20">
+                    <summary className="flex items-center justify-between gap-2 px-3 py-2.5 cursor-pointer select-none list-none">
+                      <span className="text-xs font-medium text-foreground">
+                        Rebill cushion
+                        <span className="text-muted-foreground font-normal ml-1.5">
+                          {badge ? `· ${badge} on top` : '· billed at cost'}
+                        </span>
+                      </span>
+                      <ChevronDown className="w-4 h-4 text-muted-foreground group-open:rotate-180 transition-transform" />
+                    </summary>
+                    <div className="px-3 pb-3 space-y-2.5">
+                      <div className="flex gap-2">
+                        {(['none', 'percentage', 'fixed'] as MarkupType[]).map(t => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => setForm(p => ({ ...p, markupType: t, markupValue: t === 'none' ? '' : p.markupValue }))}
+                            className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors border ${form.markupType === t
+                              ? 'bg-primary/15 text-primary border-primary/30'
+                              : 'bg-secondary text-muted-foreground border-transparent hover:text-foreground'}`}
+                          >
+                            {t === 'none' ? 'At cost' : t === 'percentage' ? 'Percentage' : 'Flat charge'}
+                          </button>
+                        ))}
+                      </div>
+
+                      {form.markupType !== 'none' && (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step={form.markupType === 'percentage' ? '0.5' : '1'}
+                            value={form.markupValue}
+                            onChange={e => setForm(p => ({ ...p, markupValue: e.target.value }))}
+                            placeholder={form.markupType === 'percentage' ? '15' : '200'}
+                            className="w-32 bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none"
+                          />
+                          <span className="text-xs text-muted-foreground">
+                            {form.markupType === 'percentage' ? '% on top of cost' : `${sym.trim()} on top of cost`}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* The arithmetic, spelled out — this figure is what the
+                          client sees, so it should never have to be guessed. */}
+                      <div className="flex items-center justify-between rounded-lg bg-foreground/[0.03] px-3 py-2 text-xs">
+                        <span className="text-muted-foreground">
+                          {money(cost)}{markupAmount !== 0 && <> + {money(markupAmount)}</>}
+                        </span>
+                        <span className="font-semibold tabular-nums">
+                          Client is billed {money(billed)}
+                        </span>
+                      </div>
+
+                      <p className="text-[10px] text-muted-foreground">
+                        Applied when this expense is added to {clients.find((c: { id: string; name: string }) => c.id === rebillClientId)?.name || 'the client'}&rsquo;s draft invoice. You can still change it on the invoice.
+                      </p>
+                    </div>
+                  </details>
+                )
+              })()}
 
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1.5">Description</label>

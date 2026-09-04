@@ -44,6 +44,7 @@ import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useRole } from '@/contexts/role-context'
+import { computeMarkup, type MarkupType } from '@/lib/finance/markup'
 import { usePermissions } from '@/contexts/permission-context'
 import { PERMS, RECORD_PAYMENT_PERMS } from '@/lib/permissions/keys'
 import { unitPriceOf } from '@/lib/invoices/line-math'
@@ -541,6 +542,12 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   // Safe force-edit — requires reason before unlocking
   const [forceEditId, setForceEditId]         = useState<string | null>(null)
   const [forceEditReason, setForceEditReason] = useState('')
+  // Inline cushion editor on an expense line: which row is open, and the
+  // unsaved choice. Null = nobody is editing.
+  const [expMarkupDraft, setExpMarkupDraft] = useState<
+    { id: string; type: MarkupType; value: string } | null
+  >(null)
+  const [expMarkupSaving, setExpMarkupSaving] = useState(false)
   const [editReasonModal, setEditReasonModal] = useState<string | null>(null)   // invoice id pending unlock
   const [editReasonInput, setEditReasonInput] = useState('')
 
@@ -1001,6 +1008,55 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
   async function updateExpensesMode(invoiceId: string, mode: string) {
     await supabase.from('invoices').update({ expenses_mode: mode, updated_at: new Date().toISOString() }).eq('id', invoiceId)
     setInvoices(prev => prev.map(i => i.id === invoiceId ? { ...i, expenses_mode: mode } : i))
+  }
+
+  /**
+   * Save a rebill cushion onto one expense line and re-total the invoice.
+   *
+   * The cushion is always applied to the line's COST (original_amount), never
+   * to whatever it is currently billed at — otherwise editing 15% twice would
+   * compound to 32.25%. Rows created before the markup columns existed have no
+   * original_amount, so their current amount IS the cost.
+   */
+  async function saveExpenseMarkup(inv: Invoice, expId: string, type: MarkupType, rawValue: string) {
+    const exp = (inv.expense_items || []).find(e => e.id === expId)
+    if (!exp) return
+    setExpMarkupSaving(true)
+
+    const cost = exp.original_amount ?? exp.amount ?? 0
+    const value = type === 'none' ? 0 : (parseFloat(rawValue) || 0)
+    const { billed, markupAmount } = computeMarkup(cost, type, value)
+    // amount_inr tracks amount at the invoice's own rate, the same way every
+    // other figure on this invoice does.
+    const rate = inv.exchange_rate || 1
+    const billedInr = round2(billed * rate)
+
+    const { error } = await supabase.from('invoice_expense_items').update({
+      amount: billed,
+      amount_inr: billedInr,
+      original_amount: cost,
+      markup_type: type,
+      markup_value: value,
+      markup_amount: markupAmount,
+    }).eq('id', expId)
+
+    if (!error) {
+      const newExps = (inv.expense_items || []).map(e => e.id === expId
+        ? { ...e, amount: billed, amount_inr: billedInr, original_amount: cost, markup_type: type, markup_value: value, markup_amount: markupAmount }
+        : e)
+      const expTotal  = newExps.reduce((t, e) => t + (e.amount || 0), 0)
+      const taskTotal = (inv.items || []).reduce((t, i) => t + (i.total || 0), 0)
+      const subtotal  = round2(taskTotal + expTotal)
+      const newTotal  = round2(subtotal - (inv.discount_amount || 0) + (inv.tax_amount || 0) + (inv.previous_balance || 0))
+      await supabase.from('invoices').update({ subtotal, total_amount: newTotal }).eq('id', inv.id)
+      setInvoices(prev => prev.map(i => i.id === inv.id
+        ? { ...i, expense_items: newExps, subtotal, total_amount: newTotal, total_amount_inr: round2(newTotal * rate) }
+        : i))
+      setExpMarkupDraft(null)
+    } else {
+      toastError(error.message)
+    }
+    setExpMarkupSaving(false)
   }
 
   async function updateItemDescription(itemId: string, invoiceId: string, description: string) {
@@ -3244,9 +3300,80 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                       </div>
                     )}
                     {exp.notes && <div className="text-[11px] text-muted-foreground/70 italic mt-1 ml-5 border-l-2 border-border/50 pl-2">{exp.notes}</div>}
+
+                    {/* ── Inline rebill cushion ─────────────────────────────
+                        The margin can be set when the expense is recorded in
+                        the Cash Book, but a cost often arrives before anyone
+                        has decided what to charge for handling it. This is
+                        the second chance, on the line the client will read,
+                        rather than a trip through Add Expenses. ── */}
+                    {editable && showAmounts && expMarkupDraft?.id === exp.id && (() => {
+                      const cost = exp.original_amount ?? exp.amount ?? 0
+                      const draft = expMarkupDraft
+                      const preview = computeMarkup(cost, draft.type, parseFloat(draft.value) || 0)
+                      return (
+                        <div className="ml-5 mt-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.05] p-2.5 space-y-2">
+                          <div className="flex gap-1.5">
+                            {(['none', 'percentage', 'fixed'] as MarkupType[]).map(t => (
+                              <button key={t} type="button"
+                                onClick={() => setExpMarkupDraft({ ...draft, type: t, value: t === 'none' ? '' : draft.value })}
+                                className={`px-2.5 py-1 rounded-full text-[10px] font-medium border transition-colors ${draft.type === t
+                                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-700 dark:text-amber-300'
+                                  : 'border-border/40 text-muted-foreground hover:border-border'}`}>
+                                {t === 'none' ? 'At cost' : t === 'percentage' ? 'Percentage' : 'Flat charge'}
+                              </button>
+                            ))}
+                          </div>
+                          {draft.type !== 'none' && (
+                            <div className="flex items-center gap-1.5">
+                              <input type="number" min="0" step={draft.type === 'percentage' ? '0.5' : '1'}
+                                value={draft.value}
+                                onChange={e => setExpMarkupDraft({ ...draft, value: e.target.value })}
+                                placeholder={draft.type === 'percentage' ? '15' : '200'}
+                                className="w-24 bg-secondary border border-border rounded-lg px-2 py-1 text-xs focus:outline-none" />
+                              <span className="text-[10px] text-muted-foreground">
+                                {draft.type === 'percentage' ? '% on top of cost' : 'on top of cost'}
+                              </span>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between gap-2 text-[11px]">
+                            <span className="text-muted-foreground">
+                              Cost {fmt(cost, exp.currency as Currency)}
+                              {preview.markupAmount !== 0 && <> + {fmt(preview.markupAmount, exp.currency as Currency)}</>}
+                              {' → '}
+                              <span className="font-semibold text-foreground">{fmt(preview.billed, exp.currency as Currency)}</span>
+                            </span>
+                            <span className="flex gap-1.5 shrink-0">
+                              <button type="button" onClick={() => setExpMarkupDraft(null)}
+                                className="px-2 py-1 rounded-lg bg-secondary text-[10px] font-medium hover:bg-secondary/80">
+                                Cancel
+                              </button>
+                              <button type="button" disabled={expMarkupSaving}
+                                onClick={() => saveExpenseMarkup(inv, exp.id, draft.type, draft.value)}
+                                className="px-2 py-1 rounded-lg bg-amber-500/90 text-white text-[10px] font-medium hover:bg-amber-500 disabled:opacity-50">
+                                {expMarkupSaving ? 'Saving…' : 'Save'}
+                              </button>
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })()}
                   </div>
                   <div className="text-right shrink-0">
                     {showAmounts && <div className="text-sm font-semibold text-amber-600 dark:text-amber-400">{fmt(exp.amount, inv.currency as Currency)}</div>}
+                    {editable && showAmounts && expMarkupDraft?.id !== exp.id && (
+                      <button
+                        onClick={() => setExpMarkupDraft({
+                          id: exp.id,
+                          type: (exp.markup_type as MarkupType) || 'none',
+                          value: exp.markup_value ? String(exp.markup_value) : '',
+                        })}
+                        className="mt-0.5 text-[10px] text-muted-foreground hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                        title="Set the margin added on top of this cost"
+                      >
+                        {exp.markup_type && exp.markup_type !== 'none' ? 'Edit cushion' : 'Add cushion'}
+                      </button>
+                    )}
                   </div>
                   {editable && (
                     <button

@@ -1,4 +1,4 @@
-import { createAdminClient } from '@/lib/supabase/server'
+import { createAdminClient, columnExists } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { financialVisibility, stripCashbookList } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
@@ -144,6 +144,12 @@ export default async function CashBookPage() {
   // `cashbook.view_amounts`. The data never reaches the client's JS state.
   const initialEntries = stripCashbookList((entriesRes.data || []) as any[], vis.cashbookAmounts, vis.payrollAmounts)
 
+  // The rebill-cushion inputs are only offered once migration 20260904150000
+  // has run. Without the columns the entry still saves (the write strips
+  // them), but the cushion would be silently dropped — so the form hides the
+  // section rather than taking an answer it cannot keep.
+  const markupAvailable = await columnExists(supabase, 'cashbook_entries', 'markup_type')
+
   return (
     <CashBookClient
       initialEntries={initialEntries}
@@ -158,6 +164,7 @@ export default async function CashBookPage() {
       companySettings={companySettings}
       showAmounts={vis.cashbookAmounts}
       showTotals={vis.cashbookTotals}
+      markupAvailable={markupAvailable}
       canEditEntries={hasPermission(me, PERMS.CASHBOOK_EDIT)}
       allTags={((tagsRes as any)?.data || []).map((t: any) => t.name as string)}
     />

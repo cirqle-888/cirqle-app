@@ -13,9 +13,10 @@ import { requirePermission, requireReadPermission } from '@/lib/permissions/chec
 import { PERMS } from '@/lib/permissions/keys'
 import { fetchRates } from '@/lib/fx/sync'
 import { syncDraftInvoiceExpenses } from '@/lib/sync/integrity'
+import type { MarkupType } from '@/lib/finance/markup'
 import { recomputeCampaignBilling } from '@/lib/advertising/billing'
 import { logActivity } from '@/lib/activity/log'
-import { retryWithoutScope, withoutScope, type FinanceScope } from '@/lib/finance/classify'
+import { retryWithoutScope, withoutScope, retryWithoutMissingColumns, withoutKeys, type FinanceScope } from '@/lib/finance/classify'
 import { computeEqualSplit } from '@/lib/finance/splits'
 import { todayISO } from '@/lib/utils/local-date'
 
@@ -68,6 +69,11 @@ export interface CashbookEntryPayload {
   tags?: string[]
   // Employees sharing this expense — split equally (see computeEqualSplit).
   employee_split_ids?: string[]
+  // Rebill cushion for a client-tagged expense. Carried on the ENTRY so the
+  // auto-copy onto the client's draft invoice applies it — see
+  // syncDraftInvoiceExpenses. 'none' bills the client exactly what we paid.
+  markup_type?: MarkupType
+  markup_value?: number
   // Explicit split of this receipt across several invoices, in ₹ (INR) — the
   // currency `cashbook_invoice_allocations.allocated_amount` is always in.
   //
@@ -264,10 +270,14 @@ export async function insertCashbookEntries(
       : baseDescription,
   }))
 
-  const { data, error } = await retryWithoutScope(strip =>
+  // These rows carry two generations of optional column — `scope` and the
+  // markup pair — so the retry learns the missing name from the error rather
+  // than being told which one to strip. An unapplied migration costs the
+  // feature, never the entry.
+  const { data, error } = await retryWithoutMissingColumns(omit =>
     admin
       .from('cashbook_entries')
-      .insert(strip ? rows.map(withoutScope) : rows)
+      .insert(rows.map(r => withoutKeys(r, omit)))
       .select(ENTRY_SELECT)
   )
 
@@ -405,6 +415,8 @@ export interface CashbookEntryUpdate {
   scope?: FinanceScope | null
   tags?: string[]
   employee_split_ids?: string[]
+  markup_type?: MarkupType
+  markup_value?: number
 }
 
 export async function updateCashbookEntry(
@@ -416,10 +428,10 @@ export async function updateCashbookEntry(
 
   const admin = createAdminClient()
   const { tags: entryTags, employee_split_ids: splitEmployeeIds, ...tableFields } = changes
-  const { error } = await retryWithoutScope(strip =>
+  const { error } = await retryWithoutMissingColumns(omit =>
     admin
       .from('cashbook_entries')
-      .update(strip ? withoutScope(tableFields) : tableFields)
+      .update(withoutKeys(tableFields, omit))
       .eq('id', id)
   )
   if (error) return { ok: false, error: error.message }

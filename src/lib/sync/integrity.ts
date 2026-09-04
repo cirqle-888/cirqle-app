@@ -11,6 +11,7 @@ import { round2 as r2 } from '@/lib/calculations/currency'
 import { syncInvoicePackageLines } from '@/lib/packages/sync-invoice'
 import { resolveEarning, CommissionAgreement } from '@/lib/agreements/resolve-earning'
 import { isBillableTask } from '@/lib/tasks/billable'
+import { computeMarkup } from '@/lib/finance/markup'
 
 /**
  * Fallback refresh for tasks that have contribution SCORES but no raw
@@ -468,9 +469,18 @@ export async function syncDraftInvoiceExpenses(entryId: string) {
   const supabase = createTypedAdminClient()
 
   // 1. Get the entry
+  // markup_type/markup_value may not exist yet (migration 20260904150000).
+  // A failed select would take the whole sync down, so they are fetched in a
+  // second, optional query rather than widening the one the sync depends on.
   const { data: entry } = await supabase.from('cashbook_entries')
     .select('id, type, amount, amount_inr, currency, description, client_id, entry_date, deleted_at')
     .eq('id', entryId).single()
+
+  const { data: markupRow } = await supabase.from('cashbook_entries')
+    .select('markup_type, markup_value')
+    .eq('id', entryId).maybeSingle()
+  const entryMarkupType  = (markupRow as { markup_type?: string } | null)?.markup_type ?? 'none'
+  const entryMarkupValue = Number((markupRow as { markup_value?: number } | null)?.markup_value ?? 0)
     
   const invoiceIdsToRecalculate = new Set<string>()
 
@@ -542,18 +552,32 @@ export async function syncDraftInvoiceExpenses(entryId: string) {
           billing = r2(entry.amount_inr / invRate)
       }
 
+      // The cushion chosen when the expense was RECORDED, in the entry's own
+      // currency. A percentage travels between currencies unchanged; a FIXED
+      // amount does not, so it is converted alongside the cost it sits on —
+      // ₹200 on a ₹2,000 cost stays 10% of it in every currency, rather than
+      // becoming "200 dollars" when the invoice is billed in USD.
+      const convert = (value: number, from: number, to: number) =>
+        entryMarkupType === 'fixed' && from !== 0 ? r2(value * (to / from)) : value
+
+      const markupInInvoiceCcy = convert(entryMarkupValue, entry.amount, billing)
+      const markupInInr        = convert(entryMarkupValue, entry.amount, entry.amount_inr)
+
+      const marked    = computeMarkup(billing,          entryMarkupType, markupInInvoiceCcy)
+      const markedInr = computeMarkup(entry.amount_inr, entryMarkupType, markupInInr)
+
       const { error } = await supabase.from('invoice_expense_items').insert({
         invoice_id: draftInvoice.id,
         cashbook_entry_id: entry.id,
         description: entry.description || 'Expense',
-        amount: billing,
-        amount_inr: entry.amount_inr,
+        amount: marked.billed,
+        amount_inr: markedInr.billed,
         currency: draftInvoice.currency || 'INR',
         original_amount: entry.amount,
         original_amount_inr: entry.amount_inr,
-        markup_type: 'none',
-        markup_value: 0,
-        markup_amount: 0
+        markup_type: entryMarkupType,
+        markup_value: markupInInvoiceCcy,
+        markup_amount: marked.markupAmount
       })
 
       if (!error) {
