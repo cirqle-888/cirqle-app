@@ -32,6 +32,8 @@ export function userCanSee(user: CurrentUser | null, perm: string): boolean {
 /** Bundle of all financial-visibility flags computed once per request. */
 export interface FinancialVisibility {
   tasksPricing:         boolean
+  /** Summed ₹ across a group of tasks (a day's worth), not one task's own amount. */
+  tasksTotals:          boolean
   contributionEarnings: boolean
   payrollAmounts:       boolean
   billingAmounts:       boolean
@@ -39,17 +41,21 @@ export interface FinancialVisibility {
   billingTotals:        boolean
   billingLinePricing:   boolean
   cashbookAmounts:      boolean
+  /** Inflow/Outflow/Net/FX summary cards, and the Accounts tab's balances. */
+  cashbookTotals:       boolean
 }
 
 export function financialVisibility(user: CurrentUser | null): FinancialVisibility {
   return {
     tasksPricing:         userCanSee(user, PERMS.TASKS_VIEW_PRICING),
+    tasksTotals:          userCanSee(user, PERMS.TASKS_VIEW_TOTALS),
     contributionEarnings: userCanSee(user, PERMS.CONTRIBUTIONS_VIEW_EARNINGS),
     payrollAmounts:       userCanSee(user, PERMS.PAYROLL_VIEW_AMOUNTS),
     billingAmounts:       userCanSee(user, PERMS.BILLING_VIEW_AMOUNTS),
     billingTotals:        userCanSee(user, PERMS.BILLING_VIEW_TOTALS),
     billingLinePricing:   userCanSee(user, PERMS.BILLING_VIEW_LINE_PRICING),
     cashbookAmounts:      userCanSee(user, PERMS.CASHBOOK_VIEW_AMOUNTS),
+    cashbookTotals:       userCanSee(user, PERMS.CASHBOOK_VIEW_TOTALS),
   }
 }
 
@@ -234,13 +240,44 @@ export function stripCashbookAmounts<T extends Record<string, any>>(
 
   return out as T
 }
+/**
+ * The category every payroll payslip's auto-created outflow entry carries
+ * (payroll/actions.ts writes it directly), and the same one staff pick by
+ * hand for a manual salary adjustment or advance. It is how a "Salary" entry
+ * is recognised — there is no separate `entry_type` column.
+ */
+const SALARY_CATEGORY_NAME = 'Salary'
+
+/**
+ * A cashbook entry that pays, or adjusts, an employee's salary — by category,
+ * or by carrying a live (non-deleted) link to a payroll record.
+ *
+ * Whoever cannot see payroll amounts must not see these entries AT ALL, not
+ * see them with the ₹ figure blanked out. "Salary — CQID004 — July 2026"
+ * names a colleague and the fact they were paid that month; a masked amount
+ * does nothing to hide that. The description IS the leak.
+ */
+export function isSalaryCashbookEntry(
+  entry: { category?: { name?: string | null } | null; payroll_allocations?: { deleted_at?: string | null }[] | null } | null | undefined,
+): boolean {
+  if (!entry) return false
+  if (entry.category?.name === SALARY_CATEGORY_NAME) return true
+  const allocs = entry.payroll_allocations
+  return Array.isArray(allocs) && allocs.some(a => !a?.deleted_at)
+}
+
 export function stripCashbookList<T extends Record<string, any>>(
   entries: T[],
   canView: boolean,
   canViewSalary: boolean = canView,
 ): T[] {
-  if (canView && canViewSalary) return entries
-  return entries.map(e => stripCashbookAmounts(e, canView, canViewSalary))
+  // Salary entries are REMOVED, not masked — see isSalaryCashbookEntry. This
+  // runs before the amounts check below: someone who can see every other
+  // entry's ₹ figure (cashbook.view_amounts) but not payroll's must still
+  // never see this row, not even with its amount blanked.
+  const visible = canViewSalary ? entries : entries.filter(e => !isSalaryCashbookEntry(e))
+  if (canView && canViewSalary) return visible
+  return visible.map(e => stripCashbookAmounts(e, canView, canViewSalary))
 }
 
 /** Client-service pricing rows. Always admin-or-permitted to see. */
