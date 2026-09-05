@@ -271,3 +271,23 @@ describe('contribution earnings toasts obey the earnings permission', () => {
     expect(src).toContain('{calculatedResult && canSeeFinancials && showFinancials && (')
   })
 })
+
+/**
+ * Payroll's task scan ignores trashed work.
+ *
+ * The Overview warns "N completed tasks missing contribution scores". Its query
+ * asked only for status done/invoiced/paid, so soft-deleted tasks counted: Aug
+ * 2026 reported seven, ALL of them deleted variants, two sharing a title so the
+ * list appeared to repeat itself. It sent people to score rows that no longer
+ * exist, and a warning that cries wolf is one nobody reads when it is real.
+ */
+describe('payroll only counts tasks that still exist', () => {
+  it('the tasks query filters soft-deleted rows', () => {
+    const src = read('src/app/(dashboard)/dashboard/payroll/page.tsx')
+    const at = src.indexOf(".from('tasks')")
+    expect(at, "payroll's tasks query has moved").toBeGreaterThan(-1)
+    const q = src.slice(at, at + 900)
+    expect(q).toContain("in('status', ['done', 'invoiced', 'paid'])")
+    expect(q, 'trashed tasks would be counted as missing scores').toContain("is('deleted_at', null)")
+  })
+})

@@ -77,6 +77,13 @@ export default async function PayrollPage() {
         .from('tasks')
         .select('id, title, task_date, status, billing_amount_inr, client:clients(name), service:services!service_id(name)')
         .in('status', ['done', 'invoiced', 'paid'])
+        // Trashed tasks are not work anybody still owes a score for. Without
+        // this the Overview warned "7 completed tasks missing contribution
+        // scores in Aug" and listed seven DELETED variants — two of them the
+        // same title twice — sending someone to score rows that no longer
+        // exist. Every sibling page (clients, ranking, recurring) already
+        // filters this; payroll was the one that did not.
+        .is('deleted_at', null)
         .gte('task_date', `${currentYear - 1}-01-01`)
         .order('task_date', { ascending: false })
     )),
