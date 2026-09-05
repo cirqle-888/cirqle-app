@@ -1984,6 +1984,17 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         .select('id, title, task_date, billing_amount, billing_amount_inr, currency, client_id, client:clients(id, name, code, default_currency)')
         .eq('status', 'done')
         .not('is_billable', 'is', false)      // waived work never reaches an invoice
+        // A package task is paid for by its package FEE line, which carries no
+        // task_id — so the "already invoiced" check below, which matches on
+        // invoice_items.task_id, cannot see it and reported the work as
+        // unbilled. This screen then offered to invoice it a second time:
+        // Elara Luxe Perfume showed 4 July and 11 August tasks, every one of
+        // them already covered by "Social Media Management · 13 included" on a
+        // SENT invoice. Generating those would have billed the client twice.
+        //
+        // Over-allowance tasks are unaffected: they get their own invoice line
+        // with a task_id, so the existing check already excludes them.
+        .is('package_id', null)
         .order('task_date')
         .range(page * PAGE, (page + 1) * PAGE - 1)
       if (hasSoftDelete) q = q.is('deleted_at', null)
@@ -2029,7 +2040,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       const clientName = t.client?.name || 'Unknown'
       const clientCode = t.client?.code || 'CLI'
       const month = t.task_date ? t.task_date.slice(0, 7) : 'unknown'
-      const key = `${clientId}__${month}`
+      // Currency belongs in the key. A client with work in two currencies —
+      // Elara Luxe Perfume bills AED but carries INR tasks too — was grouped
+      // into ONE row whose total added AED and INR together and labelled the
+      // result with whichever currency happened to arrive first. That number
+      // meant nothing. Splitting by currency makes each group's total real,
+      // and each becomes its own invoice, which is the only way to issue it.
+      const taskCurrency = t.currency || t.client?.default_currency || 'INR'
+      const key = `${clientId}__${month}__${taskCurrency}`
       if (!groupMap[key]) {
         groupMap[key] = {
           key, client_id: clientId, client_name: clientName,
@@ -2038,7 +2056,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
           // Amounts come from each task's billing_amount (its OWN currency), so
           // the invoice currency is driven by the task — NOT client.default_currency,
           // which can be unset/stale and would mislabel e.g. AED amounts as ₹.
-          currency: t.currency || t.client?.default_currency || 'INR',
+          currency: taskCurrency,
           taskIds: [], default_currency: t.client?.default_currency,
           tasks: [],
         }
