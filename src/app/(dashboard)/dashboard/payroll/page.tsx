@@ -28,7 +28,7 @@ export default async function PayrollPage() {
   scoresWindowFrom.setMonth(scoresWindowFrom.getMonth() - 24)
   const scoresWindowFromStr = scoresWindowFrom.toISOString()
 
-  const [employeesRes, payrollRes, advancesRes, creditRes, deductionsRes, scoresRes, tasksRes] = await Promise.all([
+  const [employeesRes, payrollRes, advancesRes, creditRes, deductionsRes, scoresRes, tasksRes, awardsRes] = await Promise.all([
     fetchAll(stablePaginationQuery(
       supabase.from('employees').select('*').order('cqid')
     )),
@@ -87,6 +87,20 @@ export default async function PayrollPage() {
         .gte('task_date', `${currentYear - 1}-01-01`)
         .order('task_date', { ascending: false })
     )),
+    // Per-programme ownership awards — the lines BEHIND the "Ownership" total
+    // on a payslip ("Accounts · 2% of collected · ₹679"). Without them the
+    // payroll screen could show that someone earned ₹2,085 of ownership but
+    // not one word about which programme, on what basis, at what rate — the
+    // payslip was the only place that said. The whole table is a handful of
+    // rows (one per programme, per employee, per month), so it is fetched
+    // outright rather than per-month like payroll itself.
+    fetchAll(stablePaginationQuery(
+      supabase
+        .from('ownership_awards')
+        .select('employee_id, booked_month, booked_year, basis, basis_amount_inr, percent, earned_inr, breakdown, program:ownership_programs(name)')
+        .order('booked_year', { ascending: false })
+        .order('booked_month', { ascending: false })
+    )),
   ])
 
 
@@ -113,6 +127,24 @@ export default async function PayrollPage() {
   const allTasks = (tasksRes.data || []).map((t: Record<string, unknown>) =>
     vis.tasksPricing ? t : { ...t, billing_amount_inr: undefined })
 
+  // Ownership awards are payroll money. A viewer without payroll.view_amounts
+  // gets none of them rather than a stripped shell — the rows exist only to
+  // carry amounts, so an amount-less award says nothing worth rendering.
+  const ownershipAwards = vis.payrollAmounts
+    ? (awardsRes.data || []).map((a: Record<string, unknown>) => ({
+        employee_id:      a.employee_id as string,
+        booked_month:     a.booked_month as number,
+        booked_year:      a.booked_year as number,
+        basis:            a.basis as string,
+        basis_amount_inr: Number(a.basis_amount_inr || 0),
+        percent:          a.percent == null ? null : Number(a.percent),
+        earned_inr:       Number(a.earned_inr || 0),
+        program_name:     ((a.program as { name?: string } | null)?.name)
+          ?? String((a.breakdown as Record<string, unknown> | null)?.programName ?? 'Ownership reward'),
+        rule_label:       ((a.breakdown as Record<string, unknown> | null)?.ruleLabel as string) ?? null,
+      }))
+    : []
+
   return (
     <PayrollClient
       employees={employeesRes.data || []}
@@ -122,6 +154,7 @@ export default async function PayrollPage() {
       deductions={deductions}
       contributionScores={contributionScores}
       allTasks={allTasks as any[]}
+      ownershipAwards={ownershipAwards}
       showAmounts={vis.payrollAmounts}
     />
   )

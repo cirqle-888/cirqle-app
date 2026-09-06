@@ -12,11 +12,7 @@ import {
 import { formatCompact } from '@/lib/calculations/currency'
 import { usePrivacy } from "@/contexts/privacy-context"
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
-import {
-  Plus, X, Eye, EyeOff, Zap, CheckCircle, Printer, Download,
-  ChevronLeft, ChevronRight, AlertTriangle, Calendar, BarChart2,
-  FileText, ArrowRight, TrendingUp, TrendingDown, RefreshCw, Mail, Loader2,
-} from 'lucide-react'
+import { AlertTriangle, ArrowRight, BarChart2, Calendar, CheckCircle, ChevronLeft, ChevronRight, Download, Eye, EyeOff, FileText, Loader2, Mail, Plus, Printer, RefreshCw, TrendingDown, TrendingUp, Wallet, X, Zap } from 'lucide-react'
 import { sendBulkPayslips } from '@/lib/payslip/actions'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useToast, ToastContainer } from '@/components/ui/toast'
@@ -79,6 +75,8 @@ interface PayrollRecord {
   adjustment_earned?: number
   /** Ownership rewards — revenue/profit share, incentives, bonuses. */
   ownership_earned?: number
+  /** One-off bonus keyed to this month, separate from ownership rewards. */
+  bonus?: number
   advances_deducted?: number
   other_deductions?: number
   net_salary?: number
@@ -105,6 +103,19 @@ interface Props {
     earning_source?: string | null
     calculated_at: string
     task?: { id?: string; task_date: string; title?: string; status?: string } | null
+  }[]
+  /** Per-programme ownership awards — the lines behind the Ownership total.
+   *  Empty for a viewer without payroll.view_amounts. */
+  ownershipAwards?: {
+    employee_id: string
+    booked_month: number
+    booked_year: number
+    basis: string
+    basis_amount_inr: number
+    percent: number | null
+    earned_inr: number
+    program_name: string
+    rule_label: string | null
   }[]
   allTasks: {
     id: string
@@ -177,6 +188,7 @@ function storedExtras(record: { adjustment_earned?: number | null; ownership_ear
 
 export default function PayrollClient({
   employees, payrollRecords, advances, credits, deductions, contributionScores, allTasks,
+  ownershipAwards = [],
   showAmounts,
 }: Props) {
   // Suppress to '—' for fields that may have been stripped server-side. Math
@@ -385,6 +397,13 @@ export default function PayrollClient({
    * score that produced its earning — so the modal can show not just WHAT was
    * earned but how it was derived (task value × share).
    */
+  /** The programme lines making up one employee's Ownership total this month. */
+  function getEmpOwnershipAwards(empId: string) {
+    return ownershipAwards
+      .filter(a => a.employee_id === empId && a.booked_month === viewMonth && a.booked_year === viewYear)
+      .sort((a, b) => b.earned_inr - a.earned_inr)
+  }
+
   function getEmpMonthTasks(empId: string) {
     const scoreByTask = new Map<string, typeof liveScores[number]>()
     for (const s of liveScores) {
@@ -954,6 +973,57 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                           </span>
                         </div>
                       </div>
+                      {/* The lines that made the card's own arithmetic work.
+                          Base ₹0 + Commission ₹3,302 printed next to a Net of
+                          ₹5,387 with nothing to explain the ₹2,085, so the only
+                          way to find out was to open the payslip. Ownership
+                          rewards and prior-month corrections were already on
+                          the record this page fetches — they were simply never
+                          rendered. Shown only when non-zero, so an ordinary
+                          commission-only card stays as short as it is now. */}
+                      {record && (record.ownership_earned || 0) !== 0 && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-muted-foreground">Ownership</span>
+                          <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                            +₹{Number(record.ownership_earned).toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      )}
+                      {record && (record.adjustment_earned || 0) !== 0 && (
+                        <div className="flex justify-between items-center">
+                          {/* Signed: a correction can claw back an overpayment
+                              as easily as it can pay one out. */}
+                          <span className="text-muted-foreground">Adjustment</span>
+                          <span className={cn('font-medium', Number(record.adjustment_earned) < 0
+                            ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400')}>
+                            {Number(record.adjustment_earned) < 0 ? '−' : '+'}₹{Math.abs(Number(record.adjustment_earned)).toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      )}
+                      {record && (record.bonus || 0) !== 0 && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-muted-foreground">Bonus</span>
+                          <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                            +₹{Number(record.bonus).toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      )}
+                      {record && (record.advances_deducted || 0) !== 0 && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-muted-foreground">Advance recovered</span>
+                          <span className="font-medium text-red-600 dark:text-red-400">
+                            −₹{Number(record.advances_deducted).toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      )}
+                      {record && (record.other_deductions || 0) !== 0 && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-muted-foreground">Other deductions</span>
+                          <span className="font-medium text-red-600 dark:text-red-400">
+                            −₹{Number(record.other_deductions).toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      )}
                       <div className="flex justify-between items-center font-semibold text-sm pt-2 mt-1 border-t border-border/60">
                         <span className="flex items-center gap-1.5 text-foreground">
                           Net payable
@@ -1629,6 +1699,29 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   {[
                     { label: 'Base Salary',  value: `₹${(emp.base_salary || 0).toLocaleString('en-IN')}`, cls: '' },
                     { label: 'Commission',   value: commission > 0 ? `+₹${commission.toLocaleString('en-IN')}` : '—', cls: commission > 0 ? 'text-green-400' : '' },
+                    // Same reason as the card: without these, Commission and
+                    // Net Payable sit side by side disagreeing, and the only
+                    // way to reconcile them was to open the payslip. Each tile
+                    // appears only when it carries a figure.
+                    ...((record?.ownership_earned || 0) !== 0
+                      ? [{ label: 'Ownership', value: `+₹${Number(record!.ownership_earned).toLocaleString('en-IN')}`, cls: 'text-green-400' }]
+                      : []),
+                    ...((record?.adjustment_earned || 0) !== 0
+                      ? [{
+                          label: 'Adjustment',
+                          value: `${Number(record!.adjustment_earned) < 0 ? '−' : '+'}₹${Math.abs(Number(record!.adjustment_earned)).toLocaleString('en-IN')}`,
+                          cls: Number(record!.adjustment_earned) < 0 ? 'text-red-400' : 'text-green-400',
+                        }]
+                      : []),
+                    ...((record?.bonus || 0) !== 0
+                      ? [{ label: 'Bonus', value: `+₹${Number(record!.bonus).toLocaleString('en-IN')}`, cls: 'text-green-400' }]
+                      : []),
+                    ...((record?.advances_deducted || 0) !== 0
+                      ? [{ label: 'Advance Recovered', value: `−₹${Number(record!.advances_deducted).toLocaleString('en-IN')}`, cls: 'text-red-400' }]
+                      : []),
+                    ...((record?.other_deductions || 0) !== 0
+                      ? [{ label: 'Other Deductions', value: `−₹${Number(record!.other_deductions).toLocaleString('en-IN')}`, cls: 'text-red-400' }]
+                      : []),
                     { label: 'Net Payable',  value: `₹${(record?.net_salary ?? (emp.base_salary || 0) + commission).toLocaleString('en-IN')}`, cls: 'font-semibold' },
                     { label: 'Active Days',  value: `${workedDays.size} / ${daysInMon}`, cls: 'text-blue-400' },
                   ].map(item => (
@@ -1776,6 +1869,55 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     The commission card above is a single number; this is the
                     line-by-line evidence behind it, which is what a pay query
                     ("why is my commission this?") actually needs. */}
+                {/* Ownership breakdown — WHY the Ownership figure is what it
+                    is. A lump sum labelled "Ownership +₹2,085" is unauditable:
+                    the programme, the basis it was taken on, and the rate are
+                    the whole explanation, and they lived only on the payslip.
+                    Each line names all three. */}
+                {(() => {
+                  const awards = getEmpOwnershipAwards(emp.id)
+                  if (!awards.length) return null
+                  const awardTotal = awards.reduce((sum, a) => sum + a.earned_inr, 0)
+                  const BASIS_LABEL: Record<string, string> = {
+                    billing: 'of billing', collected: 'of collections',
+                    profit: 'of profit', fixed: 'fixed amount',
+                  }
+                  return (
+                    <div>
+                      <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-3 flex items-center gap-1.5 flex-wrap">
+                        <Wallet className="w-3.5 h-3.5" /> Ownership rewards — {MONTHS[viewMonth - 1]}
+                        <span className="text-[11px] normal-case font-normal ml-1">{awards.length} programme{awards.length !== 1 ? 's' : ''}</span>
+                        <span className="ml-auto text-[11px] normal-case font-normal">
+                          <span className="text-green-400 font-semibold tabular-nums">₹{Math.round(awardTotal).toLocaleString('en-IN')}</span>
+                        </span>
+                      </h3>
+                      <div className="space-y-1.5">
+                        {awards.map((a, i) => (
+                          <div key={`${a.program_name}-${i}`}
+                            className="flex items-start gap-3 bg-foreground/[0.02] border border-foreground/[0.05] rounded-lg px-3 py-2">
+                            <div className="w-1.5 h-1.5 rounded-full shrink-0 mt-1.5 bg-emerald-400" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium truncate">
+                                {a.program_name}
+                                {a.rule_label && <span className="text-muted-foreground font-normal"> · {a.rule_label}</span>}
+                              </p>
+                              {/* The sum in words: rate × what it was taken on. */}
+                              <p className="text-[10px] text-muted-foreground/80 mt-0.5 tabular-nums">
+                                {a.percent != null && <>{a.percent}% </>}
+                                {BASIS_LABEL[a.basis] ?? a.basis}
+                                {a.basis_amount_inr > 0 && <> · basis ₹{Math.round(a.basis_amount_inr).toLocaleString('en-IN')}</>}
+                              </p>
+                            </div>
+                            <span className="text-xs font-semibold text-green-400 tabular-nums shrink-0">
+                              ₹{Math.round(a.earned_inr).toLocaleString('en-IN')}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })()}
+
                 {empTasks.length > 0 && (() => {
                   const taskEarned = empTasks.reduce((sum, t) => sum + (t.score.earnings_inr ?? 0), 0)
                   // Earnings can exist without a matching task row (a task
