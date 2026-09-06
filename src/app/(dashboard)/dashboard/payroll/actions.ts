@@ -420,6 +420,10 @@ export async function markPayrollPaid(
   if (input.finalNet > 0) {
     const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
     const monthName = MONTHS[input.month - 1]
+    // No `created_by` — that column marks hand-typed cash-book rows for the
+    // per-entry ownership basis, and this row is machine-written by marking
+    // payroll paid. `employee_id` below is who the salary is FOR, not who
+    // typed anything.
     const salaryRow = {
       entry_date:  today,
       type:        'outflow',

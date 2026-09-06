@@ -1671,6 +1671,9 @@ export default function ImportClient({ clients, services, employees, groups, par
         break
       }
 
+      // Bulk load, not data-entry work: these rows deliberately carry no
+      // `created_by`, the column that marks hand-typed cash-book rows for the
+      // per-entry ownership basis.
       case 'cashbook_entries': {
         const table = 'cashbook_entries'
         if (operation === 'delete') {

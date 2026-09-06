@@ -145,6 +145,10 @@ async function createExpense(admin: Admin, p: { amount?: number; description?: s
     if (cat) { categoryId = cat.id; categoryName = cat.name }
   }
   const d = normalizeDate(p.date) || today()
+  // No `created_by`: this route authenticates with a single shared
+  // SHORTCUT_API_TOKEN, so there is no employee identity in the request to
+  // attribute to. Rows land unattributed and earn nobody the per-entry
+  // ownership rate. Per-user tokens would be the prerequisite for changing that.
   const { data, error } = await admin.from('cashbook_entries').insert({
     type: 'outflow',
     category_id: categoryId,
@@ -183,6 +187,7 @@ async function recordPayment(admin: Admin, p: { client?: string; amount?: number
 
   // Inflow entry WITHOUT invoice_id (so the auto-allocate trigger doesn't fire);
   // we FIFO-allocate across the client's outstanding invoices ourselves.
+  // No `created_by` — shared-token route, no employee identity to attribute to.
   const { data: entry, error: entryErr } = await admin.from('cashbook_entries').insert({
     type: 'inflow',
     category_id: null,

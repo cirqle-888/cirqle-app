@@ -265,6 +265,11 @@ export async function insertCashbookEntries(
     invoice_id: isSplit ? null : tableFields.invoice_id,
     entry_date,
     receipt_number: receiptNumbers[i],
+    // `created_by` means "a human typed this row into the cash book by hand" —
+    // it is what the per-entry ownership basis counts, so only the row the user
+    // actually typed carries it. The generated copies of a recurring series
+    // were not typed, so they stay NULL and fall out of the count for free.
+    created_by: i === 0 ? guard.employeeId : null,
     description: i > 0 && baseDates.length > 1
       ? `${baseDescription}${baseDescription ? ' ' : ''}(recurring ${i + 1}/${baseDates.length})`
       : baseDescription,
@@ -427,6 +432,9 @@ export async function updateCashbookEntry(
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()
+  // This path must NEVER write `created_by`. It marks who hand-typed a row for
+  // the per-entry ownership basis; setting it on an edit would let the long
+  // backlog of unattributed rows be claimed retroactively by touching them.
   const { tags: entryTags, employee_split_ids: splitEmployeeIds, ...tableFields } = changes
   const { error } = await retryWithoutMissingColumns(omit =>
     admin
@@ -711,6 +719,10 @@ export async function insertTransfer(
   const outflowDesc = payload.description || `Transfer to ${nameOf(payload.to_account_id)}`
   const inflowDesc  = payload.description || `Transfer from ${nameOf(payload.from_account_id)}`
 
+  // No `created_by` on either leg — deliberately. It marks hand-typed cash-book
+  // rows for the per-entry ownership basis, and one transfer writes two rows
+  // that are neither income nor expense; attributing them would pay twice for
+  // one action. (The counting query also excludes `transfer_ref` rows.)
   const outRow = { ...baseFields, type: 'outflow', bank_account_id: payload.from_account_id, description: outflowDesc }
   const inRow  = { ...baseFields, type: 'inflow',  bank_account_id: payload.to_account_id,   description: inflowDesc }
   const [outRes, inRes] = await Promise.all([

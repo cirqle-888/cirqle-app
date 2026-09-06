@@ -412,6 +412,8 @@ export async function serverCancelTask(
     // Written-off work is Cirqle's loss — company books. Deliberately NO
     // client_id: the auto_attach_expense_to_invoice trigger would rebill a
     // client-tagged outflow onto their draft invoice.
+    // No `created_by`: that column marks hand-typed cash-book rows for the
+    // per-entry ownership basis, and this write-off is machine-written.
     const lossRow = {
       type:        'outflow',
       amount_inr:  input.lossAmount,

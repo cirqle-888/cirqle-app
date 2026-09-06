@@ -100,6 +100,11 @@ export async function recordPayment(
 
   // 4. Create cashbook inflow entry
   const description = `Invoice payment — ${input.invoiceNumber}${input.clientName ? ` (${input.clientName})` : ''}`
+  // No `created_by` — deliberately, even though `input.employeeId` is right
+  // there. That column marks hand-typed cash-book rows for the per-entry
+  // ownership basis; this row is a by-product of recording a payment, work
+  // already paid through the `collected`-basis programme. Attributing it would
+  // pay twice for one act.
   const paymentRow = {
     type:            'inflow',
     category_id:     input.categoryId || null,

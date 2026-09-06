@@ -107,6 +107,9 @@ export async function GET(req: NextRequest) {
     // computes it from the client link / category default. Omitting the column
     // also means this insert works unchanged on databases that predate the
     // scope migration — no retryWithoutScope dance needed.
+    // No `created_by`: there is no actor on a cron run, and that column marks
+    // hand-typed cash-book rows for the per-entry ownership basis. Leaving it
+    // NULL is what keeps machine-posted rows out of anyone's earnings.
     const rows = due.map(o => ({
       entry_date: o.postDate,
       type: 'outflow',
