@@ -12,7 +12,7 @@ import {
 import { formatCompact } from '@/lib/calculations/currency'
 import { usePrivacy } from "@/contexts/privacy-context"
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
-import { AlertTriangle, ArrowRight, BarChart2, Calendar, CheckCircle, ChevronLeft, ChevronRight, Download, Eye, EyeOff, FileText, Loader2, Mail, Plus, Printer, RefreshCw, TrendingDown, TrendingUp, Wallet, X, Zap, History } from 'lucide-react'
+import { AlertTriangle, ArrowRight, BarChart2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, EyeOff, FileText, Loader2, Mail, Plus, Printer, RefreshCw, TrendingDown, TrendingUp, Wallet, X, Zap, History } from 'lucide-react'
 import { sendBulkPayslips } from '@/lib/payslip/actions'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useToast, ToastContainer } from '@/components/ui/toast'
