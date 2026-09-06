@@ -3,7 +3,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { cn } from '@/lib/utils'
+import { cn, copyToClipboard } from '@/lib/utils'
 import Header from '@/components/layout/header'
 import AppSelect from '@/components/ui/app-select'
 import { createClient as createSupabaseClient } from '@/lib/supabase/client'
@@ -1860,11 +1860,13 @@ export default function SettingsClient(props: Props) {
 
                       {/* Portal token copy (legacy read-only view) */}
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           const url = `${window.location.origin}/portal/${(emp as any).portal_token}`
-                          navigator.clipboard.writeText(url)
-                          setCopiedPortalId(emp.id)
-                          setTimeout(() => setCopiedPortalId(null), 2000)
+                          const success = await copyToClipboard(url)
+                          if (success) {
+                            setCopiedPortalId(emp.id)
+                            setTimeout(() => setCopiedPortalId(null), 2000)
+                          }
                         }}
                         title={(emp as any).portal_token ? 'Copy portal link' : 'No portal token — run SQL migration'}
                         disabled={!(emp as any).portal_token}
@@ -3940,10 +3942,12 @@ export default function SettingsClient(props: Props) {
 
             <div className="flex gap-2 mb-4">
               <button
-                onClick={() => {
-                  navigator.clipboard.writeText(inviteLink.url)
-                  setInviteCopied(true)
-                  setTimeout(() => setInviteCopied(false), 2000)
+                onClick={async () => {
+                  const success = await copyToClipboard(inviteLink.url)
+                  if (success) {
+                    setInviteCopied(true)
+                    setTimeout(() => setInviteCopied(false), 2000)
+                  }
                 }}
                 className="flex-1 flex items-center justify-center gap-2 bg-primary/15 hover:bg-primary/20 text-primary py-2 rounded-lg text-sm font-medium transition-colors"
               >
@@ -4000,8 +4004,8 @@ export default function SettingsClient(props: Props) {
 
             <div className="flex gap-2">
               <button
-                onClick={() => {
-                  navigator.clipboard.writeText(resetPwdModal.tempPassword)
+                onClick={async () => {
+                  await copyToClipboard(resetPwdModal.tempPassword)
                 }}
                 className="flex-1 flex items-center justify-center gap-2 bg-primary/15 hover:bg-primary/20 text-primary py-2 rounded-lg text-sm font-medium transition-colors"
               >

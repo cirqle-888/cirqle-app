@@ -12,7 +12,7 @@ import {
 import { formatCompact } from '@/lib/calculations/currency'
 import { usePrivacy } from "@/contexts/privacy-context"
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
-import { AlertTriangle, ArrowRight, BarChart2, Calendar, CheckCircle, ChevronLeft, ChevronRight, Download, Eye, EyeOff, FileText, Loader2, Mail, Plus, Printer, RefreshCw, TrendingDown, TrendingUp, Wallet, X, Zap } from 'lucide-react'
+import { AlertTriangle, ArrowRight, BarChart2, Calendar, CheckCircle, ChevronLeft, ChevronRight, Download, Eye, EyeOff, FileText, Loader2, Mail, Plus, Printer, RefreshCw, TrendingDown, TrendingUp, Wallet, X, Zap, History } from 'lucide-react'
 import { sendBulkPayslips } from '@/lib/payslip/actions'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useToast, ToastContainer } from '@/components/ui/toast'
@@ -121,6 +121,21 @@ interface Props {
     program_name: string
     rule_label: string | null
   }[]
+  /** Prior-period corrections, with the lineage captured at detection time.
+   *  Empty for a viewer without payroll.view_amounts. */
+  payrollAdjustments?: {
+    id: string
+    employee_id: string
+    source_month: number
+    source_year: number
+    amount_inr: number
+    reason: string
+    detected_at: string | null
+    settled_month: number | null
+    settled_year: number | null
+    settled_at: string | null
+    breakdown: Record<string, unknown>
+  }[]
   allTasks: {
     id: string
     title: string
@@ -193,6 +208,7 @@ function storedExtras(record: { adjustment_earned?: number | null; ownership_ear
 export default function PayrollClient({
   employees, payrollRecords, advances, credits, deductions, contributionScores, allTasks,
   ownershipAwards = [],
+  payrollAdjustments = [],
   showAmounts,
 }: Props) {
   // Suppress to '—' for fields that may have been stripped server-side. Math
@@ -406,6 +422,23 @@ export default function PayrollClient({
     return ownershipAwards
       .filter(a => a.employee_id === empId && a.booked_month === viewMonth && a.booked_year === viewYear)
       .sort((a, b) => b.earned_inr - a.earned_inr)
+  }
+
+  /**
+   * The adjustments landing on THIS month's payslip for one employee.
+   *
+   * A settled row belongs to the month it was paid in; an unsettled one is
+   * what the next open payroll will pay, which is the month being viewed.
+   */
+  function getEmpAdjustments(empId: string) {
+    return payrollAdjustments
+      .filter(a => {
+        if (a.employee_id !== empId) return false
+        return a.settled_at
+          ? a.settled_month === viewMonth && a.settled_year === viewYear
+          : true
+      })
+      .sort((a, b) => (b.source_year - a.source_year) || (b.source_month - a.source_month))
   }
 
   function getEmpMonthTasks(empId: string) {
@@ -1921,6 +1954,104 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                             </span>
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  )
+                })()}
+
+                {/* Prior-period adjustments — the WHY behind a correction.
+                    "Adjustment −₹291" on a payslip is the single most alarming
+                    line payroll produces, and until now the only way to answer
+                    "why?" was to query the database. The lineage below is
+                    captured when the adjustment is detected, because a task
+                    that is later permanently deleted takes its contribution
+                    score with it and cannot be reconstructed afterwards. */}
+                {(() => {
+                  const adjustments = getEmpAdjustments(emp.id)
+                  if (!adjustments.length) return null
+                  const adjTotal = adjustments.reduce((sum, a) => sum + a.amount_inr, 0)
+                  const money = (n: number) => `₹${Math.round(Math.abs(n)).toLocaleString('en-IN')}`
+                  return (
+                    <div>
+                      <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-3 flex items-center gap-1.5 flex-wrap">
+                        <History className="w-3.5 h-3.5" /> Prior-period adjustments
+                        <span className="text-[11px] normal-case font-normal ml-1">
+                          {adjustments.length} correction{adjustments.length !== 1 ? 's' : ''}
+                        </span>
+                        <span className="ml-auto text-[11px] normal-case font-normal">
+                          <span className={`font-semibold tabular-nums ${adjTotal < 0 ? 'text-red-400' : 'text-green-400'}`}>
+                            {adjTotal < 0 ? '−' : '+'}{money(adjTotal)}
+                          </span>
+                        </span>
+                      </h3>
+                      <div className="space-y-2">
+                        {adjustments.map(a => {
+                          const b = a.breakdown as {
+                            paidCommissionInr?: number; currentEarningsInr?: number
+                            removedTasks?: { taskNumber: number | null; title: string | null; taskDate: string | null; earningsInr: number; deletedAt?: string | null }[]
+                            unexplainedInr?: number
+                          }
+                          const removed = b.removedTasks ?? []
+                          // Older rows predate lineage capture. Say that
+                          // plainly rather than rendering an empty "why".
+                          const hasLineage = 'unexplainedInr' in b
+                          const unexplained = Number(b.unexplainedInr ?? 0)
+                          return (
+                            <details key={a.id} className="group bg-foreground/[0.02] border border-foreground/[0.05] rounded-lg">
+                              <summary className="flex items-start gap-3 px-3 py-2 cursor-pointer select-none list-none">
+                                <div className={`w-1.5 h-1.5 rounded-full shrink-0 mt-1.5 ${a.amount_inr < 0 ? 'bg-red-400' : 'bg-green-400'}`} />
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-medium">
+                                    From {MONTHS[a.source_month - 1]} {a.source_year}
+                                    <span className="text-muted-foreground font-normal">
+                                      {' · '}{a.amount_inr < 0 ? 'overpaid, recovered here' : 'underpaid, added here'}
+                                    </span>
+                                  </p>
+                                  <p className="text-[10px] text-muted-foreground/80 mt-0.5 tabular-nums">
+                                    paid {money(b.paidCommissionInr ?? 0)} · now worth {money(b.currentEarningsInr ?? 0)}
+                                    {a.detected_at && <> · found {a.detected_at.slice(0, 10)}</>}
+                                  </p>
+                                </div>
+                                <span className={`text-xs font-semibold tabular-nums shrink-0 ${a.amount_inr < 0 ? 'text-red-400' : 'text-green-400'}`}>
+                                  {a.amount_inr < 0 ? '−' : '+'}{money(a.amount_inr)}
+                                </span>
+                                <ChevronDown className="w-3.5 h-3.5 shrink-0 mt-1 text-muted-foreground transition-transform group-open:rotate-180" />
+                              </summary>
+                              <div className="px-3 pb-3 pt-1 border-t border-foreground/[0.05] space-y-1.5">
+                                {removed.length > 0 && (
+                                  <>
+                                    <p className="text-[10px] uppercase text-muted-foreground/70 pt-1.5">Tasks removed since that month was paid</p>
+                                    {removed.map((t, i) => (
+                                      <div key={i} className="flex items-start gap-2 text-[11px]">
+                                        <span className="text-muted-foreground/60 tabular-nums shrink-0">
+                                          {t.taskNumber != null ? `#${t.taskNumber}` : '—'}
+                                        </span>
+                                        <span className="flex-1 min-w-0 truncate">{t.title || 'Untitled task'}</span>
+                                        <span className="text-muted-foreground/60 tabular-nums shrink-0">{t.taskDate ?? ''}</span>
+                                        <span className="text-red-400/80 tabular-nums shrink-0">−{money(t.earningsInr)}</span>
+                                      </div>
+                                    ))}
+                                  </>
+                                )}
+                                {!hasLineage ? (
+                                  <p className="text-[11px] text-muted-foreground/70 pt-1.5">
+                                    This correction predates task-level tracing, so the tasks behind it were not recorded.
+                                  </p>
+                                ) : Math.abs(unexplained) >= 1 && (
+                                  <p className="text-[11px] text-amber-400/80 pt-1.5">
+                                    {money(unexplained)} is not explained by a removed task — most often a task that was
+                                    deleted permanently (which erases its score) or one that was re-priced or re-scored.
+                                  </p>
+                                )}
+                                {hasLineage && removed.length === 0 && Math.abs(unexplained) < 1 && (
+                                  <p className="text-[11px] text-muted-foreground/70 pt-1.5">
+                                    No removed tasks recorded — the month&rsquo;s earnings changed by re-pricing or re-scoring.
+                                  </p>
+                                )}
+                              </div>
+                            </details>
+                          )
+                        })}
                       </div>
                     </div>
                   )

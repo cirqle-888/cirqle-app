@@ -28,7 +28,7 @@ export default async function PayrollPage() {
   scoresWindowFrom.setMonth(scoresWindowFrom.getMonth() - 24)
   const scoresWindowFromStr = scoresWindowFrom.toISOString()
 
-  const [employeesRes, payrollRes, advancesRes, creditRes, deductionsRes, scoresRes, tasksRes, awardsRes] = await Promise.all([
+  const [employeesRes, payrollRes, advancesRes, creditRes, deductionsRes, scoresRes, tasksRes, awardsRes, adjustmentsRes] = await Promise.all([
     fetchAll(stablePaginationQuery(
       supabase.from('employees').select('*').order('cqid')
     )),
@@ -101,6 +101,16 @@ export default async function PayrollPage() {
         .order('booked_year', { ascending: false })
         .order('booked_month', { ascending: false })
     )),
+    // Prior-period adjustments, with the lineage captured when they were
+    // detected. An "Adjustment −₹291" line is otherwise unexplainable from
+    // the app at all — the only way to ask WHY was to query the database.
+    fetchAll(stablePaginationQuery(
+      supabase
+        .from('payroll_adjustments')
+        .select('id, employee_id, source_month, source_year, amount_inr, reason, breakdown, detected_at, settled_month, settled_year, settled_at')
+        .order('source_year', { ascending: false })
+        .order('source_month', { ascending: false })
+    )),
   ])
 
 
@@ -148,6 +158,24 @@ export default async function PayrollPage() {
       }))
     : []
 
+  // Adjustments are payroll money, so they follow the same rule as awards: a
+  // viewer without payroll.view_amounts gets none rather than a stripped shell.
+  const payrollAdjustments = vis.payrollAmounts
+    ? (adjustmentsRes.data || []).map((a: Record<string, unknown>) => ({
+        id:            a.id as string,
+        employee_id:   a.employee_id as string,
+        source_month:  Number(a.source_month),
+        source_year:   Number(a.source_year),
+        amount_inr:    Number(a.amount_inr || 0),
+        reason:        String(a.reason || ''),
+        detected_at:   (a.detected_at as string) ?? null,
+        settled_month: a.settled_month == null ? null : Number(a.settled_month),
+        settled_year:  a.settled_year == null ? null : Number(a.settled_year),
+        settled_at:    (a.settled_at as string) ?? null,
+        breakdown:     (a.breakdown as Record<string, unknown>) ?? {},
+      }))
+    : []
+
   return (
     <PayrollClient
       employees={employeesRes.data || []}
@@ -158,6 +186,7 @@ export default async function PayrollPage() {
       contributionScores={contributionScores}
       allTasks={allTasks as any[]}
       ownershipAwards={ownershipAwards}
+      payrollAdjustments={payrollAdjustments}
       showAmounts={vis.payrollAmounts}
     />
   )

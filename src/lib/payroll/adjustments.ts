@@ -39,6 +39,40 @@ import { round2 as r2 } from '@/lib/calculations/currency'
 /** Ignore sub-rupee drift — rounding noise is not an adjustment. */
 const MATERIALITY_INR = 1
 
+/** One task standing behind an adjustment, for the "why" trail. */
+export interface AdjustmentTaskLine {
+  taskId: string
+  taskNumber: number | null
+  title: string | null
+  taskDate: string | null
+  earningsInr: number
+  /** Set when the task has been soft-deleted since the month was paid. */
+  deletedAt?: string | null
+}
+
+/**
+ * What an adjustment is made of, captured AT DETECTION TIME.
+ *
+ * It has to be captured here because it is not reconstructable later: a task
+ * that is permanently deleted takes its contribution score with it, and then
+ * nothing in the database can say what the difference was for.
+ */
+export interface AdjustmentLineage {
+  /** The tasks that make up the month's earnings TODAY. */
+  tasks: AdjustmentTaskLine[]
+  /**
+   * Tasks from that month, still scored for this employee, that have been
+   * soft-deleted since. On a negative adjustment these are usually the cause.
+   */
+  removedTasks: AdjustmentTaskLine[]
+  /**
+   * The part of the delta that removed tasks do NOT explain — a permanently
+   * deleted task, a re-priced one, or a re-scored contribution. Named rather
+   * than hidden so an unexplained figure is visibly unexplained.
+   */
+  unexplainedInr: number
+}
+
 export interface DetectedAdjustment {
   employeeId: string
   sourceMonth: number
@@ -46,6 +80,7 @@ export interface DetectedAdjustment {
   amountInr: number
   currentEarningsInr: number
   paidCommissionInr: number
+  lineage?: AdjustmentLineage
 }
 
 /**
@@ -64,12 +99,32 @@ export function computeDeltas(
   current: Map<string, number>,
   sourceMonth: number,
   sourceYear: number,
+  /** employeeId → the tasks behind today's figure. Optional: callers that only
+   *  need the amount (and every existing test) can leave it out. */
+  liveTasks?: Map<string, AdjustmentTaskLine[]>,
+  /** employeeId → that month's tasks this employee is still scored on, since
+   *  soft-deleted. The usual explanation for a negative delta. */
+  removedTasks?: Map<string, AdjustmentTaskLine[]>,
 ): DetectedAdjustment[] {
   const out: DetectedAdjustment[] = []
   for (const [employeeId, paidInr] of paid) {
     const currentInr = r2(current.get(employeeId) || 0)
     const delta = r2(currentInr - paidInr)
     if (Math.abs(delta) < MATERIALITY_INR) continue
+
+    let lineage: AdjustmentLineage | undefined
+    if (liveTasks || removedTasks) {
+      const removed = removedTasks?.get(employeeId) ?? []
+      // A removed task used to pay the employee, so it explains a NEGATIVE
+      // delta of its own size. Whatever is left over is something else.
+      const explained = r2(removed.reduce((sum, t) => sum + t.earningsInr, 0))
+      lineage = {
+        tasks: liveTasks?.get(employeeId) ?? [],
+        removedTasks: removed,
+        unexplainedInr: r2(delta + explained),
+      }
+    }
+
     out.push({
       employeeId,
       sourceMonth,
@@ -77,6 +132,7 @@ export function computeDeltas(
       amountInr: delta,
       currentEarningsInr: currentInr,
       paidCommissionInr: paidInr,
+      lineage,
     })
   }
   return out
@@ -112,28 +168,71 @@ export async function detectAdjustments(
   // against, so the month is simply still open in payroll terms.
   if (paid.size === 0) return []
 
-  // What the engine says those employees earned in that month today.
+  // Every task in the month, live AND soft-deleted. The deleted ones are not
+  // counted, but they are the usual explanation for a negative delta, and the
+  // trail has to be captured now — a task that is later PERMANENTLY deleted
+  // takes its contribution score with it and becomes unrecoverable.
   const { data: tasks } = await admin
     .from('tasks')
-    .select('id')
+    .select('id, task_number, title, task_date, deleted_at')
     .gte('task_date', start)
     .lt('task_date', nextStart)
-    .is('deleted_at', null)
-  const taskIds = (tasks || []).map((t: { id: string }) => t.id)
+  const taskRows = (tasks || []) as {
+    id: string; task_number: number | null; title: string | null
+    task_date: string | null; deleted_at: string | null
+  }[]
+  const taskById = new Map(taskRows.map(t => [t.id, t]))
 
   const current = new Map<string, number>()
+  const liveTasks = new Map<string, AdjustmentTaskLine[]>()
+  const removedTasks = new Map<string, AdjustmentTaskLine[]>()
+
+  const push = (
+    map: Map<string, AdjustmentTaskLine[]>, employeeId: string, line: AdjustmentTaskLine,
+  ) => {
+    const list = map.get(employeeId)
+    if (list) list.push(line)
+    else map.set(employeeId, [line])
+  }
+
+  const allIds = taskRows.map(t => t.id)
   const CHUNK = 200
-  for (let i = 0; i < taskIds.length; i += CHUNK) {
+  for (let i = 0; i < allIds.length; i += CHUNK) {
     const { data: scores } = await admin
       .from('contribution_scores')
-      .select('employee_id, earnings_inr')
-      .in('task_id', taskIds.slice(i, i + CHUNK))
-    for (const s of (scores || []) as { employee_id: string; earnings_inr: number | null }[]) {
-      current.set(s.employee_id, (current.get(s.employee_id) || 0) + Number(s.earnings_inr || 0))
+      .select('task_id, employee_id, earnings_inr')
+      .in('task_id', allIds.slice(i, i + CHUNK))
+    for (const s of (scores || []) as {
+      task_id: string; employee_id: string; earnings_inr: number | null
+    }[]) {
+      const task = taskById.get(s.task_id)
+      if (!task) continue
+      const earningsInr = Number(s.earnings_inr || 0)
+      const line: AdjustmentTaskLine = {
+        taskId: task.id,
+        taskNumber: task.task_number,
+        title: task.title,
+        taskDate: task.task_date,
+        earningsInr: r2(earningsInr),
+      }
+      if (task.deleted_at) {
+        // Deliberately NOT added to `current` — the money total must keep
+        // matching what the payroll engine itself counts, which is live tasks
+        // only. This list exists to EXPLAIN the difference, not to change it.
+        push(removedTasks, s.employee_id, { ...line, deletedAt: task.deleted_at })
+      } else {
+        current.set(s.employee_id, (current.get(s.employee_id) || 0) + earningsInr)
+        push(liveTasks, s.employee_id, line)
+      }
     }
   }
 
-  return computeDeltas(paid, current, month, year)
+  const byDateDesc = (a: AdjustmentTaskLine, b: AdjustmentTaskLine) =>
+    (b.taskDate || '').localeCompare(a.taskDate || '')
+  for (const list of liveTasks.values()) list.sort(byDateDesc)
+  for (const list of removedTasks.values()) list.sort(byDateDesc)
+
+  return computeDeltas(paid, current, month, year, liveTasks, removedTasks)
 }
 
 /**
@@ -183,6 +282,12 @@ export async function recordAdjustments(
         currentEarningsInr: d.currentEarningsInr,
         paidCommissionInr: d.paidCommissionInr,
         note: 'Contribution earnings for a closed month changed after payroll was paid (typically a task entered later with its original date).',
+        // The WHY, captured now because it cannot be reconstructed later.
+        ...(d.lineage ? {
+          tasks: d.lineage.tasks,
+          removedTasks: d.lineage.removedTasks,
+          unexplainedInr: d.lineage.unexplainedInr,
+        } : {}),
       },
       detected_at: new Date().toISOString(),
     }))

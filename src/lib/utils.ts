@@ -59,3 +59,31 @@ export const BRANDED_PILL_BASE_CLASS = "inline-flex px-3 py-1.5 -mx-3 -my-1.5 ro
 export const BRANDED_PILL_SELECTED_CLASS = "gradient-bg !text-white shadow-md [&_.text-muted-foreground]:!text-white/80 [&_.opacity-70]:!opacity-100 [&_.bg-foreground]:!bg-white/20 [&_.text-foreground]:!text-white"
 export const BRANDED_PILL_ACTIVE_CLASS = "gradient-bg !text-white shadow-lg ring-2 ring-violet-500/50 ring-offset-1 ring-offset-background [&_.text-muted-foreground]:!text-white/80 [&_.opacity-70]:!opacity-100 [&_.bg-foreground]:!bg-white/20 [&_.text-foreground]:!text-white"
 
+export async function copyToClipboard(text: string): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch (e) {
+      console.warn('Clipboard API failed', e)
+    }
+  }
+  // Fallback
+  try {
+    const textArea = document.createElement("textarea")
+    textArea.value = text
+    textArea.style.position = "fixed"
+    textArea.style.top = "0"
+    textArea.style.left = "0"
+    textArea.style.opacity = "0"
+    document.body.appendChild(textArea)
+    textArea.focus()
+    textArea.select()
+    const successful = document.execCommand('copy')
+    document.body.removeChild(textArea)
+    return successful
+  } catch (err) {
+    console.error('Fallback: Oops, unable to copy', err)
+    return false
+  }
+}
