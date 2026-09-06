@@ -65,14 +65,37 @@ export function resolveParticipants(
   return out
 }
 
-/** Pick the measured amount for a basis. `fixed` measures nothing. */
+/**
+ * Pick the program-wide measured amount for a basis. `fixed` measures nothing,
+ * and `entries` is measured per participant — see `measuredFor`.
+ *
+ * The switch is deliberately exhaustive with no `default`: widening
+ * `OwnershipBasis` is then a compile error here until the new basis is handled.
+ */
 export function basisAmount(basis: OwnershipBasis, agg: PeriodAggregates): number {
   switch (basis) {
     case 'billing':   return agg.billingInr
     case 'collected': return agg.collectedInr
     case 'profit':    return agg.profitInr
     case 'fixed':     return 0
+    case 'entries':   return 0     // per participant; see measuredFor
   }
+}
+
+/**
+ * What THIS participant is measured on.
+ *
+ * Every money basis is one program-wide amount that each rule takes a share of,
+ * so they ignore `employeeId`. A count basis measures each person separately —
+ * two people on the same rule earn different amounts.
+ */
+export function measuredFor(
+  basis: OwnershipBasis,
+  agg: PeriodAggregates,
+  employeeId: string,
+): number {
+  if (basis === 'entries') return agg.unitsByEmployee?.[employeeId] ?? 0
+  return basisAmount(basis, agg)
 }
 
 /**
@@ -88,6 +111,12 @@ export function earningFor(
   measured: number,
   rule: OwnershipRule,
 ): number {
+  // A per-unit basis reads `fixedAmountInr` as the RATE PER UNIT. This branch
+  // must precede the flat-amount short-circuit below, or a ₹5-per-entry rule
+  // would pay ₹5 once instead of ₹5 × the count.
+  if (basis === 'entries') {
+    return r2(Math.max(0, (rule.fixedAmountInr ?? 0) * Math.max(0, measured)))
+  }
   if (rule.fixedAmountInr != null) return r2(Math.max(0, rule.fixedAmountInr))
   if (rule.percent == null || basis === 'fixed') return 0
   return r2(Math.max(0, measured * (rule.percent / 100)))
@@ -100,34 +129,49 @@ export function computeAwards(
   agg: PeriodAggregates,
   period: OwnershipPeriod,
 ): OwnershipAward[] {
-  const measured = basisAmount(program.basis, agg)
-  return participants.map(({ employeeId, rule }) => ({
-    programId: program.id,
-    ruleId: rule.id,
-    employeeId,
-    period,
-    basis: program.basis,
-    // The TRUE measured amount is snapshotted even when negative, so a loss
-    // month is auditable rather than invisible behind a ₹0 payout.
-    basisAmountInr: r2(measured),
-    percent: rule.percent,
-    fixedAmountInr: rule.fixedAmountInr,
-    earnedInr: earningFor(program.basis, measured, rule),
-    breakdown: {
-      programName: program.name,
-      programType: program.programType,
+  // Measured INSIDE the map: a per-participant basis gives each person their
+  // own number, and hoisting it would silently pay everyone the first one.
+  return participants.map(({ employeeId, rule }) => {
+    const measured = measuredFor(program.basis, agg, employeeId)
+    const perUnit = program.basis === 'entries'
+    return {
+      programId: program.id,
+      ruleId: rule.id,
+      employeeId,
+      period,
       basis: program.basis,
-      periodLabel: period.label,
-      periodStart: period.start,
-      periodEnd: period.end,
-      scopeKind: program.scopeKind,
-      scopeId: program.scopeId,
-      ruleSource: rule.employeeId ? 'employee' : 'designation',
-      ruleLabel: rule.label,
-      measuredInr: r2(measured),
-      clampedAtZero: measured < 0,
-    },
-  }))
+      // The TRUE measured amount is snapshotted even when negative, so a loss
+      // month is auditable rather than invisible behind a ₹0 payout. On a
+      // per-unit basis this column holds a COUNT, not rupees.
+      basisAmountInr: r2(measured),
+      percent: rule.percent,
+      fixedAmountInr: rule.fixedAmountInr,
+      earnedInr: earningFor(program.basis, measured, rule),
+      breakdown: {
+        programName: program.name,
+        programType: program.programType,
+        basis: program.basis,
+        periodLabel: period.label,
+        periodStart: period.start,
+        periodEnd: period.end,
+        scopeKind: program.scopeKind,
+        scopeId: program.scopeId,
+        ruleSource: rule.employeeId ? 'employee' : 'designation',
+        ruleLabel: rule.label,
+        measuredInr: r2(measured),
+        clampedAtZero: measured < 0,
+        // Per-unit awards are self-describing without a join back to the rule,
+        // whose `fixed_amount_inr` means something different on every basis.
+        ...(perUnit ? {
+          unit: 'entry',
+          unitPlural: 'entries',
+          units: measured,
+          ratePerUnitInr: rule.fixedAmountInr ?? 0,
+          countedOn: 'created_at',
+        } : {}),
+      },
+    }
+  })
 }
 
 /**

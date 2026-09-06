@@ -27,6 +27,10 @@ export interface AwardLine {
   programName: string
   basis: string
   percent: number | null
+  /** Flat rupees, or ₹ per unit on a per-unit basis. */
+  fixedAmountInr: number | null
+  /** Rupees on a money basis; a UNIT COUNT on a per-unit basis. */
+  basisAmountInr: number
   earnedInr: number
   /** Payroll month the award booked into — a quarter books into its END month. */
   bookedMonth: number
@@ -64,7 +68,11 @@ export interface PersonHat {
   programNames: string[]
   /** The rate, when every award in this hat shares one; null when mixed. */
   percent: number | null
-  /** 'billing' | 'collected' | 'profit' | 'fixed', or 'mixed' across programs. */
+  /** Per-unit rate, when every award in this hat shares one; null when mixed. */
+  fixedAmountInr: number | null
+  /** Units/rupees measured across the hat — summed, since the rate is shared. */
+  basisAmountInr: number
+  /** 'billing' | 'collected' | 'profit' | 'fixed' | 'entries', or 'mixed'. */
   basis: string
 }
 
@@ -145,12 +153,15 @@ export function groupByPerson(awards: AwardLine[]): PersonGroup[] {
       // A hat paid by two programs at different rates has no single rate to
       // show — saying "2%" there would be a lie, so it shows nothing.
       const percents = new Set(hatAwards.map(a => a.percent))
+      const rates = new Set(hatAwards.map(a => a.fixedAmountInr))
       const bases = new Set(hatAwards.map(a => a.basis))
       return {
         role,
         totalInr: r2(hatAwards.reduce((s, a) => s + a.earnedInr, 0)),
         programNames: [...new Set(hatAwards.map(a => a.programName))].sort(),
         percent: percents.size === 1 ? [...percents][0] : null,
+        fixedAmountInr: rates.size === 1 ? [...rates][0] : null,
+        basisAmountInr: r2(hatAwards.reduce((s, a) => s + a.basisAmountInr, 0)),
         basis: bases.size === 1 ? [...bases][0] : 'mixed',
       }
     }).sort((a, b) => b.totalInr - a.totalInr || a.role.localeCompare(b.role))

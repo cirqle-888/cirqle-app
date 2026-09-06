@@ -60,8 +60,11 @@ export interface PayslipData {
       programName: string
       label: string | null
       basis: string
+      /** Rupees on a money basis; a UNIT COUNT on a per-unit basis. */
       basisAmountInr: number
       percent: number | null
+      /** Flat rupees, or ₹ per unit on a per-unit basis. */
+      fixedAmountInr: number | null
       earnedInr: number
     }[]
     advancesDeducted: number

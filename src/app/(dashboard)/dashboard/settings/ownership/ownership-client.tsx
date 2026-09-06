@@ -19,10 +19,8 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import AppSelect from '@/components/ui/app-select'
 import type { OwnershipProgram, OwnershipRule, OwnershipBasis, OwnershipPeriodType, OwnershipScopeKind } from '@/lib/ownership/types'
 import { saveProgram, setProgramActive, deleteProgram, saveRule, deleteRule, previewMonth, runAwardsForMonth } from './actions'
+import { rateLabel, BASIS_CHOICE_LABEL as BASIS_LABEL, PER_UNIT_BASES } from '@/lib/ownership/format'
 
-const BASIS_LABEL: Record<OwnershipBasis, string> = {
-  billing: '% of billing', collected: '% of collections', profit: '% of profit', fixed: 'Fixed amount',
-}
 const PERIOD_LABEL: Record<OwnershipPeriodType, string> = {
   monthly: 'Monthly', quarterly: 'Quarterly', yearly: 'Yearly', one_time: 'One-time',
 }
@@ -232,6 +230,9 @@ export default function OwnershipClient(p: Props) {
                   <span className="min-w-0 truncate">
                     {employeeLabel(r.employeeId)} · {r.programName}
                     {r.label ? <span className="text-muted-foreground"> · {r.label}</span> : null}
+                    {/* The rate in words — this is the sanity check before a run,
+                        and a count spike shows up here rather than on a payslip. */}
+                    <span className="text-muted-foreground/70"> · {rateLabel(r)}</span>
                   </span>
                   <span className="tabular-nums font-medium">{inr(r.earnedInr)}</span>
                 </div>
@@ -362,6 +363,7 @@ export default function OwnershipClient(p: Props) {
       {ruleModal && (
         <RuleModal
           programId={ruleModal.programId} initial={ruleModal.rule}
+          basis={p.programs.find(x => x.id === ruleModal.programId)?.basis ?? 'billing'}
           employees={p.employees} designations={p.designations}
           onClose={() => setRuleModal(null)}
           onSaved={() => { setRuleModal(null); success('Rule saved'); refresh() }}
@@ -423,8 +425,9 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, onClos
 
   // Profit is company-wide; collections have no service dimension. Mirroring
   // the DB constraints here means the operator never meets a Postgres error.
+  // A per-entry count has no client or service dimension at all.
   const scopeOptions: OwnershipScopeKind[] =
-    basis === 'profit' ? ['company']
+    basis === 'profit' || basis === 'entries' ? ['company']
     : basis === 'collected' ? ['company', 'client', 'org_unit']
     : ['company', 'client', 'service', 'service_category', 'org_unit']
 
@@ -438,7 +441,8 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, onClos
   async function submit() {
     setSaving(true)
     const res = await saveProgram({
-      id: initial?.id, name, programType: basis === 'fixed' ? 'bonus' : 'revenue_share',
+      id: initial?.id, name,
+      programType: basis === 'entries' ? 'entry_rate' : basis === 'fixed' ? 'bonus' : 'revenue_share',
       basis, periodType,
       scopeKind: scopeOptions.includes(scopeKind) ? scopeKind : 'company',
       scopeId: scopeKind === 'company' ? null : scopeId,
@@ -492,7 +496,7 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, onClos
               wants. Limiting a program to one client/service/team is real
               power but rarely needed, so it opens on demand — and opens itself
               when an existing program already uses it. */}
-          {basis !== 'fixed' && (
+          {basis !== 'fixed' && basis !== 'entries' && (
             <details open={scopeKind !== 'company'} className="group rounded-lg border border-border bg-secondary/20">
               <summary className="flex items-center justify-between gap-2 px-3 py-2 cursor-pointer select-none list-none">
                 <span className="text-xs font-medium">
@@ -555,8 +559,10 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, onClos
 
 // ── Rule form ────────────────────────────────────────────────────────────────
 
-function RuleModal({ programId, initial, employees, designations, onClose, onSaved, onError }: {
+function RuleModal({ programId, basis, initial, employees, designations, onClose, onSaved, onError }: {
   programId: string
+  /** The parent program's basis — it decides what a rule's amount MEANS. */
+  basis: OwnershipBasis
   initial: OwnershipRule | null
   employees: { id: string; cqid: string }[]
   designations: { id: string; name: string }[]
@@ -567,7 +573,11 @@ function RuleModal({ programId, initial, employees, designations, onClose, onSav
   const [target, setTarget] = useState<'designation' | 'employee'>(initial?.employeeId ? 'employee' : 'designation')
   const [employeeId, setEmployeeId] = useState(initial?.employeeId ?? '')
   const [designationId, setDesignationId] = useState(initial?.designationId ?? '')
-  const [mode, setMode] = useState<'percent' | 'fixed'>(initial?.fixedAmountInr != null ? 'fixed' : 'percent')
+  // On a per-unit basis the amount is a rate per unit, so there is no choice
+  // to offer: a percentage of a row count would mean nothing.
+  const perUnit = PER_UNIT_BASES.includes(basis)
+  const [mode, setMode] = useState<'percent' | 'fixed'>(
+    perUnit || initial?.fixedAmountInr != null ? 'fixed' : 'percent')
   const [percent, setPercent] = useState(initial?.percent != null ? String(initial.percent) : '')
   const [fixed, setFixed] = useState(initial?.fixedAmountInr != null ? String(initial.fixedAmountInr) : '')
   const [label, setLabel] = useState(initial?.label ?? '')
@@ -623,19 +633,34 @@ function RuleModal({ programId, initial, employees, designations, onClose, onSav
 
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1.5">Earns</label>
-            <div className="flex gap-2">
-              <AppSelect value={mode} onChange={e => setMode(e.target.value as 'percent' | 'fixed')}>
-                <option value="percent">Percentage</option>
-                <option value="fixed">Fixed ₹</option>
-              </AppSelect>
-              {mode === 'percent' ? (
-                <input type="number" step="0.01" min="0" value={percent} onChange={e => setPercent(e.target.value)}
-                  className={field} placeholder="2.5" />
-              ) : (
-                <input type="number" step="1" min="0" value={fixed} onChange={e => setFixed(e.target.value)}
-                  className={field} placeholder="5000" />
-              )}
-            </div>
+            {perUnit ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="shrink-0 text-sm text-muted-foreground">₹</span>
+                  <input type="number" step="0.5" min="0" value={fixed} onChange={e => setFixed(e.target.value)}
+                    className={field} placeholder="5" />
+                  <span className="shrink-0 text-sm text-muted-foreground whitespace-nowrap">per entry</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground/70 mt-1.5">
+                  Counts cash-book rows this person typed by hand. Rows created by
+                  imports, recurring postings or recorded payments do not count.
+                </p>
+              </>
+            ) : (
+              <div className="flex gap-2">
+                <AppSelect value={mode} onChange={e => setMode(e.target.value as 'percent' | 'fixed')}>
+                  <option value="percent">Percentage</option>
+                  <option value="fixed">Fixed ₹</option>
+                </AppSelect>
+                {mode === 'percent' ? (
+                  <input type="number" step="0.01" min="0" value={percent} onChange={e => setPercent(e.target.value)}
+                    className={field} placeholder="2.5" />
+                ) : (
+                  <input type="number" step="1" min="0" value={fixed} onChange={e => setFixed(e.target.value)}
+                    className={field} placeholder="5000" />
+                )}
+              </div>
+            )}
           </div>
 
           <div>

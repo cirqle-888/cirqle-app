@@ -97,7 +97,7 @@ export default async function PayrollPage() {
     fetchAll(stablePaginationQuery(
       supabase
         .from('ownership_awards')
-        .select('employee_id, booked_month, booked_year, basis, basis_amount_inr, percent, earned_inr, breakdown, program:ownership_programs(name)')
+        .select('employee_id, booked_month, booked_year, basis, basis_amount_inr, percent, fixed_amount_inr, earned_inr, breakdown, program:ownership_programs(name)')
         .order('booked_year', { ascending: false })
         .order('booked_month', { ascending: false })
     )),
@@ -138,6 +138,9 @@ export default async function PayrollPage() {
         basis:            a.basis as string,
         basis_amount_inr: Number(a.basis_amount_inr || 0),
         percent:          a.percent == null ? null : Number(a.percent),
+        // The rate. On a per-unit basis it is ₹ per unit, and `basis_amount_inr`
+        // above is a COUNT rather than rupees.
+        fixed_amount_inr: a.fixed_amount_inr == null ? null : Number(a.fixed_amount_inr),
         earned_inr:       Number(a.earned_inr || 0),
         program_name:     ((a.program as { name?: string } | null)?.name)
           ?? String((a.breakdown as Record<string, unknown> | null)?.programName ?? 'Ownership reward'),

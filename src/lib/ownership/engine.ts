@@ -20,6 +20,7 @@ import { getPeriodProfit, monthBounds } from '@/lib/finance/profit'
 import { fetchJournalLines } from '@/lib/finance/journal'
 import { loadOrgGraph, resolveScope, matchesScope } from '@/lib/org/units'
 import { computeAwards, resolveParticipants } from './compute'
+import { loadEntryCounts } from './entry-count'
 import { monthsInPeriod, periodForBookingMonth, activeForPeriod } from './periods'
 import type {
   BasisLine, OwnershipAward, OwnershipPeriod, OwnershipProgram, OwnershipRule, PeriodAggregates,
@@ -119,10 +120,13 @@ export async function loadPeriodAggregates(
   admin: SupabaseClient<any, any, any>,
   program: OwnershipProgram,
   period: OwnershipPeriod,
+  /** Participants, for a basis measured per person rather than program-wide. */
+  employeeIds: string[] = [],
 ): Promise<PeriodAggregates> {
   let billingInr = 0
   let collectedInr = 0
   let profitInr = 0
+  let unitsByEmployee: Record<string, number> | undefined
 
   // Profit is company-wide by definition (enforced by a CHECK on the table).
   if (program.basis === 'profit') {
@@ -140,7 +144,18 @@ export async function loadPeriodAggregates(
     collectedInr = sumLines(await loadCollectedLines(admin, program, period))
   }
 
-  return { billingInr: r2(billingInr), collectedInr: r2(collectedInr), profitInr: r2(profitInr) }
+  // A count, not money — and measured per participant, so unlike every basis
+  // above it needs to know who is taking part.
+  if (program.basis === 'entries') {
+    unitsByEmployee = (await loadEntryCounts(admin, period, employeeIds)).unitsByEmployee
+  }
+
+  return {
+    billingInr: r2(billingInr),
+    collectedInr: r2(collectedInr),
+    profitInr: r2(profitInr),
+    unitsByEmployee,
+  }
 }
 
 const sumLines = (lines: BasisLine[]) => lines.reduce((s, l) => s + l.amountInr, 0)
@@ -301,7 +316,8 @@ export async function computeAwardsForMonth(
     const participants = resolveParticipants(live, membersByDesignation)
     if (participants.length === 0) continue
 
-    const agg = await loadPeriodAggregates(admin, program, period)
+    const agg = await loadPeriodAggregates(
+      admin, program, period, participants.map(p => p.employeeId))
     out.push(...computeAwards(program, participants, agg, period))
   }
   return out
@@ -395,11 +411,11 @@ export async function loadAwardsForPayslip(
   employeeId: string,
   month: number,
   year: number,
-): Promise<{ programName: string; label: string | null; basis: string; basisAmountInr: number; percent: number | null; earnedInr: number }[]> {
+): Promise<{ programName: string; label: string | null; basis: string; basisAmountInr: number; percent: number | null; fixedAmountInr: number | null; earnedInr: number }[]> {
   try {
     const { data, error } = await admin
       .from('ownership_awards')
-      .select('basis, basis_amount_inr, percent, earned_inr, breakdown, program:ownership_programs(name)')
+      .select('basis, basis_amount_inr, percent, fixed_amount_inr, earned_inr, breakdown, program:ownership_programs(name)')
       .eq('employee_id', employeeId).eq('booked_month', month).eq('booked_year', year)
     if (error) return []
     return (data || []).map((r: Record<string, unknown>) => ({
@@ -409,6 +425,9 @@ export async function loadAwardsForPayslip(
       basis: r.basis as string,
       basisAmountInr: Number(r.basis_amount_inr || 0),
       percent: r.percent == null ? null : Number(r.percent),
+      // The RATE. On a per-unit basis this is ₹ per unit, and without it the
+      // payslip can only show a count with no price beside it.
+      fixedAmountInr: r.fixed_amount_inr == null ? null : Number(r.fixed_amount_inr),
       earnedInr: Number(r.earned_inr || 0),
     }))
   } catch {

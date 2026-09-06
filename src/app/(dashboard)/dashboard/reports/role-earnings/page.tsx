@@ -8,6 +8,7 @@ import { groupByRole, groupByPerson, totalEarned, type AwardLine } from '@/lib/o
 import { buildComposition, singleRate } from '@/lib/ownership/composition'
 import { loadPrograms, loadPeriodComposition } from '@/lib/ownership/engine'
 import type { OwnershipPeriod } from '@/lib/ownership/types'
+import { rateLabel, BASIS_NOUN } from '@/lib/ownership/format'
 import { HardHat, Users, Lock, ArrowUpRight, ChevronDown, Receipt } from 'lucide-react'
 
 // Awards are recomputed whenever payroll runs — never serve a cached figure.
@@ -15,17 +16,6 @@ export const dynamic = 'force-dynamic'
 
 const inr = (n: number) => '₹' + Math.round(n || 0).toLocaleString('en-IN')
 
-/** The plural noun each basis measures, for "2% of collections". */
-const BASIS_NOUN: Record<string, string> = {
-  billing: 'billing', collected: 'collections', profit: 'profit',
-}
-
-function rateLabel(percent: number | null, basis: string): string {
-  if (percent != null) return `${percent}% of ${BASIS_NOUN[basis] ?? basis}`
-  if (basis === 'fixed') return 'fixed amount'
-  if (basis === 'mixed') return 'mixed rates'
-  return basis
-}
 
 /**
  * Earnings by Role — what each HAT earned, not what each person was paid.
@@ -83,7 +73,7 @@ export default async function RoleEarningsPage({
 
   let query = admin
     .from('ownership_awards')
-    .select('id, employee_id, earned_inr, basis, percent, booked_month, booked_year, program_id, period_start, period_end, breakdown, program:ownership_programs(name)')
+    .select('id, employee_id, earned_inr, basis, percent, fixed_amount_inr, basis_amount_inr, booked_month, booked_year, program_id, period_start, period_end, breakdown, program:ownership_programs(name)')
     .in('booked_year', years)
     .order('id', { ascending: true })
   if (!seeEveryone && myEmployeeId) query = query.eq('employee_id', myEmployeeId)
@@ -104,6 +94,8 @@ export default async function RoleEarningsPage({
         ?? String(breakdown.programName ?? 'Ownership reward'),
       basis: (r.basis as string) ?? 'billing',
       percent: r.percent == null ? null : Number(r.percent),
+      fixedAmountInr: r.fixed_amount_inr == null ? null : Number(r.fixed_amount_inr),
+      basisAmountInr: Number(r.basis_amount_inr || 0),
       earnedInr: Number(r.earned_inr || 0),
       bookedMonth: Number(r.booked_month),
       bookedYear: Number(r.booked_year),
@@ -329,7 +321,7 @@ export default async function RoleEarningsPage({
                           <span className="min-w-0 truncate text-muted-foreground">
                             {hat.role}
                             <span className="text-muted-foreground/60 ml-1.5">
-                              ({rateLabel(hat.percent, hat.basis)})
+                              ({rateLabel(hat)})
                             </span>
                           </span>
                           <span className="tabular-nums text-muted-foreground">{inr(hat.totalInr)}</span>
@@ -381,7 +373,9 @@ export default async function RoleEarningsPage({
 
             {!composition || composition.clients.length === 0 ? (
               <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-                {compositionBasis === 'profit' || compositionBasis === 'fixed'
+                {compositionBasis === 'entries'
+                  ? 'A per-entry reward has no client breakdown — it counts cash-book rows recorded, not revenue.'
+                  : compositionBasis === 'profit' || compositionBasis === 'fixed'
                   ? `A ${compositionBasis === 'fixed' ? 'fixed award' : 'profit share'} has no client or task breakdown — ${
                       compositionBasis === 'fixed'
                         ? 'it measures nothing'

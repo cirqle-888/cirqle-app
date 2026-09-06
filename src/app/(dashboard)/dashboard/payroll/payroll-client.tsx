@@ -17,6 +17,7 @@ import { sendBulkPayslips } from '@/lib/payslip/actions'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { todayISO } from '@/lib/utils/local-date'
+import { rateLabel } from '@/lib/ownership/format'
 
 // Heavy bulk-generate modal (773 lines) — only mounts when an admin clicks
 // the action. Splitting it off the initial payroll chunk reduces the entry
@@ -111,8 +112,11 @@ interface Props {
     booked_month: number
     booked_year: number
     basis: string
+    /** Rupees on a money basis; a UNIT COUNT on a per-unit basis. */
     basis_amount_inr: number
     percent: number | null
+    /** Flat rupees, or ₹ per unit on a per-unit basis. */
+    fixed_amount_inr: number | null
     earned_inr: number
     program_name: string
     rule_label: string | null
@@ -1878,10 +1882,6 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   const awards = getEmpOwnershipAwards(emp.id)
                   if (!awards.length) return null
                   const awardTotal = awards.reduce((sum, a) => sum + a.earned_inr, 0)
-                  const BASIS_LABEL: Record<string, string> = {
-                    billing: 'of billing', collected: 'of collections',
-                    profit: 'of profit', fixed: 'fixed amount',
-                  }
                   return (
                     <div>
                       <h3 className="text-xs font-semibold text-muted-foreground uppercase mb-3 flex items-center gap-1.5 flex-wrap">
@@ -1901,11 +1901,19 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                                 {a.program_name}
                                 {a.rule_label && <span className="text-muted-foreground font-normal"> · {a.rule_label}</span>}
                               </p>
-                              {/* The sum in words: rate × what it was taken on. */}
+                              {/* The sum in words: rate × what it was taken on.
+                                  Via the shared formatter, because a per-unit
+                                  award's basis amount is a count, not rupees. */}
                               <p className="text-[10px] text-muted-foreground/80 mt-0.5 tabular-nums">
-                                {a.percent != null && <>{a.percent}% </>}
-                                {BASIS_LABEL[a.basis] ?? a.basis}
-                                {a.basis_amount_inr > 0 && <> · basis ₹{Math.round(a.basis_amount_inr).toLocaleString('en-IN')}</>}
+                                {rateLabel({
+                                  basis: a.basis,
+                                  basisAmountInr: a.basis_amount_inr,
+                                  percent: a.percent,
+                                  fixedAmountInr: a.fixed_amount_inr,
+                                })}
+                                {a.basis !== 'entries' && a.basis_amount_inr > 0 && (
+                                  <> · basis ₹{Math.round(a.basis_amount_inr).toLocaleString('en-IN')}</>
+                                )}
                               </p>
                             </div>
                             <span className="text-xs font-semibold text-green-400 tabular-nums shrink-0">

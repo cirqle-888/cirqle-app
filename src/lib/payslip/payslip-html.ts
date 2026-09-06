@@ -1,5 +1,6 @@
 import type { PayslipData } from './types'
 import { round2 } from '@/lib/calculations/currency'
+import { rateLabel } from '@/lib/ownership/format'
 
 /** Light-mode brand palette (hex only — email-safe). */
 const C = {
@@ -80,9 +81,17 @@ export function adjustmentLabel(
  */
 export function ownershipRowLabel(a: {
   programName: string; label: string | null; basis: string; percent: number | null
+  basisAmountInr?: number; fixedAmountInr?: number | null
 }): string {
   const hat = a.label ? ` · ${a.label}` : ''
-  const rate = a.percent != null ? ` (${a.percent}% of ${a.basis})` : ''
+  // Via the shared formatter, so a per-entry award reads "142 entries × ₹5"
+  // rather than the nothing an `a.percent`-only rate produced for it.
+  const rate = ` (${rateLabel({
+    basis: a.basis,
+    basisAmountInr: a.basisAmountInr ?? 0,
+    percent: a.percent,
+    fixedAmountInr: a.fixedAmountInr,
+  })})`
   return `${a.programName}${hat}${rate}`
 }
 

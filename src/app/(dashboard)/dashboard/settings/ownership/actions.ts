@@ -30,9 +30,15 @@ interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
 /** Turn a raw PostgREST "relation missing" into something actionable. */
 function friendly(message: string): string {
-  return /does not exist|PGRST205|schema cache/i.test(message)
-    ? `The Ownership Platform needs a database migration. Run ${MIGRATION} in the Supabase SQL editor, then try again.`
-    : message
+  if (/does not exist|PGRST205|schema cache/i.test(message)) {
+    return `The Ownership Platform needs a database migration. Run ${MIGRATION} in the Supabase SQL editor, then try again.`
+  }
+  // A basis the table's CHECK doesn't know yet — the constraint arrives with a
+  // later migration, and the raw Postgres string says nothing an owner can act on.
+  if (/violates check constraint|23514/i.test(message)) {
+    return `This program uses a setting your database hasn't been migrated for yet. Run the pending migrations in supabase/migrations/ in the Supabase SQL editor, then try again.`
+  }
+  return message
 }
 
 export interface ProgramInput {
@@ -63,6 +69,9 @@ export async function saveProgram(input: ProgramInput): Promise<ActionResult<{ i
   }
   if (input.basis === 'collected' && !['company', 'client', 'org_unit'].includes(input.scopeKind)) {
     return { ok: false, error: 'Collections are recorded per client, not per service — use a company, client or unit scope.' }
+  }
+  if (input.basis === 'entries' && input.scopeKind !== 'company') {
+    return { ok: false, error: 'A per-entry reward counts cash-book rows, which have no client or service dimension — use the company scope.' }
   }
   if (input.scopeKind !== 'company' && !input.scopeId) {
     return { ok: false, error: 'Pick what this program is scoped to.' }
@@ -171,6 +180,21 @@ export async function saveRule(input: RuleInput): Promise<ActionResult<{ id: str
   }
 
   const admin = createAdminClient()
+
+  // A rule's amount means whatever its PROGRAM's basis says it means, so the
+  // basis has to be read before the rule can be judged. On a per-unit basis
+  // `fixed_amount_inr` is the rate PER UNIT, and a percentage of a row count
+  // is not a thing — caught here rather than paying ₹0 silently every month.
+  {
+    const { data: prog } = await admin
+      .from('ownership_programs').select('basis').eq('id', input.programId).maybeSingle()
+    if ((prog as { basis?: string } | null)?.basis === 'entries' && hasPercent) {
+      return {
+        ok: false,
+        error: 'A per-entry reward is a rupee rate per entry, not a percentage — set the ₹ amount instead.',
+      }
+    }
+  }
   const row = {
     program_id: input.programId,
     employee_id: input.employeeId || null,
@@ -215,7 +239,7 @@ export async function deleteRule(id: string): Promise<ActionResult> {
  * payday.
  */
 export async function previewMonth(month: number, year: number): Promise<ActionResult<{
-  rows: { programName: string; employeeId: string; label: string | null; basisAmountInr: number; earnedInr: number }[]
+  rows: { programName: string; employeeId: string; label: string | null; basis: string; basisAmountInr: number; percent: number | null; fixedAmountInr: number | null; earnedInr: number }[]
   totalInr: number
   profitSharePercent: number
 }>> {
@@ -226,7 +250,7 @@ export async function previewMonth(month: number, year: number): Promise<ActionR
   const { programs, rules } = await loadPrograms(admin)
   const membersByDesignation = await loadMembersByDesignation(admin)
 
-  const rows: { programName: string; employeeId: string; label: string | null; basisAmountInr: number; earnedInr: number }[] = []
+  const rows: { programName: string; employeeId: string; label: string | null; basis: string; basisAmountInr: number; percent: number | null; fixedAmountInr: number | null; earnedInr: number }[] = []
   for (const program of programs) {
     if (!program.isActive) continue
     const period = periodForBookingMonth(program.periodType, month, year, { start: program.periodStart, end: program.periodEnd })
@@ -235,13 +259,17 @@ export async function previewMonth(month: number, year: number): Promise<ActionR
     const live = rules.filter(r => r.programId === program.id && activeForPeriod(r.effectiveFrom, r.effectiveTo, period))
     const participants = resolveParticipants(live, membersByDesignation)
     if (participants.length === 0) continue
-    const agg = await loadPeriodAggregates(admin, program, period)
+    const agg = await loadPeriodAggregates(
+      admin, program, period, participants.map(p => p.employeeId))
     for (const a of computeAwards(program, participants, agg, period)) {
       rows.push({
         programName: program.name,
         employeeId: a.employeeId,
         label: a.breakdown.ruleLabel as string | null,
+        basis: program.basis as string,
         basisAmountInr: a.basisAmountInr,
+        percent: a.percent,
+        fixedAmountInr: a.fixedAmountInr,
         earnedInr: a.earnedInr,
       })
     }

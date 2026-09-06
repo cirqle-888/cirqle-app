@@ -23,6 +23,12 @@ export type OwnershipBasis =
   | 'profit'
   /** No measurement — a flat amount per participant (bonuses). */
   | 'fixed'
+  /**
+   * Cash-book rows the participant hand-typed in the period — a COUNT, not
+   * money. The only basis measured per participant rather than program-wide,
+   * and the only one where a rule's `fixedAmountInr` is a rate PER UNIT.
+   */
+  | 'entries'
 
 export type OwnershipPeriodType = 'monthly' | 'quarterly' | 'yearly' | 'one_time'
 
@@ -91,6 +97,14 @@ export interface PeriodAggregates {
   billingInr: number
   collectedInr: number
   profitInr: number
+  /**
+   * Per-participant measured UNITS, not rupees — employeeId → count.
+   *
+   * Only a per-participant basis (`entries`) fills this; the money bases leave
+   * it undefined, which is why it is optional: every existing construction site
+   * stays valid.
+   */
+  unitsByEmployee?: Record<string, number>
 }
 
 /**
