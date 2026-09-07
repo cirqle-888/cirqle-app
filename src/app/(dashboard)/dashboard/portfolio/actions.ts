@@ -32,6 +32,7 @@ interface ItemRow {
   id: string
   slug: string
   title: string
+  caption: string | null
   width: number
   height: number
   variants: WorkVariant[] | null
@@ -81,8 +82,9 @@ const collectionSelect = (extra: { brand: readonly string[]; item: readonly stri
  * everything it does have.
  */
 const COLLECTION_SELECTS = [
+  { brand: ['logo_path'], item: ['format', 'collection_position', 'caption'] },
   { brand: ['logo_path'], item: ['format', 'collection_position'] },
-  { brand: [], item: ['format', 'collection_position'] },
+  { brand: ['logo_path'], item: ['format'] },
   { brand: [], item: ['format'] },
   { brand: [], item: [] },
 ] as const
@@ -169,6 +171,7 @@ export async function listPortfolio(): Promise<ActionResult<PortfolioCollection[
           published: item.published,
           position: item.position,
           collectionPosition: item.collection_position ?? null,
+          caption: item.caption ?? '',
           previewUrl: thumb ? `${publicBase}/${thumb.path}` : '',
         }
       }),
@@ -359,7 +362,7 @@ export async function saveWorkItem(input: {
 
 export async function updateWorkItem(
   id: string,
-  patch: { title?: string; published?: boolean; format?: WorkFormat },
+  patch: { title?: string; caption?: string; published?: boolean; format?: WorkFormat },
 ): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
   if (!guard.ok) return { ok: false, error: guard.error }
@@ -370,6 +373,9 @@ export async function updateWorkItem(
     if (!title) return { ok: false, error: 'Give the creative a title.' }
     update.title = title
   }
+  // An empty caption is stored as null, not '': the website tests for a
+  // caption, and "" would be a caption that says nothing.
+  if (patch.caption !== undefined) update.caption = patch.caption.trim() || null
   if (patch.published !== undefined) update.published = patch.published
   if (patch.format !== undefined) {
     if (!WORK_FORMATS.includes(patch.format)) return { ok: false, error: 'That is not a format we publish.' }
@@ -381,6 +387,9 @@ export async function updateWorkItem(
   const { error } = await site.from('work_items').update(update).eq('id', id)
   if (isMissingColumn(error, 'format')) {
     return { ok: false, error: 'The website database has no format column yet. Run cirqle-website/supabase/add-work-format.sql in its SQL editor, then try again.' }
+  }
+  if (isMissingColumn(error, 'caption')) {
+    return { ok: false, error: 'The website database has no caption column yet. Run cirqle-website/supabase/add-work-caption.sql in its SQL editor, then try again.' }
   }
   if (error?.code === '23514' && (error.message ?? '').includes('format')) {
     return { ok: false, error: 'The website database does not allow that format yet. Run cirqle-website/supabase/add-brand-identity.sql in its SQL editor, then try again.' }

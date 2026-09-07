@@ -81,7 +81,10 @@ export interface WorkVariant {
 export interface PortfolioItem {
   id: string
   slug: string
+  /** From the uploaded file name. Used here to find things, never published. */
   title: string
+  /** What the website tile says. Empty means the tile shows the brand alone. */
+  caption: string
   kind: WorkKind
   format: WorkFormat
   /** Storage path of an uploaded video, for kind 'video' */

@@ -18,7 +18,8 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import type { FlyerRow, PortfolioBrand, PortfolioCollection, PortfolioItem, WorkFormat } from '@/lib/portfolio/types'
 import { WORK_FORMAT_LABEL, formatsFor } from '@/lib/portfolio/types'
-import { resizeForUpload, slugFromFilename, titleFromFilename } from '@/lib/portfolio/resize'
+import { prepareLogoForUpload, slugFromFilename, titleFromFilename } from '@/lib/portfolio/resize'
+import type { PreparedLogo } from '@/lib/portfolio/resize'
 import FlyersPanel from './flyers-panel'
 import { uploadMedia } from './upload-media'
 import {
@@ -116,12 +117,22 @@ export default function PortfolioClient({
   const [linkBusy, setLinkBusy] = useState<string | null>(null)
   const coverRef = useRef<HTMLInputElement>(null)
   const [brandModal, setBrandModal] = useState<
-    { id?: string; name: string; tagline: string; logoUrl: string | null; logo: File | null; clearLogo?: boolean } | null
+    {
+      id?: string
+      name: string
+      tagline: string
+      logoUrl: string | null
+      logo: File | null
+      /** What will actually be uploaded, and what the preview shows. */
+      prepared?: { logo: PreparedLogo; url: string } | null
+      removePlate?: boolean
+      clearLogo?: boolean
+    } | null
   >(null)
   const [brandBusy, setBrandBusy] = useState<string | null>(null)
   const logoRef = useRef<HTMLInputElement>(null)
   const [confirm, setConfirm] = useState<{ title: string; body: string; run: () => Promise<void> } | null>(null)
-  const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
+  const [renaming, setRenaming] = useState<{ id: string; title: string; caption: string } | null>(null)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
 
@@ -264,8 +275,8 @@ export default function PortfolioClient({
 
   async function commitRename() {
     if (!renaming) return
-    const res = await updateWorkItem(renaming.id, { title: renaming.title })
-    if (!res.ok) { toast.toastError('Could not rename', res.error); return }
+    const res = await updateWorkItem(renaming.id, { title: renaming.title, caption: renaming.caption })
+    if (!res.ok) { toast.toastError('Could not save', res.error); return }
     setRenaming(null)
     router.refresh()
   }
@@ -342,6 +353,26 @@ export default function PortfolioClient({
     }
   }
 
+  /**
+   * Re-render the logo preview from the chosen file.
+   *
+   * The preview IS the upload: the same prepared blob is what goes to storage,
+   * so what the dialog shows on its dark pill is exactly what the website chip
+   * will draw. Guessing from the original file would let the two drift.
+   */
+  /** The logo already in storage, back as a File so it can be reprocessed. */
+  async function fetchStoredLogo(url: string): Promise<File> {
+    const res = await fetch(url, { cache: 'reload' })
+    if (!res.ok) throw new Error(`Could not read the stored logo (${res.status}).`)
+    return new File([await res.blob()], 'logo.webp', { type: 'image/webp' })
+  }
+
+  async function prepareLogo(file: File, removePlate: boolean | undefined, previous?: string) {
+    const logo = await prepareLogoForUpload(file, { removePlate })
+    if (previous) URL.revokeObjectURL(previous)
+    return { logo, url: URL.createObjectURL(logo.blob) }
+  }
+
   async function submitBrand() {
     if (!brandModal || !collection) return
     setBrandBusy('Saving')
@@ -358,9 +389,9 @@ export default function PortfolioClient({
 
       // The logo goes up only after the brand exists, because its storage path
       // is built from the brand's slug — which the server decides, not us.
-      if (saved && brandModal.logo) {
+      if (saved && brandModal.prepared) {
         setBrandBusy('Uploading the logo')
-        const logoPath = await uploadBrandLogo(brandModal.logo, collection.slug, saved.slug)
+        const logoPath = await uploadBrandLogo(brandModal.prepared.logo, collection.slug, saved.slug)
         const linked = await saveBrandLogo(saved.id, logoPath)
         if (!linked.ok) { toast.toastError('Saved the brand, but not its logo', linked.error); return }
       } else if (saved && brandModal.clearLogo) {
@@ -381,20 +412,17 @@ export default function PortfolioClient({
   /**
    * Put a brand logo in storage and return its path.
    *
-   * One small rendition is enough — it is drawn about 20 pixels tall on a chip
-   * — so the smallest the resizer produces is the one kept. WebP carries the
-   * transparency a logo needs.
+   * One small rendition is enough — it is drawn about 20 pixels tall on a chip.
+   * A flat background is erased on the way, because the site uses the file's
+   * alpha channel as a mask for the monochrome version: a logo still sitting
+   * on its white rectangle would mask as a white rectangle.
    */
-  async function uploadBrandLogo(file: File, collectionSlug: string, brandSlug: string): Promise<string> {
-    const resized = await resizeForUpload(file)
-    const smallest = resized.renditions[0]
-    if (!smallest) throw new Error('That image could not be prepared for upload.')
-
+  async function uploadBrandLogo(logo: PreparedLogo, collectionSlug: string, brandSlug: string): Promise<string> {
     const targets = await createWorkUploadUrls({
       collectionSlug,
       brandSlug,
       slug: 'logo',
-      widths: [smallest.width],
+      widths: [logo.width],
     })
     if (!targets.ok || !targets.data?.length) throw new Error(targets.error ?? 'Could not prepare the upload.')
 
@@ -402,7 +430,7 @@ export default function PortfolioClient({
     const put = await fetch(target.uploadUrl, {
       method: 'PUT',
       headers: { 'Content-Type': 'image/webp' },
-      body: smallest.blob,
+      body: logo.blob,
     })
     if (!put.ok) throw new Error(`The logo did not upload (${put.status}).`)
     return target.path
@@ -564,7 +592,7 @@ export default function PortfolioClient({
                       onToggle={() => void togglePublished(item)}
                       onFormat={(f) => void setFormat(item, f)}
                       formats={formatsFor(collection.slug)}
-                      onRename={() => setRenaming({ id: item.id, title: item.title })}
+                      onRename={() => setRenaming({ id: item.id, title: item.title, caption: item.caption })}
                       onDelete={() =>
                         setConfirm({
                           title: `Delete "${item.title}"?`,
@@ -713,7 +741,7 @@ export default function PortfolioClient({
                       onToggle={() => void togglePublished(item)}
                       onFormat={(f) => void setFormat(item, f)}
                       formats={formatsFor(collection.slug)}
-                      onRename={() => setRenaming({ id: item.id, title: item.title })}
+                      onRename={() => setRenaming({ id: item.id, title: item.title, caption: item.caption })}
                       onDelete={() =>
                         setConfirm({
                           title: `Delete "${item.title}"?`,
@@ -760,17 +788,43 @@ export default function PortfolioClient({
             </div>
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground">Logo</label>
-              <div className="flex items-center gap-2">
-                {(brandModal.logo || (brandModal.logoUrl && !brandModal.clearLogo)) && (
-                  <span className="shrink-0 grid place-items-center w-14 h-10 rounded-lg border border-border bg-secondary/60 overflow-hidden">
-                    {/* eslint-disable-next-line @next/next/no-img-element -- blob preview, and the website's storage host is not in next.config images */}
-                    <img
-                      src={brandModal.logo ? URL.createObjectURL(brandModal.logo) : brandModal.logoUrl!}
-                      alt=""
-                      className="max-w-[90%] max-h-[80%] object-contain"
+
+              {/* The preview is the chip, not a thumbnail: same dark pill, same
+                  one-colour mask, same size. What is judged here is what ships. */}
+              {(brandModal.prepared || (brandModal.logoUrl && !brandModal.clearLogo)) && (
+                <div className="flex items-center gap-3 py-1">
+                  <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#1b1430] text-white/85">
+                    <span
+                      className="block w-[84px] h-5 bg-current"
+                      style={{
+                        WebkitMaskImage: `url(${brandModal.prepared?.url ?? brandModal.logoUrl})`,
+                        maskImage: `url(${brandModal.prepared?.url ?? brandModal.logoUrl})`,
+                        WebkitMaskRepeat: 'no-repeat',
+                        maskRepeat: 'no-repeat',
+                        WebkitMaskPosition: 'center',
+                        maskPosition: 'center',
+                        WebkitMaskSize: 'contain',
+                        maskSize: 'contain',
+                      }}
                     />
+                    <span className="text-[10px] opacity-60">12</span>
                   </span>
-                )}
+                  <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#1b1430]">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- blob preview */}
+                    <img
+                      src={brandModal.prepared?.url ?? brandModal.logoUrl!}
+                      alt=""
+                      className="block w-[84px] h-5 object-contain"
+                    />
+                    <span className="text-[10px] text-white/60">12</span>
+                  </span>
+                  <span className="text-[10px] text-muted-foreground leading-tight">
+                    resting<br />hover
+                  </span>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => logoRef.current?.click()}
@@ -785,10 +839,10 @@ export default function PortfolioClient({
                         : 'Choose a logo'}
                   </span>
                 </button>
-                {(brandModal.logo || (brandModal.logoUrl && !brandModal.clearLogo)) && (
+                {(brandModal.prepared || (brandModal.logoUrl && !brandModal.clearLogo)) && (
                   <IconBtn
                     label="Remove the logo"
-                    onClick={() => setBrandModal({ ...brandModal, logo: null, clearLogo: true })}
+                    onClick={() => setBrandModal({ ...brandModal, logo: null, prepared: null, clearLogo: true })}
                   >
                     <Trash2 className="w-3 h-3" />
                   </IconBtn>
@@ -799,16 +853,60 @@ export default function PortfolioClient({
                 type="file"
                 accept="image/png,image/webp,image/jpeg,image/avif"
                 className="hidden"
-                onChange={(e) => {
+                onChange={async (e) => {
                   const f = e.target.files?.[0] ?? null
                   e.target.value = ''
-                  if (f) setBrandModal({ ...brandModal, logo: f, clearLogo: false })
+                  if (!f) return
+                  try {
+                    // Undefined, not false: let the detector decide, then show
+                    // what it decided in the checkbox so it can be overruled.
+                    const prepared = await prepareLogo(f, undefined, brandModal.prepared?.url)
+                    setBrandModal({
+                      ...brandModal,
+                      logo: f,
+                      prepared,
+                      removePlate: prepared.logo.plateRemoved,
+                      clearLogo: false,
+                    })
+                  } catch (err) {
+                    toast.toastError('Could not read that image', err instanceof Error ? err.message : undefined)
+                  }
                 }}
               />
+
+              {(brandModal.logo || (brandModal.logoUrl && !brandModal.clearLogo)) && (
+                <label className="flex items-start gap-2 text-[11px] text-muted-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!brandModal.removePlate}
+                    className="mt-0.5"
+                    onChange={async (e) => {
+                      const removePlate = e.target.checked
+                      try {
+                        // Works on a logo already in storage as well as on a
+                        // freshly chosen file: it is fetched back and treated
+                        // as the source, so a plate can be taken off without
+                        // hunting down the original artwork again.
+                        const file = brandModal.logo ?? (await fetchStoredLogo(brandModal.logoUrl!))
+                        const prepared = await prepareLogo(file, removePlate, brandModal.prepared?.url)
+                        setBrandModal({ ...brandModal, logo: file, removePlate, prepared })
+                      } catch (err) {
+                        toast.toastError('Could not read that image', err instanceof Error ? err.message : undefined)
+                      }
+                    }}
+                  />
+                  <span>
+                    Remove the plate behind the mark — the white shape the logo is drawn on. Found and removed
+                    automatically; untick it if the logo has white letters sitting on a coloured shape, since those go
+                    with it. Watch the resting preview.
+                  </span>
+                </label>
+              )}
+
               <p className="text-[11px] text-muted-foreground leading-relaxed">
-                Shown on the website in place of the brand name. A PNG with a transparent background is best, and a
-                light or full-colour mark reads better than a dark one — the chips it sits on are dark. The name is
-                still what screen readers and search engines get.
+                Shown on the website in place of the brand name: one flat colour that matches the page, turning full
+                colour when someone points at it. Every logo is drawn at the same size. The name is still what screen
+                readers and search engines get.
               </p>
             </div>
 
@@ -896,13 +994,32 @@ export default function PortfolioClient({
       {renaming && (
         <ModalOverlay onClose={() => setRenaming(null)}>
           <div className="bg-card border border-border rounded-2xl shadow-2xl p-5 space-y-4 w-full max-w-sm overflow-y-auto">
-            <h3 className="text-sm font-medium">Rename creative</h3>
-            <Input
-              value={renaming.title}
-              onChange={(e) => setRenaming({ ...renaming, title: e.target.value })}
-              autoFocus
-              onKeyDown={(e) => { if (e.key === 'Enter') void commitRename() }}
-            />
+            <h3 className="text-sm font-medium">Edit creative</h3>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">Caption</label>
+              <Input
+                value={renaming.caption}
+                onChange={(e) => setRenaming({ ...renaming, caption: e.target.value })}
+                placeholder="Eid al-Fitr greeting"
+                autoFocus
+                onKeyDown={(e) => { if (e.key === 'Enter') void commitRename() }}
+              />
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                What the website shows under this piece. Leave it empty and the tile carries the brand name alone —
+                which is better than a file name.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">File name</label>
+              <Input
+                value={renaming.title}
+                onChange={(e) => setRenaming({ ...renaming, title: e.target.value })}
+                onKeyDown={(e) => { if (e.key === 'Enter') void commitRename() }}
+              />
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Only used here, to find this piece again. Never shown to visitors.
+              </p>
+            </div>
             <div className="flex gap-2">
               <Button type="button" variant="outline" className="flex-1" onClick={() => setRenaming(null)}>Cancel</Button>
               <Button type="button" className="flex-1" onClick={() => void commitRename()}>Save</Button>
@@ -990,7 +1107,9 @@ function ItemCard({
       )}
 
       <div className="px-2.5 py-2 space-y-1.5">
-        <p className="text-[11px] font-medium truncate" title={item.title}>{item.title}</p>
+        <p className="text-[11px] font-medium truncate" title={item.caption || item.title}>
+          {item.caption || item.title}
+        </p>
         <p className="text-[10px] text-muted-foreground truncate">
           {brandName ? `${brandName} · ` : ''}
           {item.kind === 'reel'
