@@ -38,6 +38,7 @@ const ROUTE_LABELS: Record<string, string> = {
   feed:          'Feed Planner',
   assets:        'Asset Assignment',
   'cirqle-accounts': 'Cirqle Accounts',
+  portfolio:     'Website Portfolio',
   quotations:    'Quotations',
   cashbook:      'Cash Book',
   recurring:     'Recurring Expenses',

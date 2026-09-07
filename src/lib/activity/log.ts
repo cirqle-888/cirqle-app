@@ -48,6 +48,10 @@ export type EntityType =
   // Social — a connected Instagram/Facebook account. Needed because content on
   // one of Cirqle's OWN accounts has no client to log against.
   | 'social_account'
+  // Website portfolio — a creative published to cirqle.work. The content
+  // itself lives in the website's own Supabase project; this is the audit
+  // trail for who put it there.
+  | 'portfolio_item'
 
 /** Timeline filter groups — mirrors migration 014 backfill mapping. */
 export type ActivityCategory =
@@ -69,6 +73,7 @@ export const DEFAULT_CATEGORY: Record<EntityType, ActivityCategory> = {
   interview: 'recruitment', offer: 'recruitment',
   field_place: 'crm',
   social_account: 'crm',
+  portfolio_item: 'files',
 }
 
 export type ActivityAction =

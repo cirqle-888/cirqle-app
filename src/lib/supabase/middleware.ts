@@ -14,6 +14,7 @@ const ROUTE_PERMS: Array<[RegExp, string]> = [
   // More specific first: the planner has its own permission.
   [/^\/dashboard\/social\/feed/,           'social.plan_feed'],
   [/^\/dashboard\/social(?!-calendar)/,     'social.view_insights'],
+  [/^\/dashboard\/portfolio/,              'portfolio.view'],
   // Platform connections (Meta OAuth, ad-account/campaign mapping). Moved out
   // of /dashboard/advertising/integrations — same permission as before.
   [/^\/dashboard\/connections/,             'advertising.manage_providers'],

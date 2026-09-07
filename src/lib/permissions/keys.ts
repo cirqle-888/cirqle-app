@@ -166,6 +166,10 @@ export const PERMS = {
   SOCIAL_VIEW:   'social.view',
   SOCIAL_MANAGE: 'social.manage',
 
+  // Website portfolio (cirqle.work) — lives in a separate Supabase project.
+  PORTFOLIO_VIEW:   'portfolio.view',
+  PORTFOLIO_MANAGE: 'portfolio.manage',
+
   // Social Hub — connected Meta assets (Pages/Instagram), insights, publishing
   /** Connect/disconnect Meta assets (Pages, Instagram accounts) for clients. */
   SOCIAL_CONNECT:       'social.connect',

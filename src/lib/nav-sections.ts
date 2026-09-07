@@ -14,7 +14,7 @@ import {
   Briefcase, ClipboardList, CalendarClock, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
   BadgePercent, CalendarRange, HardHat, Repeat, Package as PackageIcon,
   Share2, UserPlus, Gauge, ShieldCheck, MapPin,
-  Scale, Receipt,
+  Scale, Receipt, Images,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -139,6 +139,9 @@ export const navSections: NavSection[] = [
       // now share a tab bar (components/social-hub/social-tabs) and this is the
       // way in. Routes are unchanged, so every existing link still works.
       { label: 'Social',           href: '/dashboard/social-calendar', icon: Share2, requiredPerm: 'social.view', keywords: ['content', 'planner', 'posts', 'instagram', 'facebook', 'calendar', 'publish', 'schedule', 'comments', 'inbox', 'reply', 'feed', 'grid', 'insights', 'reach', 'to post', 'caption', 'hashtags', 'stories', 'reels'] },
+      // Publishes straight to cirqle.work — the site reads this content from a
+      // separate Supabase project, so nothing here touches business data.
+      { label: 'Portfolio',        href: '/dashboard/portfolio',       icon: Images, requiredPerm: 'portfolio.view', keywords: ['website', 'work', 'gallery', 'creatives', 'showcase', 'cirqle.work', 'case studies', 'brands', 'social media posts', 'upload work'] },
       { label: 'Leads',            href: '/dashboard/leads',           icon: UserPlus, requiredPerm: 'leads.view', keywords: ['crm', 'meta leads', 'lead ads', 'prospects', 'enquiries'] },
       // Door-to-door / direct marketing: physical prospects on a map, visit
       // tracking, follow-ups — distinct from the Meta-ads Leads CRM above.
