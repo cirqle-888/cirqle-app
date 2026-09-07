@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Upload, Loader2, Trash2, Eye, EyeOff, GripVertical, ImageOff, Pencil } from 'lucide-react'
+import { Upload, Loader2, Trash2, Eye, EyeOff, GripVertical, ImageOff, Pencil, Link2, Link2Off } from 'lucide-react'
 import {
   DndContext, PointerSensor, useSensor, useSensors, closestCenter, type DragEndEvent,
 } from '@dnd-kit/core'
@@ -157,7 +157,9 @@ export default function FlyersPanel({ flyers, error, canManage, siteUrl, onToast
         <div>
           <h2 className="text-base font-medium">Supermarket flyers</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Shown as a flip-through brochure, so the order below is the page order. Drag to rearrange.
+            Shown as a flip-through brochure, so the order below is the page order. Drag to rearrange, and
+            use the link button on a page to mark it as part of the same booklet as the page before it — those
+            pages appear on the website as one open spread.
           </p>
         </div>
         <a
@@ -228,6 +230,11 @@ export default function FlyersPanel({ flyers, error, canManage, siteUrl, onToast
                     router.refresh()
                   }}
                   onRename={() => setRenaming({ id: flyer.id, title: flyer.title })}
+                  onJoin={i === 0 ? undefined : async () => {
+                    const res = await updateFlyer(flyer.id, { bookletContinues: !flyer.bookletContinues })
+                    if (!res.ok) { onToast('error', 'Could not change the booklet', res.error); return }
+                    router.refresh()
+                  }}
                   onDelete={() =>
                     setConfirm({
                       title: `Delete page ${i + 1}?`,
@@ -250,7 +257,7 @@ export default function FlyersPanel({ flyers, error, canManage, siteUrl, onToast
 
       {renaming && (
         <ModalOverlay onClose={() => setRenaming(null)}>
-          <div className="p-5 space-y-4 w-full max-w-sm">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl p-5 space-y-4 w-full max-w-sm overflow-y-auto">
             <h3 className="text-sm font-medium">Rename flyer page</h3>
             <Input
               value={renaming.title}
@@ -281,12 +288,14 @@ export default function FlyersPanel({ flyers, error, canManage, siteUrl, onToast
 }
 
 function FlyerCard({
-  flyer, page, canManage, onToggle, onRename, onDelete,
+  flyer, page, canManage, onToggle, onJoin, onRename, onDelete,
 }: {
   flyer: FlyerRow
   page: number
   canManage: boolean
   onToggle: () => void
+  /** Undefined for page 1, which has nothing above it to join. */
+  onJoin?: () => void
   onRename: () => void
   onDelete: () => void
 }) {
@@ -301,6 +310,15 @@ function FlyerCard({
       style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }}
       className="group relative rounded-xl overflow-hidden border border-border bg-secondary"
     >
+      {flyer.bookletContinues && (
+        <span
+          className="absolute top-1.5 left-8 z-10 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-background/85 text-[10px] text-muted-foreground"
+          title="Part of the same booklet as the page before it"
+        >
+          <Link2 className="w-2.5 h-2.5" /> Booklet
+        </span>
+      )}
+
       <div className="aspect-[3/4] bg-background/40">
         {flyer.previewUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- the website project's storage host is not in next.config images
@@ -318,7 +336,10 @@ function FlyerCard({
       </div>
 
       <div className="px-2.5 py-2">
-        <p className="text-[11px] font-medium truncate" title={flyer.title}>Page {page}</p>
+        <p className="text-[11px] font-medium truncate" title={flyer.title}>
+          Page {page}
+          {flyer.bookletContinues && <span className="text-muted-foreground font-normal"> · same booklet</span>}
+        </p>
         <p className="text-[10px] text-muted-foreground truncate">
           {flyer.title || 'Untitled'}{!flyer.published && ' · hidden'}
         </p>
@@ -330,6 +351,16 @@ function FlyerCard({
             <IconBtn label={flyer.published ? 'Hide from the website' : 'Show on the website'} onClick={onToggle}>
               {flyer.published ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
             </IconBtn>
+            {onJoin && (
+              <IconBtn
+                label={flyer.bookletContinues
+                  ? 'Start a new booklet here'
+                  : 'Same booklet as the page before — shown as one spread'}
+                onClick={onJoin}
+              >
+                {flyer.bookletContinues ? <Link2Off className="w-3 h-3" /> : <Link2 className="w-3 h-3" />}
+              </IconBtn>
+            )}
             <IconBtn label="Rename" onClick={onRename}><Pencil className="w-3 h-3" /></IconBtn>
             <IconBtn label="Delete" onClick={onDelete}><Trash2 className="w-3 h-3" /></IconBtn>
           </div>

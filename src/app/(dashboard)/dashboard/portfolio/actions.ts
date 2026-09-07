@@ -6,7 +6,7 @@ import { PERMS } from '@/lib/permissions/keys'
 import { createWebsiteAdminClient, websiteSupabaseConfigured } from '@/lib/supabase/website-admin'
 import { logActivity } from '@/lib/activity/log'
 import type { FlyerRow, PortfolioCollection, UploadTarget, WorkFormat, WorkKind, WorkVariant } from '@/lib/portfolio/types'
-import { VIDEO_EXT_BY_TYPE, WORK_FORMATS } from '@/lib/portfolio/types'
+import { VIDEO_EXT_BY_TYPE, WORK_FORMATS, formatsFor } from '@/lib/portfolio/types'
 
 /**
  * Website portfolio — reads and writes the SEPARATE Supabase project that
@@ -37,6 +37,7 @@ interface ItemRow {
   variants: WorkVariant[] | null
   published: boolean
   position: number
+  collection_position: number | null
   kind: WorkKind | null
   format: WorkFormat | null
   media_path: string | null
@@ -60,8 +61,33 @@ interface CollectionRow {
   work_brands: BrandRow[] | null
 }
 
-const COLLECTION_SELECT =
-  'id,slug,title,eyebrow,position,work_brands(id,slug,name,tagline,position,work_items(id,slug,title,width,height,variants,published,position,kind,media_path,external_url,duration_seconds))'
+/**
+ * One unknown field makes PostgREST reject an entire select, so the newer item
+ * columns are dropped one at a time rather than as a block — the migrations
+ * land in their own order, and a database that has `format` but not
+ * `collection_position` should still show formats.
+ */
+const collectionSelect = (extra: readonly string[]) =>
+  'id,slug,title,eyebrow,position,work_brands(id,slug,name,tagline,position,' +
+  'work_items(id,slug,title,width,height,variants,published,position,' +
+  extra.map((c) => `${c},`).join('') +
+  'kind,media_path,external_url,duration_seconds))'
+
+/** Most complete first; each fallback gives up exactly one column. */
+const COLLECTION_SELECTS = [
+  ['format', 'collection_position'],
+  ['format'],
+  [],
+] as const
+
+/**
+ * True when PostgREST rejected a write because a column does not exist yet.
+ * Newer columns ship in code before their migration has been run against the
+ * website database, and a save must not fail for the sake of an optional
+ * field — see the add-*.sql files in cirqle-website/supabase.
+ */
+const isMissingColumn = (e: { code?: string; message?: string } | null, column: string) =>
+  !!e && (e.code === 'PGRST204' || e.code === '42703') && (e.message ?? '').includes(column)
 
 const isMissingRelation = (e: { code?: string; message?: string } | null) =>
   !!e && (e.code === '42P01' || e.code === 'PGRST205' || /does not exist|schema cache/i.test(e.message ?? ''))
@@ -83,10 +109,15 @@ export async function listPortfolio(): Promise<ActionResult<PortfolioCollection[
   if (!websiteSupabaseConfigured()) return { ok: false, error: SETUP_HINT }
 
   const site = createWebsiteAdminClient()
-  const { data, error } = await site
-    .from('work_collections')
-    .select(COLLECTION_SELECT)
-    .order('position')
+  let result = await site.from('work_collections').select(collectionSelect(COLLECTION_SELECTS[0])).order('position')
+  for (let i = 1; i < COLLECTION_SELECTS.length; i++) {
+    if (result.error?.code !== '42703' && result.error?.code !== 'PGRST204') break
+    result = await site
+      .from('work_collections')
+      .select(collectionSelect(COLLECTION_SELECTS[i]))
+      .order('position') as typeof result
+  }
+  const { data, error } = result
 
   if (error) {
     if (isMissingRelation(error)) {
@@ -128,6 +159,7 @@ export async function listPortfolio(): Promise<ActionResult<PortfolioCollection[
           variants,
           published: item.published,
           position: item.position,
+          collectionPosition: item.collection_position ?? null,
           previewUrl: thumb ? `${publicBase}/${thumb.path}` : '',
         }
       }),
@@ -191,6 +223,8 @@ export async function saveWorkItem(input: {
   externalUrl?: string | null
   durationSeconds?: number | null
   format?: WorkFormat
+  /** Decides which vocabulary the guessed format comes from. */
+  collectionSlug?: string
 }): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
   if (!guard.ok) return { ok: false, error: guard.error }
@@ -200,15 +234,21 @@ export async function saveWorkItem(input: {
   const kind: WorkKind = input.kind ?? 'image'
   // Guess the format from what was uploaded, so nothing lands untagged: a clip
   // or a linked reel is a reel, a tall still is a story frame, the rest are
-  // posts. Whoever uploads can correct it on the card afterwards.
+  // posts. Outside social media there is nothing in the file to go on — a logo
+  // and a brandbook page look alike to a computer — so it falls to the first
+  // type the collection offers, and whoever uploads corrects it on the card.
+  const vocabulary = formatsFor(input.collectionSlug)
+  const guessed: WorkFormat = vocabulary.includes('post')
+    ? kind !== 'image'
+      ? 'reel'
+      : input.width > 0 && input.height / input.width >= 1.5
+        ? 'story'
+        : 'post'
+    : vocabulary[0]
   const format: WorkFormat =
-    input.format && WORK_FORMATS.includes(input.format)
+    input.format && WORK_FORMATS.includes(input.format) && vocabulary.includes(input.format)
       ? input.format
-      : kind !== 'image'
-        ? 'reel'
-        : input.width > 0 && input.height / input.width >= 1.5
-          ? 'story'
-          : 'post'
+      : guessed
   if (!slug) return { ok: false, error: 'That file name cannot be turned into a web address.' }
   if (!title) return { ok: false, error: 'Give the creative a title.' }
   if (kind === 'image' && !input.variants.length) return { ok: false, error: 'The image did not produce any sizes.' }
@@ -261,28 +301,35 @@ export async function saveWorkItem(input: {
     .limit(1)
     .maybeSingle()
 
-  const { error } = await site
-    .from('work_items')
-    .upsert(
-      {
-        brand_id: input.brandId,
-        slug,
-        title,
-        kind,
-        format,
-        media_path: input.mediaPath ?? null,
-        external_url: externalUrl,
-        duration_seconds: input.durationSeconds ?? null,
-        // A link-only reel has no artwork of its own, so record a sane ratio
-        // rather than zero, which the check constraint rejects.
-        width: input.width || 1080,
-        height: input.height || 1920,
-        variants: input.variants,
-        published: true,
-        position: ((last?.position as number | undefined) ?? 0) + 10,
-      },
-      { onConflict: 'brand_id,slug' },
-    )
+  const row = {
+    brand_id: input.brandId,
+    slug,
+    title,
+    kind,
+    media_path: input.mediaPath ?? null,
+    external_url: externalUrl,
+    duration_seconds: input.durationSeconds ?? null,
+    // A link-only reel has no artwork of its own, so record a sane ratio
+    // rather than zero, which the check constraint rejects.
+    width: input.width || 1080,
+    height: input.height || 1920,
+    variants: input.variants,
+    published: true,
+    position: ((last?.position as number | undefined) ?? 0) + 10,
+  }
+
+  // The format is worth recording but not worth losing an upload over. Two
+  // ways it can be unsavable, and both end in the row going in without it:
+  // the column may not exist yet, or it may exist with the older constraint
+  // that predates the brand identity types (add-work-format.sql run,
+  // add-brand-identity.sql not). The website infers a sane value meanwhile.
+  const formatRejected = (e: { code?: string; message?: string } | null) =>
+    isMissingColumn(e, 'format') || (e?.code === '23514' && (e.message ?? '').includes('format'))
+
+  let { error } = await site.from('work_items').upsert({ ...row, format }, { onConflict: 'brand_id,slug' })
+  if (formatRejected(error)) {
+    ({ error } = await site.from('work_items').upsert(row, { onConflict: 'brand_id,slug' }))
+  }
 
   if (error) {
     if (error.code === '23505') return { ok: false, error: 'A creative with that name already exists for this brand.' }
@@ -323,6 +370,12 @@ export async function updateWorkItem(
 
   const site = createWebsiteAdminClient()
   const { error } = await site.from('work_items').update(update).eq('id', id)
+  if (isMissingColumn(error, 'format')) {
+    return { ok: false, error: 'The website database has no format column yet. Run cirqle-website/supabase/add-work-format.sql in its SQL editor, then try again.' }
+  }
+  if (error?.code === '23514' && (error.message ?? '').includes('format')) {
+    return { ok: false, error: 'The website database does not allow that format yet. Run cirqle-website/supabase/add-brand-identity.sql in its SQL editor, then try again.' }
+  }
   if (error) return { ok: false, error: error.message }
 
   revalidatePath(REVALIDATE)
@@ -364,6 +417,48 @@ export async function reorderWorkItems(ids: string[]): Promise<ActionResult> {
   const site = createWebsiteAdminClient()
   for (let i = 0; i < ids.length; i++) {
     const { error } = await site.from('work_items').update({ position: (i + 1) * 10 }).eq('id', ids[i])
+    if (error) return { ok: false, error: error.message }
+  }
+
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
+/**
+ * Persist a hand-picked order for the collection's All view.
+ *
+ * Separate from `position`, which orders creatives inside one brand: the All
+ * view runs across brands, so the two orders have nothing to say to each other.
+ */
+export async function reorderCollectionItems(ids: string[]): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!ids.length) return { ok: true }
+
+  const site = createWebsiteAdminClient()
+  for (let i = 0; i < ids.length; i++) {
+    const { error } = await site.from('work_items').update({ collection_position: (i + 1) * 10 }).eq('id', ids[i])
+    if (error) {
+      if (isMissingColumn(error, 'collection_position')) {
+        return { ok: false, error: 'The website database cannot store this order yet. Run cirqle-website/supabase/add-work-collection-order.sql in its SQL editor, then try again.' }
+      }
+      return { ok: false, error: error.message }
+    }
+  }
+
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
+/** Persist the order the brands appear in — chips, and brand-by-brand views. */
+export async function reorderBrands(ids: string[]): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!ids.length) return { ok: true }
+
+  const site = createWebsiteAdminClient()
+  for (let i = 0; i < ids.length; i++) {
+    const { error } = await site.from('work_brands').update({ position: (i + 1) * 10 }).eq('id', ids[i])
     if (error) return { ok: false, error: error.message }
   }
 
@@ -498,10 +593,18 @@ export async function listFlyers(): Promise<ActionResult<FlyerRow[]>> {
   if (!websiteSupabaseConfigured()) return { ok: false, error: SETUP_HINT }
 
   const site = createWebsiteAdminClient()
-  const { data, error } = await site
-    .from('flyers')
-    .select('id,title,width,height,variants,published,position')
-    .order('position')
+  const FIELDS = 'id,title,width,height,variants,published,position'
+
+  // booklet_continues is newer than the table, and PostgREST rejects the whole
+  // select for one unknown column. Falling back keeps the panel usable before
+  // add-flyer-booklets.sql has been run — every page simply reads as its own.
+  type FlyerSelect = Record<string, unknown>
+  let result = await site.from('flyers').select(`${FIELDS},booklet_continues`).order('position')
+  if (result.error?.code === '42703') {
+    result = await site.from('flyers').select(FIELDS).order('position') as typeof result
+  }
+  const data = result.data as FlyerSelect[] | null
+  const error = result.error
 
   if (error) {
     if (isMissingRelation(error)) {
@@ -513,9 +616,14 @@ export async function listFlyers(): Promise<ActionResult<FlyerRow[]>> {
   const publicBase = `${process.env.WEBSITE_SUPABASE_URL}/storage/v1/object/public/${FLYERS_BUCKET}`
   return {
     ok: true,
-    data: ((data ?? []) as unknown as FlyerRow[]).map((row) => {
+    data: ((data ?? []) as unknown as (FlyerRow & { booklet_continues?: boolean | null })[]).map((row) => {
       const variants = [...(row.variants ?? [])].sort((a, b) => a.width - b.width)
-      return { ...row, variants, previewUrl: variants[0] ? `${publicBase}/${variants[0].path}` : '' }
+      return {
+        ...row,
+        variants,
+        bookletContinues: row.booklet_continues ?? false,
+        previewUrl: variants[0] ? `${publicBase}/${variants[0].path}` : '',
+      }
     }),
   }
 }
@@ -584,7 +692,7 @@ export async function saveFlyer(input: {
 
 export async function updateFlyer(
   id: string,
-  patch: { title?: string; published?: boolean },
+  patch: { title?: string; published?: boolean; bookletContinues?: boolean },
 ): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
   if (!guard.ok) return { ok: false, error: guard.error }
@@ -592,10 +700,14 @@ export async function updateFlyer(
   const update: Record<string, unknown> = {}
   if (patch.title !== undefined) update.title = patch.title.trim()
   if (patch.published !== undefined) update.published = patch.published
+  if (patch.bookletContinues !== undefined) update.booklet_continues = patch.bookletContinues
   if (!Object.keys(update).length) return { ok: true }
 
   const site = createWebsiteAdminClient()
   const { error } = await site.from('flyers').update(update).eq('id', id)
+  if (isMissingColumn(error, 'booklet_continues')) {
+    return { ok: false, error: 'The website database has no booklet column yet. Run cirqle-website/supabase/add-flyer-booklets.sql in its SQL editor, then try again.' }
+  }
   if (error) return { ok: false, error: error.message }
 
   revalidatePath(REVALIDATE)

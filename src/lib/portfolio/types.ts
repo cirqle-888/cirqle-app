@@ -24,15 +24,42 @@ export type WorkKind = 'image' | 'video' | 'reel'
  * can be a still or a clip. Brands answer who the work was for, formats answer
  * what it is, and the website filters on both.
  */
-export type WorkFormat = 'post' | 'reel' | 'story'
+export type WorkFormat =
+  // social media
+  | 'post' | 'reel' | 'story'
+  // brand identity
+  | 'logo' | 'guidelines' | 'brandbook' | 'chart'
 
-export const WORK_FORMATS: readonly WorkFormat[] = ['post', 'reel', 'story'] as const
+export const WORK_FORMATS: readonly WorkFormat[] =
+  ['post', 'reel', 'story', 'logo', 'guidelines', 'brandbook', 'chart'] as const
 
 export const WORK_FORMAT_LABEL: Record<WorkFormat, string> = {
   post: 'Post',
   reel: 'Reel',
   story: 'Story',
+  logo: 'Logo',
+  guidelines: 'Guidelines',
+  brandbook: 'Brandbook',
+  chart: 'Brand chart',
 }
+
+/**
+ * Which formats a collection actually uses.
+ *
+ * A brand identity job is not one fixed thing — one client gets a logo and
+ * nothing else, another a full brandbook, another a single brand chart — so
+ * they all live in one collection and the type is per item. Offering the
+ * social media types there (or the identity types on a social page) would
+ * just be a way to file something wrongly.
+ */
+export const FORMATS_BY_COLLECTION: Record<string, readonly WorkFormat[]> = {
+  'social-media': ['post', 'reel', 'story'],
+  'brand-identity': ['logo', 'guidelines', 'brandbook', 'chart'],
+}
+
+/** Formats offered for a collection; every format if it is not a known one. */
+export const formatsFor = (collectionSlug: string | undefined): readonly WorkFormat[] =>
+  (collectionSlug && FORMATS_BY_COLLECTION[collectionSlug]) || WORK_FORMATS
 
 /** Video containers accepted for upload, and the extension each is stored as. */
 export const VIDEO_EXT_BY_TYPE: Record<string, string> = {
@@ -67,12 +94,16 @@ export interface PortfolioItem {
   variants: WorkVariant[]
   published: boolean
   position: number
+  /** Hand-picked place in the collection's All view; null when never dragged. */
+  collectionPosition: number | null
   previewUrl: string
 }
 
 export interface FlyerRow {
   id: string
   title: string
+  /** True when this page belongs to the same booklet as the page before it. */
+  bookletContinues: boolean
   width: number
   height: number
   variants: WorkVariant[]

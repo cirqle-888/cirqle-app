@@ -17,12 +17,13 @@ import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import type { FlyerRow, PortfolioBrand, PortfolioCollection, PortfolioItem, WorkFormat } from '@/lib/portfolio/types'
-import { WORK_FORMATS, WORK_FORMAT_LABEL } from '@/lib/portfolio/types'
+import { WORK_FORMAT_LABEL, formatsFor } from '@/lib/portfolio/types'
 import { slugFromFilename, titleFromFilename } from '@/lib/portfolio/resize'
 import FlyersPanel from './flyers-panel'
 import { uploadMedia } from './upload-media'
 import {
-  deleteBrand, deleteWorkItem, reorderWorkItems, saveBrand, saveWorkItem, updateWorkItem,
+  deleteBrand, deleteWorkItem, reorderBrands, reorderCollectionItems, reorderWorkItems,
+  saveBrand, saveWorkItem, updateWorkItem,
 } from './actions'
 
 interface Props {
@@ -55,11 +56,45 @@ export default function PortfolioClient({
     [collections, collectionId],
   )
 
+  // A sentinel rather than a nullable brand: "no brand chosen" already means
+  // "fall back to the first one" everywhere below, and the All view has to be
+  // a deliberate choice, not the absence of one.
+  const ALL = '__all__'
   const [brandId, setBrandId] = useState(collection?.brands[0]?.id ?? '')
+  const showingAll = brandId === ALL
   const brand: PortfolioBrand | undefined = useMemo(
-    () => collection?.brands.find((b) => b.id === brandId) ?? collection?.brands[0],
-    [collection, brandId],
+    () => (showingAll ? undefined : collection?.brands.find((b) => b.id === brandId) ?? collection?.brands[0]),
+    [collection, brandId, showingAll],
   )
+
+  // Every creative in the collection, in the order the website's All view puts
+  // them: hand-placed first, then everything never dragged, in brand order.
+  const [allOrder, setAllOrder] = useState<string[] | null>(null)
+  const [brandOrder, setBrandOrder] = useState<string[] | null>(null)
+  const brands = useMemo(() => {
+    const list = collection?.brands ?? []
+    if (!brandOrder) return list
+    const byId = new Map(list.map((b) => [b.id, b]))
+    const picked = brandOrder.map((id) => byId.get(id)).filter(Boolean) as PortfolioBrand[]
+    return picked.length === list.length ? picked : list
+  }, [collection, brandOrder])
+
+  const allItems = useMemo(() => {
+    const flat = (collection?.brands ?? []).flatMap((b) =>
+      b.items.map((i) => ({ ...i, brandName: b.name })),
+    )
+    const sorted = flat
+      .slice()
+      .sort(
+        (a, z) =>
+          (a.collectionPosition ?? Number.MAX_SAFE_INTEGER) -
+          (z.collectionPosition ?? Number.MAX_SAFE_INTEGER),
+      )
+    if (!allOrder) return sorted
+    const byId = new Map(sorted.map((i) => [i.id, i]))
+    const picked = allOrder.map((id) => byId.get(id)).filter(Boolean) as typeof sorted
+    return picked.length === sorted.length ? picked : sorted
+  }, [collection, allOrder])
 
   // Local order so a drag feels instant; the server call follows.
   const [order, setOrder] = useState<string[] | null>(null)
@@ -142,6 +177,7 @@ export default function PortfolioClient({
         mark('Saving')
         const saved = await saveWorkItem({
           brandId: brand.id,
+          collectionSlug: collection.slug,
           slug,
           title: titleFromFilename(file.name),
           kind: isVideo ? 'video' : 'image',
@@ -178,6 +214,36 @@ export default function PortfolioClient({
     const res = await updateWorkItem(item.id, { published: !item.published })
     if (!res.ok) { toast.toastError('Could not update', res.error); return }
     toast.success(item.published ? 'Hidden from the website' : 'Visible on the website')
+    router.refresh()
+  }
+
+  async function onAllDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const ids = allItems.map((i) => i.id)
+    const next = arrayMove(ids, ids.indexOf(String(active.id)), ids.indexOf(String(over.id)))
+    setAllOrder(next)
+    const res = await reorderCollectionItems(next)
+    if (!res.ok) {
+      setAllOrder(null)
+      toast.toastError('Could not save the new order', res.error)
+      return
+    }
+    router.refresh()
+  }
+
+  async function onBrandDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over || active.id === over.id || !collection) return
+    const ids = collection.brands.map((b) => b.id)
+    const next = arrayMove(ids, ids.indexOf(String(active.id)), ids.indexOf(String(over.id)))
+    setBrandOrder(next)
+    const res = await reorderBrands(next)
+    if (!res.ok) {
+      setBrandOrder(null)
+      toast.toastError('Could not save the brand order', res.error)
+      return
+    }
     router.refresh()
   }
 
@@ -245,6 +311,7 @@ export default function PortfolioClient({
       setLinkBusy('Saving')
       const res = await saveWorkItem({
         brandId: brand.id,
+        collectionSlug: collection.slug,
         slug,
         title,
         kind: 'reel',
@@ -377,28 +444,93 @@ export default function PortfolioClient({
           body="Create a brand — a client whose work you want to show — then upload their creatives into it."
         />
       ) : (
-        <div className="flex flex-wrap gap-2">
-          {collection.brands.map((b) => {
-            const hidden = b.items.filter((i) => !i.published).length
-            return (
-              <button
-                key={b.id}
-                type="button"
-                onClick={() => { setBrandId(b.id); setOrder(null) }}
-                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border transition-colors ${
-                  b.id === brand?.id
-                    ? 'bg-foreground text-background border-transparent'
-                    : 'border-border bg-secondary text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {b.name}
-                <span className="opacity-60">{b.items.length}</span>
-                {hidden > 0 && <span className="opacity-60">· {hidden} hidden</span>}
-              </button>
-            )
-          })}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* The website's All view, and the only place its order can be set. */}
+          <button
+            type="button"
+            onClick={() => { setBrandId(ALL); setOrder(null) }}
+            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border transition-colors ${
+              showingAll
+                ? 'bg-foreground text-background border-transparent'
+                : 'border-border bg-secondary text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            All work
+            <span className="opacity-60">{allItems.length}</span>
+          </button>
+
+          <span className="w-px h-5 bg-border" aria-hidden />
+
+          {/* Brand chips are draggable: their order is the order the website
+              lists brands in, and the order All falls back to. */}
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onBrandDragEnd}>
+            <SortableContext items={brands.map((b) => b.id)} strategy={rectSortingStrategy}>
+              {brands.map((b) => (
+                <BrandChip
+                  key={b.id}
+                  brand={b}
+                  active={b.id === brand?.id}
+                  canManage={canManage}
+                  onSelect={() => { setBrandId(b.id); setOrder(null) }}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         </div>
       ))}
+
+      {/* ─── All work: the order the website's "All" chip shows ─────────── */}
+      {tab === 'work' && collection && showingAll && (
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-base font-medium">All work</h2>
+            <p className="text-xs text-muted-foreground mt-1">
+              {canManage
+                ? 'Drag to set the order of the All view on the website. Each brand keeps its own order on its own page — this is only the mixed list.'
+                : 'The order of the All view on the website.'}
+            </p>
+          </div>
+
+          {allItems.length === 0 ? (
+            <div className="text-center py-12 text-xs text-muted-foreground">
+              <ImageOff className="w-5 h-5 mx-auto mb-2 opacity-50" />
+              Nothing published in this collection yet.
+            </div>
+          ) : (
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onAllDragEnd}>
+              <SortableContext items={allItems.map((i) => i.id)} strategy={rectSortingStrategy}>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                  {allItems.map((item) => (
+                    <ItemCard
+                      key={item.id}
+                      item={item}
+                      brandName={item.brandName}
+                      canManage={canManage}
+                      onToggle={() => void togglePublished(item)}
+                      onFormat={(f) => void setFormat(item, f)}
+                      formats={formatsFor(collection.slug)}
+                      onRename={() => setRenaming({ id: item.id, title: item.title })}
+                      onDelete={() =>
+                        setConfirm({
+                          title: `Delete "${item.title}"?`,
+                          body: 'This removes it from the website and deletes its image files. It cannot be undone.',
+                          run: async () => {
+                            const res = await deleteWorkItem(item.id)
+                            if (!res.ok) { toast.toastError('Could not delete', res.error); return }
+                            setAllOrder(null)
+                            toast.success('Deleted')
+                            router.refresh()
+                          },
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+          )}
+        </div>
+      )}
 
       {/* ─── Selected brand ─────────────────────────────────────────────── */}
       {tab === 'work' && brand && (
@@ -525,6 +657,7 @@ export default function PortfolioClient({
                       canManage={canManage}
                       onToggle={() => void togglePublished(item)}
                       onFormat={(f) => void setFormat(item, f)}
+                      formats={formatsFor(collection.slug)}
                       onRename={() => setRenaming({ id: item.id, title: item.title })}
                       onDelete={() =>
                         setConfirm({
@@ -695,12 +828,16 @@ function Notice({ title, body }: { title: string; body: string }) {
 }
 
 function ItemCard({
-  item, canManage, onToggle, onFormat, onRename, onDelete,
+  item, brandName, canManage, onToggle, onFormat, formats, onRename, onDelete,
 }: {
   item: PortfolioItem
+  /** Set only in the All view, where one grid mixes every brand. */
+  brandName?: string
   canManage: boolean
   onToggle: () => void
   onFormat: (format: WorkFormat) => void
+  /** What this collection publishes — social posts, identity pieces, … */
+  formats: readonly WorkFormat[]
   onRename: () => void
   onDelete: () => void
 }) {
@@ -744,6 +881,7 @@ function ItemCard({
       <div className="px-2.5 py-2 space-y-1.5">
         <p className="text-[11px] font-medium truncate" title={item.title}>{item.title}</p>
         <p className="text-[10px] text-muted-foreground truncate">
+          {brandName ? `${brandName} · ` : ''}
           {item.kind === 'reel'
             ? hostOf(item.externalUrl)
             : `${item.width}×${item.height} · ${item.variants.length} sizes`}
@@ -758,7 +896,11 @@ function ItemCard({
             aria-label={`Format for ${item.title}`}
             className="w-full text-[10px] rounded-md border border-border bg-background/60 px-1.5 py-1 text-muted-foreground hover:text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500"
           >
-            {WORK_FORMATS.map((f) => (
+            {/* A creative uploaded before this collection had its own
+                vocabulary can hold a format the list does not offer. Without
+                it here the select would show the FIRST option while the row
+                still said something else — the one state worse than wrong. */}
+            {(formats.includes(item.format) ? formats : [item.format, ...formats]).map((f) => (
               <option key={f} value={f}>{WORK_FORMAT_LABEL[f]}</option>
             ))}
           </select>
@@ -789,6 +931,51 @@ function ItemCard({
         </button>
       )}
     </div>
+  )
+}
+
+/**
+ * A brand chip that can be dragged to reorder the brands.
+ *
+ * Drag and click share one element on purpose — a separate grip on something
+ * this small is fiddly. dnd-kit's PointerSensor is configured with a distance
+ * threshold, so a plain click still selects the brand and only a real drag
+ * moves it.
+ */
+function BrandChip({
+  brand, active, canManage, onSelect,
+}: {
+  brand: PortfolioBrand
+  active: boolean
+  canManage: boolean
+  onSelect: () => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: brand.id,
+    disabled: !canManage,
+  })
+  const hidden = brand.items.filter((i) => !i.published).length
+
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={onSelect}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }}
+      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border transition-colors ${
+        canManage ? 'cursor-grab active:cursor-grabbing' : ''
+      } ${
+        active
+          ? 'bg-foreground text-background border-transparent'
+          : 'border-border bg-secondary text-muted-foreground hover:text-foreground'
+      }`}
+      {...attributes}
+      {...listeners}
+    >
+      {brand.name}
+      <span className="opacity-60">{brand.items.length}</span>
+      {hidden > 0 && <span className="opacity-60">· {hidden} hidden</span>}
+    </button>
   )
 }
 
