@@ -38,6 +38,34 @@ Without the first two the page renders a setup notice instead of failing.
 auto-granted to admin designations. Grant them to other designations in
 Settings → Designations.
 
+## What can be published
+
+The module has a **Work** tab and a **Supermarket flyers** tab.
+
+Work entries come in three kinds, stored in `work_items.kind`:
+
+- **image** — a still. `variants` holds its WebP renditions.
+- **video** — a file we host at `media_path`, played inline on the site.
+  `variants` holds the poster frame, captured from the video in the browser.
+  Capped at 50 MB; `.mov` will not always decode for a poster, and the upload
+  still succeeds without one.
+- **reel** — hosted elsewhere, at `external_url`. Nothing is uploaded. YouTube
+  is embedded and plays on the site; Instagram, TikTok and Facebook refuse to
+  be embedded, so the site shows the cover and sends the visitor to the post.
+
+A video may also carry `external_url`, so someone who watches it on the site
+can still be sent to Instagram to like and share it.
+
+Flyers live in their own `flyers` table rather than a bucket listing, because
+the website flips through them like a printed brochure and object storage has
+no dependable ordering. Drag to set page order.
+
+### Video and the free tier
+
+Supabase's free plan includes 1 GB of storage and 5 GB of egress a month. A
+20 MB reel watched 250 times spends the whole monthly egress. Prefer reel
+links for anything already on Instagram or YouTube.
+
 ## How uploading works
 
 Supabase image transformation is a paid add-on, so renditions are produced in

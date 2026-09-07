@@ -132,3 +132,74 @@ export function titleFromFilename(name: string): string {
     })
     .join(' ')
 }
+
+// ─── Video ───────────────────────────────────────────────────────────────────
+
+export interface VideoPoster {
+  width: number
+  height: number
+  durationSeconds: number
+  /** Poster frame at the same widths as a still, or [] if it could not be read */
+  renditions: Rendition[]
+}
+
+/**
+ * Read a video's dimensions and duration, and grab a frame to use as the
+ * poster. Everything happens locally; the file itself is uploaded untouched.
+ *
+ * Some containers (notably .mov) will not decode in every browser. When the
+ * frame cannot be captured the video still uploads — it just has no poster —
+ * so this resolves with empty renditions rather than throwing.
+ */
+export async function posterFromVideo(file: File): Promise<VideoPoster> {
+  const url = URL.createObjectURL(file)
+  const video = document.createElement('video')
+  video.preload = 'metadata'
+  video.muted = true
+  video.playsInline = true
+  video.src = url
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      video.onloadedmetadata = () => resolve()
+      video.onerror = () => reject(new Error('This video could not be read in the browser.'))
+      window.setTimeout(() => reject(new Error('Timed out reading the video.')), 20000)
+    })
+
+    const width = video.videoWidth
+    const height = video.videoHeight
+    const durationSeconds = Number.isFinite(video.duration) ? video.duration : 0
+    if (!width || !height) return { width: 0, height: 0, durationSeconds, renditions: [] }
+
+    // A frame a little way in is far more representative than frame zero,
+    // which is often black.
+    const target = durationSeconds > 2 ? Math.min(1, durationSeconds * 0.1) : 0
+    let frame: ImageBitmap | null = null
+    try {
+      await new Promise<void>((resolve, reject) => {
+        video.onseeked = () => resolve()
+        video.onerror = () => reject(new Error('Could not seek the video.'))
+        video.currentTime = target
+        window.setTimeout(() => reject(new Error('Timed out seeking the video.')), 20000)
+      })
+      frame = await createImageBitmap(video)
+    } catch {
+      return { width, height, durationSeconds, renditions: [] }
+    }
+
+    try {
+      const renditions: Rendition[] = []
+      for (const w of widthsFor(width)) {
+        const scaled = Math.round((height / width) * w)
+        renditions.push({ width: w, height: scaled, blob: await toWebp(frame, w, scaled) })
+      }
+      return { width, height, durationSeconds, renditions }
+    } finally {
+      frame.close()
+    }
+  } finally {
+    URL.revokeObjectURL(url)
+    video.removeAttribute('src')
+    video.load()
+  }
+}

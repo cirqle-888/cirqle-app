@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Upload, Loader2, Trash2, Eye, EyeOff, ExternalLink, Plus, Pencil, GripVertical, ImageOff,
+  Play, Link2, Film,
 } from 'lucide-react'
 import {
   DndContext, PointerSensor, useSensor, useSensors, closestCenter, type DragEndEvent,
@@ -15,17 +16,19 @@ import { Input } from '@/components/ui/input'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast, ToastContainer } from '@/components/ui/toast'
-import type { PortfolioBrand, PortfolioCollection, PortfolioItem } from '@/lib/portfolio/types'
-import { MAX_SOURCE_BYTES } from '@/lib/portfolio/types'
-import { resizeForUpload, slugFromFilename, titleFromFilename } from '@/lib/portfolio/resize'
+import type { FlyerRow, PortfolioBrand, PortfolioCollection, PortfolioItem } from '@/lib/portfolio/types'
+import { slugFromFilename, titleFromFilename } from '@/lib/portfolio/resize'
+import FlyersPanel from './flyers-panel'
+import { uploadMedia } from './upload-media'
 import {
-  createWorkUploadUrls, deleteBrand, deleteWorkItem, reorderWorkItems, saveBrand, saveWorkItem,
-  updateWorkItem,
+  deleteBrand, deleteWorkItem, reorderWorkItems, saveBrand, saveWorkItem, updateWorkItem,
 } from './actions'
 
 interface Props {
   configured: boolean
   collections: PortfolioCollection[]
+  flyers: FlyerRow[]
+  flyerError: string | null
   loadError: string | null
   canManage: boolean
   siteUrl: string
@@ -37,9 +40,11 @@ interface UploadProgress {
   failed?: boolean
 }
 
-const ACCEPT = 'image/jpeg,image/png,image/webp,image/avif'
+const ACCEPT = 'image/jpeg,image/png,image/webp,image/avif,video/mp4,video/webm,video/quicktime'
 
-export default function PortfolioClient({ configured, collections, loadError, canManage, siteUrl }: Props) {
+export default function PortfolioClient({
+  configured, collections, flyers, flyerError, loadError, canManage, siteUrl,
+}: Props) {
   const router = useRouter()
   const toast = useToast()
 
@@ -70,6 +75,10 @@ export default function PortfolioClient({ configured, collections, loadError, ca
   const [dragOver, setDragOver] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  const [tab, setTab] = useState<'work' | 'flyers'>('work')
+  const [linkModal, setLinkModal] = useState<{ url: string; title: string; cover: File | null } | null>(null)
+  const [linkBusy, setLinkBusy] = useState<string | null>(null)
+  const coverRef = useRef<HTMLInputElement>(null)
   const [brandModal, setBrandModal] = useState<{ id?: string; name: string; tagline: string } | null>(null)
   const [confirm, setConfirm] = useState<{ title: string; body: string; run: () => Promise<void> } | null>(null)
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
@@ -88,24 +97,16 @@ export default function PortfolioClient({ configured, collections, loadError, ca
     )
   }
 
-  if (loadError) {
-    return (
-      <div className="p-6">
-        <Notice title="Could not load the portfolio" body={loadError} />
-      </div>
-    )
-  }
-
-  if (!collection) {
-    return (
-      <div className="p-6">
-        <Notice
-          title="No collections yet"
-          body="Run cirqle-website/supabase/schema.sql in the website project's SQL editor. It creates the tables and the first collection."
-        />
-      </div>
-    )
-  }
+  // A failed work query used to return early, which also took the flyers tab
+  // with it — flyers are a separate query and may be perfectly healthy.
+  const workNotice = loadError
+    ? { title: 'Could not load the portfolio', body: loadError }
+    : !collection
+      ? {
+          title: 'No collections yet',
+          body: "Run cirqle-website/supabase/schema.sql in the website project's SQL editor. It creates the tables and the first collection.",
+        }
+      : null
 
   // ─── Upload ────────────────────────────────────────────────────────────────
   async function uploadFiles(files: FileList | File[]) {
@@ -113,7 +114,9 @@ export default function PortfolioClient({ configured, collections, loadError, ca
       toast.toastError('Pick a brand first', 'Create a brand to upload work into.')
       return
     }
-    const list = Array.from(files).filter((f) => f.type.startsWith('image/'))
+    const list = Array.from(files).filter(
+      (f) => f.type.startsWith('image/') || f.type.startsWith('video/'),
+    )
     if (!list.length) return
 
     setBusy(true)
@@ -125,59 +128,34 @@ export default function PortfolioClient({ configured, collections, loadError, ca
       const mark = (step: string, failed?: boolean) =>
         setUploads((prev) => prev.map((u, n) => (n === i ? { ...u, step, failed } : u)))
 
+      const isVideo = file.type.startsWith('video/')
+
       try {
-        if (file.size > MAX_SOURCE_BYTES) {
-          mark('Too large — export it smaller', true)
-          continue
-        }
-
-        mark('Resizing')
-        const { width, height, renditions } = await resizeForUpload(file)
-
-        mark('Preparing upload')
         const slug = slugFromFilename(file.name)
-        const prep = await createWorkUploadUrls({
-          collectionSlug: collection.slug,
-          brandSlug: brand.slug,
-          slug,
-          widths: renditions.map((r) => r.width),
-        })
-        if (!prep.ok || !prep.data) {
-          mark(prep.error ?? 'Could not prepare the upload', true)
-          continue
-        }
-
-        mark(`Uploading ${renditions.length} sizes`)
-        const targets = prep.data
-        for (const rendition of renditions) {
-          const target = targets.find((t) => t.width === rendition.width)
-          if (!target) continue
-          const put = await fetch(target.uploadUrl, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'image/webp' },
-            body: rendition.blob,
-          })
-          if (!put.ok) throw new Error('Storage rejected the file.')
-        }
+        const media = await uploadMedia(
+          file,
+          { collectionSlug: collection.slug, brandSlug: brand.slug, slug },
+          mark,
+        )
 
         mark('Saving')
         const saved = await saveWorkItem({
           brandId: brand.id,
           slug,
           title: titleFromFilename(file.name),
-          width,
-          height,
-          variants: renditions.map((r) => {
-            const target = targets.find((t) => t.width === r.width)
-            return { width: r.width, height: r.height, path: target?.path ?? '', bytes: r.blob.size }
-          }).filter((v) => v.path),
+          kind: isVideo ? 'video' : 'image',
+          mediaPath: media.mediaPath,
+          durationSeconds: media.durationSeconds,
+          width: media.width,
+          height: media.height,
+          variants: media.variants,
         })
         if (!saved.ok) {
           mark(saved.error ?? 'Could not save', true)
           continue
         }
 
-        mark('Published')
+        mark(media.posterMissing ? 'Published (no poster)' : 'Published')
         done++
       } catch (e) {
         // Without this the user watches a spinner forever on a dropped connection.
@@ -225,6 +203,62 @@ export default function PortfolioClient({ configured, collections, loadError, ca
     router.refresh()
   }
 
+  /**
+   * Publish a reel that lives on Instagram, YouTube or similar.
+   *
+   * Nothing can be pulled from the link itself - those platforms block
+   * cross-origin reads - so the cover is whatever the user attaches. A short
+   * muted clip is best: it plays on hover and in the viewer, while the button
+   * still sends people to the real post.
+   */
+  async function submitLink() {
+    if (!linkModal || !brand || !collection) return
+    const title = linkModal.title.trim()
+    const url = linkModal.url.trim()
+    if (!title) { toast.toastError('Give it a title', 'This is what visitors read under the tile.'); return }
+    if (!/^https:\/\//i.test(url)) { toast.toastError('Check the link', 'It must start with https://'); return }
+
+    const slug = slugFromFilename(title) || `reel-${Date.now().toString(36)}`
+    setLinkBusy('Saving')
+    try {
+      let media = null
+      if (linkModal.cover) {
+        media = await uploadMedia(
+          linkModal.cover,
+          { collectionSlug: collection.slug, brandSlug: brand.slug, slug },
+          (step) => setLinkBusy(step),
+        )
+      }
+
+      setLinkBusy('Saving')
+      const res = await saveWorkItem({
+        brandId: brand.id,
+        slug,
+        title,
+        kind: 'reel',
+        externalUrl: url,
+        mediaPath: media?.mediaPath ?? null,
+        durationSeconds: media?.durationSeconds ?? null,
+        // Portrait is the safe default for a reel with no cover yet.
+        width: media?.width || 1080,
+        height: media?.height || 1920,
+        variants: media?.variants ?? [],
+      })
+      if (!res.ok) { toast.toastError('Could not save the reel', res.error); return }
+
+      setLinkModal(null)
+      toast.success(
+        'Reel added',
+        media?.mediaPath ? 'Its clip plays on hover.' : media ? 'Cover uploaded.' : 'Add a cover later so it is not a blank tile.',
+      )
+      router.refresh()
+    } catch (e) {
+      toast.toastError('Could not add the reel', e instanceof Error ? e.message : 'Please try again.')
+    } finally {
+      setLinkBusy(null)
+    }
+  }
+
   async function submitBrand() {
     if (!brandModal || !collection) return
     const res = await saveBrand({
@@ -253,23 +287,64 @@ export default function PortfolioClient({ configured, collections, loadError, ca
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <a
+          {collection && <a
             href={`${siteUrl}/portfolio/${collection.slug}`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border bg-secondary text-xs text-muted-foreground hover:text-foreground"
           >
             <ExternalLink className="w-3.5 h-3.5" /> View live
-          </a>
-          {canManage && (
-            <Button size="sm" onClick={() => setBrandModal({ name: '', tagline: '' })}>
-              <Plus className="w-3.5 h-3.5" /> New brand
-            </Button>
+          </a>}
+          {canManage && tab === 'work' && collection && (
+            <>
+              <Button size="sm" variant="outline" onClick={() => setLinkModal({ url: '', title: '', cover: null })}>
+                <Link2 className="w-3.5 h-3.5" /> Add reel link
+              </Button>
+              <Button size="sm" onClick={() => setBrandModal({ name: '', tagline: '' })}>
+                <Plus className="w-3.5 h-3.5" /> New brand
+              </Button>
+            </>
           )}
         </div>
       </div>
 
-      {collections.length > 1 && (
+      {/* Work and flyers are both published to the website, so they live
+          behind one nav entry rather than two. */}
+      <div className="flex items-center gap-1 border-b border-border">
+        {([
+          { id: 'work' as const, label: 'Work', count: collections.reduce((n, c) => n + c.brands.reduce((m, b) => m + b.items.length, 0), 0) },
+          { id: 'flyers' as const, label: 'Supermarket flyers', count: flyers.length },
+        ]).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${
+              tab === t.id
+                ? 'border-violet-500 text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {t.label} <span className="opacity-60">{t.count}</span>
+          </button>
+        ))}
+      </div>
+
+      {tab === 'flyers' && (
+        <FlyersPanel
+          flyers={flyers}
+          error={flyerError}
+          canManage={canManage}
+          siteUrl={siteUrl}
+          onToast={(kind, title, body) =>
+            kind === 'success' ? toast.success(title, body) : toast.toastError(title, body)
+          }
+        />
+      )}
+
+      {tab === 'work' && workNotice && <Notice title={workNotice.title} body={workNotice.body} />}
+
+      {tab === 'work' && collection && collections.length > 1 && (
         <div className="flex flex-wrap gap-2">
           {collections.map((c) => (
             <button
@@ -289,7 +364,7 @@ export default function PortfolioClient({ configured, collections, loadError, ca
       )}
 
       {/* ─── Brands ─────────────────────────────────────────────────────── */}
-      {collection.brands.length === 0 ? (
+      {tab === 'work' && collection && (collection.brands.length === 0 ? (
         <Notice
           title="No brands yet"
           body="Create a brand — a client whose work you want to show — then upload their creatives into it."
@@ -316,10 +391,10 @@ export default function PortfolioClient({ configured, collections, loadError, ca
             )
           })}
         </div>
-      )}
+      ))}
 
       {/* ─── Selected brand ─────────────────────────────────────────────── */}
-      {brand && (
+      {tab === 'work' && brand && (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
@@ -382,9 +457,10 @@ export default function PortfolioClient({ configured, collections, loadError, ca
               } ${busy ? 'opacity-60 pointer-events-none' : ''}`}
             >
               {busy ? <Loader2 className="w-5 h-5 animate-spin mb-2" /> : <Upload className="w-5 h-5 mb-2 text-muted-foreground" />}
-              <p className="text-sm">Drop images here, or click to choose</p>
+              <p className="text-sm">Drop images or videos here, or click to choose</p>
               <p className="text-[11px] text-muted-foreground mt-1">
-                Any size — they are converted to WebP at four widths before uploading. The file name becomes the title.
+                Images are converted to WebP at four widths before uploading. Videos go up as they are, up to 50 MB,
+                and a poster frame is taken automatically. The file name becomes the title.
               </p>
               <input
                 ref={fileRef}
@@ -482,6 +558,70 @@ export default function PortfolioClient({ configured, collections, loadError, ca
         </ModalOverlay>
       )}
 
+      {linkModal && (
+        <ModalOverlay onClose={() => setLinkModal(null)}>
+          <div className="p-5 space-y-4 w-full max-w-sm">
+            <div>
+              <h3 className="text-sm font-medium">Add a reel by link</h3>
+              <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
+                For work already published on Instagram, YouTube or TikTok. Nothing is uploaded, so it costs no
+                storage. YouTube plays on the site; the others show a cover and send the visitor to the post.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">Title</label>
+              <Input
+                value={linkModal.title}
+                onChange={(e) => setLinkModal({ ...linkModal, title: e.target.value })}
+                placeholder="Nabidina Reel"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">Link</label>
+              <Input
+                value={linkModal.url}
+                onChange={(e) => setLinkModal({ ...linkModal, url: e.target.value })}
+                placeholder="https://www.instagram.com/reel/..."
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">Cover</label>
+              <button
+                type="button"
+                onClick={() => coverRef.current?.click()}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-border bg-secondary/40 text-xs text-muted-foreground hover:text-foreground hover:border-violet-500/40"
+              >
+                <Upload className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{linkModal.cover ? linkModal.cover.name : 'Choose an image or a short clip'}</span>
+              </button>
+              <input
+                ref={coverRef}
+                type="file"
+                accept={ACCEPT}
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0] ?? null
+                  e.target.value = ''
+                  if (f) setLinkModal({ ...linkModal, cover: f })
+                }}
+              />
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Instagram will not let us read the reel, so the cover has to come from you. A 3-6 second muted clip
+                is best - it plays on hover and in the viewer, and the button still opens the real post. A still
+                image works too.
+              </p>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <Button type="button" variant="outline" className="flex-1" disabled={!!linkBusy} onClick={() => setLinkModal(null)}>Cancel</Button>
+              <Button type="button" className="flex-1" disabled={!!linkBusy} onClick={() => void submitLink()}>
+                {linkBusy ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> {linkBusy}</> : 'Add reel'}
+              </Button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
       {renaming && (
         <ModalOverlay onClose={() => setRenaming(null)}>
           <div className="p-5 space-y-4 w-full max-w-sm">
@@ -563,10 +703,22 @@ function ItemCard({
         )}
       </div>
 
+      {item.kind !== 'image' && (
+        <span
+          className="absolute top-1.5 left-8 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-background/85 text-[10px] text-muted-foreground"
+          title={item.kind === 'video' ? 'Plays on the website' : 'Opens on the platform'}
+        >
+          {item.kind === 'video' ? <Play className="w-2.5 h-2.5" /> : <Film className="w-2.5 h-2.5" />}
+          {item.kind === 'video' ? 'Video' : 'Reel'}
+        </span>
+      )}
+
       <div className="px-2.5 py-2">
         <p className="text-[11px] font-medium truncate" title={item.title}>{item.title}</p>
-        <p className="text-[10px] text-muted-foreground">
-          {item.width}×{item.height} · {item.variants.length} sizes
+        <p className="text-[10px] text-muted-foreground truncate">
+          {item.kind === 'reel'
+            ? hostOf(item.externalUrl)
+            : `${item.width}×${item.height} · ${item.variants.length} sizes`}
           {!item.published && ' · hidden'}
         </p>
       </div>
@@ -594,6 +746,19 @@ function ItemCard({
       )}
     </div>
   )
+}
+
+/**
+ * Host of a stored link, for the card subtitle. Never throws: a malformed URL
+ * saved before validation tightened would otherwise crash the whole page.
+ */
+function hostOf(url: string | null): string {
+  if (!url) return 'link'
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return 'invalid link'
+  }
 }
 
 function IconBtn({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {

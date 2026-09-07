@@ -5,7 +5,8 @@ import { requirePermission, requireReadPermission } from '@/lib/permissions/chec
 import { PERMS } from '@/lib/permissions/keys'
 import { createWebsiteAdminClient, websiteSupabaseConfigured } from '@/lib/supabase/website-admin'
 import { logActivity } from '@/lib/activity/log'
-import type { PortfolioCollection, UploadTarget, WorkVariant } from '@/lib/portfolio/types'
+import type { FlyerRow, PortfolioCollection, UploadTarget, WorkKind, WorkVariant } from '@/lib/portfolio/types'
+import { VIDEO_EXT_BY_TYPE } from '@/lib/portfolio/types'
 
 /**
  * Website portfolio — reads and writes the SEPARATE Supabase project that
@@ -21,6 +22,7 @@ interface ActionResult<T = void> {
 
 const REVALIDATE = '/dashboard/portfolio'
 const BUCKET = 'work'
+const FLYERS_BUCKET = 'flyers'
 
 const SETUP_HINT =
   'The website Supabase project is not configured yet. Add WEBSITE_SUPABASE_URL and WEBSITE_SUPABASE_SERVICE_ROLE_KEY, then reload.'
@@ -35,6 +37,10 @@ interface ItemRow {
   variants: WorkVariant[] | null
   published: boolean
   position: number
+  kind: WorkKind | null
+  media_path: string | null
+  external_url: string | null
+  duration_seconds: number | null
 }
 interface BrandRow {
   id: string
@@ -52,6 +58,9 @@ interface CollectionRow {
   position: number
   work_brands: BrandRow[] | null
 }
+
+const COLLECTION_SELECT =
+  'id,slug,title,eyebrow,position,work_brands(id,slug,name,tagline,position,work_items(id,slug,title,width,height,variants,published,position,kind,media_path,external_url,duration_seconds))'
 
 const isMissingRelation = (e: { code?: string; message?: string } | null) =>
   !!e && (e.code === '42P01' || e.code === 'PGRST205' || /does not exist|schema cache/i.test(e.message ?? ''))
@@ -75,9 +84,7 @@ export async function listPortfolio(): Promise<ActionResult<PortfolioCollection[
   const site = createWebsiteAdminClient()
   const { data, error } = await site
     .from('work_collections')
-    .select(
-      'id,slug,title,eyebrow,position,work_brands(id,slug,name,tagline,position,work_items(id,slug,title,width,height,variants,published,position))',
-    )
+    .select(COLLECTION_SELECT)
     .order('position')
 
   if (error) {
@@ -90,7 +97,7 @@ export async function listPortfolio(): Promise<ActionResult<PortfolioCollection[
   const publicBase = `${process.env.WEBSITE_SUPABASE_URL}/storage/v1/object/public/${BUCKET}`
   const byPosition = (a: { position: number }, b: { position: number }) => a.position - b.position
 
-  const collections: PortfolioCollection[] = ((data ?? []) as CollectionRow[]).map((collection) => ({
+  const collections: PortfolioCollection[] = ((data ?? []) as unknown as CollectionRow[]).map((collection) => ({
     id: collection.id,
     slug: collection.slug,
     title: collection.title,
@@ -110,6 +117,10 @@ export async function listPortfolio(): Promise<ActionResult<PortfolioCollection[
           id: item.id,
           slug: item.slug,
           title: item.title,
+          kind: item.kind ?? 'image',
+          mediaPath: item.media_path,
+          externalUrl: item.external_url,
+          durationSeconds: item.duration_seconds,
           width: item.width,
           height: item.height,
           variants,
@@ -173,17 +184,59 @@ export async function saveWorkItem(input: {
   width: number
   height: number
   variants: WorkVariant[]
+  kind?: WorkKind
+  mediaPath?: string | null
+  externalUrl?: string | null
+  durationSeconds?: number | null
 }): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const slug = slugify(input.slug)
   const title = input.title.trim()
+  const kind: WorkKind = input.kind ?? 'image'
   if (!slug) return { ok: false, error: 'That file name cannot be turned into a web address.' }
   if (!title) return { ok: false, error: 'Give the creative a title.' }
-  if (!input.variants.length) return { ok: false, error: 'The image did not produce any sizes.' }
+  if (kind === 'image' && !input.variants.length) return { ok: false, error: 'The image did not produce any sizes.' }
+  if (kind === 'video' && !input.mediaPath) return { ok: false, error: 'The video file was not uploaded.' }
+
+  const externalUrl = input.externalUrl?.trim() || null
+  if (kind === 'reel' && !externalUrl) return { ok: false, error: 'Paste the link where the reel plays.' }
+  if (externalUrl) {
+    // A prefix test alone let "https://" through, which then threw inside
+    // new URL() while rendering the dashboard and blanked the whole page.
+    let host = ''
+    try {
+      const parsed = new URL(externalUrl)
+      host = parsed.hostname
+      if (parsed.protocol !== 'https:') host = ''
+    } catch {
+      host = ''
+    }
+    if (!host) return { ok: false, error: 'That does not look like a link. It should start with https:// and include a site, like https://www.instagram.com/reel/...' }
+  }
 
   const site = createWebsiteAdminClient()
+
+  // Uploading over an existing slug replaces that creative, which is intended.
+  // What is not intended is leaving the file it replaced behind: the row that
+  // named it is about to be overwritten, so nothing could ever reach it again.
+  const { data: existing } = await site
+    .from('work_items')
+    .select('media_path,variants')
+    .eq('brand_id', input.brandId)
+    .eq('slug', slug)
+    .maybeSingle()
+
+  const superseded: string[] = []
+  if (existing) {
+    const keptVariants = new Set(input.variants.map((v) => v.path))
+    for (const v of (existing.variants ?? []) as WorkVariant[]) {
+      if (v.path && !keptVariants.has(v.path)) superseded.push(v.path)
+    }
+    const oldMedia = existing.media_path as string | null
+    if (oldMedia && oldMedia !== (input.mediaPath ?? null)) superseded.push(oldMedia)
+  }
 
   // New items go to the end of the brand.
   const { data: last } = await site
@@ -201,8 +254,14 @@ export async function saveWorkItem(input: {
         brand_id: input.brandId,
         slug,
         title,
-        width: input.width,
-        height: input.height,
+        kind,
+        media_path: input.mediaPath ?? null,
+        external_url: externalUrl,
+        duration_seconds: input.durationSeconds ?? null,
+        // A link-only reel has no artwork of its own, so record a sane ratio
+        // rather than zero, which the check constraint rejects.
+        width: input.width || 1080,
+        height: input.height || 1920,
         variants: input.variants,
         published: true,
         position: ((last?.position as number | undefined) ?? 0) + 10,
@@ -213,6 +272,13 @@ export async function saveWorkItem(input: {
   if (error) {
     if (error.code === '23505') return { ok: false, error: 'A creative with that name already exists for this brand.' }
     return { ok: false, error: error.message }
+  }
+
+  if (superseded.length) {
+    // Best effort: a stranded file is untidy, not broken, so it must not fail
+    // an upload that has already succeeded.
+    const { error: removeErr } = await site.storage.from(BUCKET).remove(superseded)
+    if (removeErr) console.error('Portfolio: could not remove superseded files for', slug, removeErr.message)
   }
 
   void logActivity({ actorId: guard.employeeId, entityType: 'portfolio_item', entityId: slug, action: 'created', note: `Published "${title}" to the website portfolio` })
@@ -251,12 +317,13 @@ export async function deleteWorkItem(id: string): Promise<ActionResult> {
   const site = createWebsiteAdminClient()
 
   // Read the rendition paths first so the files go with the row.
-  const { data: row } = await site.from('work_items').select('slug,title,variants').eq('id', id).maybeSingle()
+  const { data: row } = await site.from('work_items').select('slug,title,variants,media_path').eq('id', id).maybeSingle()
 
   const { error } = await site.from('work_items').delete().eq('id', id)
   if (error) return { ok: false, error: error.message }
 
   const paths = ((row?.variants ?? []) as WorkVariant[]).map((v) => v.path).filter(Boolean)
+  if (row?.media_path) paths.push(row.media_path as string)
   if (paths.length) {
     // A storage failure here leaves orphaned files, not a broken gallery, so
     // it must not fail the whole action.
@@ -347,11 +414,13 @@ export async function deleteBrand(id: string): Promise<ActionResult> {
 
   const site = createWebsiteAdminClient()
 
-  // Collect every rendition under the brand before the cascade removes the rows.
-  const { data: rows } = await site.from('work_items').select('variants').eq('brand_id', id)
-  const paths = ((rows ?? []) as { variants: WorkVariant[] | null }[])
-    .flatMap((row) => (row.variants ?? []).map((v) => v.path))
-    .filter(Boolean)
+  // Collect every file under the brand before the cascade removes the rows.
+  // Videos live in media_path, not variants — missing them left 50 MB objects
+  // stranded in a public bucket with nothing left to reference them.
+  const { data: rows } = await site.from('work_items').select('variants,media_path').eq('brand_id', id)
+  const paths = ((rows ?? []) as { variants: WorkVariant[] | null; media_path: string | null }[])
+    .flatMap((row) => [...(row.variants ?? []).map((v) => v.path), row.media_path])
+    .filter((path): path is string => Boolean(path))
 
   const { error } = await site.from('work_brands').delete().eq('id', id)
   if (error) return { ok: false, error: error.message }
@@ -362,6 +431,191 @@ export async function deleteBrand(id: string): Promise<ActionResult> {
   }
 
   void logActivity({ actorId: guard.employeeId, entityType: 'portfolio_item', entityId: id, action: 'deleted', note: 'Removed a brand from the website portfolio' })
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
+// ─── Video uploads ───────────────────────────────────────────────────────────
+
+/**
+ * One signed URL for the video file itself. The browser PUTs the file straight
+ * to storage, so a 50 MB reel never passes through this server.
+ */
+export async function createVideoUploadUrl(input: {
+  collectionSlug: string
+  brandSlug: string
+  slug: string
+  contentType: string
+}): Promise<ActionResult<{ uploadUrl: string; path: string }>> {
+  const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!websiteSupabaseConfigured()) return { ok: false, error: SETUP_HINT }
+
+  // The bucket is public, so an unchecked extension would let something else
+  // be served from our own domain.
+  const ext = VIDEO_EXT_BY_TYPE[input.contentType?.toLowerCase().split(';')[0].trim()]
+  if (!ext) return { ok: false, error: 'Videos must be MP4, WebM or MOV.' }
+
+  const collectionSlug = slugify(input.collectionSlug)
+  const brandSlug = slugify(input.brandSlug)
+  const slug = slugify(input.slug)
+  if (!collectionSlug || !brandSlug || !slug) {
+    return { ok: false, error: 'That file name cannot be turned into a web address.' }
+  }
+
+  const path = `${collectionSlug}/${brandSlug}/${slug}.${ext}`
+  const site = createWebsiteAdminClient()
+  const { data, error } = await site.storage.from(BUCKET).createSignedUploadUrl(path, { upsert: true })
+  if (error || !data) return { ok: false, error: error?.message ?? 'Could not prepare the upload.' }
+  return { ok: true, data: { uploadUrl: data.signedUrl, path } }
+}
+
+// ─── Supermarket flyers ──────────────────────────────────────────────────────
+
+/** Every flyer page, in the order the website flips through them. */
+export async function listFlyers(): Promise<ActionResult<FlyerRow[]>> {
+  const guard = await requireReadPermission(PERMS.PORTFOLIO_VIEW)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!websiteSupabaseConfigured()) return { ok: false, error: SETUP_HINT }
+
+  const site = createWebsiteAdminClient()
+  const { data, error } = await site
+    .from('flyers')
+    .select('id,title,width,height,variants,published,position')
+    .order('position')
+
+  if (error) {
+    if (isMissingRelation(error)) {
+      return { ok: false, error: 'The website project has no flyers table yet. Re-run cirqle-website/supabase/schema.sql in its SQL editor.' }
+    }
+    return { ok: false, error: error.message }
+  }
+
+  const publicBase = `${process.env.WEBSITE_SUPABASE_URL}/storage/v1/object/public/${FLYERS_BUCKET}`
+  return {
+    ok: true,
+    data: ((data ?? []) as unknown as FlyerRow[]).map((row) => {
+      const variants = [...(row.variants ?? [])].sort((a, b) => a.width - b.width)
+      return { ...row, variants, previewUrl: variants[0] ? `${publicBase}/${variants[0].path}` : '' }
+    }),
+  }
+}
+
+export async function createFlyerUploadUrls(input: {
+  slug: string
+  widths: number[]
+}): Promise<ActionResult<UploadTarget[]>> {
+  const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!websiteSupabaseConfigured()) return { ok: false, error: SETUP_HINT }
+
+  const slug = slugify(input.slug)
+  if (!slug) return { ok: false, error: 'That file name cannot be turned into a web address.' }
+
+  const widths = input.widths.filter((w) => Number.isInteger(w) && w > 0 && w <= 4000)
+  if (!widths.length) return { ok: false, error: 'No image sizes were requested.' }
+
+  // Flyers are replaced weekly and names repeat, so a stamp keeps a new upload
+  // from overwriting the page it is meant to sit beside.
+  const stamp = Date.now().toString(36)
+  const site = createWebsiteAdminClient()
+  const targets: UploadTarget[] = []
+
+  for (const width of widths) {
+    const path = `${slug}-${stamp}-${width}.webp`
+    const { data, error } = await site.storage.from(FLYERS_BUCKET).createSignedUploadUrl(path, { upsert: true })
+    if (error || !data) return { ok: false, error: error?.message ?? 'Could not prepare the upload.' }
+    targets.push({ width, uploadUrl: data.signedUrl, path })
+  }
+
+  return { ok: true, data: targets }
+}
+
+export async function saveFlyer(input: {
+  title: string
+  width: number
+  height: number
+  variants: WorkVariant[]
+}): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!input.variants.length) return { ok: false, error: 'The image did not produce any sizes.' }
+
+  const site = createWebsiteAdminClient()
+  const { data: last } = await site
+    .from('flyers')
+    .select('position')
+    .order('position', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const { error } = await site.from('flyers').insert({
+    title: input.title.trim(),
+    width: input.width,
+    height: input.height,
+    variants: input.variants,
+    published: true,
+    position: ((last?.position as number | undefined) ?? 0) + 10,
+  })
+  if (error) return { ok: false, error: error.message }
+
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
+export async function updateFlyer(
+  id: string,
+  patch: { title?: string; published?: boolean },
+): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const update: Record<string, unknown> = {}
+  if (patch.title !== undefined) update.title = patch.title.trim()
+  if (patch.published !== undefined) update.published = patch.published
+  if (!Object.keys(update).length) return { ok: true }
+
+  const site = createWebsiteAdminClient()
+  const { error } = await site.from('flyers').update(update).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
+export async function deleteFlyer(id: string): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const site = createWebsiteAdminClient()
+  const { data: row } = await site.from('flyers').select('title,variants').eq('id', id).maybeSingle()
+
+  const { error } = await site.from('flyers').delete().eq('id', id)
+  if (error) return { ok: false, error: error.message }
+
+  const paths = ((row?.variants ?? []) as WorkVariant[]).map((v) => v.path).filter(Boolean)
+  if (paths.length) {
+    const { error: removeErr } = await site.storage.from(FLYERS_BUCKET).remove(paths)
+    if (removeErr) console.error('Portfolio: could not remove flyer files', removeErr.message)
+  }
+
+  void logActivity({ actorId: guard.employeeId, entityType: 'portfolio_item', entityId: id, action: 'deleted', note: `Removed flyer "${row?.title ?? 'untitled'}" from the website` })
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
+/** Persist a new page order for the flyers. */
+export async function reorderFlyers(ids: string[]): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!ids.length) return { ok: true }
+
+  const site = createWebsiteAdminClient()
+  for (let i = 0; i < ids.length; i++) {
+    const { error } = await site.from('flyers').update({ position: (i + 1) * 10 }).eq('id', ids[i])
+    if (error) return { ok: false, error: error.message }
+  }
+
   revalidatePath(REVALIDATE)
   return { ok: true }
 }

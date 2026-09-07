@@ -16,6 +16,19 @@ export const WEBP_QUALITY = 0.82
 /** Largest file the browser will accept before resizing. */
 export const MAX_SOURCE_BYTES = 40 * 1024 * 1024
 
+/** What a portfolio entry is. */
+export type WorkKind = 'image' | 'video' | 'reel'
+
+/** Video containers accepted for upload, and the extension each is stored as. */
+export const VIDEO_EXT_BY_TYPE: Record<string, string> = {
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'video/quicktime': 'mov',
+}
+
+/** Storage caps. The bucket enforces the same limit — a browser can lie. */
+export const MAX_VIDEO_BYTES = 50 * 1024 * 1024
+
 export interface WorkVariant {
   width: number
   height: number
@@ -26,6 +39,23 @@ export interface WorkVariant {
 export interface PortfolioItem {
   id: string
   slug: string
+  title: string
+  kind: WorkKind
+  /** Storage path of an uploaded video, for kind 'video' */
+  mediaPath: string | null
+  /** Where it lives on a social platform */
+  externalUrl: string | null
+  durationSeconds: number | null
+  width: number
+  height: number
+  variants: WorkVariant[]
+  published: boolean
+  position: number
+  previewUrl: string
+}
+
+export interface FlyerRow {
+  id: string
   title: string
   width: number
   height: number
