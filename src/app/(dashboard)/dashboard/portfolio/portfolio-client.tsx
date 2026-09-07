@@ -526,7 +526,7 @@ export default function PortfolioClient({
       {/* ─── Modals ─────────────────────────────────────────────────────── */}
       {brandModal && (
         <ModalOverlay onClose={() => setBrandModal(null)}>
-          <div className="p-5 space-y-4 w-full max-w-sm">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl p-5 space-y-4 w-full max-w-sm overflow-y-auto">
             <h3 className="text-sm font-medium">{brandModal.id ? 'Edit brand' : 'New brand'}</h3>
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground">Name</label>
@@ -560,7 +560,7 @@ export default function PortfolioClient({
 
       {linkModal && (
         <ModalOverlay onClose={() => setLinkModal(null)}>
-          <div className="p-5 space-y-4 w-full max-w-sm">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl p-5 space-y-4 w-full max-w-sm overflow-y-auto">
             <div>
               <h3 className="text-sm font-medium">Add a reel by link</h3>
               <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
@@ -624,7 +624,7 @@ export default function PortfolioClient({
 
       {renaming && (
         <ModalOverlay onClose={() => setRenaming(null)}>
-          <div className="p-5 space-y-4 w-full max-w-sm">
+          <div className="bg-card border border-border rounded-2xl shadow-2xl p-5 space-y-4 w-full max-w-sm overflow-y-auto">
             <h3 className="text-sm font-medium">Rename creative</h3>
             <Input
               value={renaming.title}
