@@ -19,6 +19,21 @@ export const MAX_SOURCE_BYTES = 40 * 1024 * 1024
 /** What a portfolio entry is. */
 export type WorkKind = 'image' | 'video' | 'reel'
 
+/**
+ * What shape the piece was designed for. Independent of `kind`: a story frame
+ * can be a still or a clip. Brands answer who the work was for, formats answer
+ * what it is, and the website filters on both.
+ */
+export type WorkFormat = 'post' | 'reel' | 'story'
+
+export const WORK_FORMATS: readonly WorkFormat[] = ['post', 'reel', 'story'] as const
+
+export const WORK_FORMAT_LABEL: Record<WorkFormat, string> = {
+  post: 'Post',
+  reel: 'Reel',
+  story: 'Story',
+}
+
 /** Video containers accepted for upload, and the extension each is stored as. */
 export const VIDEO_EXT_BY_TYPE: Record<string, string> = {
   'video/mp4': 'mp4',
@@ -41,6 +56,7 @@ export interface PortfolioItem {
   slug: string
   title: string
   kind: WorkKind
+  format: WorkFormat
   /** Storage path of an uploaded video, for kind 'video' */
   mediaPath: string | null
   /** Where it lives on a social platform */

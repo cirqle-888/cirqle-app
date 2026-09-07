@@ -16,7 +16,8 @@ import { Input } from '@/components/ui/input'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast, ToastContainer } from '@/components/ui/toast'
-import type { FlyerRow, PortfolioBrand, PortfolioCollection, PortfolioItem } from '@/lib/portfolio/types'
+import type { FlyerRow, PortfolioBrand, PortfolioCollection, PortfolioItem, WorkFormat } from '@/lib/portfolio/types'
+import { WORK_FORMATS, WORK_FORMAT_LABEL } from '@/lib/portfolio/types'
 import { slugFromFilename, titleFromFilename } from '@/lib/portfolio/resize'
 import FlyersPanel from './flyers-panel'
 import { uploadMedia } from './upload-media'
@@ -180,6 +181,17 @@ export default function PortfolioClient({
     router.refresh()
   }
 
+  /**
+   * Retag a creative. The website groups by brand AND by format, so this is
+   * what decides whether a piece shows up under Reels or Stories there.
+   */
+  async function setFormat(item: PortfolioItem, format: WorkFormat) {
+    if (format === item.format) return
+    const res = await updateWorkItem(item.id, { format })
+    if (!res.ok) { toast.toastError('Could not change the format', res.error); return }
+    router.refresh()
+  }
+
   async function commitRename() {
     if (!renaming) return
     const res = await updateWorkItem(renaming.id, { title: renaming.title })
@@ -296,14 +308,9 @@ export default function PortfolioClient({
             <ExternalLink className="w-3.5 h-3.5" /> View live
           </a>}
           {canManage && tab === 'work' && collection && (
-            <>
-              <Button size="sm" variant="outline" onClick={() => setLinkModal({ url: '', title: '', cover: null })}>
-                <Link2 className="w-3.5 h-3.5" /> Add reel link
-              </Button>
-              <Button size="sm" onClick={() => setBrandModal({ name: '', tagline: '' })}>
-                <Plus className="w-3.5 h-3.5" /> New brand
-              </Button>
-            </>
+            <Button size="sm" onClick={() => setBrandModal({ name: '', tagline: '' })}>
+              <Plus className="w-3.5 h-3.5" /> New brand
+            </Button>
           )}
         </div>
       </div>
@@ -473,6 +480,23 @@ export default function PortfolioClient({
             </div>
           )}
 
+          {/* A reel lives on Instagram or YouTube rather than in our storage,
+              but it still belongs to THIS brand — so the button sits with the
+              brand's own drop zone, not up in the page header where it read as
+              a global action. */}
+          {canManage && (
+            <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+              <span>Published somewhere else?</span>
+              <button
+                type="button"
+                onClick={() => setLinkModal({ url: '', title: '', cover: null })}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-secondary text-xs text-muted-foreground hover:text-foreground hover:border-violet-500/40"
+              >
+                <Link2 className="w-3.5 h-3.5" /> Add a reel link to {brand.name}
+              </button>
+            </div>
+          )}
+
           {uploads.length > 0 && (
             <div className="rounded-xl border border-border bg-secondary/40 divide-y divide-border">
               {uploads.map((u) => (
@@ -500,6 +524,7 @@ export default function PortfolioClient({
                       item={item}
                       canManage={canManage}
                       onToggle={() => void togglePublished(item)}
+                      onFormat={(f) => void setFormat(item, f)}
                       onRename={() => setRenaming({ id: item.id, title: item.title })}
                       onDelete={() =>
                         setConfirm({
@@ -562,7 +587,9 @@ export default function PortfolioClient({
         <ModalOverlay onClose={() => setLinkModal(null)}>
           <div className="bg-card border border-border rounded-2xl shadow-2xl p-5 space-y-4 w-full max-w-sm overflow-y-auto">
             <div>
-              <h3 className="text-sm font-medium">Add a reel by link</h3>
+              <h3 className="text-sm font-medium">
+                Add a reel by link{brand ? ` to ${brand.name}` : ''}
+              </h3>
               <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
                 For work already published on Instagram, YouTube or TikTok. Nothing is uploaded, so it costs no
                 storage. YouTube plays on the site; the others show a cover and send the visitor to the post.
@@ -668,11 +695,12 @@ function Notice({ title, body }: { title: string; body: string }) {
 }
 
 function ItemCard({
-  item, canManage, onToggle, onRename, onDelete,
+  item, canManage, onToggle, onFormat, onRename, onDelete,
 }: {
   item: PortfolioItem
   canManage: boolean
   onToggle: () => void
+  onFormat: (format: WorkFormat) => void
   onRename: () => void
   onDelete: () => void
 }) {
@@ -713,7 +741,7 @@ function ItemCard({
         </span>
       )}
 
-      <div className="px-2.5 py-2">
+      <div className="px-2.5 py-2 space-y-1.5">
         <p className="text-[11px] font-medium truncate" title={item.title}>{item.title}</p>
         <p className="text-[10px] text-muted-foreground truncate">
           {item.kind === 'reel'
@@ -721,6 +749,22 @@ function ItemCard({
             : `${item.width}×${item.height} · ${item.variants.length} sizes`}
           {!item.published && ' · hidden'}
         </p>
+        {canManage ? (
+          // Always visible rather than hover-revealed: this is the one field a
+          // creative can be filed under wrongly without anyone noticing.
+          <select
+            value={item.format}
+            onChange={(e) => onFormat(e.target.value as WorkFormat)}
+            aria-label={`Format for ${item.title}`}
+            className="w-full text-[10px] rounded-md border border-border bg-background/60 px-1.5 py-1 text-muted-foreground hover:text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500"
+          >
+            {WORK_FORMATS.map((f) => (
+              <option key={f} value={f}>{WORK_FORMAT_LABEL[f]}</option>
+            ))}
+          </select>
+        ) : (
+          <p className="text-[10px] text-muted-foreground">{WORK_FORMAT_LABEL[item.format]}</p>
+        )}
       </div>
 
       {canManage && (

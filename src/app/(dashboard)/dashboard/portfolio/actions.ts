@@ -5,8 +5,8 @@ import { requirePermission, requireReadPermission } from '@/lib/permissions/chec
 import { PERMS } from '@/lib/permissions/keys'
 import { createWebsiteAdminClient, websiteSupabaseConfigured } from '@/lib/supabase/website-admin'
 import { logActivity } from '@/lib/activity/log'
-import type { FlyerRow, PortfolioCollection, UploadTarget, WorkKind, WorkVariant } from '@/lib/portfolio/types'
-import { VIDEO_EXT_BY_TYPE } from '@/lib/portfolio/types'
+import type { FlyerRow, PortfolioCollection, UploadTarget, WorkFormat, WorkKind, WorkVariant } from '@/lib/portfolio/types'
+import { VIDEO_EXT_BY_TYPE, WORK_FORMATS } from '@/lib/portfolio/types'
 
 /**
  * Website portfolio — reads and writes the SEPARATE Supabase project that
@@ -38,6 +38,7 @@ interface ItemRow {
   published: boolean
   position: number
   kind: WorkKind | null
+  format: WorkFormat | null
   media_path: string | null
   external_url: string | null
   duration_seconds: number | null
@@ -118,6 +119,7 @@ export async function listPortfolio(): Promise<ActionResult<PortfolioCollection[
           slug: item.slug,
           title: item.title,
           kind: item.kind ?? 'image',
+          format: item.format ?? 'post',
           mediaPath: item.media_path,
           externalUrl: item.external_url,
           durationSeconds: item.duration_seconds,
@@ -188,6 +190,7 @@ export async function saveWorkItem(input: {
   mediaPath?: string | null
   externalUrl?: string | null
   durationSeconds?: number | null
+  format?: WorkFormat
 }): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
   if (!guard.ok) return { ok: false, error: guard.error }
@@ -195,6 +198,17 @@ export async function saveWorkItem(input: {
   const slug = slugify(input.slug)
   const title = input.title.trim()
   const kind: WorkKind = input.kind ?? 'image'
+  // Guess the format from what was uploaded, so nothing lands untagged: a clip
+  // or a linked reel is a reel, a tall still is a story frame, the rest are
+  // posts. Whoever uploads can correct it on the card afterwards.
+  const format: WorkFormat =
+    input.format && WORK_FORMATS.includes(input.format)
+      ? input.format
+      : kind !== 'image'
+        ? 'reel'
+        : input.width > 0 && input.height / input.width >= 1.5
+          ? 'story'
+          : 'post'
   if (!slug) return { ok: false, error: 'That file name cannot be turned into a web address.' }
   if (!title) return { ok: false, error: 'Give the creative a title.' }
   if (kind === 'image' && !input.variants.length) return { ok: false, error: 'The image did not produce any sizes.' }
@@ -255,6 +269,7 @@ export async function saveWorkItem(input: {
         slug,
         title,
         kind,
+        format,
         media_path: input.mediaPath ?? null,
         external_url: externalUrl,
         duration_seconds: input.durationSeconds ?? null,
@@ -288,7 +303,7 @@ export async function saveWorkItem(input: {
 
 export async function updateWorkItem(
   id: string,
-  patch: { title?: string; published?: boolean },
+  patch: { title?: string; published?: boolean; format?: WorkFormat },
 ): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
   if (!guard.ok) return { ok: false, error: guard.error }
@@ -300,6 +315,10 @@ export async function updateWorkItem(
     update.title = title
   }
   if (patch.published !== undefined) update.published = patch.published
+  if (patch.format !== undefined) {
+    if (!WORK_FORMATS.includes(patch.format)) return { ok: false, error: 'That is not a format we publish.' }
+    update.format = patch.format
+  }
   if (!Object.keys(update).length) return { ok: true }
 
   const site = createWebsiteAdminClient()
