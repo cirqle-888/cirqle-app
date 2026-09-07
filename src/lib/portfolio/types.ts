@@ -118,6 +118,9 @@ export interface PortfolioBrand {
   name: string
   tagline: string | null
   position: number
+  /** Public URL of the brand logo, or null when the chip shows its name. */
+  logoUrl: string | null
+  logoPath: string | null
   items: PortfolioItem[]
 }
 

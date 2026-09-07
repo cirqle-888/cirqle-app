@@ -18,12 +18,12 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import type { FlyerRow, PortfolioBrand, PortfolioCollection, PortfolioItem, WorkFormat } from '@/lib/portfolio/types'
 import { WORK_FORMAT_LABEL, formatsFor } from '@/lib/portfolio/types'
-import { slugFromFilename, titleFromFilename } from '@/lib/portfolio/resize'
+import { resizeForUpload, slugFromFilename, titleFromFilename } from '@/lib/portfolio/resize'
 import FlyersPanel from './flyers-panel'
 import { uploadMedia } from './upload-media'
 import {
-  deleteBrand, deleteWorkItem, reorderBrands, reorderCollectionItems, reorderWorkItems,
-  saveBrand, saveWorkItem, updateWorkItem,
+  createWorkUploadUrls, deleteBrand, deleteWorkItem, reorderBrands, reorderCollectionItems,
+  reorderWorkItems, saveBrand, saveBrandLogo, saveWorkItem, updateWorkItem,
 } from './actions'
 
 interface Props {
@@ -115,7 +115,11 @@ export default function PortfolioClient({
   const [linkModal, setLinkModal] = useState<{ url: string; title: string; cover: File | null } | null>(null)
   const [linkBusy, setLinkBusy] = useState<string | null>(null)
   const coverRef = useRef<HTMLInputElement>(null)
-  const [brandModal, setBrandModal] = useState<{ id?: string; name: string; tagline: string } | null>(null)
+  const [brandModal, setBrandModal] = useState<
+    { id?: string; name: string; tagline: string; logoUrl: string | null; logo: File | null; clearLogo?: boolean } | null
+  >(null)
+  const [brandBusy, setBrandBusy] = useState<string | null>(null)
+  const logoRef = useRef<HTMLInputElement>(null)
   const [confirm, setConfirm] = useState<{ title: string; body: string; run: () => Promise<void> } | null>(null)
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
 
@@ -340,17 +344,68 @@ export default function PortfolioClient({
 
   async function submitBrand() {
     if (!brandModal || !collection) return
-    const res = await saveBrand({
-      id: brandModal.id,
-      collectionId: collection.id,
-      name: brandModal.name,
-      tagline: brandModal.tagline,
+    setBrandBusy('Saving')
+    try {
+      const res = await saveBrand({
+        id: brandModal.id,
+        collectionId: collection.id,
+        name: brandModal.name,
+        tagline: brandModal.tagline,
+      })
+      if (!res.ok) { toast.toastError('Could not save the brand', res.error); return }
+      const saved = res.data
+      if (saved && !brandModal.id) setBrandId(saved.id)
+
+      // The logo goes up only after the brand exists, because its storage path
+      // is built from the brand's slug — which the server decides, not us.
+      if (saved && brandModal.logo) {
+        setBrandBusy('Uploading the logo')
+        const logoPath = await uploadBrandLogo(brandModal.logo, collection.slug, saved.slug)
+        const linked = await saveBrandLogo(saved.id, logoPath)
+        if (!linked.ok) { toast.toastError('Saved the brand, but not its logo', linked.error); return }
+      } else if (saved && brandModal.clearLogo) {
+        const cleared = await saveBrandLogo(saved.id, null)
+        if (!cleared.ok) { toast.toastError('Saved the brand, but could not remove its logo', cleared.error); return }
+      }
+
+      setBrandModal(null)
+      toast.success('Brand saved')
+      router.refresh()
+    } catch (e) {
+      toast.toastError('Could not save the brand', e instanceof Error ? e.message : 'Please try again.')
+    } finally {
+      setBrandBusy(null)
+    }
+  }
+
+  /**
+   * Put a brand logo in storage and return its path.
+   *
+   * One small rendition is enough — it is drawn about 20 pixels tall on a chip
+   * — so the smallest the resizer produces is the one kept. WebP carries the
+   * transparency a logo needs.
+   */
+  async function uploadBrandLogo(file: File, collectionSlug: string, brandSlug: string): Promise<string> {
+    const resized = await resizeForUpload(file)
+    const smallest = resized.renditions[0]
+    if (!smallest) throw new Error('That image could not be prepared for upload.')
+
+    const targets = await createWorkUploadUrls({
+      collectionSlug,
+      brandSlug,
+      slug: 'logo',
+      widths: [smallest.width],
     })
-    if (!res.ok) { toast.toastError('Could not save the brand', res.error); return }
-    if (res.data && !brandModal.id) setBrandId(res.data.id)
-    setBrandModal(null)
-    toast.success('Brand saved')
-    router.refresh()
+    if (!targets.ok || !targets.data?.length) throw new Error(targets.error ?? 'Could not prepare the upload.')
+
+    const target = targets.data[0]
+    const put = await fetch(target.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'image/webp' },
+      body: smallest.blob,
+    })
+    if (!put.ok) throw new Error(`The logo did not upload (${put.status}).`)
+    return target.path
   }
 
   const brandUrl = brand ? `${siteUrl}/portfolio/${collection.slug}/${brand.slug}` : null
@@ -375,7 +430,7 @@ export default function PortfolioClient({
             <ExternalLink className="w-3.5 h-3.5" /> View live
           </a>}
           {canManage && tab === 'work' && collection && (
-            <Button size="sm" onClick={() => setBrandModal({ name: '', tagline: '' })}>
+            <Button size="sm" onClick={() => setBrandModal({ name: '', tagline: '', logoUrl: null, logo: null })}>
               <Plus className="w-3.5 h-3.5" /> New brand
             </Button>
           )}
@@ -542,7 +597,7 @@ export default function PortfolioClient({
                 {canManage && (
                   <button
                     type="button"
-                    onClick={() => setBrandModal({ id: brand.id, name: brand.name, tagline: brand.tagline ?? '' })}
+                    onClick={() => setBrandModal({ id: brand.id, name: brand.name, tagline: brand.tagline ?? '', logoUrl: brand.logoUrl, logo: null })}
                     className="text-muted-foreground hover:text-foreground"
                     aria-label="Edit brand"
                   >
@@ -703,14 +758,70 @@ export default function PortfolioClient({
                 placeholder="Mobile retail · Akkikkavu &amp; Karikkad"
               />
             </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">Logo</label>
+              <div className="flex items-center gap-2">
+                {(brandModal.logo || (brandModal.logoUrl && !brandModal.clearLogo)) && (
+                  <span className="shrink-0 grid place-items-center w-14 h-10 rounded-lg border border-border bg-secondary/60 overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- blob preview, and the website's storage host is not in next.config images */}
+                    <img
+                      src={brandModal.logo ? URL.createObjectURL(brandModal.logo) : brandModal.logoUrl!}
+                      alt=""
+                      className="max-w-[90%] max-h-[80%] object-contain"
+                    />
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => logoRef.current?.click()}
+                  className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-border bg-secondary/40 text-xs text-muted-foreground hover:text-foreground hover:border-violet-500/40"
+                >
+                  <Upload className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">
+                    {brandModal.logo
+                      ? brandModal.logo.name
+                      : brandModal.logoUrl && !brandModal.clearLogo
+                        ? 'Replace the logo'
+                        : 'Choose a logo'}
+                  </span>
+                </button>
+                {(brandModal.logo || (brandModal.logoUrl && !brandModal.clearLogo)) && (
+                  <IconBtn
+                    label="Remove the logo"
+                    onClick={() => setBrandModal({ ...brandModal, logo: null, clearLogo: true })}
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </IconBtn>
+                )}
+              </div>
+              <input
+                ref={logoRef}
+                type="file"
+                accept="image/png,image/webp,image/jpeg,image/avif"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0] ?? null
+                  e.target.value = ''
+                  if (f) setBrandModal({ ...brandModal, logo: f, clearLogo: false })
+                }}
+              />
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Shown on the website in place of the brand name. A PNG with a transparent background is best, and a
+                light or full-colour mark reads better than a dark one — the chips it sits on are dark. The name is
+                still what screen readers and search engines get.
+              </p>
+            </div>
+
             {!brandModal.id && (
               <p className="text-[11px] text-muted-foreground">
                 The web address is made from the name and cannot be changed later.
               </p>
             )}
             <div className="flex gap-2 pt-1">
-              <Button type="button" variant="outline" className="flex-1" onClick={() => setBrandModal(null)}>Cancel</Button>
-              <Button type="button" className="flex-1" onClick={() => void submitBrand()}>Save</Button>
+              <Button type="button" variant="outline" className="flex-1" disabled={!!brandBusy} onClick={() => setBrandModal(null)}>Cancel</Button>
+              <Button type="button" className="flex-1" disabled={!!brandBusy} onClick={() => void submitBrand()}>
+                {brandBusy ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> {brandBusy}</> : 'Save'}
+              </Button>
             </div>
           </div>
         </ModalOverlay>
@@ -972,7 +1083,15 @@ function BrandChip({
       {...attributes}
       {...listeners}
     >
-      {brand.name}
+      {brand.logoUrl ? (
+        // The name stays in the title attribute: the chip is how the website
+        // will look, but the editor still has to be able to say which brand
+        // this is when a logo is a wordmark nobody recognises out of context.
+        // eslint-disable-next-line @next/next/no-img-element -- the website project's storage host is not in next.config images
+        <img src={brand.logoUrl} alt={brand.name} title={brand.name} className="h-4 max-w-[84px] object-contain" />
+      ) : (
+        brand.name
+      )}
       <span className="opacity-60">{brand.items.length}</span>
       {hidden > 0 && <span className="opacity-60">· {hidden} hidden</span>}
     </button>

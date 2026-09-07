@@ -50,6 +50,7 @@ interface BrandRow {
   name: string
   tagline: string | null
   position: number
+  logo_path: string | null
   work_items: ItemRow[] | null
 }
 interface CollectionRow {
@@ -67,17 +68,23 @@ interface CollectionRow {
  * land in their own order, and a database that has `format` but not
  * `collection_position` should still show formats.
  */
-const collectionSelect = (extra: readonly string[]) =>
+const collectionSelect = (extra: { brand: readonly string[]; item: readonly string[] }) =>
   'id,slug,title,eyebrow,position,work_brands(id,slug,name,tagline,position,' +
+  extra.brand.map((c) => `${c},`).join('') +
   'work_items(id,slug,title,width,height,variants,published,position,' +
-  extra.map((c) => `${c},`).join('') +
+  extra.item.map((c) => `${c},`).join('') +
   'kind,media_path,external_url,duration_seconds))'
 
-/** Most complete first; each fallback gives up exactly one column. */
+/**
+ * Most complete first; each fallback gives up exactly one column, newest
+ * first, so a database part-way through the migrations still returns
+ * everything it does have.
+ */
 const COLLECTION_SELECTS = [
-  ['format', 'collection_position'],
-  ['format'],
-  [],
+  { brand: ['logo_path'], item: ['format', 'collection_position'] },
+  { brand: [], item: ['format', 'collection_position'] },
+  { brand: [], item: ['format'] },
+  { brand: [], item: [] },
 ] as const
 
 /**
@@ -141,6 +148,8 @@ export async function listPortfolio(): Promise<ActionResult<PortfolioCollection[
       name: brand.name,
       tagline: brand.tagline,
       position: brand.position,
+      logoUrl: brand.logo_path ? `${publicBase}/${brand.logo_path}` : null,
+      logoPath: brand.logo_path,
       items: [...(brand.work_items ?? [])].sort(byPosition).map((item) => {
         const variants: WorkVariant[] = [...(item.variants ?? [])].sort((x, y) => x.width - y.width)
         // Smallest rendition is plenty for a thumbnail in the editor.
@@ -467,6 +476,37 @@ export async function reorderBrands(ids: string[]): Promise<ActionResult> {
 }
 
 // ─── Brands ──────────────────────────────────────────────────────────────────
+
+/**
+ * Point a brand at its logo, or clear it.
+ *
+ * The file itself goes up through the same signed-URL path as artwork; this
+ * only records where it landed. Clearing removes the file too, since nothing
+ * else can reach it once the row stops naming it.
+ */
+export async function saveBrandLogo(id: string, path: string | null): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const site = createWebsiteAdminClient()
+  const { data: existing } = await site.from('work_brands').select('logo_path').eq('id', id).maybeSingle()
+
+  const { error } = await site.from('work_brands').update({ logo_path: path }).eq('id', id)
+  if (isMissingColumn(error, 'logo_path')) {
+    return { ok: false, error: 'The website database has no brand logo column yet. Run cirqle-website/supabase/add-brand-logos.sql in its SQL editor, then try again.' }
+  }
+  if (error) return { ok: false, error: error.message }
+
+  const old = (existing?.logo_path as string | null) ?? null
+  if (old && old !== path) {
+    // Best effort: a stranded file is untidy, not broken.
+    const { error: removeErr } = await site.storage.from(BUCKET).remove([old])
+    if (removeErr) console.error('Portfolio: could not remove the old brand logo', removeErr.message)
+  }
+
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
 
 export async function saveBrand(input: {
   id?: string
