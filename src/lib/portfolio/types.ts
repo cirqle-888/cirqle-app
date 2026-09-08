@@ -115,6 +115,15 @@ export interface FlyerRow {
   previewUrl: string
 }
 
+/** How a brand's card on the website chooses its picture. */
+export type CoverMode = 'auto' | 'custom' | 'collage'
+
+export const COVER_MODES: readonly { id: CoverMode; label: string; hint: string }[] = [
+  { id: 'auto', label: 'Automatic', hint: 'The first creative in the brand.' },
+  { id: 'custom', label: 'Choose or upload', hint: 'Pick one creative, or upload a picture made for the card.' },
+  { id: 'collage', label: 'Creative grid', hint: 'The first four creatives, laid out inside the card.' },
+]
+
 export interface PortfolioBrand {
   id: string
   slug: string
@@ -124,6 +133,12 @@ export interface PortfolioBrand {
   /** Public URL of the brand logo, or null when the chip shows its name. */
   logoUrl: string | null
   logoPath: string | null
+  coverMode: CoverMode
+  /** Id of the chosen creative, when the mode is 'custom'. */
+  coverItemId: string | null
+  /** Storage path of an image uploaded just for the card. */
+  coverPath: string | null
+  coverUrl: string | null
   items: PortfolioItem[]
 }
 

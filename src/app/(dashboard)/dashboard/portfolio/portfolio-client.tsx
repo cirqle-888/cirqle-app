@@ -16,9 +16,9 @@ import { Input } from '@/components/ui/input'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast, ToastContainer } from '@/components/ui/toast'
-import type { FlyerRow, PortfolioBrand, PortfolioCollection, PortfolioItem, WorkFormat } from '@/lib/portfolio/types'
-import { WORK_FORMAT_LABEL, formatsFor } from '@/lib/portfolio/types'
-import { prepareLogoForUpload, slugFromFilename, titleFromFilename } from '@/lib/portfolio/resize'
+import type { CoverMode, FlyerRow, PortfolioBrand, PortfolioCollection, PortfolioItem, WorkFormat } from '@/lib/portfolio/types'
+import { COVER_MODES, WORK_FORMAT_LABEL, formatsFor } from '@/lib/portfolio/types'
+import { prepareLogoForUpload, resizeForUpload, slugFromFilename, titleFromFilename } from '@/lib/portfolio/resize'
 import type { PreparedLogo } from '@/lib/portfolio/resize'
 import FlyersPanel from './flyers-panel'
 import { uploadMedia } from './upload-media'
@@ -127,10 +127,17 @@ export default function PortfolioClient({
       prepared?: { logo: PreparedLogo; url: string } | null
       removePlate?: boolean
       clearLogo?: boolean
+      coverMode: CoverMode
+      coverItemId: string | null
+      coverPath: string | null
+      coverUrl: string | null
+      /** A picture chosen for the card but not yet uploaded. */
+      coverFile?: File | null
     } | null
   >(null)
   const [brandBusy, setBrandBusy] = useState<string | null>(null)
   const logoRef = useRef<HTMLInputElement>(null)
+  const coverPicRef = useRef<HTMLInputElement>(null)
   const [confirm, setConfirm] = useState<{ title: string; body: string; run: () => Promise<void> } | null>(null)
   const [renaming, setRenaming] = useState<{ id: string; title: string; caption: string } | null>(null)
 
@@ -377,11 +384,23 @@ export default function PortfolioClient({
     if (!brandModal || !collection) return
     setBrandBusy('Saving')
     try {
+      let coverPath = brandModal.coverPath
+      if (brandModal.coverFile && brandModal.id) {
+        setBrandBusy('Uploading the card picture')
+        const existing = collection.brands.find((b) => b.id === brandModal.id)
+        coverPath = await uploadBrandCover(brandModal.coverFile, collection.slug, existing?.slug ?? '')
+      }
+
       const res = await saveBrand({
         id: brandModal.id,
         collectionId: collection.id,
         name: brandModal.name,
         tagline: brandModal.tagline,
+        coverMode: brandModal.coverMode,
+        // Only one of the two can decide the picture, so setting either clears
+        // the other — otherwise a card would carry a stale choice underneath.
+        coverItemId: brandModal.coverMode === 'custom' && !coverPath ? brandModal.coverItemId : null,
+        coverPath: brandModal.coverMode === 'custom' ? coverPath : null,
       })
       if (!res.ok) { toast.toastError('Could not save the brand', res.error); return }
       const saved = res.data
@@ -407,6 +426,36 @@ export default function PortfolioClient({
     } finally {
       setBrandBusy(null)
     }
+  }
+
+  /**
+   * Put a picture chosen for a brand card in storage and return its path.
+   *
+   * Unlike a logo this is photography or a composition, so it keeps its
+   * background and goes up at a size the card can actually use.
+   */
+  async function uploadBrandCover(file: File, collectionSlug: string, brandSlug: string): Promise<string> {
+    const resized = await resizeForUpload(file)
+    const rendition =
+      resized.renditions.find((r) => r.width >= 960) ?? resized.renditions[resized.renditions.length - 1]
+    if (!rendition) throw new Error('That image could not be prepared for upload.')
+
+    const targets = await createWorkUploadUrls({
+      collectionSlug,
+      brandSlug,
+      slug: 'card',
+      widths: [rendition.width],
+    })
+    if (!targets.ok || !targets.data?.length) throw new Error(targets.error ?? 'Could not prepare the upload.')
+
+    const target = targets.data[0]
+    const put = await fetch(target.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'image/webp' },
+      body: rendition.blob,
+    })
+    if (!put.ok) throw new Error(`The picture did not upload (${put.status}).`)
+    return target.path
   }
 
   /**
@@ -458,7 +507,7 @@ export default function PortfolioClient({
             <ExternalLink className="w-3.5 h-3.5" /> View live
           </a>}
           {canManage && tab === 'work' && collection && (
-            <Button size="sm" onClick={() => setBrandModal({ name: '', tagline: '', logoUrl: null, logo: null })}>
+            <Button size="sm" onClick={() => setBrandModal({ name: '', tagline: '', logoUrl: null, logo: null, coverMode: 'auto', coverItemId: null, coverPath: null, coverUrl: null })}>
               <Plus className="w-3.5 h-3.5" /> New brand
             </Button>
           )}
@@ -625,7 +674,7 @@ export default function PortfolioClient({
                 {canManage && (
                   <button
                     type="button"
-                    onClick={() => setBrandModal({ id: brand.id, name: brand.name, tagline: brand.tagline ?? '', logoUrl: brand.logoUrl, logo: null })}
+                    onClick={() => setBrandModal({ id: brand.id, name: brand.name, tagline: brand.tagline ?? '', logoUrl: brand.logoUrl, logo: null, coverMode: brand.coverMode, coverItemId: brand.coverItemId, coverPath: brand.coverPath, coverUrl: brand.coverUrl })}
                     className="text-muted-foreground hover:text-foreground"
                     aria-label="Edit brand"
                   >
@@ -909,6 +958,110 @@ export default function PortfolioClient({
                 readers and search engines get.
               </p>
             </div>
+
+            {/* Card thumbnail. Only once the brand exists, since two of the
+                three modes need creatives to point at. */}
+            {brandModal.id && (() => {
+              const editing = collection.brands.find((b) => b.id === brandModal.id)
+              const pieces = editing?.items ?? []
+              const chosenUrl =
+                brandModal.coverFile
+                  ? URL.createObjectURL(brandModal.coverFile)
+                  : brandModal.coverUrl ??
+                    pieces.find((i) => i.id === brandModal.coverItemId)?.previewUrl ??
+                    null
+
+              return (
+                <div className="space-y-2">
+                  <label className="text-xs text-muted-foreground">Card picture</label>
+
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {COVER_MODES.map((mode) => (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() => setBrandModal({ ...brandModal, coverMode: mode.id })}
+                        className={`px-2 py-2 rounded-lg border text-[11px] transition-colors ${
+                          brandModal.coverMode === mode.id
+                            ? 'border-violet-500 bg-violet-500/10 text-foreground'
+                            : 'border-border bg-secondary/40 text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        {mode.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    {COVER_MODES.find((m) => m.id === brandModal.coverMode)?.hint}
+                  </p>
+
+                  {brandModal.coverMode === 'custom' && (
+                    <div className="space-y-2">
+                      {pieces.length > 0 && (
+                        <div className="grid grid-cols-5 gap-1.5 max-h-40 overflow-y-auto pr-1">
+                          {pieces.map((piece) => {
+                            const picked = !brandModal.coverFile && !brandModal.coverPath && brandModal.coverItemId === piece.id
+                            return (
+                              <button
+                                key={piece.id}
+                                type="button"
+                                title={piece.caption || piece.title}
+                                onClick={() =>
+                                  setBrandModal({ ...brandModal, coverItemId: piece.id, coverFile: null, coverPath: null, coverUrl: null })
+                                }
+                                className={`aspect-square rounded-md overflow-hidden border transition-colors ${
+                                  picked ? 'border-violet-500 ring-1 ring-violet-500' : 'border-border hover:border-violet-500/50'
+                                }`}
+                              >
+                                {piece.previewUrl ? (
+                                  // eslint-disable-next-line @next/next/no-img-element -- the website project's storage host is not in next.config images
+                                  <img src={piece.previewUrl} alt="" className="w-full h-full object-cover" />
+                                ) : (
+                                  <span className="grid place-items-center w-full h-full text-muted-foreground">
+                                    <ImageOff className="w-3 h-3" />
+                                  </span>
+                                )}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-2">
+                        {chosenUrl && (
+                          <span className="shrink-0 w-14 h-10 rounded-lg overflow-hidden border border-border bg-secondary/60">
+                            {/* eslint-disable-next-line @next/next/no-img-element -- blob or storage preview */}
+                            <img src={chosenUrl} alt="" className="w-full h-full object-cover" />
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => coverPicRef.current?.click()}
+                          className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-border bg-secondary/40 text-xs text-muted-foreground hover:text-foreground hover:border-violet-500/40"
+                        >
+                          <Upload className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">
+                            {brandModal.coverFile ? brandModal.coverFile.name : brandModal.coverPath ? 'Replace the uploaded picture' : 'Or upload a picture'}
+                          </span>
+                        </button>
+                      </div>
+                      <input
+                        ref={coverPicRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/avif"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] ?? null
+                          e.target.value = ''
+                          if (f) setBrandModal({ ...brandModal, coverFile: f, coverItemId: null })
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
             {!brandModal.id && (
               <p className="text-[11px] text-muted-foreground">

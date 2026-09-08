@@ -5,7 +5,7 @@ import { requirePermission, requireReadPermission } from '@/lib/permissions/chec
 import { PERMS } from '@/lib/permissions/keys'
 import { createWebsiteAdminClient, websiteSupabaseConfigured } from '@/lib/supabase/website-admin'
 import { logActivity } from '@/lib/activity/log'
-import type { FlyerRow, PortfolioCollection, UploadTarget, WorkFormat, WorkKind, WorkVariant } from '@/lib/portfolio/types'
+import type { CoverMode, FlyerRow, PortfolioCollection, UploadTarget, WorkFormat, WorkKind, WorkVariant } from '@/lib/portfolio/types'
 import { VIDEO_EXT_BY_TYPE, WORK_FORMATS, formatsFor } from '@/lib/portfolio/types'
 
 /**
@@ -52,6 +52,9 @@ interface BrandRow {
   tagline: string | null
   position: number
   logo_path: string | null
+  cover_mode: CoverMode | null
+  cover_item_id: string | null
+  cover_path: string | null
   work_items: ItemRow[] | null
 }
 interface CollectionRow {
@@ -82,6 +85,7 @@ const collectionSelect = (extra: { brand: readonly string[]; item: readonly stri
  * everything it does have.
  */
 const COLLECTION_SELECTS = [
+  { brand: ['logo_path', 'cover_mode', 'cover_item_id', 'cover_path'], item: ['format', 'collection_position', 'caption'] },
   { brand: ['logo_path'], item: ['format', 'collection_position', 'caption'] },
   { brand: ['logo_path'], item: ['format', 'collection_position'] },
   { brand: ['logo_path'], item: ['format'] },
@@ -152,6 +156,10 @@ export async function listPortfolio(): Promise<ActionResult<PortfolioCollection[
       position: brand.position,
       logoUrl: brand.logo_path ? `${publicBase}/${brand.logo_path}` : null,
       logoPath: brand.logo_path,
+      coverMode: brand.cover_mode ?? 'auto',
+      coverItemId: brand.cover_item_id,
+      coverPath: brand.cover_path,
+      coverUrl: brand.cover_path ? `${publicBase}/${brand.cover_path}` : null,
       items: [...(brand.work_items ?? [])].sort(byPosition).map((item) => {
         const variants: WorkVariant[] = [...(item.variants ?? [])].sort((x, y) => x.width - y.width)
         // Smallest rendition is plenty for a thumbnail in the editor.
@@ -523,6 +531,9 @@ export async function saveBrand(input: {
   name: string
   tagline: string
   slug?: string
+  coverMode?: CoverMode
+  coverItemId?: string | null
+  coverPath?: string | null
 }): Promise<ActionResult<{ id: string; slug: string }>> {
   const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
   if (!guard.ok) return { ok: false, error: guard.error }
@@ -535,8 +546,19 @@ export async function saveBrand(input: {
   const site = createWebsiteAdminClient()
   const tagline = input.tagline.trim() || null
 
+  // The cover columns are newer than the table, so they are dropped and the
+  // write retried if the migration has not been run: renaming a brand must not
+  // fail for the sake of a card setting.
+  const cover: Record<string, unknown> = {}
+  if (input.coverMode !== undefined) cover.cover_mode = input.coverMode
+  if (input.coverItemId !== undefined) cover.cover_item_id = input.coverItemId
+  if (input.coverPath !== undefined) cover.cover_path = input.coverPath
+
   if (input.id) {
-    const { error } = await site.from('work_brands').update({ name, tagline }).eq('id', input.id)
+    let { error } = await site.from('work_brands').update({ name, tagline, ...cover }).eq('id', input.id)
+    if (Object.keys(cover).length && isMissingColumn(error, 'cover_')) {
+      ({ error } = await site.from('work_brands').update({ name, tagline }).eq('id', input.id))
+    }
     if (error) return { ok: false, error: error.message }
     revalidatePath(REVALIDATE)
     return { ok: true, data: { id: input.id, slug } }
