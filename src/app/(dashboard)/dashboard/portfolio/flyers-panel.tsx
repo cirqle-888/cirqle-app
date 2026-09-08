@@ -193,7 +193,13 @@ export default function FlyersPanel({ flyers, error, canManage, siteUrl, onToast
             accept="image/jpeg,image/png,image/webp,image/avif"
             multiple
             className="hidden"
-            onChange={(e) => { const f = e.target.files; e.target.value = ''; if (f?.length) void uploadFiles(f) }}
+            onChange={(e) => {
+              // Copy the files out first: clearing the input empties the very
+              // FileList this holds, so reading it afterwards finds nothing.
+              const picked = Array.from(e.target.files ?? [])
+              e.target.value = ''
+              if (picked.length) void uploadFiles(picked)
+            }}
           />
         </div>
       )}

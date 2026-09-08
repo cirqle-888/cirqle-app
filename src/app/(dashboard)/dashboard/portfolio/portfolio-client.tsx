@@ -739,7 +739,16 @@ export default function PortfolioClient({
                 accept={ACCEPT}
                 multiple
                 className="hidden"
-                onChange={(e) => { const f = e.target.files; e.target.value = ''; if (f?.length) void uploadFiles(f) }}
+                // The input sits inside the drop zone, so its own click bubbles back
+                // up and asks the picker to open a second time.
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => {
+                  // Copy the files out first: clearing the input empties the very
+                  // FileList this holds, so reading it afterwards finds nothing.
+                  const picked = Array.from(e.target.files ?? [])
+                  e.target.value = ''
+                  if (picked.length) void uploadFiles(picked)
+                }}
               />
             </div>
           )}
