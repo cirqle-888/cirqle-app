@@ -12,10 +12,10 @@ import { useState } from 'react'
 import {
   CheckCircle2, AlertCircle, ChevronDown, ChevronUp,
   RefreshCw, Archive, Flag, Link2, Copy, Check, Loader2,
-  ImageIcon, Tag, Calendar, FileText, FileSpreadsheet, History,
+  ImageIcon, Tag, Calendar, FileText, FileSpreadsheet, History, Trash2,
 } from 'lucide-react'
 import {
-  acknowledgeLogs, finaliseCampaign, archiveCampaign, resyncSheet, generateOfferLink,
+  acknowledgeLogs, finaliseCampaign, archiveCampaign, deleteCampaign, resyncSheet, generateOfferLink,
 } from '@/app/(dashboard)/dashboard/campaigns/actions'
 import {
   convertSheetCampaign, listCampaignRevisions, restoreCampaignRevision, type RevisionMeta,
@@ -80,10 +80,18 @@ export function CampaignCard({
   campaign,
   onRefresh,
   defaultExpanded = false,
+  onDeleted,
 }: {
   campaign: any
   onRefresh: () => void
   defaultExpanded?: boolean
+  /**
+   * Called after a permanent delete. The card's own row is gone at this point,
+   * so a host that renders it inside a drawer or detail pane has to close that
+   * view — onRefresh alone would leave it open around a campaign that no
+   * longer exists.
+   */
+  onDeleted?: () => void
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [busy, setBusy] = useState(false)
@@ -99,6 +107,7 @@ export function CampaignCard({
     body: string
     confirmLabel: string
     danger?: boolean
+    requireTypedText?: string
     onConfirm: () => void
   } | null>(null)
 
@@ -167,6 +176,22 @@ export function CampaignCard({
     setBusy(true)
     const res = await archiveCampaign(campaign.id)
     if (!res.ok) alert(res.error || 'Could not archive.')
+    onRefresh()
+    setBusy(false)
+  }
+
+  async function handleDelete() {
+    setBusy(true)
+    const res = await deleteCampaign(campaign.id)
+    if (!res.ok) {
+      alert(res.error || 'Could not delete.')
+      setBusy(false)
+      return
+    }
+    // Order matters: let the host tear the view down first, then refresh the
+    // list underneath it. Refreshing first re-renders this card against a row
+    // the server has already dropped.
+    onDeleted?.()
     onRefresh()
     setBusy(false)
   }
@@ -512,6 +537,27 @@ export function CampaignCard({
             >
               <Archive className="w-3.5 h-3.5" /> Archive
             </button>
+            {/* Permanent delete — for a draft that should never have existed,
+                as opposed to a finished campaign being retired (Archive).
+                Separated to the right and gated behind typing the client's
+                name, because it sits a few pixels from Archive and the two
+                outcomes could not be further apart: one keeps everything, the
+                other cannot be undone from anywhere in the app. */}
+            <button
+              onClick={() => setConfirmPrompt({
+                title: 'Delete this campaign permanently?',
+                body: `${products.length} product${products.length === 1 ? '' : 's'} and their entire change history go with it. This cannot be undone — there is no recovering it afterwards. To keep the record but clear it out of the list, use Archive instead.`,
+                confirmLabel: 'Delete permanently',
+                danger: true,
+                requireTypedText: campaign.client?.name || 'DELETE',
+                onConfirm: () => { void handleDelete() },
+              })}
+              disabled={busy}
+              title="Delete this campaign and all its products — cannot be undone"
+              className="text-xs px-3 py-2 rounded-lg bg-red-500/10 text-red-500 dark:text-red-400 border border-red-500/25 hover:bg-red-500/20 transition-colors flex items-center gap-1.5 disabled:opacity-50 ml-auto"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Delete
+            </button>
           </div>
         </div>
       )}
@@ -521,6 +567,7 @@ export function CampaignCard({
           body={confirmPrompt.body}
           confirmLabel={confirmPrompt.confirmLabel}
           danger={confirmPrompt.danger}
+          requireTypedText={confirmPrompt.requireTypedText}
           onConfirm={() => { const fn = confirmPrompt.onConfirm; setConfirmPrompt(null); fn() }}
           onCancel={() => setConfirmPrompt(null)}
         />

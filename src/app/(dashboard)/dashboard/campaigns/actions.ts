@@ -81,6 +81,64 @@ export async function archiveCampaign(campaignId: string): Promise<ActionResult>
   return { ok: true }
 }
 
+/**
+ * Permanently delete a campaign and everything hanging off it.
+ *
+ * Archive is the normal way to retire a campaign — it keeps the products,
+ * versions and history. This is for the other case: a draft built to try
+ * something out, which should never have existed and should not sit in the
+ * archive forever pretending to be a record of work.
+ *
+ * The row is the only thing deleted here because the schema does the rest:
+ * offer_products, offer_change_logs and offer_campaign_revisions all declare
+ * `on delete cascade` on campaign_id, and offer_product_badges cascades from
+ * the products. Deleting the children by hand would risk a partial delete if
+ * one statement failed halfway.
+ *
+ * Admin-only, like finalise and archive — and enforced HERE rather than by
+ * hiding the button, because a Server Function is reachable by direct POST.
+ *
+ * Returns what was destroyed so the caller can say so plainly afterwards.
+ */
+export async function deleteCampaign(campaignId: string): Promise<ActionResult<{
+  title: string | null
+  clientName: string | null
+  products: number
+  logs: number
+}>> {
+  const guard = await requireAdmin()
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const admin = createAdminClient()
+
+  // Read the shape of what is about to go, before it goes. This is also the
+  // existence check: a missing campaign must not report a successful delete.
+  const { data: existing, error: readErr } = await admin.from('offer_campaigns')
+    .select('id, title, client:clients(name)')
+    .eq('id', campaignId)
+    .maybeSingle()
+  if (readErr || !existing) return { ok: false, error: 'Campaign not found.' }
+
+  const [{ count: products }, { count: logs }] = await Promise.all([
+    admin.from('offer_products').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId),
+    admin.from('offer_change_logs').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId),
+  ])
+
+  const { error } = await admin.from('offer_campaigns').delete().eq('id', campaignId)
+  if (error) return { ok: false, error: 'Could not delete the campaign.' }
+
+  revalidatePath('/dashboard/campaigns')
+  revalidatePath('/dashboard/requests')
+  return {
+    ok: true,
+    data: {
+      title: existing.title ?? null,
+      clientName: (existing as { client?: { name?: string } | null }).client?.name ?? null,
+      products: products ?? 0,
+      logs: logs ?? 0,
+    },
+  }
+}
+
 export async function resyncSheet(campaignId: string, clientId: string): Promise<ActionResult> {
   const employeeId = await resolveCurrentEmployeeId()
   if (!employeeId) return { ok: false, error: 'Not signed in.' }

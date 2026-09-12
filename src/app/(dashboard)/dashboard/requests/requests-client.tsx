@@ -1338,7 +1338,15 @@ export default function RequestsClient({
                 </div>
                 {/* App-Owned Operational Component */}
                 <div className="overflow-y-auto flex-1 p-5 bg-background">
-                  <CampaignCard campaign={open.campaign} onRefresh={() => router.refresh()} defaultExpanded={true} />
+                  <CampaignCard
+                    campaign={open.campaign}
+                    onRefresh={() => router.refresh()}
+                    defaultExpanded={true}
+                    // The drawer is rendered FROM this campaign, so it has to
+                    // close before the list refreshes — otherwise it sits open
+                    // around a row that no longer exists.
+                    onDeleted={() => setOpen(null)}
+                  />
                 </div>
               </>
             ) : (
