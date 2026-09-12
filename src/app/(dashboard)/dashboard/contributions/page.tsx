@@ -7,6 +7,7 @@ import {
   loadUnitScope, isUnitScoped, scopeRowsByUnitMember, scopeTasksByUnit, unitTaskIdsFrom,
 } from '@/lib/scope/unit-scope'
 import ContributionsClient from './contributions-client'
+import { redirect } from 'next/navigation'
 import { toISODate } from '@/lib/utils/local-date'
 import { loadServiceScope } from '@/lib/scope/service-scope'
 import { visibleEmployeeIds, scopeEmployeeList } from '@/lib/scope/employee-scope'
@@ -37,6 +38,23 @@ export default async function ContributionsPage() {
   const viewAll         = isAdmin || userCanSee(me, PERMS.CONTRIBUTIONS_VIEW_ALL)
   const canViewActivity = isAdmin || userCanSee(me, PERMS.CONTRIBUTIONS_VIEW_ACTIVITY)
   const myEmployeeId    = me?.employeeId ?? null
+
+  // Reaching the page at all takes a rung on the ladder. The stripping below
+  // has always been sound — rows are cut to the viewer's own, and earnings are
+  // withheld at the QUERY — but nothing checked whether the viewer belonged
+  // here in the first place, so `contributions.view_own` was counted in a
+  // designation's "Contributions 0/6" while gating nothing. Checked here
+  // rather than only in the nav or middleware: a hidden link still leaves a
+  // working URL, and this page is the thing that actually loads the data.
+  //
+  // view_own is the LOWEST rung, not the required one — Task Manager and
+  // Auditor hold view_all without it, and demanding view_own would bounce the
+  // two roles that can see everyone.
+  const canSeeAnyContributions = isAdmin
+    || userCanSee(me, PERMS.CONTRIBUTIONS_VIEW_OWN)
+    || userCanSee(me, PERMS.CONTRIBUTIONS_VIEW_UNIT)
+    || viewAll
+  if (!canSeeAnyContributions) redirect('/dashboard')
 
   // Every viewer sees the full task list and contributor graph. Pricing
   // fields (billing_amount_inr, currency, etc.) are included ONLY when the

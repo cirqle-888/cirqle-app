@@ -6,7 +6,14 @@ import { Database } from '../../types/supabase'
  * Map of pathname prefix -> required permission key.
  * If a non-admin user visits a path with a required perm they lack, redirect to /dashboard.
  */
-const ROUTE_PERMS: Array<[RegExp, string]> = [
+/**
+ * A route's permission, or SEVERAL when more than one grant legitimately opens
+ * it. Contributions is the case that forced this: view_own, view_unit and
+ * view_all are three rungs of the same ladder, and Task Manager and Auditor
+ * hold view_all WITHOUT view_own — a single-key rule would have bounced the
+ * very people who can see everyone's contributions.
+ */
+const ROUTE_PERMS: Array<[RegExp, string | string[]]> = [
   [/^\/dashboard\/activity/,                'timeline.view_all'],
   [/^\/dashboard\/leads/,                   'leads.view'],
   [/^\/dashboard\/field-marketing/,         'field.view'],
@@ -36,6 +43,9 @@ const ROUTE_PERMS: Array<[RegExp, string]> = [
   [/^\/dashboard\/cashbook\/accounts/,       'cashbook.view_totals'],
   [/^\/dashboard\/cashbook\/reconciliation/, 'cashbook.view_amounts'],
   [/^\/dashboard\/cashbook/,                'cashbook.view'],
+  // Three rungs of one ladder — any of them opens the page. The page itself
+  // then strips the rows to what that rung actually allows.
+  [/^\/dashboard\/contributions/,           ['contributions.view_own', 'contributions.view_unit', 'contributions.view_all']],
   [/^\/dashboard\/partners/,                'finance.partner.view'],
   [/^\/dashboard\/payroll/,                 'payroll.view'],
   [/^\/dashboard\/performance/,             'performance.manage'],
@@ -390,9 +400,9 @@ export async function updateSession(request: NextRequest) {
     // Regular designation → check route permission
     const matched = ROUTE_PERMS.find(([re]) => re.test(pathname))
     if (!matched) return supabaseResponse
-    const requiredKey = matched[1]
+    const requiredKeys = Array.isArray(matched[1]) ? matched[1] : [matched[1]]
 
-    if (!profile.allowedPerms.includes(requiredKey)) {
+    if (!requiredKeys.some(k => profile.allowedPerms.includes(k))) {
       const url = request.nextUrl.clone()
       if (pathname === '/dashboard') {
         url.pathname = '/dashboard/tasks'

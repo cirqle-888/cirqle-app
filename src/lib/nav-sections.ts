@@ -93,7 +93,12 @@ export const navSections: NavSection[] = [
       { label: 'Requests',      href: '/dashboard/requests',      icon: Inbox, requiredPerm: 'requests.view' },
       { label: 'Tasks',         href: '/dashboard/tasks',         icon: CheckSquare },
       { label: 'Clients',       href: '/dashboard/clients',       icon: Users2, requiredPerm: 'clients.view' },
-      { label: 'Contributions', href: '/dashboard/contributions', icon: TrendingUp },
+      // Any rung of the contributions ladder opens the page; the page strips
+      // the rows to what that rung allows. Ungated until now — it was the one
+      // item here with no permission at all, so "Contributions 0/6" on a
+      // designation promised a gate that did not exist.
+      { label: 'Contributions', href: '/dashboard/contributions', icon: TrendingUp,
+        requiredAnyPerm: ['contributions.view_own', 'contributions.view_unit', 'contributions.view_all'] },
       { label: 'Chat',          href: '/dashboard/chat',          icon: MessageSquare, requiredPerm: 'chat.access' },
     ],
   },
