@@ -37,7 +37,7 @@ import { EmployeeAvatar } from '@/components/ui/employee-avatar'
 import { FavoritesSection } from '@/components/layout/favorites-section'
 import { FavoriteToggle } from '@/components/ui/favorite-toggle'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
-import { resolveFavoriteIcon } from '@/lib/favorites/icon-map'
+import { resolveFavoriteIcon, iconKeyFor } from '@/lib/favorites/icon-map'
 import { useFavorites } from '@/contexts/favorites-context'
 import type { FavoriteEntry } from '@/lib/favorites/queries'
 
@@ -397,7 +397,12 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
             <div className="space-y-px">
               {visibleItems.map(({ label, href, icon: Icon }) => {
                 const active = href === activeHref
-                const iconKey = Icon.displayName || 'Star'
+                // iconKeyFor, NOT Icon.displayName: displayName is lucide's
+                // CURRENT name for an icon, while this codebase imports the
+                // older alias — so favouriting Tasks stored "SquareCheckBig"
+                // against a map keyed "CheckSquare", and the favourite came
+                // back a Star. iconKeyFor returns the key the map actually has.
+                const iconKey = iconKeyFor(Icon)
                 return (
                   <div key={href} className="relative group">
                     <Link
