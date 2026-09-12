@@ -59,16 +59,15 @@ function Card({ row, dragging }: { row: MyWorkRow; dragging?: boolean }) {
   const due = dueLabel(row.due_date)
   return (
     <div className={`rounded-xl border border-border bg-card p-3 space-y-2 ${dragging ? 'shadow-xl' : 'shadow-sm'}`}>
-      <p className="text-sm font-medium leading-snug break-words">{row.title}</p>
+      <p className="text-sm font-semibold leading-snug break-words">{row.title}</p>
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
         {/* Where it came from. Not needed to DO the work — the board treats
             both identically — but a designer glancing at a card should be able
-            to tell a client request from something planned on the calendar. */}
-        <span className={`px-1.5 py-0.5 rounded font-medium ${
-          row.source === 'plan'
-            ? 'bg-violet-500/15 text-violet-400'
-            : 'bg-blue-500/15 text-blue-400'
-        }`}>
+            to tell a client request from something planned on the calendar.
+            The WORD carries that; it does not need a colour to shout it. A
+            reference number is something you quote when asking about a card,
+            not something you read the card by. */}
+        <span className="font-medium text-muted-foreground/70 tabular-nums">
           {row.source === 'plan' ? 'Plan' : row.ref_no ? `REQ-${String(row.ref_no).padStart(4, '0')}` : 'Request'}
         </span>
         {/* Complimentary work still has to be done and still has a deadline —
@@ -83,8 +82,12 @@ function Card({ row, dragging }: { row: MyWorkRow; dragging?: boolean }) {
         {row.client_name && (
           <span className="px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">{row.client_name}</span>
         )}
+        {/* The service was the loudest thing on the card, in the accent colour
+            no less — so five cards in a column read as five coloured chips
+            before they read as five pieces of work. It says what KIND of thing
+            this is, which the title already says better. */}
         {row.service_name && (
-          <span className="px-1.5 py-0.5 rounded bg-primary/10 text-primary">{row.service_name}</span>
+          <span className="text-muted-foreground/70">{row.service_name}</span>
         )}
         {due && <span className={`px-1.5 py-0.5 rounded-full border ${due.tone}`}>{due.text}</span>}
       </div>
@@ -125,7 +128,7 @@ function CardDetail({ row, onClose }: { row: MyWorkRow; onClose: () => void }) {
                 {STAGE_LABEL[rowStage(row)]}
               </span>
               {row.client_name && <span className="text-muted-foreground">{row.client_name}</span>}
-              {row.service_name && <span className="text-primary">{row.service_name}</span>}
+              {row.service_name && <span className="text-muted-foreground/70">{row.service_name}</span>}
               {due && <span className={`px-1.5 py-0.5 rounded-full border ${due.tone}`}>{due.text}</span>}
             </div>
           </div>
