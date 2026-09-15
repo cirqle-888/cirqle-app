@@ -532,6 +532,7 @@ const PLUGIN_HEADER = PLUGIN_NAME + '/' + PLUGIN_VERSION + '+' + PLUGIN_BUILD + 
  * ------------------------------------------------------------------ */
 const state = {
   offers: [],          // rows from /api/figma/offers
+  department: null,    // {category, matched, defaultServiceId, reason} from the same call
   campaign: null,      // detail from /api/figma/campaign/:id
   templates: [],       // from the sandbox
   templateIssues: [],  // last template validation
@@ -936,6 +937,9 @@ async function connect() {
     const data = await api('/api/figma/offers')
     state.offers = data.offers || []
     state.services = data.services || []
+    // Which department these lists came from. An older server sends nothing
+    // here, which reads as "unknown" and changes no behaviour.
+    state.department = data.department || null
     // Clients come from the workspace, not from the active offers — see
     // fillClientDropdown. An older server that doesn't send them yet falls
     // back to the offer-derived list there, so this stays deploy-order safe.
@@ -959,24 +963,42 @@ async function connect() {
   }
 }
 
-/** Which service the task gets. Left alone it is "Offer Flyer"; the picker
- * is for the days it is an update, an A3, or a revision instead. Remembered
- * by NAME, so it survives a workspace re-seeding of service ids. */
+/** Which service the task gets. The default is "Offer Flyer" — the picker is
+ * for the days it is an update, an A3, or a revision instead. Remembered by
+ * NAME, so it survives a workspace re-seeding of service ids.
+ *
+ * The server now sends only the OFFER FLYERS department's services and marks
+ * the default with `isDefault`, so this no longer lists "Video Editing" and
+ * no longer relies on the server guessing a service from an empty value: the
+ * default is selected here, by id, and sent explicitly. An older server that
+ * sends neither still works — the blank option means "you decide". */
 function fillServiceDropdown() {
   const sel = $('paste-service')
   sel.innerHTML = ''
+  const services = state.services || []
+  const fallbackDefault = services.find(s => s.isDefault)
+    || services.find(s => String(s.name || '').trim().toLowerCase() === 'offer flyer')
+  const defaultId = (state.department && state.department.defaultServiceId) || (fallbackDefault && fallbackDefault.id) || ''
+
   const def = document.createElement('option')
-  def.value = ''
-  def.textContent = 'Offer Flyer (default)'
+  def.value = defaultId
+  def.textContent = defaultId ? 'Offer Flyer (default)' : 'Default service'
   sel.appendChild(def)
-  for (const s of (state.services || [])) {
+  for (const s of services) {
+    if (s.id === defaultId) continue   // already the first option
     const opt = document.createElement('option')
     opt.value = s.id
     opt.textContent = s.name
     sel.appendChild(opt)
   }
-  const saved = (state.services || []).find(s => s.name === state.lastServiceName)
-  if (saved) sel.value = saved.id
+  const saved = services.find(s => s.name === state.lastServiceName)
+  sel.value = saved ? saved.id : defaultId
+
+  // A renamed category means these lists are the whole workspace, not this
+  // department. Say so once rather than letting the dropdown look normal.
+  if (state.department && state.department.matched === false && state.department.reason) {
+    logFix(state.department.reason)
+  }
 }
 
 $('paste-service').onchange = () => {
@@ -1460,14 +1482,20 @@ function onBuildDone(report) {
   // Tell Cirqle what was actually produced, so the task's contribution
   // counts (pages, creatives) update themselves. Fire-and-forget: a
   // reporting hiccup must never distract from a finished build.
-  if (state.user && state.user.id && $('offer').value && report.cards) {
+  // Both numbers are COUNTED IN THE FILE (see artboardOf/countArtboards in
+  // code.ts): creatives are the artboards this build produced or filled,
+  // pages are the ones laid out with more than one product. The old fallback
+  // to the SHEET's page count is deliberately gone — a contribution score
+  // must describe what the designer drew, not what the list implied.
+  if (state.user && state.user.id && $('offer').value && (report.artboards || report.pages)) {
     api('/api/figma/build-report', {
       campaignId: $('offer').value,
       createdBy: state.user,
-      pages: report.pages || (state.campaign ? state.campaign.campaign.pageCount : 1) || 1,
-      cards: report.cards,
+      pages: report.pages || 0,
+      creatives: report.artboards || 0,
     }).then(r => {
       if (r && r.recorded && r.taskNumber) log('· Counts updated on Task #' + r.taskNumber + '.', 'ok')
+      if (r && r.skipped && r.skipped.length) r.skipped.forEach(m => logFix(m))
     }).catch(() => undefined)
   }
   const verb = report.filledInPlace ? 'cards filled in place' : 'cards built'

@@ -411,3 +411,39 @@ body:has([data-modal-overlay]) [data-chat-launcher] {
       0 4px 20px rgba(124, 58, 237, 0.11);
   }
 }
+/* ── Presentation mode: hide figures during a screen share ─────────────────
+ * Set by src/lib/privacy/blur-figures.ts while the toggle is on. Elements
+ * carrying [data-cq-figure] were detected as money, a grouped number or a
+ * percentage; [data-cq-hide] is the manual opt-in for anything detection
+ * cannot see — chart bars, sparklines, an avatar of a payslip.
+ *
+ * Blur rather than display:none so the layout does not move: the demo looks
+ * like the real app, minus the amounts. Deliberately NOT revealed on hover —
+ * the mouse is on screen too.
+ *
+ * This hides pixels, not data. The numbers are still in the DOM and still
+ * visible to anyone whose own account may read them.
+ */
+[data-cq-hide-figures] [data-cq-figure],
+[data-cq-hide-figures] [data-cq-hide] {
+  filter: blur(7px);
+  /* The blur alone still leaks shape — a long number reads as a long smudge.
+     Tightening the letters makes every amount roughly the same grey block. */
+  letter-spacing: -0.05em;
+  user-select: none;
+  transition: filter 120ms ease-out;
+}
+
+/* The toggle itself must never blur, or it cannot be found to turn off. */
+[data-cq-hide-figures] [data-cq-figure-exempt],
+[data-cq-hide-figures] [data-cq-figure-exempt] [data-cq-figure] {
+  filter: none;
+  letter-spacing: inherit;
+  user-select: auto;
+}
+
+@media print {
+  /* A printed invoice must still show its total. */
+  [data-cq-hide-figures] [data-cq-figure],
+  [data-cq-hide-figures] [data-cq-hide] { filter: none; letter-spacing: inherit }
+}

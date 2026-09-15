@@ -8,6 +8,7 @@ import { usePermissions } from '@/contexts/permission-context'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
 import { NotificationBell } from '@/components/layout/notification-bell'
+import { FiguresToggle } from '@/contexts/privacy-context'
 import { AppLauncherTrigger } from '@/components/layout/app-launcher'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
 import { EmployeePresenceDot, PresenceNote } from '@/components/ui/presence-dot'
@@ -46,6 +47,7 @@ const ROUTE_LABELS: Record<string, string> = {
   ranking:       'Client Ranking',
   capture:       'AI Capture',
   'pricing-matrix': 'Pricing Matrix',
+  'quote-planner': 'Quote Planner',
   partners:      'Business Partners',
   payroll:       'HR & Payroll',
   reports:       'Reports',
@@ -193,6 +195,11 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
       <AppLauncherTrigger />
       {/* Toggles the app-wide comms widget on its Chat tab — the same surface
           as the corner launcher, reachable from the top bar on every page. */}
+      {/* Screen-share control: one click (or Cmd/Ctrl+Shift+H) blurs every
+          amount on screen, so the app can be demoed without the figures. */}
+      <div className="hidden sm:block mr-1">
+        <FiguresToggle />
+      </div>
       <button
         type="button"
         onClick={() => window.dispatchEvent(new CustomEvent('cirqle:toggleChat'))}

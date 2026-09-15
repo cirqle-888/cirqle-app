@@ -3845,7 +3845,7 @@ export default function SettingsClient(props: Props) {
                   <div className="grid grid-cols-2 gap-3">
                     <FieldRow label="Type">
                       <AppSelect value={form.type || 'bank'} onChange={e => setForm(p => ({ ...p, type: e.target.value }))}>
-                        {['bank', 'cash', 'wallet', 'other'].map(t => <option key={t} value={t}>{t}</option>)}
+                        {['bank', 'cash', 'wallet', 'credit_card', 'other'].map(t => <option key={t} value={t}>{t === 'credit_card' ? 'credit card' : t}</option>)}
                       </AppSelect>
                     </FieldRow>
                     <FieldRow label="Currency">
@@ -3857,6 +3857,56 @@ export default function SettingsClient(props: Props) {
                   <FieldRow label="Account Number"><input value={form.account_number || ''} onChange={e => setForm(p => ({ ...p, account_number: e.target.value }))} className={inputCls} /></FieldRow>
                   <FieldRow label="Bank Name"><input value={form.bank_name || ''} onChange={e => setForm(p => ({ ...p, bank_name: e.target.value }))} className={inputCls} /></FieldRow>
                   <FieldRow label="Opening Balance"><input type="number" step="0.01" value={form.opening_balance || ''} onChange={e => setForm(p => ({ ...p, opening_balance: parseFloat(e.target.value) || 0 }))} className={inputCls} /></FieldRow>
+
+                  {/* ── Credit card only ────────────────────────────────────
+                      A card is a LIABILITY, not a pot of money: a purchase is
+                      an outflow on the card and only the bill payment moves
+                      cash, as a transfer from the bank. These four fields are
+                      what Card Statements needs to know where a cycle begins
+                      and ends. They are meaningless on every other type, so
+                      they only appear here. */}
+                  {form.type === 'credit_card' && (
+                    <>
+                      <div className="grid grid-cols-2 gap-3">
+                        <FieldRow label="Statement day">
+                          <input type="number" min={1} max={31} value={form.statement_day ?? ''}
+                            onChange={e => setForm(p => ({ ...p, statement_day: e.target.value === '' ? null : parseInt(e.target.value, 10) }))}
+                            className={inputCls} placeholder="e.g. 16" />
+                        </FieldRow>
+                        <FieldRow label="Due day">
+                          <input type="number" min={1} max={31} value={form.due_day ?? ''}
+                            onChange={e => setForm(p => ({ ...p, due_day: e.target.value === '' ? null : parseInt(e.target.value, 10) }))}
+                            className={inputCls} placeholder="e.g. 5" />
+                        </FieldRow>
+                      </div>
+                      <p className="-mt-1 text-xs text-muted-foreground">
+                        Statement day is the day of the month the cycle closes. 16 means the cycle
+                        runs the 16th to the 15th. In a month too short for it, it moves to that
+                        month&rsquo;s last day.
+                      </p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <FieldRow label="Last 4 digits">
+                          <input value={form.card_last4 || ''} maxLength={4} inputMode="numeric"
+                            onChange={e => setForm(p => ({ ...p, card_last4: e.target.value.replace(/\D/g, '').slice(0, 4) || null }))}
+                            className={inputCls} placeholder="1234" />
+                        </FieldRow>
+                        <FieldRow label="Credit limit">
+                          <input type="number" step="0.01" value={form.credit_limit ?? ''}
+                            onChange={e => setForm(p => ({ ...p, credit_limit: e.target.value === '' ? null : parseFloat(e.target.value) }))}
+                            className={inputCls} />
+                        </FieldRow>
+                      </div>
+                      <FieldRow label="Reconcile from">
+                        <input type="date" value={form.reconcile_from || ''}
+                          onChange={e => setForm(p => ({ ...p, reconcile_from: e.target.value || null }))}
+                          className={inputCls} />
+                      </FieldRow>
+                      <p className="-mt-1 text-xs text-muted-foreground">
+                        The date reconciliation starts. Cycles before it are not offered, and
+                        nothing recorded before it is touched.
+                      </p>
+                    </>
+                  )}
                 </>
               )}
 

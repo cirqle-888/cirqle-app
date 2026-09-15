@@ -16,15 +16,15 @@ import { Input } from '@/components/ui/input'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast, ToastContainer } from '@/components/ui/toast'
-import type { CoverMode, FlyerRow, PortfolioBrand, PortfolioCollection, PortfolioItem, WorkFormat } from '@/lib/portfolio/types'
+import type { CoverMode, FlyerRow, PortfolioBrand, PortfolioCollection, PortfolioItem, WorkFormat, WorkKind } from '@/lib/portfolio/types'
 import { COVER_MODES, WORK_FORMAT_LABEL, formatsFor } from '@/lib/portfolio/types'
-import { prepareLogoForUpload, resizeForUpload, slugFromFilename, titleFromFilename } from '@/lib/portfolio/resize'
+import { prepareAvatarForUpload, prepareLogoForUpload, resizeForUpload, slugFromFilename, titleFromFilename } from '@/lib/portfolio/resize'
 import type { PreparedLogo } from '@/lib/portfolio/resize'
 import FlyersPanel from './flyers-panel'
 import { uploadMedia } from './upload-media'
 import {
   createWorkUploadUrls, deleteBrand, deleteWorkItem, reorderBrands, reorderCollectionItems,
-  reorderWorkItems, saveBrand, saveBrandLogo, saveWorkItem, updateWorkItem,
+  reorderWorkItems, saveBrand, saveBrandAvatar, saveBrandLogo, saveWorkItem, updateWorkItem,
 } from './actions'
 
 interface Props {
@@ -127,6 +127,11 @@ export default function PortfolioClient({
       prepared?: { logo: PreparedLogo; url: string } | null
       removePlate?: boolean
       clearLogo?: boolean
+      /** Square account picture, kept apart from the wide logo above. */
+      avatarUrl: string | null
+      avatar?: File | null
+      avatarPreview?: string | null
+      clearAvatar?: boolean
       coverMode: CoverMode
       coverItemId: string | null
       coverPath: string | null
@@ -137,9 +142,20 @@ export default function PortfolioClient({
   >(null)
   const [brandBusy, setBrandBusy] = useState<string | null>(null)
   const logoRef = useRef<HTMLInputElement>(null)
+  const avatarRef = useRef<HTMLInputElement>(null)
   const coverPicRef = useRef<HTMLInputElement>(null)
   const [confirm, setConfirm] = useState<{ title: string; body: string; run: () => Promise<void> } | null>(null)
-  const [renaming, setRenaming] = useState<{ id: string; title: string; caption: string } | null>(null)
+  const [renaming, setRenaming] = useState<{
+    id: string
+    slug: string
+    kind: WorkKind
+    title: string
+    caption: string
+    /** A new cover chosen but not yet uploaded. */
+    cover: File | null
+  } | null>(null)
+  const [renameBusy, setRenameBusy] = useState<string | null>(null)
+  const renameCoverRef = useRef<HTMLInputElement>(null)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
 
@@ -281,11 +297,40 @@ export default function PortfolioClient({
   }
 
   async function commitRename() {
-    if (!renaming) return
-    const res = await updateWorkItem(renaming.id, { title: renaming.title, caption: renaming.caption })
-    if (!res.ok) { toast.toastError('Could not save', res.error); return }
-    setRenaming(null)
-    router.refresh()
+    if (!renaming || !brand || !collection) return
+    setRenameBusy('Saving')
+    try {
+      let cover: Awaited<ReturnType<typeof uploadMedia>> | null = null
+      if (renaming.cover) {
+        cover = await uploadMedia(
+          renaming.cover,
+          { collectionSlug: collection.slug, brandSlug: brand.slug, slug: renaming.slug },
+          (step) => setRenameBusy(step),
+        )
+      }
+
+      setRenameBusy('Saving')
+      const res = await updateWorkItem(renaming.id, {
+        title: renaming.title,
+        caption: renaming.caption,
+        ...(cover
+          ? {
+              mediaPath: cover.mediaPath,
+              variants: cover.variants,
+              width: cover.width,
+              height: cover.height,
+              durationSeconds: cover.durationSeconds,
+            }
+          : {}),
+      })
+      if (!res.ok) { toast.toastError('Could not save', res.error); return }
+      setRenaming(null)
+      router.refresh()
+    } catch (e) {
+      toast.toastError('Could not save the cover', e instanceof Error ? e.message : 'Please try again.')
+    } finally {
+      setRenameBusy(null)
+    }
   }
 
   async function onDragEnd(event: DragEndEvent) {
@@ -418,6 +463,16 @@ export default function PortfolioClient({
         if (!cleared.ok) { toast.toastError('Saved the brand, but could not remove its logo', cleared.error); return }
       }
 
+      if (saved && brandModal.avatar) {
+        setBrandBusy('Uploading the account picture')
+        const avatarPath = await uploadBrandAvatar(brandModal.avatar, collection.slug, saved.slug)
+        const linked = await saveBrandAvatar(saved.id, avatarPath)
+        if (!linked.ok) { toast.toastError('Saved the brand, but not its account picture', linked.error); return }
+      } else if (saved && brandModal.clearAvatar) {
+        const cleared = await saveBrandAvatar(saved.id, null)
+        if (!cleared.ok) { toast.toastError('Saved the brand, but could not remove its account picture', cleared.error); return }
+      }
+
       setBrandModal(null)
       toast.success('Brand saved')
       router.refresh()
@@ -485,6 +540,33 @@ export default function PortfolioClient({
     return target.path
   }
 
+  /**
+   * Put a brand's account picture in storage and return its path.
+   *
+   * Squared off before upload, because the site draws it in a circle. Its own
+   * transparency is left alone — unlike the logo, whose alpha the site uses as
+   * a mask, this is drawn in full colour on a light disc.
+   */
+  async function uploadBrandAvatar(file: File, collectionSlug: string, brandSlug: string): Promise<string> {
+    const avatar = await prepareAvatarForUpload(file)
+    const targets = await createWorkUploadUrls({
+      collectionSlug,
+      brandSlug,
+      slug: 'avatar',
+      widths: [avatar.size],
+    })
+    if (!targets.ok || !targets.data?.length) throw new Error(targets.error ?? 'Could not prepare the upload.')
+
+    const target = targets.data[0]
+    const put = await fetch(target.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'image/webp' },
+      body: avatar.blob,
+    })
+    if (!put.ok) throw new Error(`The account picture did not upload (${put.status}).`)
+    return target.path
+  }
+
   const brandUrl = brand ? `${siteUrl}/portfolio/${collection.slug}/${brand.slug}` : null
 
   return (
@@ -507,7 +589,7 @@ export default function PortfolioClient({
             <ExternalLink className="w-3.5 h-3.5" /> View live
           </a>}
           {canManage && tab === 'work' && collection && (
-            <Button size="sm" onClick={() => setBrandModal({ name: '', tagline: '', logoUrl: null, logo: null, coverMode: 'auto', coverItemId: null, coverPath: null, coverUrl: null })}>
+            <Button size="sm" onClick={() => setBrandModal({ name: '', tagline: '', logoUrl: null, logo: null, avatarUrl: null, coverMode: 'auto', coverItemId: null, coverPath: null, coverUrl: null })}>
               <Plus className="w-3.5 h-3.5" /> New brand
             </Button>
           )}
@@ -641,7 +723,7 @@ export default function PortfolioClient({
                       onToggle={() => void togglePublished(item)}
                       onFormat={(f) => void setFormat(item, f)}
                       formats={formatsFor(collection.slug)}
-                      onRename={() => setRenaming({ id: item.id, title: item.title, caption: item.caption })}
+                      onRename={() => setRenaming({ id: item.id, slug: item.slug, kind: item.kind, title: item.title, caption: item.caption, cover: null })}
                       onDelete={() =>
                         setConfirm({
                           title: `Delete "${item.title}"?`,
@@ -674,7 +756,7 @@ export default function PortfolioClient({
                 {canManage && (
                   <button
                     type="button"
-                    onClick={() => setBrandModal({ id: brand.id, name: brand.name, tagline: brand.tagline ?? '', logoUrl: brand.logoUrl, logo: null, coverMode: brand.coverMode, coverItemId: brand.coverItemId, coverPath: brand.coverPath, coverUrl: brand.coverUrl })}
+                    onClick={() => setBrandModal({ id: brand.id, name: brand.name, tagline: brand.tagline ?? '', logoUrl: brand.logoUrl, logo: null, avatarUrl: brand.avatarUrl, coverMode: brand.coverMode, coverItemId: brand.coverItemId, coverPath: brand.coverPath, coverUrl: brand.coverUrl })}
                     className="text-muted-foreground hover:text-foreground"
                     aria-label="Edit brand"
                   >
@@ -799,7 +881,7 @@ export default function PortfolioClient({
                       onToggle={() => void togglePublished(item)}
                       onFormat={(f) => void setFormat(item, f)}
                       formats={formatsFor(collection.slug)}
-                      onRename={() => setRenaming({ id: item.id, title: item.title, caption: item.caption })}
+                      onRename={() => setRenaming({ id: item.id, slug: item.slug, kind: item.kind, title: item.title, caption: item.caption, cover: null })}
                       onDelete={() =>
                         setConfirm({
                           title: `Delete "${item.title}"?`,
@@ -965,6 +1047,81 @@ export default function PortfolioClient({
                 Shown on the website in place of the brand name: one flat colour that matches the page, turning full
                 colour when someone points at it. Every logo is drawn at the same size. The name is still what screen
                 readers and search engines get.
+              </p>
+            </div>
+
+            {/* Account picture. A separate upload from the logo above, because
+                the two are drawn at completely different shapes: the logo is a
+                wide lockup on a chip, this is a 32px circle on a post. */}
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">Account picture</label>
+
+              <div className="flex items-center gap-3 py-1">
+                {(brandModal.avatarPreview || (brandModal.avatarUrl && !brandModal.clearAvatar)) ? (
+                  // Previewed exactly as it ships: same circle, same light disc.
+                  <span className="inline-flex items-center gap-2 rounded-full bg-[#1b1430] px-3 py-1.5 text-white/85">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- blob or storage preview */}
+                    <img
+                      src={brandModal.avatarPreview ?? brandModal.avatarUrl!}
+                      alt=""
+                      className="block h-8 w-8 rounded-full bg-white object-contain p-0.5"
+                    />
+                    <span className="text-xs">{brandModal.name || 'Brand'}</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-2 rounded-full bg-[#1b1430] px-3 py-1.5 text-white/85">
+                    <span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-[#a259ff] to-[#4cc3ff] text-xs font-semibold uppercase">
+                      {(brandModal.name || '?').charAt(0)}
+                    </span>
+                    <span className="text-xs">{brandModal.name || 'Brand'}</span>
+                  </span>
+                )}
+
+                <Button type="button" variant="outline" size="sm" onClick={() => avatarRef.current?.click()}>
+                  <Upload className="mr-1.5 h-3 w-3" />
+                  {brandModal.avatar
+                    ? brandModal.avatar.name
+                    : brandModal.avatarUrl && !brandModal.clearAvatar
+                      ? 'Replace'
+                      : 'Upload'}
+                </Button>
+
+                {(brandModal.avatarPreview || (brandModal.avatarUrl && !brandModal.clearAvatar)) && (
+                  <IconBtn
+                    label="Remove the account picture"
+                    onClick={() =>
+                      setBrandModal({ ...brandModal, avatar: null, avatarPreview: null, clearAvatar: true })
+                    }
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </IconBtn>
+                )}
+              </div>
+
+              <input
+                ref={avatarRef}
+                type="file"
+                accept="image/png,image/webp,image/jpeg,image/avif,image/svg+xml,image/x-icon"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0] ?? null
+                  e.target.value = ''
+                  if (!f) return
+                  if (brandModal.avatarPreview) URL.revokeObjectURL(brandModal.avatarPreview)
+                  setBrandModal({
+                    ...brandModal,
+                    avatar: f,
+                    avatarPreview: URL.createObjectURL(f),
+                    clearAvatar: false,
+                  })
+                }}
+              />
+
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                The round picture beside the brand name on social posts, like a profile picture. Upload the square
+                emblem or the favicon — not the full logo: a wide lockup shrinks to about ten pixels inside the circle
+                and cannot be read. Anything not square is cropped from the centre. Left empty, the post shows the
+                brand&rsquo;s first letter.
               </p>
             </div>
 
@@ -1182,9 +1339,42 @@ export default function PortfolioClient({
                 Only used here, to find this piece again. Never shown to visitors.
               </p>
             </div>
+            {renaming.kind !== 'image' && (
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">
+                  {renaming.kind === 'reel' ? 'Cover' : 'Poster'}
+                </label>
+                <button
+                  type="button"
+                  onClick={() => renameCoverRef.current?.click()}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-border bg-secondary/40 text-xs text-muted-foreground hover:text-foreground hover:border-violet-500/40"
+                >
+                  <Upload className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">{renaming.cover ? renaming.cover.name : 'Choose an image or a short clip'}</span>
+                </button>
+                <input
+                  ref={renameCoverRef}
+                  type="file"
+                  accept={ACCEPT}
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null
+                    e.target.value = ''
+                    if (f) setRenaming({ ...renaming, cover: f })
+                  }}
+                />
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  {renaming.kind === 'reel'
+                    ? 'Replaces the tile shown on the website. A short muted clip plays on hover; a still image works too.'
+                    : 'Replaces the poster frame shown before the video plays.'}
+                </p>
+              </div>
+            )}
             <div className="flex gap-2">
-              <Button type="button" variant="outline" className="flex-1" onClick={() => setRenaming(null)}>Cancel</Button>
-              <Button type="button" className="flex-1" onClick={() => void commitRename()}>Save</Button>
+              <Button type="button" variant="outline" className="flex-1" disabled={!!renameBusy} onClick={() => setRenaming(null)}>Cancel</Button>
+              <Button type="button" className="flex-1" disabled={!!renameBusy} onClick={() => void commitRename()}>
+                {renameBusy ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> {renameBusy}</> : 'Save'}
+              </Button>
             </div>
           </div>
         </ModalOverlay>

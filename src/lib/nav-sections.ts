@@ -15,6 +15,7 @@ import {
   BadgePercent, CalendarRange, HardHat, Repeat, Package as PackageIcon,
   Share2, UserPlus, Gauge, ShieldCheck, MapPin,
   Scale, Receipt, Images,
+  Calculator, CreditCard,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -109,6 +110,7 @@ export const navSections: NavSection[] = [
       // Commercial flow: Quotations → Packages → Invoices (design §12 #7).
       // Quotations sits in Advanced until one is actually issued.
       { label: 'Packages',          href: '/dashboard/packages',   icon: PackageIcon, requiredPerm: 'packages.view', keywords: ['agreement', 'retainer', 'commitment', 'bundle', 'committed', 'promised'] },
+      { label: 'Quote Planner',     href: '/dashboard/quote-planner', icon: Calculator, requiredPerm: 'quote_planner.view', keywords: ['quote', 'quotation', 'proposal', 'pricing', 'margin', 'estimate', 'package price', 'what will we earn'] },
       { label: 'Invoices',          href: '/dashboard/invoices',   icon: FileText, requiredPerm: 'billing.view_invoices' },
       { label: 'Follow-ups',        href: '/dashboard/invoices/follow-ups', icon: PhoneCall, requiredPerm: 'billing.view_invoices' },
       { label: 'Statements',        href: '/dashboard/statements', icon: Receipt, requiredPerm: 'billing.view_invoices', keywords: ['statement of account', 'ledger', 'ageing', 'aging', 'balance due', 'outstanding'] },
@@ -121,6 +123,7 @@ export const navSections: NavSection[] = [
       { label: 'Business Partners', href: '/dashboard/partners',   icon: Handshake, requiredPerm: 'finance.partner.view', keywords: ['commission', 'referral', 'reseller', 'agent', 'partner code', 'BP'] },
       { label: 'Cash Book',         href: '/dashboard/cashbook',   icon: Wallet,   requiredPerm: 'cashbook.view', keywords: ['expenses', 'bank', 'transactions'] },
       { label: 'Recurring',         href: '/dashboard/cashbook/recurring', icon: Repeat, requiredPerm: 'cashbook.view', keywords: ['rent', 'subscription', 'monthly bill', 'repeat', 'standing'] },
+      { label: 'Card Statements',   href: '/dashboard/cashbook/cards', icon: CreditCard, requiredPerm: 'card_reconciliation.view', keywords: ['credit card', 'statement', 'reconcile', 'reconciliation', 'billing cycle', 'card bill'] },
       // The monthly control centre: profit composition, payroll status,
       // corrections and the lock action for each financial period.
       { label: 'Months',            href: '/dashboard/finance/months', icon: CalendarRange, requiredPerm: 'payroll.view', keywords: ['financial timeline', 'period', 'close', 'lock', 'profit', 'month end'] },

@@ -213,6 +213,22 @@ export const PERMS = {
   /** Create/edit/close packages and set their price and extra-work rate. */
   PACKAGES_MANAGE: 'packages.manage',
 
+  // Quote Planner (migration 20260913060000). Pricing a proposal shows the
+  // employee pool and what each person would earn from it, so viewing is
+  // treated as a money permission — see FINANCIAL_READ_PERMS below.
+  /** Open a quote plan and see its totals, earnings split and margin. */
+  QUOTE_PLANNER_VIEW:   'quote_planner.view',
+  /** Create and edit quote plans, their lines, shares, ratings and costs. */
+  QUOTE_PLANNER_MANAGE: 'quote_planner.manage',
+
+  // Credit card reconciliation (migration 20260915100000). A card statement is
+  // the company's own spending, line by line, so viewing is a money permission
+  // — see FINANCIAL_READ_PERMS below.
+  /** Open a card's statements and see how a billing cycle reconciles. */
+  CARD_RECONCILIATION_VIEW:   'card_reconciliation.view',
+  /** Import a statement, match its lines to entries, and close a cycle. */
+  CARD_RECONCILIATION_MANAGE: 'card_reconciliation.manage',
+
   // Marketing asset ownership (migration 20260814140000). Assigning an asset
   // moves reporting, leads and billing between parties, so it is its own key
   // rather than riding on social.manage.
@@ -380,6 +396,12 @@ export const CRITICAL_PERMS: ReadonlySet<string> = new Set<string>([
   // A package's whole point is its agreed price, so there is no field-level
   // split here — seeing the page means seeing what the client pays.
   PERMS.PACKAGES_VIEW,
+  // A quote plan shows the pool and per-employee earnings it implies. Seeing
+  // the page is seeing what colleagues would be paid.
+  PERMS.QUOTE_PLANNER_VIEW,
+  // A card statement is a line-by-line list of what the company spent, which
+  // is the cashbook's amounts by another route.
+  PERMS.CARD_RECONCILIATION_VIEW,
   PERMS.CASHBOOK_VIEW_AMOUNTS,
   // The bank's actual cash position — company-sensitive the same way a single
   // entry's amount is, just aggregated.

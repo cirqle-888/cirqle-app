@@ -8,6 +8,7 @@ import { isTaskMonthProtected } from '@/lib/payroll/compute'
 import { recordAdjustments } from '@/lib/payroll/adjustments'
 import { logActivity } from '@/lib/activity/log'
 import { recalcTaskCommissions } from '@/lib/sync/integrity'
+import { invalidateAnalyticsForDates } from '@/lib/analytics/invalidate'
 
 // ─── Phase 3.0 — server-side contribution writes ─────────────────────────────
 
@@ -247,6 +248,10 @@ export async function saveTaskContributions(
       preserved_overrides: overrides.length,
     },
   })
+
+  // A correction to a past month's split changes what that month's cached
+  // per-employee earnings say. Dated by the TASK, never by now.
+  await invalidateAnalyticsForDates([task.task_date])
 
   revalidatePath('/dashboard/contributions')
   return { ok: true, preservedOverrides: overrides.length }

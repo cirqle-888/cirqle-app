@@ -22,6 +22,7 @@ const supabase = createClient(get('NEXT_PUBLIC_SUPABASE_URL'), get('SUPABASE_SER
 //       bucket -> storage bucket must exist
 const PROBES = [
   // ── root migrations/ (001–025) ──────────────────────────────────────────
+  { m: 'supabase/migrations/20260915100000_card_reconciliation', kind: 'table', table: 'card_statements', col: 'cycle_end' },
   { m: 'migrations/001_designations_and_self_registration', kind: 'table',  table: 'designations', col: 'id' },
   { m: 'migrations/002_task_variants',                      kind: 'column', table: 'tasks', col: 'parent_task_id' },
   { m: 'migrations/003_billing_snapshot',                   kind: 'column', table: 'tasks', col: 'billing_snapshot' },

@@ -11,6 +11,7 @@ const updatedTables: string[] = []
 const loggedActivity: any[] = []
 const recordAdjustmentsCalls: { month: number; year: number }[] = []
 const recalcCalls: { taskId: string; userId?: string }[] = []
+const analyticsBusts: (string | null | undefined)[][] = []
 let recordedAdjustments = 0
 
 vi.mock('next/cache', () => ({
@@ -25,6 +26,15 @@ vi.mock('@/lib/permissions/keys', () => ({
 }))
 vi.mock('@/lib/payroll/compute', () => ({
   isTaskMonthProtected: () => Promise.resolve(monthProtected),
+}))
+// Correcting a past month's split changes what the dashboard's cached
+// per-employee earnings say for that month. Mocked here both to record the
+// call and because the real module is `server-only`.
+vi.mock('@/lib/analytics/invalidate', () => ({
+  invalidateAnalyticsForDates: (dates: (string | null | undefined)[]) => {
+    analyticsBusts.push(dates)
+    return Promise.resolve([])
+  },
 }))
 vi.mock('@/lib/activity/log', () => ({
   logActivity: (input: any) => { loggedActivity.push(input); return Promise.resolve() },
@@ -82,6 +92,7 @@ beforeEach(() => {
   updatedTables.length = 0
   loggedActivity.length = 0
   recordAdjustmentsCalls.length = 0
+  analyticsBusts.length = 0
 })
 
 describe('saveTaskContributions (Phase 3.0)', () => {
@@ -174,6 +185,17 @@ describe('saveTaskContributions (Phase 3.0)', () => {
     expect(res.closedPeriod).toBeUndefined()
     expect(recordAdjustmentsCalls).toHaveLength(0)
     expect(loggedActivity.some(a => a.action === 'contribution_saved')).toBe(true)
+  })
+
+  it('clears the cached analytics for the TASK\'s month, not for today', async () => {
+    // The cache is keyed by the month the work happened in. Busting "now"
+    // would leave a back-dated correction invisible until the 24h TTL — the
+    // exact failure a cache like this is most likely to hide.
+    await saveTaskContributions({
+      taskId: 't1', contributions: {},
+      scores: [{ employeeId: 'e1', scorePercentage: 100, earnings: 500 }],
+    })
+    expect(analyticsBusts.flat()).toEqual(['2026-08-01'])
   })
 
   it('preserves a manually-overridden score instead of recomputing over it', async () => {

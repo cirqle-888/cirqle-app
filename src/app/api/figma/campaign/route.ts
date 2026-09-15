@@ -3,6 +3,8 @@ import { FIGMA_CORS_HEADERS as CORS_HEADERS, figmaOptions, verifyFigmaAuth, logF
 import { saveCampaign, type ProductInput } from '@/app/intake/offer/[token]/actions'
 import { todayISO } from '@/lib/utils/local-date'
 import { autoLinkTaskPackage } from '@/lib/packages/auto-link'
+import { resolveFlyerService } from '../_lib/flyer-department'
+import { bumpContribution, diffProducts, parametersForService, resolveFlyerParameters } from '../_lib/contributions'
 
 /**
  * POST /api/figma/campaign — save an offer parsed in the Cirqle Studio plugin
@@ -230,26 +232,58 @@ export async function POST(req: NextRequest) {
     // campaign — so per-field edit counts (price/name changes) can be
     // attributed to the employee who made them (see the contribution
     // section after the save).
-    type PrevProduct = { name: string | null; price: number | null; mrp: number | null; display_order: number | null }
+    type PrevProduct = {
+      name: string | null; price: number | null; mrp: number | null; display_order: number | null
+      // Carried so a save can count the edits the team currently types by
+      // hand: Photo Updating, Limit Updating, Add Special Tags, Layout Change.
+      weight: string | null; page: number | null; image_url: string | null
+      // `offer_products` has no `badges` column — a single `badge_id` plus the
+      // `offer_product_badges` join table. `badgeCount` flattens both into the
+      // only thing the diff asks: did this row carry a tag?
+      id?: string; badge_id?: string | null; badgeCount?: number
+    }
+    type PrevCampaign = { offer_date: string | null; offer_date_from: string | null; offer_date_to: string | null }
     let prevProducts: PrevProduct[] = []
+    let prevCampaign: PrevCampaign | null = null
     try {
       const { data: activeCampaign } = await admin
         .from('offer_campaigns')
-        .select('id')
+        .select('id, offer_date, offer_date_from, offer_date_to')
         .eq('client_id', clientId)
         .eq('status', 'active')
         .maybeSingle()
-      const activeId = (activeCampaign as { id?: string } | null)?.id
+      const activeRow = activeCampaign as ({ id?: string } & PrevCampaign) | null
+      const activeId = activeRow?.id
       if (activeId) {
+        prevCampaign = {
+          offer_date: activeRow?.offer_date ?? null,
+          offer_date_from: activeRow?.offer_date_from ?? null,
+          offer_date_to: activeRow?.offer_date_to ?? null,
+        }
         const { data: prevRows } = await admin
           .from('offer_products')
-          .select('name, price, mrp, display_order')
+          .select('id, name, price, mrp, display_order, weight, badge_id, page, image_url')
           .eq('campaign_id', activeId)
           .order('display_order')
         prevProducts = (prevRows as PrevProduct[] | null) || []
+
+        // Multi-badge rows live in a join table; one query for the lot.
+        const productIds = prevProducts.map(r => r.id).filter((id): id is string => !!id)
+        if (productIds.length) {
+          const { data: badgeRows } = await admin
+            .from('offer_product_badges')
+            .select('product_id')
+            .in('product_id', productIds)
+          const counts = new Map<string, number>()
+          for (const b of ((badgeRows as { product_id: string | null }[] | null) || [])) {
+            if (b.product_id) counts.set(b.product_id, (counts.get(b.product_id) || 0) + 1)
+          }
+          for (const r of prevProducts) r.badgeCount = (r.id && counts.get(r.id)) || 0
+        }
       }
     } catch {
       prevProducts = []
+      prevCampaign = null
     }
 
     const result = await saveCampaign(
@@ -305,17 +339,40 @@ export async function POST(req: NextRequest) {
       })
     } catch { /* observability, not availability */ }
 
-    // Every offer saved from Figma also lands on the Tasks page — ONE task
-    // per campaign (re-saves reuse it via the [figma:cmp:…] marker), titled
-    // with the offer title, assigned to everyone who worked on it, and with
-    // contribution counts filled in automatically:
-    //   · "Products" count      → total products in the offer
-    //   · "Price Updating"      → prices/MRPs this save changed
-    //   · "Product Name Updating" → names this save changed
+    // Every offer saved from Figma or Offer Studio also lands on the Tasks
+    // page — ONE task per campaign (re-saves reuse it via the [figma:cmp:…]
+    // marker), titled with the offer title, assigned to everyone who worked
+    // on it, and with contribution counts filled in automatically.
+    //
+    // WHAT IS COUNTED, and why this list grew:
+    // The team was already recording every one of these by hand in the
+    // contribution panel — 102 "Photo Updating" rows, 48 "Limit Updating",
+    // 19 "Add Special Tags", 19 "Sheet Updating", 8 "Layout Change" — while a
+    // save that knew all of it wrote only three. Each count below is a
+    // difference this save can see for itself:
+    //   · Products               → products added (the whole list on a first save)
+    //   · Price Updating         → rows whose price or MRP changed
+    //   · Product Name Updating  → rows whose name changed
+    //   · Photo Updating         → rows whose photo changed or arrived
+    //   · Limit Updating         → rows whose weight/limit changed
+    //   · Add Special Tags       → rows that gained a badge
+    //   · Layout Change          → rows that moved to a different page
+    //   · Sheet Updating         → 1 per save that changed anything at all
+    //   · Date Change            → 1 when the offer's dates moved
+    //
+    // Parameters are resolved through the TASK'S SERVICE (see
+    // _lib/contributions.ts): only the Flyer Design / Flyer Products groups
+    // are candidates, so a name that matches nothing scores nothing instead
+    // of landing in a paid-advertising parameter that happened to match.
+    //
     // The contribution panel stays the manual override — anything written
-    // here can be corrected by hand. Best-effort by design: none of this
-    // may ever fail the offer save.
+    // here can be corrected by hand. Best-effort by design: none of this may
+    // ever fail the offer save. What it may NOT do any more is fail in
+    // silence, so the reason comes back in the response.
     let taskNumber: number | null = null
+    let taskId: string | null = null
+    let taskWarning: string | null = null
+    let scoring: { written: Record<string, number>; missing: string[]; scoped: boolean } | null = null
     try {
       const campaignId = result.data.campaignId
       const offerTitle = body?.title?.trim() || 'Offer ' + today
@@ -325,76 +382,103 @@ export async function POST(req: NextRequest) {
       // so the description only needs a staff identifier.
       const byName = (body?.createdBy?.cqid || '').trim()
 
-      // Edit deltas: same row position, different value.
-      let nameChanges = 0
-      let priceChanges = 0
-      for (let i = 0; i < Math.min(prevProducts.length, productInputs.length); i++) {
-        const oldP = prevProducts[i]
-        const newP = productInputs[i]
-        if ((oldP.name || '').trim() !== newP.name.trim()) nameChanges++
-        if ((oldP.price ?? null) !== (newP.price ?? null) || (oldP.mrp ?? null) !== (newP.mrp ?? null)) priceChanges++
-      }
-      const addedProducts = Math.max(0, productInputs.length - prevProducts.length)
+      // What this save changed, row by row. See diffProducts — position is
+      // the identity a pasted list has, and Offer Studio's read-back is what
+      // upgrades the next save to real product ids.
+      const norm = (v: string | null | undefined) => String(v ?? '').trim()
+      const delta = diffProducts(
+        prevProducts.map(r => ({
+          name: r.name, price: r.price, mrp: r.mrp, weight: r.weight, page: r.page,
+          image_url: r.image_url,
+          hasBadge: !!r.badge_id || (r.badgeCount ?? 0) > 0,
+        })),
+        productInputs.map(p => ({
+          name: p.name, price: p.price, mrp: p.mrp, weight: p.weight ?? null, page: p.page,
+          image_url: p.image_url ?? null,
+          badgeCount: p.badges?.length ?? 0,
+        })),
+      )
+      const addedProducts = delta.added
       const isUpdate = prevProducts.length > 0
 
-      // Which service this flyer is. The plugin's choice wins; otherwise
-      // fall back to the workspace's "Offer Flyer" service, since that is
-      // what an offer flyer saved from Figma is by default. Without this
-      // the task lands on the Tasks page with an empty Service.
-      let serviceId: string | null = (body?.serviceId || '').trim() || null
-      if (!serviceId) {
-        const { data: svc } = await admin
-          .from('services')
-          .select('id')
-          .eq('is_active', true)
-          .ilike('name', 'offer flyer')
-          .maybeSingle()
-        serviceId = (svc as { id?: string } | null)?.id || null
+      // Did the offer's dates move? Only meaningful on an update — the first
+      // save is not a "Date Change", it is the date being set.
+      const dateChanged = isUpdate && !!prevCampaign && (
+        dateType === 'single'
+          ? norm(prevCampaign.offer_date) !== norm(body?.offerDate || today)
+          : norm(prevCampaign.offer_date_from) !== norm(body?.offerDateFrom) ||
+            norm(prevCampaign.offer_date_to) !== norm(body?.offerDateTo)
+      )
+
+      // Which service this flyer is. The caller's choice wins when it really
+      // belongs to the offer-flyer department; anything else falls back to
+      // "Offer Flyer" rather than filing a supermarket flyer as "Video
+      // Editing". Without this the task lands with an empty Service.
+      const { serviceId, substituted } = await resolveFlyerService(admin, body?.serviceId)
+      if (substituted) {
+        taskWarning = 'The service sent with this offer is not an offer-flyer service; filed as the default instead.'
       }
 
-      // One task per campaign — find before creating.
-      const { data: existingTask } = await admin
+      // One task per campaign — find before creating. `limit(1)` rather than
+      // maybeSingle(): a workspace that somehow has two tasks carrying the
+      // same marker should reuse the older one, not throw and lose the task
+      // and every contribution with it.
+      const { data: existingTasks } = await admin
         .from('tasks')
         .select('id, task_number')
         .ilike('description', `%${marker}%`)
         .is('deleted_at', null)
-        .maybeSingle()
-      let taskId = (existingTask as { id?: string } | null)?.id || null
-      taskNumber = (existingTask as { task_number?: number } | null)?.task_number ?? null
+        .order('task_number', { ascending: true, nullsFirst: false })
+        .limit(1)
+      const existingTask = ((existingTasks as { id: string; task_number: number | null }[] | null) || [])[0] || null
+      taskId = existingTask?.id || null
+      taskNumber = existingTask?.task_number ?? null
 
       if (taskId) {
         // Same offer re-saved — keep the task, refresh the title, and follow
-        // a service the designer changed in the plugin (an offer that turned
-        // into "Offer Flyer Updating" should say so). Never clears a service
-        // someone set by hand in Cirqle.
+        // a service the designer changed (an offer that turned into "Offer
+        // Flyer Updating" should say so). Never clears a service someone set
+        // by hand in Cirqle.
         const patch: Record<string, unknown> = { title: offerTitle }
         if (serviceId) patch.service_id = serviceId
         await admin.from('tasks').update(patch).eq('id', taskId)
       } else {
-        const { data: maxRow } = await admin
-          .from('tasks')
-          .select('task_number')
-          .order('task_number', { ascending: false, nullsFirst: false })
-          .limit(1)
-          .maybeSingle()
-        taskNumber = (((maxRow as { task_number?: number } | null)?.task_number) ?? 0) + 1
-        const { data: taskRow } = await admin
-          .from('tasks')
-          .insert({
-            task_number: taskNumber,
-            title: offerTitle,
-            description:
-              `Offer flyer saved from Figma (Cirqle Studio)${byName ? ' by ' + byName : ''} — ` +
-              `${productInputs.length} products. ${marker}`,
-            client_id: client.id,
-            service_id: serviceId,
-            status: 'pending',
-            task_date: today,
-            quantity: 1,
-          })
-          .select('id')
-          .single()
-        taskId = (taskRow as { id?: string } | null)?.id || null
+        // task_number is `max + 1` under a unique index, so two saves landing
+        // together race. Retry on the collision rather than losing the task:
+        // the loser simply takes the next number.
+        const description =
+          `Offer flyer saved from Figma (Cirqle Studio)${byName ? ' by ' + byName : ''} — ` +
+          `${productInputs.length} products. ${marker}`
+        for (let attempt = 0; attempt < 5 && !taskId; attempt++) {
+          const { data: maxRow } = await admin
+            .from('tasks')
+            .select('task_number')
+            .order('task_number', { ascending: false, nullsFirst: false })
+            .limit(1)
+            .maybeSingle()
+          const candidate = (((maxRow as { task_number?: number } | null)?.task_number) ?? 0) + 1 + attempt
+          const { data: taskRow, error: insertError } = await admin
+            .from('tasks')
+            .insert({
+              task_number: candidate,
+              title: offerTitle,
+              description,
+              client_id: client.id,
+              service_id: serviceId,
+              status: 'pending',
+              task_date: today,
+              quantity: 1,
+            })
+            .select('id')
+            .single()
+          if (!insertError) {
+            taskId = (taskRow as { id?: string } | null)?.id || null
+            taskNumber = candidate
+            break
+          }
+          // 23505 = unique violation: somebody else took this number.
+          if ((insertError as { code?: string }).code !== '23505') throw insertError
+        }
         if (taskId) await autoLinkTaskPackage(admin, taskId)
       }
 
@@ -410,51 +494,51 @@ export async function POST(req: NextRequest) {
           await admin.from('task_assignments').insert({ task_id: taskId, employee_id: employeeId })
         }
 
-        // Auto contribution counts. Parameters are matched by name so this
-        // adapts to the workspace's own contribution setup; anything not
-        // found is simply skipped.
-        const { data: paramRows } = await admin.from('parameters').select('id, name, input_type')
-        const params = (paramRows as { id: string; name: string | null; input_type: string | null }[] | null) || []
-        const flat = (s: string | null) => String(s || '').toLowerCase().replace(/[^a-z]/g, '')
-        const findParam = (test: (n: string) => boolean) =>
-          params.find(p => (p.input_type || 'count') === 'count' && test(flat(p.name)))?.id || null
-        const productsParam = findParam(n => n === 'products' || n === 'productcount' || n === 'product')
-        const priceParam = findParam(n => n.includes('price') && n.includes('updat'))
-        const nameParam = findParam(n => n.includes('name') && n.includes('updat'))
-
-        const bump = async (parameterId: string | null, delta: number, setTo?: number) => {
-          if (!parameterId || (delta <= 0 && setTo == null)) return
-          const { data: row } = await admin
-            .from('contributions')
-            .select('value')
-            .eq('task_id', taskId)
-            .eq('employee_id', employeeId)
-            .eq('parameter_id', parameterId)
-            .maybeSingle()
-          const current = Number((row as { value?: number } | null)?.value ?? NaN)
-          if (Number.isFinite(current)) {
-            const next = setTo != null ? setTo : current + delta
-            await admin.from('contributions').update({ value: next })
-              .eq('task_id', taskId).eq('employee_id', employeeId).eq('parameter_id', parameterId)
-          } else {
-            await admin.from('contributions').insert({
-              task_id: taskId, employee_id: employeeId, parameter_id: parameterId,
-              value: setTo != null ? setTo : delta,
-            })
-          }
+        const parameterSet = await parametersForService(admin, serviceId)
+        const p = resolveFlyerParameters(parameterSet)
+        const written: Record<string, number> = {}
+        const add = async (label: string, parameterId: string | null, delta: number) => {
+          if (!parameterId || delta <= 0) return
+          await bumpContribution(admin, { taskId: taskId as string, employeeId, parameterId, delta })
+          written[label] = (written[label] || 0) + delta
         }
 
         if (!isUpdate) {
-          // First save: the whole product list is this employee's work.
-          await bump(productsParam, productInputs.length)
+          // First save: the whole product list is this employee's work, and
+          // nothing was "changed" — it did not exist a moment ago.
+          await add('Products', p.products, productInputs.length)
         } else {
-          await bump(productsParam, addedProducts)
-          await bump(priceParam, priceChanges)
-          await bump(nameParam, nameChanges)
+          await add('Products', p.products, addedProducts)
+          await add('Price Updating', p.price, delta.price)
+          await add('Product Name Updating', p.productName, delta.name)
+          await add('Photo Updating', p.photo, delta.photo)
+          await add('Limit Updating', p.limit, delta.limit)
+          await add('Add Special Tags', p.specialTags, delta.specialTags)
+          await add('Layout Change', p.layout, delta.layout)
+          await add('Date Change', p.date, dateChanged ? 1 : 0)
+          // One per save that actually moved something — the act of working
+          // the sheet, which is what the team records by hand today.
+          await add('Sheet Updating', p.sheet, delta.touched ? 1 : 0)
+        }
+
+        scoring = { written, missing: p.missing, scoped: p.scoped }
+        if (!p.scoped) {
+          taskWarning = (taskWarning ? taskWarning + ' ' : '') +
+            'Contribution parameters could not be narrowed to this service\'s groups ' +
+            '(link the Flyer groups to it in Settings → Services), so counts were matched workspace-wide.'
         }
       }
-    } catch {
+    } catch (err) {
+      // The offer IS saved. Say what did not happen rather than letting the
+      // designer believe a task and their contribution counts exist.
       taskNumber = null
+      taskWarning = 'The offer was saved, but its task or contribution counts could not be written: ' +
+        (err instanceof Error ? err.message : String(err))
+      void logFigmaEvent(admin, 'save_failed', {
+        campaignId: result.data.campaignId,
+        plugin: auth.plugin,
+        detail: 'task/contributions: ' + (err instanceof Error ? err.message : String(err)),
+      })
     }
 
     // Fresh updated_at so the plugin can rebase its conflict check without a
@@ -476,7 +560,13 @@ export async function POST(req: NextRequest) {
         updatedAt,
         productCount: productInputs.length,
         clientName: client.name,
+        taskId,
         taskNumber,
+        // Everything that did not go to plan while filing the task, and what
+        // the save actually scored. A client that shows these is a client
+        // whose user can fix the cause.
+        taskWarning,
+        scoring,
         // saveCampaign fires the Google Sheet sync in the background, so a
         // client still on the sheet pipeline stays in step automatically.
         message: `Saved ${productInputs.length} products to ${client.name} in Cirqle.`,

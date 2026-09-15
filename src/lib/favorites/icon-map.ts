@@ -20,7 +20,7 @@
  */
 import {
   Activity, Award, BadgeCheck, BadgePercent, BarChart3, Blocks, BookOpen,
-  Briefcase, Building2, CalendarClock, CalendarRange, CheckSquare,
+  Briefcase, Building2, Calculator, CalendarClock, CalendarRange, CheckSquare, CreditCard,
   ClipboardCheck, ClipboardList, FileText, Gauge, Handshake, HardHat, History,
   Images, Inbox, LayoutDashboard, LayoutGrid, MapPin, Megaphone, MessageSquare,
   NotebookPen, Package, PhoneCall, PieChart, Receipt, Repeat, Scale, Settings,
@@ -34,7 +34,7 @@ import {
 
 export const FAVORITE_ICON_MAP: Record<string, LucideIcon> = {
   Activity, Award, BadgeCheck, BadgePercent, BarChart3, Blocks, BookOpen,
-  Briefcase, Building2, CalendarClock, CalendarDays, CalendarRange, CheckSquare,
+  Briefcase, Building2, Calculator, CalendarClock, CalendarDays, CalendarRange, CheckSquare, CreditCard,
   ClipboardCheck, ClipboardList, FileText, Gauge, Handshake, HardHat, History,
   Images, Inbox, LayoutDashboard, LayoutGrid, MapPin, Megaphone, MessageSquare,
   NotebookPen, PhoneCall, PieChart, Receipt, Repeat, Scale, Settings,

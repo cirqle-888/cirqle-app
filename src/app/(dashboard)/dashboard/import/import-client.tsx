@@ -13,6 +13,7 @@ import {
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ConfirmDialog, ConfirmModalProps } from '@/components/ui/confirm-dialog'
 import { todayISO } from '@/lib/utils/local-date'
+import { notifyAnalyticsBulkChange } from '../analytics-actions'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface RefClient    { id: string; name: string; code: string }
@@ -1831,6 +1832,11 @@ export default function ImportClient({ clients, services, employees, groups, par
         break
       }
     }
+
+    // An import can land rows across any number of past months, and working
+    // out which ones would mean re-reading the rows the cache exists to avoid.
+    // One full rebuild is cheaper than that, and far cheaper than the import.
+    if (res.inserted > 0) void notifyAnalyticsBulkChange().catch(() => {})
 
     setResult(res)
     setImporting(false)

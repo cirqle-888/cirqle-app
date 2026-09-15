@@ -22,6 +22,8 @@ import { useState, useMemo, use, Suspense, useEffect, useCallback } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
+import type { AnalyticsView } from '@/lib/analytics/view'
+import type { EarningsAggregate } from '@/lib/analytics/earnings'
 import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
 import type { DateFilterValue } from '@/components/ui/date-filter'
 import {
@@ -48,9 +50,11 @@ interface Props {
     totalExpectedCash: number; totalDues: number
   }
   invoices: any[]; overdueInvoices: any[]; dueInvoices: any[]
-  allCashbook: any[]; displayTasks: any[]; allAnalyticsTasksPromise: Promise<any[]>
+  allCashbook: any[]; displayTasks: any[]; analyticsViewPromise: Promise<AnalyticsView>
   todayTasks: any[]; unscoredDoneTasks: any[]; activeTasks: any[]; toBeInvoiced: any[]
   employees: any[]; scoresPromise: Promise<any[]>; payrollRecords: any[]
+  /** Admin only — team earnings as cached aggregates, not score rows. */
+  earningsPromise: Promise<EarningsAggregate>
   pendingContribCount?: number
   /** Employee view: open tasks assigned to me + done tasks awaiting my contribution. */
   myActions?: { active: any[]; needContribution: any[] }
@@ -242,13 +246,13 @@ export default function DashboardClient(props: Props) {
 //
 // Owns the shared period/granularity/drawer state (kept in the shell so the
 // period controls stay interactive while analytics stream). The heavy analytics
-// child reads `allAnalyticsTasksPromise` + `scoresPromise` via use(), so it is
+// child reads `analyticsViewPromise` + `earningsPromise` via use(), so it is
 // wrapped in its own <Suspense> with a dimension-matched skeleton fallback.
 // ─────────────────────────────────────────────────────────────────────────────
 function AdminDashboard({
   stats, invoices, overdueInvoices, dueInvoices, allCashbook,
-  allAnalyticsTasksPromise, todayTasks, unscoredDoneTasks,
-  activeTasks, toBeInvoiced, employees, scoresPromise, payrollRecords,
+  analyticsViewPromise, todayTasks, unscoredDoneTasks,
+  activeTasks, toBeInvoiced, employees, earningsPromise, payrollRecords,
   todayStr, exchangeRates = [], followupCounts,
   notifications, pendingRequests, draftInvoicesSample = [], payrollPendingCount = 0,
   companyOps = null,
@@ -566,8 +570,8 @@ function AdminDashboard({
         {shouldShow('analytics') && (
         <Suspense fallback={<AnalyticsSkeleton />}>
           <DashboardAnalytics
-            allAnalyticsTasksPromise={allAnalyticsTasksPromise}
-            scoresPromise={scoresPromise}
+            analyticsViewPromise={analyticsViewPromise}
+            earningsPromise={earningsPromise}
             companyOps={companyOps}
             stats={effectiveStats}
             invoices={invoices}

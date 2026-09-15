@@ -5,8 +5,8 @@
 //
 // This is the heavy, below-the-fold half of the admin dashboard. It is rendered
 // inside a <Suspense> boundary in `dashboard-client.tsx`, and the two biggest
-// queries (`allAnalyticsTasks` = 36mo tasks + client/service joins, and
-// `scores` = 36mo contribution scores + task join) arrive here as **unresolved
+// queries (`analyticsViewPromise` = 36mo aggregates + the live month, and
+// `earningsPromise` = per-employee earnings aggregates) arrive here as unresolved
 // promises** that we unwrap with React's `use()`. Until they resolve, the shell
 // (header, period selector, Today's Focus, Expected-Cash hero) is already
 // painted and interactive; this section streams in when the data is ready.
@@ -19,6 +19,9 @@
 import { useState, useMemo, use } from 'react'
 import Link from 'next/link'
 import { matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
+import { sliceView, type AnalyticsView } from '@/lib/analytics/view'
+import { dateFilterWindow } from '@/lib/analytics/window'
+import { sliceEarnings, type EarningsAggregate } from '@/lib/analytics/earnings'
 import type { DateFilterValue } from '@/components/ui/date-filter'
 import {
   TrendingUp, TrendingDown, DollarSign, Clock, AlertTriangle,
@@ -32,15 +35,14 @@ import {
   WEEKDAY, MONTH_NAMES, FULL_MONTHS,
 } from './dashboard-utils'
 import type { Granularity, PulseTab, DrawerType } from './dashboard-utils'
-import { isBillableTask } from '@/lib/tasks/billable'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
 // ─────────────────────────────────────────────────────────────────────────────
 interface DashboardAnalyticsProps {
   // Heavy, deferred queries — passed as unresolved promises, unwrapped with use()
-  allAnalyticsTasksPromise: Promise<any[]>
-  scoresPromise: Promise<any[]>
+  analyticsViewPromise: Promise<AnalyticsView>
+  earningsPromise: Promise<EarningsAggregate>
   // Light data (already awaited on the server, needed for the analytics widgets)
   stats: {
     totalBilled: number; totalPaid: number; outstanding: number; outstandingThisMonth: number; bankBalance: number
@@ -65,15 +67,17 @@ interface DashboardAnalyticsProps {
 // Main streamed component
 // ─────────────────────────────────────────────────────────────────────────────
 export default function DashboardAnalytics({
-  allAnalyticsTasksPromise, scoresPromise,
+  analyticsViewPromise, earningsPromise,
   stats, invoices, overdueInvoices, dueInvoices, allCashbook,
   activeTasks, toBeInvoiced, employees, payrollRecords,
   dateFilter, granularity, setDrawer, displayFull,
   companyOps = null,
 }: DashboardAnalyticsProps) {
   // ── Unwrap the streamed promises (suspends until resolved) ──────────────────
-  const allAnalyticsTasks = use(allAnalyticsTasksPromise)
-  const scores            = use(scoresPromise)
+  // History arrives pre-aggregated from cache, the current month live; the
+  // seam is sealed in buildView, so nothing below knows which half it reads.
+  const view = use(analyticsViewPromise)
+  const earnings          = use(earningsPromise)
 
   const f = displayFull ? fmtFull : fmt
 
@@ -103,13 +107,14 @@ export default function DashboardAnalytics({
       if (e.type === 'inflow')  map[k].inflow  += e.amount_inr || 0
       else                      map[k].outflow += e.amount_inr || 0
     })
-    const taskSrc = dateFilter ? allAnalyticsTasks.filter(t => matchesDateFilter(t.task_date, dateFilter)) : allAnalyticsTasks
-    taskSrc.forEach(t => {
-      const k = getPeriodKey(t.task_date, granularity)
+    // Day totals, not task rows — same buckets, a fraction of the payload.
+    const daySrc = dateFilter ? view.days.filter(d => matchesDateFilter(d.date, dateFilter)) : view.days
+    daySrc.forEach(d => {
+      const k = getPeriodKey(d.date, granularity)
       if (!k) return
       if (!map[k]) map[k] = { inflow: 0, outflow: 0, taskValue: 0, taskCount: 0 }
-      map[k].taskValue += t.billing_amount_inr || 0
-      map[k].taskCount += 1
+      map[k].taskValue += d.value
+      map[k].taskCount += d.count
     })
     return Object.entries(map)
       .sort(([a],[b]) => a.localeCompare(b))
@@ -120,7 +125,7 @@ export default function DashboardAnalytics({
         taskValue: Math.round(v.taskValue), taskCount: v.taskCount,
       }))
       .slice(-24) // last 24 periods
-  }, [allCashbook, filteredCashbook, allAnalyticsTasks, dateFilter, granularity])
+  }, [allCashbook, filteredCashbook, view, dateFilter, granularity])
 
   // ── Current period vs previous comparison ─────────────────────────────────
   const periodComparison = useMemo(() => {
@@ -134,10 +139,12 @@ export default function DashboardAnalytics({
   }, [trendData])
 
   // ── Insights analytics ─────────────────────────────────────────────────────
-  const analyticsTasks = useMemo(() => {
-    if (!dateFilter) return allAnalyticsTasks
-    return allAnalyticsTasks.filter(t => matchesDateFilter(t.task_date, dateFilter))
-  }, [allAnalyticsTasks, dateFilter])
+  // The window the whole panel reads. Without a filter it is the full 36
+  // months; with one, day rows narrow it exactly.
+  const scoped = useMemo(() => {
+    const w = dateFilterWindow(dateFilter)
+    return w ? sliceView(view, w) : { ...view, clientSplitExact: true }
+  }, [view, dateFilter])
 
   // ── Cashbook insights (one-pass replacement for bestMonth + bestWeekday + avgDailyIncome) ──
   // Previously this section ran 3 separate full scans of `allCashbook` (which
@@ -185,46 +192,28 @@ export default function DashboardAnalytics({
   }, [allCashbook])
   const { bestMonth, bestWeekday, avgDailyIncome } = cashbookInsights
 
-  // ── Task insights (one-pass replacement for topClients + revenueByWorkType) ──
-  // Previously two separate scans over `analyticsTasks`. Single pass collapses
-  // both maps into one walk.
-  const taskInsights = useMemo(() => {
-    const byClient:  Record<string, { name: string; revenue: number; count: number }> = {}
-    const byService: Record<string, { name: string; revenue: number; count: number }> = {}
-    for (const t of analyticsTasks) {
-      // Revenue, not task value: waived work is worth its price internally but
-      // brought in nothing, so it must not lift a client up this ranking.
-      const rev = isBillableTask(t) ? (t.billing_amount_inr || 0) : 0
-      const cid = t.client?.id; const cname = t.client?.name
-      if (cid && cname) {
-        if (!byClient[cid]) byClient[cid] = { name: cname, revenue: 0, count: 0 }
-        byClient[cid].revenue += rev
-        byClient[cid].count++
-      }
-      const sid = t.service_id; const sname = t.service?.name
-      if (sid && sname) {
-        if (!byService[sid]) byService[sid] = { name: sname, revenue: 0, count: 0 }
-        byService[sid].revenue += rev
-        byService[sid].count++
-      }
-    }
-    const topClients       = Object.values(byClient).sort((a, b) => b.revenue - a.revenue).slice(0, 10)
-    const revenueByWorkType = Object.values(byService).sort((a, b) => b.revenue - a.revenue).slice(0, 10)
-    return { topClients, revenueByWorkType }
-  }, [analyticsTasks])
+  // ── Task insights: top clients and revenue by work type ────────────────────
+  // Both come straight off the scoped view, already split by client and by
+  // service and already using billable revenue only — waived work is worth its
+  // price internally but brought nothing in, so it must not lift a client up
+  // this ranking. That rule lives in the aggregate (isBillableTask), not here.
+  const taskInsights = useMemo(() => ({
+    topClients: scoped.byClient.slice(0, 10),
+    revenueByWorkType: scoped.byService.slice(0, 10),
+  }), [scoped])
   const { topClients, revenueByWorkType } = taskInsights
 
   // Revenue by season/month (calendar month, all-time)
   const revenueByMonth = useMemo(() => {
     const map: Record<number, number> = {}
-    allAnalyticsTasks.forEach(t => {
-      if (!t.task_date) return
-      const m = new Date(t.task_date + 'T12:00:00').getMonth()
-      map[m] = (map[m] || 0) + (isBillableTask(t) ? (t.billing_amount_inr || 0) : 0)
-    })
+    for (const m of view.months) {
+      const idx = Number(m.month.slice(5, 7)) - 1
+      if (idx < 0 || idx > 11) continue
+      map[idx] = (map[idx] || 0) + m.revenue
+    }
     return Array.from({ length: 12 }, (_, i) => ({ month: FULL_MONTHS[i], revenue: map[i] || 0 }))
       .sort((a, b) => b.revenue - a.revenue)
-  }, [allAnalyticsTasks])
+  }, [view])
 
   // Client outstanding (from invoices)
   const clientDues = useMemo(() => {
@@ -242,15 +231,11 @@ export default function DashboardAnalytics({
 
   // ── Jobs vs Payroll monthly ────────────────────────────────────────────────
   const jobsVsPayroll = useMemo(() => {
-    // Group tasks by month
     const taskMap: Record<string, { value: number; count: number }> = {}
-    allAnalyticsTasks.forEach(t => {
-      if (!t.task_date) return
-      const k = t.task_date.slice(0, 7)
-      if (!taskMap[k]) taskMap[k] = { value: 0, count: 0 }
-      taskMap[k].value += t.billing_amount_inr || 0
-      taskMap[k].count++
-    })
+    // Already bucketed by month by the aggregate — no per-row walk needed.
+    for (const m of view.months) {
+      taskMap[m.month] = { value: m.taskValue, count: m.taskCount }
+    }
     // Group payroll by month
     const payMap: Record<string, number> = {}
     payrollRecords.forEach(p => {
@@ -296,60 +281,34 @@ export default function DashboardAnalytics({
       }
     })
     return rows
-  }, [allAnalyticsTasks, payrollRecords, allCashbook])
+  }, [view, payrollRecords, allCashbook])
 
   // ── Team earnings for period ───────────────────────────────────────────────
-  // Dedup first: scores are ordered calculated_at DESC by the server, so the
-  // first row seen per (employee_id, task.id) pair is the most recent
-  // calculation. We never fall back to calculated_at as a date — if task_date
-  // is absent the row is excluded to prevent recalculation history leakage.
+  // The deduplication (newest calculation per employee+task) and the
+  // task_date-only rule now live in `aggregateEarnings`, where they are held by
+  // tests, rather than being re-derived here over 5,000 rows on every filter
+  // change. Creatives credited = Σ (quantity × score% ÷ 100), unchanged.
   const teamEarnings = useMemo(() => {
-    // Build per-employee maps: task.id → score row (newest calculation wins)
-    const byEmp = new Map<string, Map<string, typeof scores[0]>>()
-    for (const s of scores) {
-      const tid = s.task?.id
-      if (!tid) continue                                // !inner guarantees present; belt-and-suspenders
-      const empMap = byEmp.get(s.employee_id) ?? new Map<string, typeof scores[0]>()
-      if (!empMap.has(tid)) empMap.set(tid, s)         // first = newest
-      byEmp.set(s.employee_id, empMap)
-    }
+    const slice = sliceEarnings(earnings, dateFilterWindow(dateFilter))
     return employees.map(emp => {
-      const all = [...(byEmp.get(emp.id)?.values() ?? [])]
-      const filtered = dateFilter
-        ? all.filter(s => {
-            const d = s.task?.task_date ?? ''
-            return d && matchesDateFilter(d, dateFilter) // task_date ONLY — never calculated_at
-          })
-        : all
-      // Creatives credited = Σ (task.quantity × score_percentage / 100).
-      // Mirrors how earnings are split — same source-of-truth score% from
-      // commission.ts, inherits all group/parameter/tool weighting automatically.
-      const creatives = filtered.reduce((acc, e) => {
-        const qty   = Number(e.task?.quantity ?? 1)
-        const share = (e.score_percentage ?? 0) / 100
-        return acc + qty * share
-      }, 0)
+      const t = slice.byEmployee.get(emp.id)
       return {
         ...emp,
-        earnings:  filtered.reduce((acc, e) => acc + (e.earnings_inr  || 0), 0),
-        taskCount: filtered.length,
-        creatives,
+        earnings: t?.earningsInr ?? 0,
+        taskCount: t?.taskCount ?? 0,
+        creatives: t?.creatives ?? 0,
       }
     })
-  }, [employees, scores, dateFilter])
+  }, [employees, earnings, dateFilter])
 
   // ── Admin production totals (per-period across the whole company) ──────────
-  // Counts every task once (no dedup needed — analytics tasks query is canonical)
-  // and sums their quantity. Independent of contribution scores: this is studio
-  // output, not employee credit.
+  // Studio output, not employee credit — independent of contribution scores.
+  // `taskCount` counts tasks, `creativeCount` sums their quantity; both are
+  // carried per DAY by the view, so a partial-month window stays exact.
   const productionTotals = useMemo(() => {
-    const src = dateFilter
-      ? allAnalyticsTasks.filter(t => matchesDateFilter(t.task_date, dateFilter))
-      : allAnalyticsTasks
-    let creatives = 0
-    for (const t of src) creatives += Number(t.quantity ?? 1)
-    return { tasks: src.length, creatives }
-  }, [allAnalyticsTasks, dateFilter])
+    // Both figures are day-exact, so a mid-month window is honest here.
+    return { tasks: scoped.taskCount, creatives: scoped.creativeCount }
+  }, [scoped])
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -368,7 +327,12 @@ export default function DashboardAnalytics({
       {/* Jobs / inflow / outflow / bank balance with per-series toggles and a
           period-over-period comparison overlay. Fed entirely from the two
           datasets already on the page (all-time cashbook + analytics tasks). */}
-      <DashboardTrendGraph cashbook={allCashbook} tasks={allAnalyticsTasks} fmt={f} />
+      {/* Day totals stand in for task rows: the graph only ever reads a date
+          and a value, and one row per DAY draws the identical wave. */}
+      <DashboardTrendGraph
+        cashbook={allCashbook}
+        tasks={view.days.map(d => ({ task_date: d.date, billing_amount_inr: d.value }))}
+        fmt={f} />
 
       {/* ── Company Ops (Finance Engine) ───────────────── */}
       {/* Company-scoped money only — fully separate from client billing above. */}

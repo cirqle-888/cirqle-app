@@ -7,6 +7,7 @@ import { isMonthFinalized } from '@/lib/payroll/compute'
 import { fetchAll, fetchAllIn } from '@/lib/supabase/server'
 import { resolveEarning } from '@/lib/agreements/resolve-earning'
 import type { CommissionAgreement } from '@/lib/agreements/resolve-earning'
+import { invalidateAnalyticsForDates } from '@/lib/analytics/invalidate'
 
 export async function POST(req: NextRequest) {
   try {
@@ -299,6 +300,16 @@ export async function POST(req: NextRequest) {
         }
       }
     }
+
+    // Earnings for these months just changed, so the dashboard's cached
+    // per-employee aggregates are wrong. `finalized` months were never
+    // recomputed above, so they are not cleared here either — a closed book
+    // must not move. Best-effort: a failed bust is a stale figure for up to a
+    // day; a throw here would fail a recalculation that already committed.
+    try {
+      await invalidateAnalyticsForDates(
+        [...monthKeys].filter(k => !finalized.has(k)).map(k => `${k}-01`))
+    } catch { /* the 24h TTL still applies */ }
 
     return NextResponse.json({
       success: true,

@@ -52,6 +52,7 @@ interface BrandRow {
   tagline: string | null
   position: number
   logo_path: string | null
+  avatar_path: string | null
   cover_mode: CoverMode | null
   cover_item_id: string | null
   cover_path: string | null
@@ -85,6 +86,7 @@ const collectionSelect = (extra: { brand: readonly string[]; item: readonly stri
  * everything it does have.
  */
 const COLLECTION_SELECTS = [
+  { brand: ['avatar_path', 'logo_path', 'cover_mode', 'cover_item_id', 'cover_path'], item: ['format', 'collection_position', 'caption'] },
   { brand: ['logo_path', 'cover_mode', 'cover_item_id', 'cover_path'], item: ['format', 'collection_position', 'caption'] },
   { brand: ['logo_path'], item: ['format', 'collection_position', 'caption'] },
   { brand: ['logo_path'], item: ['format', 'collection_position'] },
@@ -156,6 +158,8 @@ export async function listPortfolio(): Promise<ActionResult<PortfolioCollection[
       position: brand.position,
       logoUrl: brand.logo_path ? `${publicBase}/${brand.logo_path}` : null,
       logoPath: brand.logo_path,
+      avatarUrl: brand.avatar_path ? `${publicBase}/${brand.avatar_path}` : null,
+      avatarPath: brand.avatar_path,
       coverMode: brand.cover_mode ?? 'auto',
       coverItemId: brand.cover_item_id,
       coverPath: brand.cover_path,
@@ -370,7 +374,18 @@ export async function saveWorkItem(input: {
 
 export async function updateWorkItem(
   id: string,
-  patch: { title?: string; caption?: string; published?: boolean; format?: WorkFormat },
+  patch: {
+    title?: string
+    caption?: string
+    published?: boolean
+    format?: WorkFormat
+    /** Replace the cover: a reel's thumbnail, or a video's poster. */
+    mediaPath?: string | null
+    variants?: WorkVariant[]
+    width?: number
+    height?: number
+    durationSeconds?: number | null
+  },
 ): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
   if (!guard.ok) return { ok: false, error: guard.error }
@@ -389,9 +404,31 @@ export async function updateWorkItem(
     if (!WORK_FORMATS.includes(patch.format)) return { ok: false, error: 'That is not a format we publish.' }
     update.format = patch.format
   }
+  if (patch.variants !== undefined) update.variants = patch.variants
+  if (patch.mediaPath !== undefined) update.media_path = patch.mediaPath
+  if (patch.width !== undefined) update.width = patch.width
+  if (patch.height !== undefined) update.height = patch.height
+  if (patch.durationSeconds !== undefined) update.duration_seconds = patch.durationSeconds
   if (!Object.keys(update).length) return { ok: true }
 
   const site = createWebsiteAdminClient()
+
+  // A new cover replaces the old one; the file it replaced must go with it,
+  // the same as saveWorkItem does on create.
+  const superseded: string[] = []
+  if (patch.variants !== undefined || patch.mediaPath !== undefined) {
+    const { data: existing } = await site.from('work_items').select('media_path,variants').eq('id', id).maybeSingle()
+    if (existing) {
+      const keptVariants = new Set((patch.variants ?? (existing.variants as WorkVariant[] | null) ?? []).map((v) => v.path))
+      for (const v of (existing.variants ?? []) as WorkVariant[]) {
+        if (v.path && !keptVariants.has(v.path)) superseded.push(v.path)
+      }
+      const oldMedia = existing.media_path as string | null
+      const nextMedia = patch.mediaPath !== undefined ? patch.mediaPath : oldMedia
+      if (oldMedia && oldMedia !== nextMedia) superseded.push(oldMedia)
+    }
+  }
+
   const { error } = await site.from('work_items').update(update).eq('id', id)
   if (isMissingColumn(error, 'format')) {
     return { ok: false, error: 'The website database has no format column yet. Run cirqle-website/supabase/add-work-format.sql in its SQL editor, then try again.' }
@@ -403,6 +440,13 @@ export async function updateWorkItem(
     return { ok: false, error: 'The website database does not allow that format yet. Run cirqle-website/supabase/add-brand-identity.sql in its SQL editor, then try again.' }
   }
   if (error) return { ok: false, error: error.message }
+
+  if (superseded.length) {
+    // Best effort: a stranded file is untidy, not broken, so it must not fail
+    // an edit that has already succeeded.
+    const { error: removeErr } = await site.storage.from(BUCKET).remove(superseded)
+    if (removeErr) console.error('Portfolio: could not remove superseded cover files for', id, removeErr.message)
+  }
 
   revalidatePath(REVALIDATE)
   return { ok: true }
@@ -519,6 +563,39 @@ export async function saveBrandLogo(id: string, path: string | null): Promise<Ac
     // Best effort: a stranded file is untidy, not broken.
     const { error: removeErr } = await site.storage.from(BUCKET).remove([old])
     if (removeErr) console.error('Portfolio: could not remove the old brand logo', removeErr.message)
+  }
+
+  revalidatePath(REVALIDATE)
+  return { ok: true }
+}
+
+/**
+ * Point a brand at its square account picture, or clear it.
+ *
+ * Deliberately not the same column as the logo. `logo_path` holds the full
+ * lockup — emblem plus wordmark — which the website's filter chips have the
+ * width to show. The social post frames draw a 32px circle instead, and a
+ * lockup scaled into one leaves an eleven-pixel emblem and no readable words.
+ * Brands whose logo is a pure wordmark cannot work as a circle at all.
+ */
+export async function saveBrandAvatar(id: string, path: string | null): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const site = createWebsiteAdminClient()
+  const { data: existing } = await site.from('work_brands').select('avatar_path').eq('id', id).maybeSingle()
+
+  const { error } = await site.from('work_brands').update({ avatar_path: path }).eq('id', id)
+  if (isMissingColumn(error, 'avatar_path')) {
+    return { ok: false, error: 'The website database has no brand avatar column yet. Run cirqle-website/supabase/add-brand-avatar.sql in its SQL editor, then try again.' }
+  }
+  if (error) return { ok: false, error: error.message }
+
+  const old = (existing?.avatar_path as string | null) ?? null
+  if (old && old !== path) {
+    // Best effort: a stranded file is untidy, not broken.
+    const { error: removeErr } = await site.storage.from(BUCKET).remove([old])
+    if (removeErr) console.error('Portfolio: could not remove the old brand avatar', removeErr.message)
   }
 
   revalidatePath(REVALIDATE)

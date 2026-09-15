@@ -133,6 +133,14 @@ export interface PortfolioBrand {
   /** Public URL of the brand logo, or null when the chip shows its name. */
   logoUrl: string | null
   logoPath: string | null
+  /**
+   * Square mark shown as the account picture on the website's social post
+   * frames. Separate from the logo: that is the wide lockup the filter chips
+   * have room for, and it is unreadable scaled into a 32px circle. Null falls
+   * back to the brand's initial, never to the lockup.
+   */
+  avatarUrl: string | null
+  avatarPath: string | null
   coverMode: CoverMode
   /** Id of the chosen creative, when the mode is 'custom'. */
   coverItemId: string | null

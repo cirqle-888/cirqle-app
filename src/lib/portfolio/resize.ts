@@ -471,3 +471,52 @@ export async function prepareLogoForUpload(
     bitmap.close()
   }
 }
+
+/** Rendered at 32px on the site; 256 leaves room for a retina screen. */
+const AVATAR_SIZE = 256
+
+export interface PreparedAvatar {
+  size: number
+  blob: Blob
+}
+
+/**
+ * Square off a mark for use as an account picture.
+ *
+ * Centre-cropped rather than letterboxed: the site draws it in a circle, so
+ * padding a wide lockup to square would only shrink it further inside that
+ * circle. Anything genuinely wide should not be uploaded here at all — the
+ * field asks for the emblem, or a favicon.
+ *
+ * Transparency is preserved and NOT stripped the way a logo's is. A logo's
+ * alpha is a mask the site fills with the chip's text colour; an avatar is
+ * drawn in its own colours on a light disc, so a favicon that arrives with its
+ * own background should keep it.
+ */
+export async function prepareAvatarForUpload(file: File): Promise<PreparedAvatar> {
+  const bitmap = await decode(file)
+  const { width: sw, height: sh } = bitmap
+  if (!sw || !sh) throw new Error('That file is not a readable image.')
+
+  try {
+    const size = Math.min(AVATAR_SIZE, Math.max(sw, sh))
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('This browser cannot process images.')
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+
+    const side = Math.min(sw, sh)
+    ctx.drawImage(bitmap, (sw - side) / 2, (sh - side) / 2, side, side, 0, 0, size, size)
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/webp', 0.92),
+    )
+    if (!blob) throw new Error('This browser cannot save WebP images.')
+    return { size, blob }
+  } finally {
+    if ('close' in bitmap && typeof bitmap.close === 'function') bitmap.close()
+  }
+}

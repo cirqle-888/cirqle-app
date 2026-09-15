@@ -34,6 +34,7 @@ import { activePackagesForClient, type PackageOption } from '@/lib/packages/quer
 import { autoLinkTaskPackage } from '@/lib/packages/auto-link'
 import { normalizeNoChargeReason, retryWithoutNoChargeReason, withoutNoChargeReason } from '@/lib/tasks/billable'
 import { retryWithoutColumn, withoutColumn } from '@/lib/db/missing-column'
+import { invalidateAnalyticsForDates } from '@/lib/analytics/invalidate'
 
 const REVALIDATE = '/dashboard/tasks'
 
@@ -58,6 +59,31 @@ async function readTaskScope(
   if (!data) return null
   const r = data as { client_id?: string | null; service_id?: string | null; task_date?: string | null; billing_mode?: string | null }
   return { clientId: r.client_id, serviceId: r.service_id, taskDate: r.task_date, billingMode: r.billing_mode }
+}
+
+/**
+ * History moved — drop the cached analytics aggregate for the months touched.
+ *
+ * Takes DATES rather than ids because a task that moves from March to April
+ * makes BOTH months wrong, and only the caller still knows the old one (see
+ * `scopeBefore` in serverSaveTask). A current-month date is a no-op — that
+ * month is never cached — and so is a locked one, whose figures are frozen.
+ *
+ * Never throws. A cache that fails to clear shows a stale number for up to a
+ * day; a cache that throws fails a save the user already completed.
+ */
+async function bustAnalytics(...dates: (string | null | undefined)[]): Promise<void> {
+  try { await invalidateAnalyticsForDates(dates) } catch { /* the 24h TTL still applies */ }
+}
+
+/** The same, for tasks whose dates the caller does not already hold. */
+async function bustAnalyticsForTasks(
+  admin: ReturnType<typeof createAdminClient>,
+  taskIds: readonly string[],
+): Promise<void> {
+  if (!taskIds.length) return
+  const { data } = await admin.from('tasks').select('task_date').in('id', taskIds.slice(0, 500))
+  await bustAnalytics(...((data || []) as { task_date: string | null }[]).map(r => r.task_date))
 }
 
 /**
@@ -116,6 +142,7 @@ export async function serverDeleteTask(
   // SYNC INTEGRITY!
   await syncDraftInvoices(taskId)
   await syncDerived(admin, scope, `task ${taskTitle} deleted`, guard.employeeId)
+  await bustAnalytics(scope?.taskDate)
 
   return { ok: true, data: { deleted_at: deletedAt } }
 }
@@ -146,7 +173,9 @@ export async function serverRestoreTask(
 
   // SYNC INTEGRITY!
   await syncDraftInvoices(taskId)
-  await syncDerived(admin, await readTaskScope(admin, taskId), `task ${taskTitle} restored`, guard.employeeId)
+  const restored = await readTaskScope(admin, taskId)
+  await syncDerived(admin, restored, `task ${taskTitle} restored`, guard.employeeId)
+  await bustAnalytics(restored?.taskDate)
 
   return { ok: true }
 }
@@ -175,9 +204,14 @@ export async function serverPermanentDeleteTask(
     detail:     { title: taskTitle, permanent: true },
   })
 
+  // Read the date before the row is gone — afterwards there is nothing to
+  // identify the month whose aggregate this delete just invalidated.
+  const scope = await readTaskScope(admin, taskId)
+
   const { error } = await admin.from('tasks').delete().eq('id', taskId)
   if (error) return { ok: false, error: error.message }
 
+  await bustAnalytics(scope?.taskDate)
   return { ok: true }
 }
 
@@ -196,6 +230,10 @@ export async function serverEmptyTrash(taskIds: string[]): Promise<ActionResult>
     detail:     { bulk: true, permanent: true, count: taskIds.length },
   })
 
+  // Dates first, for the same reason as the single permanent delete.
+  const { data: doomed } = await admin
+    .from('tasks').select('task_date').in('id', taskIds.slice(0, 500))
+
   const CHUNK = 100
   for (let i = 0; i < taskIds.length; i += CHUNK) {
     const chunk = taskIds.slice(i, i + CHUNK)
@@ -203,6 +241,7 @@ export async function serverEmptyTrash(taskIds: string[]): Promise<ActionResult>
     if (error) return { ok: false, error: error.message }
   }
 
+  await bustAnalytics(...((doomed || []) as { task_date: string | null }[]).map(r => r.task_date))
   return { ok: true }
 }
 
@@ -239,6 +278,9 @@ export async function serverUpdateTaskStatus(
   // SYNC INTEGRITY!
   await syncDraftInvoices(taskId)
   await syncDerived(admin, scope, `task ${taskTitle} → ${toStatus}`, guard.employeeId)
+  // 'cancelled' is excluded from the aggregate, so a status change can add or
+  // remove a task's whole value from a closed month.
+  await bustAnalytics(scope?.taskDate)
 
   // Mirror onto any promoted requests (no-op when none are linked).
   void syncRequestStatusFromTask(taskId, toStatus).catch(() => {})
@@ -277,10 +319,14 @@ export async function serverBulkUpdateStatus(
   })
 
   // SYNC INTEGRITY!
+  const touched: (string | null | undefined)[] = []
   for (const id of ids) {
     await syncDraftInvoices(id)
-    await syncDerived(admin, await readTaskScope(admin, id), `bulk status → ${toStatus}`, guard.employeeId)
+    const scope = await readTaskScope(admin, id)
+    touched.push(scope?.taskDate)
+    await syncDerived(admin, scope, `bulk status → ${toStatus}`, guard.employeeId)
   }
+  await bustAnalytics(...touched)
 
   // Mirror onto any promoted requests (no-op when none are linked).
   void syncRequestStatusFromTasks(ids, toStatus).catch(() => {})
@@ -361,6 +407,7 @@ export async function serverBulkDeleteTasks(
     await syncDraftInvoices(id)
     await syncDerived(admin, scopes.get(id) ?? null, 'bulk delete', guard.employeeId)
   }
+  await bustAnalytics(...[...scopes.values()].map(s => s?.taskDate))
 
   return { ok: true, data: { deletedAt } }
 }
@@ -448,6 +495,7 @@ export async function serverCancelTask(
   // A cancelled task leaves every derived task's basis for its month.
   await syncDerived(admin, await readTaskScope(admin, input.taskId),
     `task ${input.taskTitle} cancelled`, guard.employeeId)
+  await bustAnalytics(input.taskDate)
 
   revalidatePath(REVALIDATE)
   return { ok: true }
@@ -672,6 +720,7 @@ export async function serverFillTaskBilling(
   if (t?.task_date) {
     const d = new Date(t.task_date)
     void recalculatePayrollForMonth({ month: d.getMonth() + 1, year: d.getFullYear(), source: 'task_edit' }).catch(() => {})
+    await bustAnalytics(t.task_date)
   }
 }
 
@@ -708,12 +757,15 @@ export async function serverInlineTaskUpdate(
   // Sync Integrity!
   await syncDraftInvoices(taskId)
   await recalcTaskCommissions(taskId, guard.employeeId)
+  const scopeAfter = await readTaskScope(admin, taskId)
   try {
     await resyncDerivedForMovedTask(
-      admin as never, scopeBefore, await readTaskScope(admin, taskId) ?? {},
-      'source task edited', guard.employeeId,
+      admin as never, scopeBefore, scopeAfter ?? {}, 'source task edited', guard.employeeId,
     )
   } catch { /* best-effort */ }
+  // Both sides: an inline date edit moves value out of one month and into
+  // another, and clearing only the new month leaves the old one overstated.
+  await bustAnalytics(scopeBefore?.taskDate, scopeAfter?.taskDate)
   if (updates.status) void syncRequestStatusFromTask(taskId, updates.status).catch(() => {})
 
   return { ok: true }
@@ -910,6 +962,8 @@ export async function serverSaveTask(
   await recalcTaskCommissions(input.taskId, guard.employeeId)
   if (input.status) void syncRequestStatusFromTask(input.taskId, input.status).catch(() => {})
 
+  await bustAnalytics(scopeBefore?.taskDate, input.taskDate)
+
   // Auto-recalculate pending payroll for this task's month
   if (input.taskDate) {
     const taskDate = new Date(input.taskDate)
@@ -1083,6 +1137,7 @@ export async function serverSetDerivedOverride(
     })
   }
 
+  await bustAnalyticsForTasks(admin, [taskId])
   revalidatePath(REVALIDATE)
   return { ok: true }
 }
@@ -1108,6 +1163,7 @@ export async function serverRecalculateDerivedTask(
     return { ok: false, error: why[res.reason ?? ''] ?? 'Could not recalculate.' }
   }
 
+  if (res.changed) await bustAnalyticsForTasks(admin, [taskId])
   revalidatePath(REVALIDATE)
   return {
     ok: true,
@@ -1150,6 +1206,7 @@ export async function serverSetDerivedRuleState(
 
   if (state === 'active') {
     await recomputeDerivedTask(admin as never, taskId, 'rule resumed', guard.employeeId)
+    await bustAnalyticsForTasks(admin, [taskId])
   }
 
   revalidatePath(REVALIDATE)

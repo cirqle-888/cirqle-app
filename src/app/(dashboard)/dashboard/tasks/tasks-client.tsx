@@ -61,6 +61,7 @@ import {
   serverAutoLinkTaskPackage,
   type PendingSource,
 } from './actions'
+import { notifyAnalyticsChanged } from '../analytics-actions'
 import {
   normalizeNoChargeReason, isNoChargeColumnMissing,
   withoutNoChargeReason, isWaivedTask, noChargeReasonLabel,
@@ -1647,6 +1648,12 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
 
       // Log task created (fire-and-forget server action — doesn't block UI)
       void logTaskCreated(data.id, data.title, data.task_number ?? null)
+
+      // A back-dated task lands in a month the dashboard has cached. This
+      // insert happens in the BROWSER, where `revalidateTag` does not exist,
+      // so the bust has to travel back through a server action. No-op for
+      // today's date, which is the overwhelmingly common case.
+      void notifyAnalyticsChanged([data.task_date]).catch(() => {})
 
       // Nobody should have to remember the package. If the client has one
       // running that includes this service, the server links it — and the task

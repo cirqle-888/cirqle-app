@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react'
 import { X, Lock, Unlock, Eye, EyeOff, ShieldCheck } from 'lucide-react'
+import { startHidingFigures, stopHidingFigures } from '@/lib/privacy/blur-figures'
 
 // ─────────────────────────────────────────────────────
 // Context types
@@ -18,6 +19,14 @@ interface PrivacyContextType {
   forceLock: boolean
   /** Enable/disable forced lock mode (persists in localStorage) */
   setForceLockMode: (v: boolean) => void
+  /**
+   * Presentation mode: blur every amount, grouped number and percentage on
+   * screen, for demoing the app to staff without the figures on the projector.
+   * Separate from the name lock — showing a colleague the Tasks page usually
+   * means showing their name and hiding the money, not the other way round.
+   */
+  figuresHidden: boolean
+  setFiguresHidden: (v: boolean) => void
 }
 
 const PrivacyContext = createContext<PrivacyContextType>({
@@ -28,6 +37,8 @@ const PrivacyContext = createContext<PrivacyContextType>({
   ds: (_, mask) => mask || '••••••',
   forceLock: false,
   setForceLockMode: () => {},
+  figuresHidden: false,
+  setFiguresHidden: () => {},
 })
 
 export function usePrivacy() {
@@ -39,6 +50,7 @@ export function usePrivacy() {
 // ─────────────────────────────────────────────────────
 export const PRIVACY_PIN_KEY = 'cirqle_privacy_pin'
 export const PRIVACY_FORCE_LOCK_KEY = 'cirqle_privacy_force_lock'
+export const PRIVACY_HIDE_FIGURES_KEY = 'cirqle_privacy_hide_figures'
 
 export function getStoredPin(): string {
   try { return localStorage.getItem(PRIVACY_PIN_KEY) || '' } catch { return '' }
@@ -52,6 +64,13 @@ export function isForceLocked(): boolean {
 }
 export function setForceLocked(v: boolean) {
   try { localStorage.setItem(PRIVACY_FORCE_LOCK_KEY, v ? '1' : '0') } catch { /* ignore */ }
+}
+
+export function isFiguresHidden(): boolean {
+  try { return localStorage.getItem(PRIVACY_HIDE_FIGURES_KEY) === '1' } catch { return false }
+}
+export function setFiguresHiddenStored(v: boolean) {
+  try { localStorage.setItem(PRIVACY_HIDE_FIGURES_KEY, v ? '1' : '0') } catch { /* ignore */ }
 }
 
 // ─────────────────────────────────────────────────────
@@ -156,10 +175,41 @@ export function PrivacyProvider({ children }: { children: ReactNode }) {
   const [isUnlocked, setIsUnlocked] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [forceLock, setForceLock] = useState(false)
+  const [figuresHidden, setFiguresHiddenState] = useState(false)
 
   useEffect(() => {
     setForceLock(isForceLocked())
+    // Survives a reload: a demo that outlives one page load must not come
+    // back with the salaries showing.
+    setFiguresHiddenState(isFiguresHidden())
   }, [])
+
+  // The DOM marker runs only while the mode is on, so it costs nothing the
+  // rest of the time. Unmounting stops it too — no observer outlives the app.
+  useEffect(() => {
+    if (figuresHidden) startHidingFigures()
+    else stopHidingFigures()
+    return () => stopHidingFigures()
+  }, [figuresHidden])
+
+  const setFiguresHidden = useCallback((v: boolean) => {
+    setFiguresHiddenStored(v)
+    setFiguresHiddenState(v)
+  }, [])
+
+  // One key for the whole thing, because reaching for a menu mid-sentence is
+  // how the figures stay up. Shift is in the chord so it cannot fire while
+  // somebody is typing an amount into a field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) return
+      if (e.key.toLowerCase() !== 'h') return
+      e.preventDefault()
+      setFiguresHidden(!isFiguresHidden())
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [setFiguresHidden])
 
   const effectivelyUnlocked = isUnlocked && !forceLock
 
@@ -192,7 +242,7 @@ export function PrivacyProvider({ children }: { children: ReactNode }) {
   )
 
   return (
-    <PrivacyContext.Provider value={{ isUnlocked: effectivelyUnlocked, openUnlockModal, lock, dn, ds, forceLock, setForceLockMode }}>
+    <PrivacyContext.Provider value={{ isUnlocked: effectivelyUnlocked, openUnlockModal, lock, dn, ds, forceLock, setForceLockMode, figuresHidden, setFiguresHidden }}>
       {children}
       {showModal && !forceLock && (
         <UnlockModal
@@ -229,6 +279,36 @@ export function PrivacyBadge() {
       }`}>
       {isUnlocked ? <ShieldCheck className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
       {isUnlocked ? 'Names visible' : 'Names hidden'}
+    </button>
+  )
+}
+
+// ─────────────────────────────────────────────────────
+// Presentation mode toggle (reusable)
+// ─────────────────────────────────────────────────────
+/**
+ * One click, or Cmd/Ctrl+Shift+H, to blur every amount on screen.
+ *
+ * Carries `data-cq-figure-exempt` so the button itself never blurs — a
+ * control you cannot find is a control you cannot use to turn the mode off,
+ * and it is the one thing on screen that must stay legible.
+ */
+export function FiguresToggle() {
+  const { figuresHidden, setFiguresHidden } = usePrivacy()
+  return (
+    <button
+      data-cq-figure-exempt
+      onClick={() => setFiguresHidden(!figuresHidden)}
+      title={figuresHidden
+        ? 'Amounts are blurred for screen sharing — click, or press Cmd/Ctrl+Shift+H, to show them'
+        : 'Blur every amount on screen for sharing (Cmd/Ctrl+Shift+H)'}
+      className={`flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full border transition-all ${
+        figuresHidden
+          ? 'bg-amber-500/10 border-amber-500/25 text-amber-400 hover:bg-amber-500/20'
+          : 'bg-secondary border-border text-muted-foreground hover:border-primary/30 hover:text-foreground'
+      }`}>
+      {figuresHidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+      {figuresHidden ? 'Figures hidden' : 'Figures visible'}
     </button>
   )
 }

@@ -42,6 +42,9 @@ const ROUTE_PERMS: Array<[RegExp, string | string[]]> = [
   // own page requires admin regardless, so the finer split does not matter.
   [/^\/dashboard\/cashbook\/accounts/,       'cashbook.view_totals'],
   [/^\/dashboard\/cashbook\/reconciliation/, 'cashbook.view_amounts'],
+  // Card statements are the company's own spending line by line, so they get
+  // their own key rather than riding on cashbook.view — see keys.ts.
+  [/^\/dashboard\/cashbook\/cards/,          'card_reconciliation.view'],
   [/^\/dashboard\/cashbook/,                'cashbook.view'],
   // Three rungs of one ladder — any of them opens the page. The page itself
   // then strips the rows to what that rung actually allows.

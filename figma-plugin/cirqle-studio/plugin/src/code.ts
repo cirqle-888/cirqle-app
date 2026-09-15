@@ -254,6 +254,51 @@ function bestPhotoFor(label: Label, photos: SceneNode[], used: Record<string, bo
   return best
 }
 
+/* ================================================================== *
+ * Artboards — what the build actually produced
+ * ================================================================== *
+ * "Pages" and "creatives" are reported to Cirqle as contribution counts, so
+ * they have to be COUNTED IN THE FILE, not worked out from the product list.
+ * They used to be arithmetic — `Math.ceil(products / perPage)`, and zero in
+ * card mode, at which point the panel fell back to the page number typed in
+ * the SHEET. A designer who built one extra artboard, or stopped after one
+ * page, was scored for what the list implied rather than what they drew.
+ *
+ * The rule, in the file's own terms:
+ *   · a CREATIVE is one artboard the build produced or filled — a top-level
+ *     frame, the thing Figma puts a name above;
+ *   · a PAGE is a creative laid out with MORE THAN ONE product, which is what
+ *     a printed side of a flyer is. A story crop holding one product is a
+ *     creative and not a page.
+ *
+ * No paper sizes and no aspect ratios: an A3 flyer, a custom leaflet and a
+ * supermarket's own format all count the same way, and nothing needs updating
+ * when the format changes.
+ *
+ * PARITY: this is the twin of `offer-studio/figma-plugin/src/artboards.ts`,
+ * which is a real module with a real test suite. It is copied rather than
+ * imported because this plugin compiles with plain `tsc -p .` and has no
+ * bundler, so a second module would not survive into the Figma sandbox. The
+ * two must agree — a designer's score must not depend on which plugin built
+ * the flyer. Change one, change the other, and run that suite.
+ */
+
+/** The artboard a node sits on: its outermost ancestor directly under the page. */
+function artboardOf(node: BaseNode | null): SceneNode | null {
+  let current: BaseNode | null = node
+  while (current && current.parent) {
+    if (current.parent.type === 'PAGE') return current as SceneNode
+    current = current.parent
+  }
+  return null
+}
+
+/** Artboards and printed pages, from a tally of products placed per artboard. */
+function countArtboards(productsPerArtboard: number[]): { artboards: number; pages: number } {
+  const used = productsPerArtboard.filter(n => n > 0)
+  return { artboards: used.length, pages: used.filter(n => n > 1).length }
+}
+
 /** Does this node paint an actual image? */
 function hasImageFill(node: SceneNode): boolean {
   const fills = (node as unknown as { fills?: unknown }).fills
@@ -1541,10 +1586,16 @@ async function fillSelection(
   const expanded = wholePage ? findSlots(selection[0]) : selection
   const cards = readingOrder(expanded)
 
+  // Which artboard each filled card lives on, so pages and creatives come
+  // from the file rather than from the length of the list.
+  const productsByArtboard = new Map<string, number>()
+
   const report = {
     cards: 0, layersFilled: 0, imagesPlaced: 0, placeholders: 0,
     missingLayerCounts: {} as Record<string, number>,
     filledInPlace: true as boolean,
+    pages: 0,
+    artboards: 0,
     overflow: 0,
     looseLayers: 0,
     variantsSwitched: 0,
@@ -1561,6 +1612,8 @@ async function fillSelection(
       // variant's, so filling before switching would throw the data away.
       const res = await fillCard(cards[i], products[i])
       report.cards++
+      const board = artboardOf(cards[i])
+      if (board) productsByArtboard.set(board.id, (productsByArtboard.get(board.id) || 0) + 1)
       report.layersFilled += res.filled
       if (res.imageState === 'placed') report.imagesPlaced++
       if (res.imageState === 'placeholder') report.placeholders++
@@ -1592,6 +1645,11 @@ async function fillSelection(
   // Left-over cards are LEFT ALONE rather than blanked: wiping a designer's
   // work because the list was short is unrecoverable, a stale card is not.
   if (products.length > cards.length) report.overflow = products.length - cards.length
+
+  // Counted from the artboards the filled cards actually sit on.
+  const counted = countArtboards([...productsByArtboard.values()])
+  report.artboards = counted.artboards
+  report.pages = counted.pages
 
   figma.ui.postMessage({ type: 'build-done', report })
   figma.notify(
@@ -1689,6 +1747,10 @@ async function buildFlyer(msg: {
     figma.currentPage.appendChild(wrapper)
   }
   const builtCards: SceneNode[] = []
+  // Products placed into each built top-level node, in build order. A page
+  // template's clone collects `perPage` of them; a card collects one. This is
+  // what turns "what did I make" into a number without consulting the sheet.
+  const productsPerBuilt: number[] = []
 
   const report = {
     cards: 0,
@@ -1696,7 +1758,9 @@ async function buildFlyer(msg: {
     imagesPlaced: 0,
     placeholders: 0,
     missingLayerCounts: {} as Record<string, number>,
-    pages: perPage > 1 ? copies : 0,
+    // Filled in after the loop, from the artboards that exist. See countArtboards.
+    pages: 0,
+    artboards: 0,
     slotsPerPage: perPage > 1 ? perPage : 0,
     unusedSlots: 0,
     looseLayers: 0,
@@ -1728,6 +1792,7 @@ async function buildFlyer(msg: {
     if (wrapper) wrapper.appendChild(card)
     else figma.currentPage.appendChild(card)
     builtCards.push(card)
+    productsPerBuilt.push(0)
     ;(card as FrameNode).x = (wrapper ? 0 : baseX) + (copy % cols) * (width + gap)
     ;(card as FrameNode).y = (wrapper ? 0 : baseY) + Math.floor(copy / cols) * (height + rowGap)
 
@@ -1756,6 +1821,7 @@ async function buildFlyer(msg: {
           report.variantsFailed += ov.failed
           tally(await fillCard(cardSlots[s], product))
           report.cards++
+          productsPerBuilt[copy]++
         }
 
         // Anything named outside the slots — page headings, and product names
@@ -1776,6 +1842,7 @@ async function buildFlyer(msg: {
         report.variantsFailed += ov.failed
         tally(await fillCard(card, msg.products[copy]))
         report.cards++
+        productsPerBuilt[copy]++
       }
     } catch (err) {
       // Most common real cause: a font Figma can't load.
@@ -1789,6 +1856,13 @@ async function buildFlyer(msg: {
 
     figma.ui.postMessage({ type: 'progress', done: copy + 1, total: copies })
   }
+
+  // Counted, not calculated. The wrapper is a container this plugin made to
+  // hold the build tidy, never a creative — so the artboards are the nodes
+  // inside it, which is exactly what was built.
+  const counted = countArtboards(productsPerBuilt)
+  report.artboards = counted.artboards
+  report.pages = counted.pages
 
   const focus = wrapper ? [wrapper] : builtCards
   if (focus.length) {
