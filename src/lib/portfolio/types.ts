@@ -29,9 +29,17 @@ export type WorkFormat =
   | 'post' | 'reel' | 'story'
   // brand identity
   | 'logo' | 'guidelines' | 'brandbook' | 'chart'
+  // outdoor — sizes differ wildly, the job is the same: read from a distance
+  | 'hoarding' | 'banner' | 'standee'
+  // print — anything that goes through a press
+  | 'poster' | 'brochure' | 'menu' | 'packaging' | 'stationery'
 
-export const WORK_FORMATS: readonly WorkFormat[] =
-  ['post', 'reel', 'story', 'logo', 'guidelines', 'brandbook', 'chart'] as const
+export const WORK_FORMATS: readonly WorkFormat[] = [
+  'post', 'reel', 'story',
+  'logo', 'guidelines', 'brandbook', 'chart',
+  'hoarding', 'banner', 'standee',
+  'poster', 'brochure', 'menu', 'packaging', 'stationery',
+] as const
 
 export const WORK_FORMAT_LABEL: Record<WorkFormat, string> = {
   post: 'Post',
@@ -41,6 +49,14 @@ export const WORK_FORMAT_LABEL: Record<WorkFormat, string> = {
   guidelines: 'Guidelines',
   brandbook: 'Brandbook',
   chart: 'Brand chart',
+  hoarding: 'Hoarding',
+  banner: 'Banner',
+  standee: 'Standee',
+  poster: 'Poster',
+  brochure: 'Brochure',
+  menu: 'Menu',
+  packaging: 'Packaging',
+  stationery: 'Stationery',
 }
 
 /**
@@ -55,6 +71,8 @@ export const WORK_FORMAT_LABEL: Record<WorkFormat, string> = {
 export const FORMATS_BY_COLLECTION: Record<string, readonly WorkFormat[]> = {
   'social-media': ['post', 'reel', 'story'],
   'brand-identity': ['logo', 'guidelines', 'brandbook', 'chart'],
+  outdoor: ['hoarding', 'banner', 'standee'],
+  print: ['poster', 'brochure', 'menu', 'packaging', 'stationery'],
 }
 
 /** Formats offered for a collection; every format if it is not a known one. */
