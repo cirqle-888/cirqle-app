@@ -194,3 +194,40 @@ describe('offer date formats', () => {
     expect(offerSheetTsv([['1', '1', 'Tea']], false)).toBe('1\t1\tTea')
   })
 })
+
+describe('the Offer Price cell shows money, not a JavaScript number', () => {
+  /**
+   * String(6.4) is "6.4", and on a printed flyer that reads as six rupees
+   * four paise. The rule was already written down for the split columns —
+   * fractions always show both digits — and this was the one path that went
+   * round it. Both sides of the parity contract had it, so a flyer built from
+   * the Google Sheet printed the same wrong number.
+   */
+  const priceCell = (price: number | null) =>
+    buildOfferSheetRows({ products: [{ name: 'X', display_order: 0, price }] })[0][5]
+
+  it('pads a half-rupee price to both digits', () => {
+    expect(priceCell(6.4)).toBe('6.40')
+    expect(priceCell(20.5)).toBe('20.50')
+  })
+
+  it('keeps two real decimals', () => {
+    expect(priceCell(20.99)).toBe('20.99')
+    expect(priceCell(109.9)).toBe('109.90')
+  })
+
+  it('leaves a whole price whole — no "20.00" on a flyer', () => {
+    expect(priceCell(20)).toBe('20')
+    expect(priceCell(105)).toBe('105')
+  })
+
+  it('is empty when there is no price yet', () => {
+    expect(priceCell(null)).toBe('')
+  })
+
+  it('agrees with the split columns it sits beside', () => {
+    // 6.40 in one cell, "6" and "40" in the other two: the same money.
+    const row = buildOfferSheetRows({ products: [{ name: 'Egg', display_order: 0, price: 6.4 }] })[0]
+    expect([row[5], row[13], row[14]]).toEqual(['6.40', '6', '40'])
+  })
+})

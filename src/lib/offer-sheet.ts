@@ -87,6 +87,22 @@ function offerText(product: OfferSheetProduct): string {
  * columns: 20.99 → ["20", "99"]; 20.5 → ["20", "50"]; 20 → ["20", ""] (empty
  * paise keeps the small design layer blank instead of showing "00").
  */
+/**
+ * The Offer Price cell.
+ *
+ * Whole rupees stay whole; a fraction always shows both digits, because
+ * String(6.4) is "6.4" and on a printed flyer that reads as six rupees four
+ * paise. Mirrors displayPrice in offer-studio's parity/money.ts — the two
+ * must agree, or a flyer built from the sheet and one built from Offer Studio
+ * print different numbers.
+ */
+function displayPrice(value: number | null | undefined): string {
+  if (value == null) return ''
+  const n = Number(value)
+  if (!Number.isFinite(n)) return ''
+  return Number.isInteger(n) ? String(n) : n.toFixed(2)
+}
+
 function splitPrice(value: number | null | undefined): [string, string] {
   if (value == null) return ['', '']
   const whole = Math.trunc(value)
@@ -217,7 +233,11 @@ export function buildOfferSheetRows({
         product.name || '',
         product.weight || '',
         product.offer_type || 'price',
-        product.price == null ? '' : String(product.price),
+        // displayPrice, not String: a price of 6.40 stringifies to "6.4",
+        // which on a printed flyer reads as six rupees four paise. The rule
+        // is already written down in money.ts — "fractions always show both
+        // digits" — and this was the one path that went round it.
+        displayPrice(product.price),
         product.mrp == null ? '' : String(product.mrp),
         offerText(product),
         (product.badges || []).map(badgeLabel).filter(Boolean).join(', '),
