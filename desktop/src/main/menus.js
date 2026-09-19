@@ -121,6 +121,13 @@ function buildMenu() {
       submenu: [
         { label: 'Reload Cirqle', accelerator: 'CmdOrCtrl+R', click: () => deps.reloadCirqle() },
         { label: 'Reload WhatsApp', click: () => wa.whatsapps[state.activeWa] && wa.whatsapps[state.activeWa].webContents.reload() },
+        { label: 'Reload Offer Studio', enabled: state.panes.includes('studio'), click: () => deps.reloadStudio() },
+        { type: 'separator' },
+        {
+          label: state.panes.includes('studio') ? 'Close Offer Studio' : 'Offer Studio',
+          accelerator: 'CmdOrCtrl+Shift+O',
+          click: () => deps.toggleStudio(),
+        },
         { type: 'separator' },
         { label: 'Split 50 / 50', click: () => applyPresetL('50') },
         { label: 'Cirqle 75 / WhatsApp 25', click: () => applyPresetL('75') },

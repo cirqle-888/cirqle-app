@@ -40,6 +40,7 @@ const MAX_PANES = 4
 function viewFor(pane) {
   if (pane === 'cirqle') return deps.getCirqle()
   if (pane === 'cirqle2') return deps.getCirqle2()
+  if (pane === 'studio') return deps.getStudio()
   if (pane.startsWith('wa:')) return whatsapps[pane.slice(3)] || null
   if (pane.startsWith('web:')) return deps.getWebs()[pane.slice(4)] || null
   return null

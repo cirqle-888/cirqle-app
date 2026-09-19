@@ -170,7 +170,14 @@
       </button>
     </div>
 
-    <button id="btn-split" class="icon-btn" title="Add a split — 2nd Cirqle, WhatsApp, or Browser (up to 4 panes)">
+    <!-- One press to have the flyer app beside Cirqle. It is in the split
+         menu too, but a designer opens this every morning and a menu is one
+         press more than that is worth. -->
+    <button id="btn-studio" class="icon-btn" title="Offer Studio — open the flyer app beside Cirqle">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+    </button>
+
+    <button id="btn-split" class="icon-btn" title="Add a split — 2nd Cirqle, Offer Studio, WhatsApp, or Browser (up to 4 panes)">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/><path d="M17.5 10v4M15.5 12h4" stroke="currentColor" fill="none"/></svg>
     </button>
     <div id="web-bar">
@@ -270,6 +277,14 @@
     let lastState = null
     $('#btn-split').onclick = () => window.desk.splitMenu()
 
+    // Offer Studio: open it if it is not up, close it if it is. A toggle
+    // rather than an add, because the button shows its own state and a
+    // second press on a lit button plainly means "put it away".
+    $('#btn-studio').onclick = () => {
+      if (lastState && (lastState.panes || []).includes('studio')) window.desk.splitClose('studio')
+      else window.desk.splitAdd({ kind: 'studio' })
+    }
+
     // ── Browser URL bar (targets the active web pane) ──────────────────────
     const webBar = $('#web-bar'), webUrl = $('#web-url')
     $('#web-back').onclick = () => lastState?.activeWeb && window.desk.webNav(lastState.activeWeb, 'back')
@@ -331,6 +346,15 @@
         key = s.ratio < 0.4 ? '25' : s.ratio > 0.6 ? '75' : '50'
       const el = key && $('[data-preset="' + key + '"]')
       if (el) el.classList.add('on')
+
+      // 1b. Offer Studio lights up while its pane is open, so the button says
+      // what pressing it again will do.
+      const studioBtn = $('#btn-studio')
+      if (studioBtn) {
+        const on = panes.includes('studio')
+        studioBtn.classList.toggle('active', on)
+        studioBtn.title = on ? 'Close Offer Studio' : 'Offer Studio — open the flyer app beside Cirqle'
+      }
 
       // 1b. Split button lights up whenever more than the basic pair is open.
       const splitBtn = $('#btn-split')

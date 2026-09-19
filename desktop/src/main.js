@@ -38,6 +38,8 @@ const { buildMenu, wireContextMenu, truncate, FILE_URL_RE } = menus
 menus.init({
   getWin: () => win,
   reloadCirqle: () => reloadCirqleView(),
+  reloadStudio: () => reloadStudio(),
+  toggleStudio: () => toggleStudio(),
   sendTextToCirqle: (t) => sendTextToCirqle(t),
   sendClipboardToCirqle: () => sendClipboardToCirqle(),
   navigate: (r) => navigate(r),
@@ -50,6 +52,7 @@ layoutMod.init({
   getChrome: () => chrome,
   getCirqle: () => cirqle,
   getCirqle2: () => cirqle2,
+  getStudio: () => studio,
   getWebs: () => webs,
   getSplitters: () => splitters,
   getOverlay: () => overlay,
@@ -78,7 +81,11 @@ dl.init({
 })
 
 const CIRQLE_URL = (process.env.CIRQLE_URL || 'https://app.cirqle.work').replace(/\/$/, '')
-let win, chrome, cirqle, cirqle2, overlay
+// Offer Studio — the flyer app. A sibling of Cirqle rather than a website:
+// same people, same sign-in, and the thing designers have open all day beside
+// it. STUDIO_URL overrides it the way CIRQLE_URL does, for `npm run dev`.
+const STUDIO_URL = (process.env.STUDIO_URL || 'https://flyer.cirqle.work').replace(/\/$/, '')
+let win, chrome, cirqle, cirqle2, studio, overlay
 const splitters = []   // one per pane boundary, managed by ensureSplitters()
 const webs = {}        // built-in browser panes, keyed by web-tab id
 
@@ -158,6 +165,52 @@ function createCirqle2() {
   raiseChrome()
 }
 
+/**
+ * The Offer Studio pane.
+ *
+ * A first-class pane rather than a browser tab pointed at the right address,
+ * because the difference is the whole point of asking for it: downloads land
+ * in the common shelf, right-click offers Share Image to Linked WhatsApp —
+ * which for a finished flyer IS the job — and the login lives in the same
+ * session as Cirqle's rather than the sandboxed browsing one.
+ *
+ * Not destroyed when its split closes, unlike a browser pane. A browser pane
+ * is a page you glanced at; this is a spreadsheet somebody is halfway through
+ * typing into, and throwing away the view would throw that away with it.
+ */
+function createStudio() {
+  if (studio) return
+  // backgroundThrottling off for the same reason as Cirqle's panes: the sheet
+  // autosaves on a timer, and Chromium slows timers in a hidden view to about
+  // one a minute.
+  studio = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-cirqle.js'), backgroundThrottling: false } })
+  studio.webContents.loadURL(STUDIO_URL)
+  dl.wireDownloads(studio.webContents.session, 'cirqle')
+  wireContextMenu(studio, true)
+  dl.wireEscToCloseDownloads(studio)
+  studio.webContents.setWindowOpenHandler(makeWindowOpenHandler(() => studio))
+  studio.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
+    if (isMainFrame && code !== -3) loadError(studio, STUDIO_URL, 'studio')
+  })
+  win.contentView.addChildView(studio)
+  raiseChrome()
+}
+
+/** Open Offer Studio beside whatever is there, or put it away if it is up. */
+function toggleStudio() {
+  if (state.panes.includes('studio')) layoutMod.removePane('studio')
+  else layoutMod.addPane('studio')
+  layoutMod.broadcast()
+}
+
+/** Reload in place, keeping the page. See reloadCirqleView for why. */
+function reloadStudio() {
+  if (!studio) return
+  const wc = studio.webContents
+  if (wc.getURL().startsWith(STUDIO_URL)) wc.reload()
+  else wc.loadURL(STUDIO_URL)
+}
+
 // ── Built-in browser panes ────────────────────────────────────────────────────
 // Hardened: shared 'persist:web' session (logins survive restarts), sandboxed
 // renderer, no preload/node access, every site permission denied, downloads
@@ -225,6 +278,7 @@ function destroyWebView(id) {
 // This is also what makes WhatsApp lazy — only VISIBLE accounts get a view.
 function ensureView(pane) {
   if (pane === 'cirqle2') { createCirqle2(); return }
+  if (pane === 'studio') { createStudio(); return }
   if (pane.startsWith('wa:')) {
     const id = pane.slice(3)
     const account = state.waAccounts.find(a => a.id === id)
@@ -336,6 +390,12 @@ function createViews() {
       return !!a && !a.paused
     }
     if (p.startsWith('web:')) return !!webTabFor(p.slice(4))
+    // Offer Studio comes back. Unlike cirqle2, which is a transient
+    // side-by-side comparison, this is somewhere work happens — laying it out
+    // beside Cirqle and having it gone the next morning is the opposite of
+    // what putting it in the toolbar was for. Its view is created lazily by
+    // ensureView, like every other restored pane.
+    if (p === 'studio') return true
     return p === 'cirqle' // cirqle2 was already stripped by settings migration
   })
   if (state.panes.length === 0) state.panes = ['cirqle']
@@ -419,6 +479,7 @@ presence.register()
 ipcMain.on(CH.LAYOUT_PRESET, (_e, p) => applyPreset(p))
 ipcMain.on(CH.RELOAD, (_e, which) => {
   if (which === 'cirqle') reloadCirqleView()
+  if (which === 'studio') reloadStudio()
   if (which === 'whatsapp' && whatsapps[state.activeWa]) whatsapps[state.activeWa].webContents.reload()
 })
 ipcMain.on(CH.GO_BACK, () => { if (cirqle && cirqle.webContents.canGoBack()) cirqle.webContents.goBack() })
@@ -537,6 +598,7 @@ ipcMain.on(CH.CIRQLE_COMPARE_TOGGLE, () => {
 function paneTitle(p) {
   if (p === 'cirqle') return 'Cirqle'
   if (p === 'cirqle2') return 'Cirqle (copy)'
+  if (p === 'studio') return 'Offer Studio'
   if (p.startsWith('wa:')) return (state.waAccounts.find(a => a.id === p.slice(3)) || {}).label || 'WhatsApp'
   if (p.startsWith('web:')) return (webTabFor(p.slice(4)) || {}).label || 'Browser'
   return p
@@ -551,6 +613,9 @@ ipcMain.on(CH.SPLIT_MENU, () => {
     enabled: !full && !state.panes.includes('cirqle2') && state.panes.includes('cirqle'),
     click: () => { if (layoutMod.addPane('cirqle2') && cirqle2) cirqle2.webContents.loadURL(cirqle.webContents.getURL() || CIRQLE_URL) },
   })
+  if (!state.panes.includes('studio')) {
+    add.push({ label: 'Offer Studio', enabled: !full, click: () => layoutMod.addPane('studio') })
+  }
   for (const a of state.waAccounts) {
     if (state.panes.includes(`wa:${a.id}`)) continue
     add.push({
@@ -583,6 +648,8 @@ ipcMain.on(CH.SPLIT_ADD, (_e, pane) => {
     if (!state.panes.includes('cirqle2') && layoutMod.addPane('cirqle2') && cirqle2) {
       cirqle2.webContents.loadURL(cirqle.webContents.getURL() || CIRQLE_URL)
     }
+  } else if (pane.kind === 'studio') {
+    if (!state.panes.includes('studio')) layoutMod.addPane('studio')
   } else if (pane.kind === 'cirqle') {
     layoutMod.addPane('cirqle', { front: true })
   } else if (pane.kind === 'wa' && pane.id) {
@@ -653,6 +720,7 @@ ipcMain.handle(CH.CLIPBOARD_WRITE, (_e, text) => {
 ipcMain.on(CH.CAPTURE_CLIPBOARD, sendClipboardToCirqle)
 ipcMain.on(CH.RETRY, (_e, pane) => {
   if (pane === 'whatsapp' && whatsapps[state.activeWa]) whatsapps[state.activeWa].webContents.loadURL(WHATSAPP_URL, { userAgent: CHROME_UA })
+  else if (pane === 'studio' && studio) studio.webContents.loadURL(STUDIO_URL)
   else if (cirqle) cirqle.webContents.loadURL(CIRQLE_URL)
 })
 ipcMain.handle(CH.APP_VERSION, () => app.getVersion())
