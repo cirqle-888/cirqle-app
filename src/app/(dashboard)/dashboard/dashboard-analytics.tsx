@@ -50,6 +50,8 @@ interface DashboardAnalyticsProps {
     dueCount: number; dueAmount: number
     toBeInvoicedCount: number; toBeInvoicedAmount: number
     totalExpectedCash: number; totalDues: number
+    /** Credit given that is still owed — see lib/finance/credit-ledger.ts. */
+    creditOutstanding?: number
   }
   invoices: any[]; overdueInvoices: any[]; dueInvoices: any[]
   allCashbook: any[]; activeTasks: any[]; toBeInvoiced: any[]

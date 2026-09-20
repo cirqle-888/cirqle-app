@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildCreditLedger, stillOwing, UNATTRIBUTED, type CreditMovement } from './credit-ledger'
+import { buildCreditLedger, stillOwing, UNATTRIBUTED, type CreditMovement, SETTLEMENTS, HITS_PNL } from './credit-ledger'
 
 const move = (over: Partial<CreditMovement> = {}): CreditMovement => ({
   direction: 'given',
@@ -203,5 +203,74 @@ describe('what a credit entry writes to the ledger', () => {
   it('carries the date and bank through, which is what makes it reconcilable', () => {
     const rows = plannedCreditRows(facts())
     expect(rows[0]).toMatchObject({ credit_date: '2026-09-05', bank_account_id: 'bank-1' })
+  })
+})
+
+describe('the three ways a credit ends', () => {
+  it('cash back reduces what is owed', () => {
+    const led = buildCreditLedger([
+      move({ amountInr: 50000 }),
+      move({ direction: 'returned', amountInr: 20000, entryId: 'r' }),
+    ])
+    expect(led.totalOutstandingInr).toBe(30000)
+  })
+
+  it('a conversion to the owner’s share reduces it too, and is not an expense', () => {
+    const led = buildCreditLedger([
+      move({ amountInr: 50000 }),
+      move({ direction: 'converted_drawings', amountInr: 50000, entryId: 'd' }),
+    ])
+    expect(led.totalOutstandingInr).toBe(0)
+    expect(led.totalConvertedToDrawingsInr).toBe(50000)
+    expect(HITS_PNL).not.toContain('converted_drawings')
+  })
+
+  it('a conversion to salary reduces it, and IS an expense', () => {
+    // The distinction that matters: the business has now spent the money,
+    // where before it held a receivable. Without this somebody is paid and
+    // it never appears as a cost.
+    const led = buildCreditLedger([
+      move({ amountInr: 50000 }),
+      move({ direction: 'converted_salary', amountInr: 50000, entryId: 's' }),
+    ])
+    expect(led.totalOutstandingInr).toBe(0)
+    expect(led.totalConvertedToSalaryInr).toBe(50000)
+    expect(HITS_PNL).toContain('converted_salary')
+  })
+
+  it('handles one credit ending three different ways at once', () => {
+    // ₹50,000 out: ₹20,000 back in cash, ₹20,000 becomes pay, ₹10,000 left.
+    const led = buildCreditLedger([
+      move({ amountInr: 50000 }),
+      move({ direction: 'returned', amountInr: 20000, entryId: 'r' }),
+      move({ direction: 'converted_salary', amountInr: 20000, entryId: 's' }),
+    ])
+    const b = led.balances[0]
+    expect(b.givenInr).toBe(50000)
+    expect(b.returnedInr).toBe(20000)
+    expect(b.convertedToSalaryInr).toBe(20000)
+    expect(b.outstandingInr).toBe(10000)
+  })
+
+  it('counts every settlement as settling, none as a second loan', () => {
+    expect(SETTLEMENTS).toEqual(['returned', 'converted_drawings', 'converted_salary'])
+    const led = buildCreditLedger([
+      move({ amountInr: 90000 }),
+      move({ direction: 'returned', amountInr: 30000, entryId: 'a' }),
+      move({ direction: 'converted_drawings', amountInr: 30000, entryId: 'b' }),
+      move({ direction: 'converted_salary', amountInr: 30000, entryId: 'c' }),
+    ])
+    expect(led.totalOutstandingInr).toBe(0)
+    expect(led.totalGivenInr).toBe(90000)
+  })
+
+  it('leaves only the outstanding part as money that might come back', () => {
+    // What expected cash may count. Converted money is spent, not owed.
+    const led = buildCreditLedger([
+      move({ amountInr: 50000 }),
+      move({ direction: 'converted_drawings', amountInr: 50000, entryId: 'd' }),
+      move({ employeeCqid: 'CQID002', amountInr: 8000, entryId: 'x' }),
+    ])
+    expect(led.totalOutstandingInr).toBe(8000)
   })
 })

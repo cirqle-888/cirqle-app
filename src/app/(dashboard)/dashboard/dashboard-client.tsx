@@ -48,6 +48,8 @@ interface Props {
     dueCount: number; dueAmount: number
     toBeInvoicedCount: number; toBeInvoicedAmount: number
     totalExpectedCash: number; totalDues: number
+    /** Credit given that is still owed — see lib/finance/credit-ledger.ts. */
+    creditOutstanding?: number
   }
   invoices: any[]; overdueInvoices: any[]; dueInvoices: any[]
   allCashbook: any[]; displayTasks: any[]; analyticsViewPromise: Promise<AnalyticsView>
@@ -315,7 +317,7 @@ function AdminDashboard({
     return {
       outstanding:    liveOutstanding,
       overdueAmount:  liveOverdueAmt,
-      totalExpectedCash: stats.bankBalance + liveOutstanding + stats.toBeInvoicedAmount,
+      totalExpectedCash: stats.bankBalance + liveOutstanding + stats.toBeInvoicedAmount + (stats.creditOutstanding ?? 0),
       varianceOutstanding: liveOutstanding - stats.outstanding,
       varianceOverdue:     liveOverdueAmt  - stats.overdueAmount,
     }
@@ -499,7 +501,10 @@ function AdminDashboard({
                   )}
                 </div>
                 <p className="text-3xl font-black gradient-text leading-tight">{f(effectiveStats.totalExpectedCash)}</p>
-                <p className="text-xs text-muted-foreground mt-1.5">Bank balance + all outstanding + to be invoiced</p>
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  Bank balance + all outstanding + to be invoiced
+                  {(stats.creditOutstanding ?? 0) > 0 ? ' + credit owed back' : ''}
+                </p>
               </div>
               <div className="shrink-0 text-right space-y-0.5">
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Breakdown</p>
@@ -509,6 +514,15 @@ function AdminDashboard({
                   <span className="font-semibold text-orange-400">{f(effectiveStats.outstanding)}</span>
                 </p>
                 <p className="text-xs"><span className="text-muted-foreground">To be invoiced</span> <span className="font-semibold text-yellow-400">{f(stats.toBeInvoicedAmount)}</span></p>
+                {/* Only when there is some. A nil line every day trains the
+                    eye to skip the row, and this is the row that matters on
+                    the day it is not nil. */}
+                {(stats.creditOutstanding ?? 0) > 0 && (
+                  <p className="text-xs">
+                    <span className="text-muted-foreground">Credit owed back</span>{' '}
+                    <span className="font-semibold text-sky-400">{f(stats.creditOutstanding ?? 0)}</span>
+                  </p>
+                )}
               </div>
             </div>
             {effectiveStats.totalExpectedCash > 0 && (
@@ -516,6 +530,9 @@ function AdminDashboard({
                 <div className="h-full bg-gradient-to-r from-violet-500 to-purple-500 rounded-full" style={{ width: `${Math.round((stats.bankBalance/effectiveStats.totalExpectedCash)*100)}%` }} />
                 <div className="h-full bg-orange-400/70" style={{ width: `${Math.round((effectiveStats.outstanding/effectiveStats.totalExpectedCash)*100)}%` }} />
                 <div className="h-full bg-yellow-400/70" style={{ width: `${Math.round((stats.toBeInvoicedAmount/effectiveStats.totalExpectedCash)*100)}%` }} />
+                {(stats.creditOutstanding ?? 0) > 0 && (
+                  <div className="h-full bg-sky-400/70" style={{ width: `${Math.round(((stats.creditOutstanding ?? 0)/effectiveStats.totalExpectedCash)*100)}%` }} />
+                )}
               </div>
             )}
           </div>

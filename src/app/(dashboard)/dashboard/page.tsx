@@ -1,4 +1,5 @@
 import { createAdminClient, fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
+import { buildCreditLedger, fetchCreditMovements } from '@/lib/finance/credit-ledger'
 import { getHistoricalAnalytics, getHistoricalEarnings } from '@/lib/analytics/cache'
 import { mergeEarnings, type EarningsAggregate, type ScoreRow } from '@/lib/analytics/earnings'
 import { buildView, type AnalyticsView } from '@/lib/analytics/view'
@@ -274,6 +275,19 @@ export default async function DashboardPage() {
   const bankBalance = allCashbook.reduce((s, e) =>
     e.type === 'inflow' ? s + (e.amount_inr || 0) : s - (e.amount_inr || 0), 0)
 
+  // ── Credit given, still owed ────────────────────────────────────────────
+  //
+  // Money lent out is money expected back, which makes it expected cash in
+  // exactly the way an unpaid invoice is. It is NOT in the bank balance —
+  // the cash already left — so without this it vanishes from the figure
+  // entirely: out of the bank, out of P&L (correctly, a loan is not a
+  // cost), and out of what the business expects to have.
+  //
+  // Only the OUTSTANDING part. A credit converted to the owner's share or
+  // to somebody's pay is spent, not owed, and counting it here would
+  // promise cash that is never arriving.
+  const creditOutstanding = buildCreditLedger(await fetchCreditMovements(supabase)).totalOutstandingInr
+
   // ── Invoice stats (no double-counting) ──────────────────────────────────────
   // Sent/partial/overdue = money already claimed, waiting collection
   const sentInvoices     = invoices.filter(i => ['sent', 'partial', 'overdue'].includes(i.status))
@@ -451,7 +465,8 @@ export default async function DashboardPage() {
         dueAmount:           dueInvoices.reduce((s, i) => s + (invTotalInr(i) - invPaidInr(i)), 0),
         toBeInvoicedCount:   draftInvoices.length,
         toBeInvoicedAmount,
-        totalExpectedCash:   bankBalance + outstanding + toBeInvoicedAmount,
+        creditOutstanding,
+        totalExpectedCash:   bankBalance + outstanding + toBeInvoicedAmount + creditOutstanding,
         totalDues:           overdueInvoices.length + dueInvoices.length + toBeInvoiced.length,
       }}
       exchangeRates={exchangeRates as any[]}

@@ -25,7 +25,28 @@
 
 const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100
 
-export type CreditDirection = 'given' | 'returned'
+/**
+ * How a credit moves. One way out, three ways back.
+ *
+ *   given               money leaves, and is expected back
+ *   returned            it came back as cash
+ *   converted_drawings  it is not coming back — the owner's share. Out of
+ *                       P&L either way, so this changes who is owed and
+ *                       nothing else.
+ *   converted_salary    an advance became pay. This one DOES change P&L:
+ *                       the business has spent the money, where before it
+ *                       held a receivable.
+ *
+ * Any of the three may be partial, which is why they are rows against a
+ * person rather than a status on the original.
+ */
+export type CreditDirection = 'given' | 'returned' | 'converted_drawings' | 'converted_salary'
+
+/** Everything that reduces what somebody owes. */
+export const SETTLEMENTS: readonly CreditDirection[] = ['returned', 'converted_drawings', 'converted_salary']
+
+/** Only this one turns a credit into an expense. */
+export const HITS_PNL: readonly CreditDirection[] = ['converted_salary']
 
 export interface CreditMovement {
   direction: CreditDirection
@@ -42,7 +63,11 @@ export interface CreditBalance {
   employeeCqid: string | null
   givenInr: number
   returnedInr: number
-  /** given − returned. Negative means they have paid back more than they took. */
+  /** Written off to the owner's share. Never coming back, never an expense. */
+  convertedToDrawingsInr: number
+  /** Turned into pay. Never coming back, and it IS an expense. */
+  convertedToSalaryInr: number
+  /** given − everything that settled it. Negative means over-settled. */
   outstandingInr: number
   movements: CreditMovement[]
 }
@@ -51,6 +76,13 @@ export interface CreditLedger {
   balances: CreditBalance[]
   totalGivenInr: number
   totalReturnedInr: number
+  totalConvertedToDrawingsInr: number
+  totalConvertedToSalaryInr: number
+  /**
+   * What is still owed, and therefore what may still come back. This is the
+   * only part of a credit that belongs in expected cash — money converted
+   * to a drawing or to salary is spent, not owed.
+   */
   totalOutstandingInr: number
   /** Money out that no one is recorded against. Worth its own number. */
   unattributedInr: number
@@ -74,7 +106,9 @@ export function buildCreditLedger(movements: readonly CreditMovement[]): CreditL
     if (!row) {
       row = {
         employeeCqid: m.employeeCqid ?? null,
-        givenInr: 0, returnedInr: 0, outstandingInr: 0, movements: [],
+        givenInr: 0, returnedInr: 0,
+        convertedToDrawingsInr: 0, convertedToSalaryInr: 0,
+        outstandingInr: 0, movements: [],
       }
       byPerson.set(key, row)
     }
@@ -83,6 +117,8 @@ export function buildCreditLedger(movements: readonly CreditMovement[]): CreditL
     // what decides the sign here, never the number.
     const amount = Math.abs(Number(m.amountInr) || 0)
     if (m.direction === 'given') row.givenInr += amount
+    else if (m.direction === 'converted_drawings') row.convertedToDrawingsInr += amount
+    else if (m.direction === 'converted_salary') row.convertedToSalaryInr += amount
     else row.returnedInr += amount
     row.movements.push(m)
   }
@@ -91,7 +127,11 @@ export function buildCreditLedger(movements: readonly CreditMovement[]): CreditL
     ...row,
     givenInr: round2(row.givenInr),
     returnedInr: round2(row.returnedInr),
-    outstandingInr: round2(row.givenInr - row.returnedInr),
+    convertedToDrawingsInr: round2(row.convertedToDrawingsInr),
+    convertedToSalaryInr: round2(row.convertedToSalaryInr),
+    outstandingInr: round2(
+      row.givenInr - row.returnedInr - row.convertedToDrawingsInr - row.convertedToSalaryInr,
+    ),
     movements: [...row.movements].sort((a, b) => a.entryDate.localeCompare(b.entryDate)),
   }))
 
@@ -106,6 +146,8 @@ export function buildCreditLedger(movements: readonly CreditMovement[]): CreditL
     balances,
     totalGivenInr: sum(b => b.givenInr),
     totalReturnedInr: sum(b => b.returnedInr),
+    totalConvertedToDrawingsInr: sum(b => b.convertedToDrawingsInr),
+    totalConvertedToSalaryInr: sum(b => b.convertedToSalaryInr),
     totalOutstandingInr: sum(b => b.outstandingInr),
     unattributedInr: round2(
       balances.filter(b => b.employeeCqid === null).reduce((n, b) => n + b.outstandingInr, 0),
