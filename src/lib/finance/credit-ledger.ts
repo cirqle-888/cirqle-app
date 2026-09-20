@@ -169,13 +169,19 @@ export const CREDIT_RETURN_CODE = 'financial.credit_return'
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
- * Every credit movement, with whoever is recorded against it.
+ * Every credit movement, from credit_ledger — the one source of truth.
  *
- * Two reads rather than a join through the split table, because an entry
- * with NO split still has to appear — a left join expressed in PostgREST's
- * embedding is the kind of thing that silently returns the inner-join
- * answer, and the inner-join answer here is a balance that quietly omits
- * the money nobody claimed.
+ * WHY NOT THE CASHBOOK, which is where this started. A credit's cash
+ * movements are cashbook entries, so reading those looked right and worked
+ * for `given` and `returned`. It cannot work for a CONVERSION: converting
+ * to a drawing or to salary moves no cash — the money left when the credit
+ * was given — so there is no cashbook entry to find, and a ledger built on
+ * cashbook entries reports a ₹1,00,000 balance that never moves however
+ * much of it is settled.
+ *
+ * credit_ledger holds all four kinds, and cashbook saves write a row into
+ * it for every credit entry (see cashbook/actions.ts), so it is both
+ * complete and the only place that can answer the question.
  *
  * Degrades to [] like fetchEmployeeCostSplits: a finance page that cannot
  * read one table should show the rest, not a stack trace.
@@ -184,62 +190,26 @@ export async function fetchCreditMovements(
   admin: { from: (t: string) => any },
   filter: { from?: string; to?: string } = {},
 ): Promise<CreditMovement[]> {
-  const cats = await admin.from('cashbook_categories')
-    .select('id, account_code')
-    .in('account_code', [CREDIT_GIVEN_CODE, CREDIT_RETURN_CODE])
-  if (cats.error || !cats.data?.length) return []
+  let query = admin.from('credit_ledger')
+    .select('id, credit_type, amount, credit_date, notes, entity_id, employee:employees(cqid)')
+  if (filter.from) query = query.gte('credit_date', filter.from)
+  if (filter.to) query = query.lte('credit_date', filter.to)
+  const { data, error } = await query
+  if (error) return []
 
-  const directionOf = new Map<string, CreditDirection>(
-    cats.data.map((c: any) => [c.id, c.account_code === CREDIT_GIVEN_CODE ? 'given' : 'returned']),
-  )
-
-  let query = admin.from('cashbook_entries')
-    .select('id, entry_date, amount_inr, description, category_id, deleted_at')
-    .in('category_id', [...directionOf.keys()])
-  if (filter.from) query = query.gte('entry_date', filter.from)
-  if (filter.to) query = query.lte('entry_date', filter.to)
-  const entries = await query
-  if (entries.error) return []
-
-  const live = (entries.data ?? []).filter((e: any) => !e.deleted_at)
-  if (!live.length) return []
-
-  const splits = await admin.from('cashbook_entry_employee_splits')
-    .select('cashbook_entry_id, amount_inr, employee:employees(cqid)')
-    .in('cashbook_entry_id', live.map((e: any) => e.id))
-  const byEntry = new Map<string, any[]>()
-  for (const s of (splits.error ? [] : splits.data ?? [])) {
-    const list = byEntry.get(s.cashbook_entry_id)
-    if (list) list.push(s)
-    else byEntry.set(s.cashbook_entry_id, [s])
-  }
-
-  const out: CreditMovement[] = []
-  for (const entry of live) {
-    const direction = directionOf.get(entry.category_id)
-    if (!direction) continue
-    const mine = byEntry.get(entry.id) ?? []
-    const common = {
-      direction,
-      entryId: entry.id as string,
-      entryDate: entry.entry_date as string,
-      description: (entry.description as string) ?? null,
-    }
-    if (!mine.length) {
-      // Nobody against it. Carried through as its own movement rather than
-      // skipped — that is the whole point of the unattributed bucket.
-      out.push({ ...common, employeeCqid: null, amountInr: Number(entry.amount_inr) || 0 })
-      continue
-    }
-    for (const s of mine) {
-      out.push({
-        ...common,
-        employeeCqid: (s.employee?.cqid as string) ?? null,
-        amountInr: Number(s.amount_inr) || 0,
-      })
-    }
-  }
-  return out
+  const known: CreditDirection[] = ['given', 'returned', 'converted_drawings', 'converted_salary']
+  return (data ?? [])
+    // A credit_type this build does not know about is skipped rather than
+    // silently counted as a repayment, which is what an `else` would do.
+    .filter((r: any) => known.includes(r.credit_type))
+    .map((r: any) => ({
+      direction: r.credit_type as CreditDirection,
+      employeeCqid: (r.employee?.cqid as string) ?? null,
+      amountInr: Number(r.amount) || 0,
+      entryId: r.id as string,
+      entryDate: r.credit_date as string,
+      description: (r.notes as string) ?? null,
+    }))
 }
 
 /* ── Writing it, on every credit entry ──────────────────────────────────── */

@@ -18,6 +18,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
+import { buildCreditLedger, fetchCreditMovements, type CreditBalance } from '@/lib/finance/credit-ledger'
 import { computeMonthlyCommissions } from '@/lib/payroll/compute'
 import { pendingAdjustmentTotals, settleAdjustments } from '@/lib/payroll/adjustments'
 import { computeMonthlyOwnership } from '@/lib/ownership/engine'
@@ -576,4 +577,91 @@ export async function createCreditEntry(
 
   revalidatePath(REVALIDATE)
   return { ok: true, data: { row: data } }
+}
+
+// ─── Settling credit given ────────────────────────────────────────────────
+
+export interface ConvertCreditInput {
+  /** Whose balance this settles. null settles the unattributed bucket. */
+  entityId: string | null
+  entityType?: string
+  kind: 'returned' | 'converted_drawings' | 'converted_salary'
+  amount: number
+  date: string
+  note?: string | null
+}
+
+/**
+ * Settle part or all of what somebody owes.
+ *
+ * Three endings, and they are not the same kind of thing:
+ *
+ *   returned            the cash came back
+ *   converted_drawings  it is not coming back — the owner's share. Out of
+ *                       P&L either way, so this changes who is owed and
+ *                       nothing else.
+ *   converted_salary    an advance became pay. The business has now SPENT
+ *                       the money where before it held a receivable.
+ *
+ * NO CASHBOOK ENTRY IS WRITTEN, deliberately. The cash left the bank once,
+ * when the credit was given; writing a second entry now would take it out
+ * twice and the bank balance would go wrong. A conversion reclassifies
+ * money that has already moved — see credit-ledger.ts for how P&L is meant
+ * to pick converted_salary up.
+ *
+ * REFUSES TO OVER-SETTLE. Converting ₹60,000 of a ₹50,000 credit would put
+ * the balance at −₹10,000 and quietly add ₹10,000 to expected cash, which
+ * is the kind of wrong number nobody goes looking for.
+ */
+export async function convertCredit(
+  input: ConvertCreditInput,
+): Promise<ActionResult<{ outstandingAfter: number }>> {
+  const guard = await requirePermission(PERMS.PAYROLL_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const amount = Math.abs(Number(input.amount) || 0)
+  if (amount <= 0) return { ok: false, error: 'Enter an amount to settle.' }
+
+  const admin = createAdminClient()
+  const movements = await fetchCreditMovements(admin)
+  const ledger = buildCreditLedger(movements)
+
+  // Match on the CQID the ledger reports, so the balance being checked is
+  // the one the screen is showing.
+  let cqid: string | null = null
+  if (input.entityId) {
+    const { data: emp } = await admin
+      .from('employees').select('cqid').eq('id', input.entityId).maybeSingle()
+    cqid = emp?.cqid ?? null
+  }
+  const balance = ledger.balances.find((b: CreditBalance) => b.employeeCqid === cqid)
+  const outstanding = balance?.outstandingInr ?? 0
+  if (outstanding <= 0) return { ok: false, error: 'Nothing is outstanding to settle.' }
+  if (amount > outstanding) {
+    return {
+      ok: false,
+      error: `That is more than the ₹${outstanding.toLocaleString('en-IN')} outstanding.`,
+    }
+  }
+
+  const { error } = await admin.from('credit_ledger').insert({
+    entity_type: input.entityType || 'employee',
+    entity_id: input.entityId,
+    credit_type: input.kind,
+    amount,
+    credit_date: input.date,
+    settles_note: input.note || null,
+    notes: input.note || null,
+  })
+  if (error) return { ok: false, error: error.message }
+
+  await logActivity({
+    action: 'credit.settled',
+    entityType: 'payroll',
+    entityId: input.entityId ?? 'unattributed',
+    detail: { kind: input.kind, amount, outstandingBefore: outstanding },
+  })
+
+  revalidatePath(REVALIDATE)
+  return { ok: true, data: { outstandingAfter: outstanding - amount } }
 }
