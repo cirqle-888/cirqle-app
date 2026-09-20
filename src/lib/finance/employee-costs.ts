@@ -13,6 +13,15 @@ import type { EmployeeCostRow } from './types'
 
 const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100
 
+/**
+ * Sections the ledger uses for money that is NOT spending — a loan out, an
+ * owner's drawing. P&L drops exactly these two (pnl.ts), and a cost report
+ * has the same reason to.
+ */
+export function isNotSpending(section: string | null | undefined): boolean {
+  return section === 'financial' || section === 'excluded'
+}
+
 export interface EmployeeCostSplitRaw {
   employeeId: string
   employeeName: string
@@ -36,12 +45,25 @@ export async function fetchEmployeeCostSplits(
     .select(`
       amount_inr,
       employee:employees(id, name, cqid),
-      entry:cashbook_entries(id, entry_date, description, deleted_at)
+      entry:cashbook_entries(
+        id, entry_date, description, deleted_at,
+        category:cashbook_categories(statement_section)
+      )
     `)
   if (error) return []   // table not migrated yet, or transient — degrade quietly
 
   return (data || [])
     .filter((r: any) => r.entry && !r.entry.deleted_at && r.employee?.id)
+    // A COST is money spent ON somebody. An advance is money lent TO them:
+    // it is not spent, it comes back, and the `financial` and `excluded`
+    // sections are exactly where the ledger keeps things that are not
+    // spending — the same two P&L drops (see pnl.ts).
+    //
+    // Without this a ₹50,000 credit given to CQID001 was reported as
+    // ₹50,000 of cost attributed to them, next to ₹7,863 of real cost. The
+    // split is still the right record of WHO took the money; it belongs in
+    // the credit ledger (credit-ledger.ts), not in what they cost.
+    .filter((r: any) => !isNotSpending(r.entry.category?.statement_section))
     .filter((r: any) => !filter.from || r.entry.entry_date >= filter.from)
     .filter((r: any) => !filter.to || r.entry.entry_date <= filter.to)
     .map((r: any) => ({
