@@ -6,6 +6,7 @@ import Header from '@/components/layout/header'
 import { fetchJournalLines } from '@/lib/finance/journal'
 import { buildCompanyPnl, monthRange } from '@/lib/finance/pnl'
 import { computeCompanyOpsStrip } from '@/lib/finance/kpis'
+import { creditSalaryJournalLines, fetchCreditMovements } from '@/lib/finance/credit-ledger'
 import { SECTION_LABELS } from '@/lib/finance/types'
 import { AlertTriangle, Flame, Hourglass, Landmark, Megaphone, MonitorSmartphone, Users2 } from 'lucide-react'
 
@@ -53,10 +54,18 @@ export default async function CompanyOpsPage({
   const startMonth = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}`
   const months = monthRange(startMonth, thisMonth)
 
+  // ORDER MATTERS. The bank balance is summed from the REAL ledger only.
+  // Credit converted to salary is an expense with no cash movement — the
+  // cash left when the credit was given — so it joins the statement after
+  // the balance is settled, never before.
   const bankBalanceInr = Math.round(lines.reduce((s, l) => s + l.amountInr, 0) * 100) / 100
-  const companyLines = lines.filter(l => l.scope === 'company')
+
+  const creditLines = creditSalaryJournalLines(await fetchCreditMovements(admin))
+  const withCredit = [...lines, ...creditLines]
+
+  const companyLines = withCredit.filter(l => l.scope === 'company')
   const pnl = buildCompanyPnl(companyLines, { months, bankBalanceInr })
-  const strip = computeCompanyOpsStrip(lines, { month: thisMonth, bankBalanceInr })
+  const strip = computeCompanyOpsStrip(withCredit, { month: thisMonth, bankBalanceInr })
 
   const untriaged = lines
     .filter(l => l.scope == null)
@@ -105,7 +114,9 @@ export default async function CompanyOpsPage({
         <div className="border-b border-border px-4 py-3">
           <h2 className="text-sm font-semibold">Company P&L (cash basis)</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Company-scoped cashbook only. Transfers, owner drawings and credit movements never appear here.
+            Company-scoped cashbook only. Transfers and owner drawings never appear here. Credit
+            given is not spending either — but credit converted to salary is, and shows on its own
+            line with no cashbook entry behind it.
           </p>
         </div>
         <div className="overflow-x-auto">

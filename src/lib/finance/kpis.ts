@@ -4,6 +4,7 @@
 
 import type { JournalLine } from './types'
 import { buildCompanyPnl, monthOf } from './pnl'
+import { PAYROLL_ACCOUNTS } from './credit-ledger'
 
 const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100
 
@@ -12,7 +13,7 @@ export interface CompanyOpsStrip {
   month: string
   /** Total company operating spend this month (positive INR). */
   opexInr: number
-  /** Of which salaries (opex.salaries). */
+  /** Of which salaries — paid, plus credit converted to pay (PAYROLL_ACCOUNTS). */
   payrollInr: number
   /** Of which marketing (opex.marketing — includes internal ad spend, GST-inclusive). */
   marketingInr: number
@@ -48,7 +49,7 @@ export function computeCompanyOpsStrip(
   return {
     month: opts.month,
     opexInr: spend(() => true),
-    payrollInr: spend(l => l.accountCode === 'opex.salaries'),
+    payrollInr: spend(l => PAYROLL_ACCOUNTS.includes(l.accountCode ?? '')),
     marketingInr: spend(l => l.accountCode === 'opex.marketing'),
     softwareInr: spend(l => l.accountCode === 'opex.software'),
     burnRateInr: pnl.burnRateInr,

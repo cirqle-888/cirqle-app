@@ -18,7 +18,9 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
-import { buildCreditLedger, fetchCreditMovements, type CreditBalance } from '@/lib/finance/credit-ledger'
+import {
+  buildCreditLedger, fetchCreditMovements, settlementRefusal, type CreditBalance,
+} from '@/lib/finance/credit-ledger'
 import { computeMonthlyCommissions } from '@/lib/payroll/compute'
 import { pendingAdjustmentTotals, settleAdjustments } from '@/lib/payroll/adjustments'
 import { computeMonthlyOwnership } from '@/lib/ownership/engine'
@@ -615,13 +617,11 @@ export interface ConvertCreditInput {
  */
 export async function convertCredit(
   input: ConvertCreditInput,
-): Promise<ActionResult<{ outstandingAfter: number }>> {
+): Promise<ActionResult<{ outstandingAfter: number; row: any }>> {
   const guard = await requirePermission(PERMS.PAYROLL_EDIT)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const amount = Math.abs(Number(input.amount) || 0)
-  if (amount <= 0) return { ok: false, error: 'Enter an amount to settle.' }
-
   const admin = createAdminClient()
   const movements = await fetchCreditMovements(admin)
   const ledger = buildCreditLedger(movements)
@@ -636,15 +636,10 @@ export async function convertCredit(
   }
   const balance = ledger.balances.find((b: CreditBalance) => b.employeeCqid === cqid)
   const outstanding = balance?.outstandingInr ?? 0
-  if (outstanding <= 0) return { ok: false, error: 'Nothing is outstanding to settle.' }
-  if (amount > outstanding) {
-    return {
-      ok: false,
-      error: `That is more than the ₹${outstanding.toLocaleString('en-IN')} outstanding.`,
-    }
-  }
+  const refusal = settlementRefusal(outstanding, amount)
+  if (refusal) return { ok: false, error: refusal }
 
-  const { error } = await admin.from('credit_ledger').insert({
+  const { data: row, error } = await admin.from('credit_ledger').insert({
     entity_type: input.entityType || 'employee',
     entity_id: input.entityId,
     credit_type: input.kind,
@@ -652,7 +647,7 @@ export async function convertCredit(
     credit_date: input.date,
     settles_note: input.note || null,
     notes: input.note || null,
-  })
+  }).select('*, employee:employees(id, cqid)').single()
   if (error) return { ok: false, error: error.message }
 
   await logActivity({
@@ -663,5 +658,5 @@ export async function convertCredit(
   })
 
   revalidatePath(REVALIDATE)
-  return { ok: true, data: { outstandingAfter: outstanding - amount } }
+  return { ok: true, data: { outstandingAfter: outstanding - amount, row } }
 }

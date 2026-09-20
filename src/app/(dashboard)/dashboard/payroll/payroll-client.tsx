@@ -7,8 +7,13 @@ import Header from '@/components/layout/header'
 import { createClient, safeFetchAll } from '@/lib/supabase/client'
 import {
   bulkGeneratePayroll, createPayrollRecord, markPayrollPaid, markPayrollUnpaid,
-  toggleRevealSalary, createSalaryAdvance, createCreditEntry, refreshPayrollRecord, recalculatePayrollForMonth
+  toggleRevealSalary, createSalaryAdvance, createCreditEntry, refreshPayrollRecord, recalculatePayrollForMonth,
+  convertCredit
 } from './actions'
+import {
+  buildCreditLedger, stillOwing, UNATTRIBUTED,
+  type CreditDirection, type CreditMovement,
+} from '@/lib/finance/credit-ledger'
 import { formatCompact } from '@/lib/calculations/currency'
 import { usePrivacy } from "@/contexts/privacy-context"
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
@@ -18,6 +23,38 @@ import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { todayISO } from '@/lib/utils/local-date'
 import { rateLabel } from '@/lib/ownership/format'
+
+/**
+ * The three ways an outstanding credit can end, in the words the business
+ * uses for them. `returned` is the only one where cash comes back; the two
+ * conversions settle the debt by deciding the money is never coming back —
+ * as the owner's share, or as pay already given.
+ */
+type SettleKind = 'returned' | 'converted_drawings' | 'converted_salary'
+
+/** How each movement reads on the Credits table. */
+const CREDIT_TYPE_LABEL: Record<SettleKind | 'given', string> = {
+  given: 'given',
+  returned: 'returned',
+  converted_drawings: 'to drawings',
+  converted_salary: 'to salary',
+}
+
+const CREDIT_TYPE_STYLE: Record<SettleKind | 'given', string> = {
+  given: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
+  returned: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20',
+  converted_drawings: 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20',
+  converted_salary: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20',
+}
+
+const SETTLE_KINDS: { kind: SettleKind; label: string; blurb: string }[] = [
+  { kind: 'returned', label: 'Returned in cash',
+    blurb: 'The money came back to the business. Record the deposit in the cashbook too.' },
+  { kind: 'converted_drawings', label: 'Permanent withdrawal',
+    blurb: "Keep it as the owner's share. Not an expense — it never touches the P&L." },
+  { kind: 'converted_salary', label: 'Paid salary',
+    blurb: 'Treat it as pay already given. This DOES become an expense on the P&L.' },
+]
 
 // Heavy bulk-generate modal (773 lines) — only mounts when an admin clicks
 // the action. Splitting it off the initial payroll chunk reduces the entry
@@ -272,6 +309,15 @@ export default function PayrollClient({
     entity_type: 'employee', entity_id: '', credit_type: 'given',
     amount: '', credit_date: todayISO(now), notes: '',
   })
+
+  // Settling an outstanding credit: which balance, and how it ends.
+  const [settleFor, setSettleFor] = useState<
+    { cqid: string | null; entityId: string | null; outstanding: number } | null
+  >(null)
+  const [settleForm, setSettleForm] = useState({
+    kind: 'returned' as SettleKind, amount: '', date: todayISO(now), note: '',
+  })
+  const [settleError, setSettleError] = useState<string | null>(null)
 
   const supabase = createClient()
 
@@ -745,6 +791,61 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
       credit_date: creditForm.credit_date, notes: creditForm.notes,
     })
     if (result.ok && result.data) { setCreditList((c: any[]) => [result.data!.row, ...c]); setShowCreditForm(false) }
+    setSaving(false)
+  }
+
+  // ── Who still holds money ────────────────────────────────────────────────
+  // Derived from the same rows the table below shows, through the same pure
+  // function the dashboard and the server action use. One arithmetic, three
+  // readers — the balance on screen is the balance the action checks.
+  const creditLedger = useMemo(() => buildCreditLedger(
+    (creditList as any[])
+      .filter(cr => ['given', 'returned', 'converted_drawings', 'converted_salary'].includes(cr.credit_type))
+      .map((cr): CreditMovement => ({
+        direction: cr.credit_type as CreditDirection,
+        employeeCqid: cr.employee?.cqid ?? null,
+        amountInr: Number(cr.amount) || 0,
+        entryId: cr.id,
+        entryDate: cr.credit_date,
+        description: cr.notes ?? null,
+      })),
+  ), [creditList])
+
+  const owing = useMemo(() => stillOwing(creditLedger), [creditLedger])
+
+  // entity_id to write against, found from the rows that made the balance.
+  const entityIdFor = useCallback((cqid: string | null) => {
+    const row = (creditList as any[]).find(cr => (cr.employee?.cqid ?? null) === cqid && cr.entity_id)
+    return row?.entity_id ?? null
+  }, [creditList])
+
+  function openSettle(cqid: string | null, outstanding: number) {
+    setSettleFor({ cqid, entityId: entityIdFor(cqid), outstanding })
+    // Default to the whole balance — settling in full is the common case,
+    // and a partial is one edit away.
+    setSettleForm({ kind: 'returned', amount: String(outstanding), date: todayISO(new Date()), note: '' })
+    setSettleError(null)
+  }
+
+  async function saveSettle(e: React.FormEvent) {
+    e.preventDefault()
+    if (!settleFor) return
+    setSaving(true); setSettleError(null)
+    const result = await convertCredit({
+      entityId: settleFor.entityId,
+      entityType: 'employee',
+      kind: settleForm.kind,
+      amount: parseFloat(settleForm.amount) || 0,
+      date: settleForm.date,
+      note: settleForm.note || null,
+    })
+    if (result.ok && result.data) {
+      setCreditList((c: any[]) => [result.data!.row, ...c])
+      setSettleFor(null)
+      toastSuccess(`Settled \u20b9${(parseFloat(settleForm.amount) || 0).toLocaleString('en-IN')}`)
+    } else {
+      setSettleError(result.error || 'Could not settle that.')
+    }
     setSaving(false)
   }
 
@@ -1658,6 +1759,53 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
             CREDITS TAB
         ════════════════════════════════════════════════════ */}
         {tab === 'Credits' && (
+          <div className="space-y-4">
+
+          {/* ── Who still holds money, and how to close it out ── */}
+          {showAmounts && owing.length > 0 && (
+            <div className="bg-card border border-border rounded-xl overflow-hidden">
+              <div className="flex items-baseline justify-between px-5 py-3.5 border-b border-border/50 bg-secondary/30">
+                <h3 className="text-[13px] font-semibold text-foreground">Outstanding credit</h3>
+                <span className="text-[13px] text-muted-foreground">
+                  Still owed{' '}
+                  <span className="font-semibold text-foreground tabular-nums">
+                    ₹{creditLedger.totalOutstandingInr.toLocaleString('en-IN')}
+                  </span>
+                </span>
+              </div>
+              <div className="divide-y divide-border/40">
+                {owing.map(b => (
+                  <div key={b.employeeCqid ?? UNATTRIBUTED} className="flex flex-wrap items-center gap-x-6 gap-y-2 px-5 py-3.5">
+                    <div className="min-w-[110px]">
+                      <p className="font-medium text-foreground text-[13px]">
+                        {b.employeeCqid ?? 'Unattributed'}
+                      </p>
+                      {b.employeeCqid === null && (
+                        <p className="text-[11px] text-muted-foreground">No one recorded against it</p>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-muted-foreground tabular-nums">
+                      <span>Given <span className="text-foreground">₹{b.givenInr.toLocaleString('en-IN')}</span></span>
+                      {b.returnedInr > 0 && <span>Returned <span className="text-foreground">₹{b.returnedInr.toLocaleString('en-IN')}</span></span>}
+                      {b.convertedToDrawingsInr > 0 && <span>Drawings <span className="text-foreground">₹{b.convertedToDrawingsInr.toLocaleString('en-IN')}</span></span>}
+                      {b.convertedToSalaryInr > 0 && <span>Salary <span className="text-foreground">₹{b.convertedToSalaryInr.toLocaleString('en-IN')}</span></span>}
+                    </div>
+                    <div className="ml-auto flex items-center gap-3">
+                      <span className="text-[13px] font-semibold text-amber-600 dark:text-amber-400 tabular-nums">
+                        ₹{b.outstandingInr.toLocaleString('en-IN')}
+                      </span>
+                      <button
+                        onClick={() => openSettle(b.employeeCqid, b.outstandingInr)}
+                        className="text-[12px] font-medium px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 border border-border/50 text-foreground transition-colors whitespace-nowrap">
+                        Settle
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="bg-card border border-border rounded-xl">
             <div className="overflow-x-auto">
             <table className="w-full text-[13px] min-w-[500px]">
@@ -1677,8 +1825,8 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     <td className="px-5 py-3.5 font-medium text-foreground">{cr.employee?.cqid || cr.entity_type}</td>
                     <td className="px-5 py-3.5 text-muted-foreground">{cr.credit_date}</td>
                     <td className="px-5 py-3.5">
-                      <span className={`text-[11px] font-medium px-2.5 py-1 rounded-md border ${cr.credit_type === 'given' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'}`}>
-                        {cr.credit_type}
+                      <span className={`text-[11px] font-medium px-2.5 py-1 rounded-md border ${CREDIT_TYPE_STYLE[cr.credit_type as CreditDirection] ?? CREDIT_TYPE_STYLE.returned}`}>
+                        {CREDIT_TYPE_LABEL[cr.credit_type as CreditDirection] ?? cr.credit_type}
                       </span>
                     </td>
                     <td className="px-5 py-3.5 text-right font-semibold text-foreground tabular-nums">₹{(cr.amount || 0).toLocaleString('en-IN')}</td>
@@ -1688,6 +1836,8 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
               </tbody>
             </table>
             </div>
+          </div>
+
           </div>
         )}
 
@@ -2442,6 +2592,95 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
               <div className="flex gap-3">
                 <button type="button" onClick={() => setShowCreditForm(false)} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Cancel</button>
                 <button type="submit" disabled={saving} className="flex-1 gradient-bg text-white text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">{saving ? '…' : 'Save'}</button>
+              </div>
+            </form>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* ════════════════════════════════════════════════════
+          SETTLE CREDIT MODAL
+      ════════════════════════════════════════════════════ */}
+      {settleFor && (
+        <ModalOverlay onClose={() => setSettleFor(null)} sheetOnMobile>
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-md shadow-2xl max-h-[90dvh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+              <div>
+                <h2 className="font-semibold">Settle credit</h2>
+                <p className="text-[12px] text-muted-foreground">
+                  {settleFor.cqid ?? 'Unattributed'} · ₹{settleFor.outstanding.toLocaleString('en-IN')} outstanding
+                </p>
+              </div>
+              <button onClick={() => setSettleFor(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+            </div>
+            <form onSubmit={saveSettle} className="p-6 space-y-4">
+
+              <div className="space-y-2">
+                {SETTLE_KINDS.map(k => (
+                  <button key={k.kind} type="button"
+                    onClick={() => setSettleForm(p => ({ ...p, kind: k.kind }))}
+                    className={`w-full text-left px-3.5 py-2.5 rounded-lg border transition-colors ${
+                      settleForm.kind === k.kind
+                        ? 'border-foreground/25 bg-secondary'
+                        : 'border-border/50 hover:bg-secondary/40'}`}>
+                    <p className="text-[13px] font-medium text-foreground">{k.label}</p>
+                    <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">{k.blurb}</p>
+                  </button>
+                ))}
+              </div>
+
+              <div>
+                <div className="flex items-baseline justify-between mb-1.5">
+                  <label className="block text-xs font-medium text-muted-foreground">Amount</label>
+                  <div className="flex gap-1.5">
+                    <button type="button"
+                      onClick={() => setSettleForm(p => ({ ...p, amount: String(settleFor.outstanding) }))}
+                      className="text-[11px] px-2 py-0.5 rounded-md bg-secondary hover:bg-secondary/70 text-muted-foreground">Full</button>
+                    <button type="button"
+                      onClick={() => setSettleForm(p => ({ ...p, amount: String(Math.round(settleFor.outstanding / 2 * 100) / 100) }))}
+                      className="text-[11px] px-2 py-0.5 rounded-md bg-secondary hover:bg-secondary/70 text-muted-foreground">Half</button>
+                  </div>
+                </div>
+                <input type="number" min="0" step="0.01" max={settleFor.outstanding}
+                  value={settleForm.amount}
+                  onChange={e => setSettleForm(p => ({ ...p, amount: e.target.value }))}
+                  required
+                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none" />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Leaves ₹{Math.max(0, Math.round((settleFor.outstanding - (parseFloat(settleForm.amount) || 0)) * 100) / 100).toLocaleString('en-IN')} still owed.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Date</label>
+                  <input type="date" value={settleForm.date}
+                    onChange={e => setSettleForm(p => ({ ...p, date: e.target.value }))}
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Note</label>
+                  <input type="text" value={settleForm.note}
+                    onChange={e => setSettleForm(p => ({ ...p, note: e.target.value }))}
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none" placeholder="Optional" />
+                </div>
+              </div>
+
+              {/* A conversion moves no cash. Saying so here stops somebody
+                  adding a matching cashbook entry and paying it twice. */}
+              <p className="text-[11px] text-muted-foreground leading-relaxed bg-secondary/40 border border-border/50 rounded-lg px-3 py-2">
+                {settleForm.kind === 'returned'
+                  ? 'Cash coming back also needs its own Credit Returned entry in the cashbook. This records the balance only.'
+                  : 'No cash moves — it left when the credit was given. Do not add a cashbook entry for this.'}
+              </p>
+
+              {settleError && (
+                <p className="text-[12px] text-red-500 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{settleError}</p>
+              )}
+
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setSettleFor(null)} className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80">Cancel</button>
+                <button type="submit" disabled={saving} className="flex-1 gradient-bg text-white text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">{saving ? '…' : 'Settle'}</button>
               </div>
             </form>
           </div>

@@ -23,6 +23,8 @@
  * precisely the report where that matters.
  */
 
+import type { JournalLine } from './types'
+
 const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100
 
 /**
@@ -312,4 +314,77 @@ export function plannedCreditRows(facts: CreditEntryFacts): CreditLedgerRow[] {
     amount: Math.abs(Number(facts.amountInr) || 0),
     notes: note('no one recorded'),
   }]
+}
+
+/**
+ * Why a settlement must be refused, or null when it may go ahead.
+ *
+ * Pure so it can be proved without a database — the arithmetic that stops
+ * ₹90,000 being settled against a ₹50,000 debt is the part worth being
+ * sure of, and it should not need a browser and a live row to exercise.
+ * The form's `max` says the same thing, but a stale page, a second tab or
+ * anything that is not the form would walk straight past it.
+ */
+export function settlementRefusal(outstandingInr: number, amountInr: number): string | null {
+  const amount = Math.abs(Number(amountInr) || 0)
+  if (amount <= 0) return 'Enter an amount to settle.'
+  if (outstandingInr <= 0) return 'Nothing is outstanding to settle.'
+  if (amount > outstandingInr) {
+    return `That is more than the ₹${outstandingInr.toLocaleString('en-IN')} outstanding.`
+  }
+  return null
+}
+
+/* ── Putting converted salary on the P&L ────────────────────────────────── */
+
+/**
+ * The account a converted credit lands on. Deliberately NOT `opex.salaries`.
+ *
+ * A row on the salaries line that no cashbook entry backs is a trap: the
+ * P&L says ₹20,000 of pay, and anybody who drills into the cashbook to
+ * find it comes back empty. Its own account code says where to look — the
+ * Credits tab — and keeps the two kinds of payroll spend legible side by
+ * side. `PAYROLL_ACCOUNTS` is what keeps the KPI whole despite the split.
+ */
+export const SALARY_FROM_CREDIT_CODE = 'opex.salaries_from_credit'
+
+/** Every account that is payroll spend, however it was paid. */
+export const PAYROLL_ACCOUNTS: readonly string[] = ['opex.salaries', SALARY_FROM_CREDIT_CODE]
+
+/**
+ * Journal lines for credit that became pay.
+ *
+ * A conversion moves no cash — the money left when the credit was given,
+ * as `financial.credit_given`, which the P&L excludes — so there is no
+ * cashbook entry and nothing on the statement. But the business HAS spent
+ * it: what it held was a receivable, and now it holds nothing. That is an
+ * expense, and it has to appear as one.
+ *
+ * So the expense is synthesised here rather than written to the cashbook.
+ * Writing a cashbook entry would say the cash left twice.
+ *
+ * WHICH MEANS CALLERS MUST NOT ADD THESE TO A CASH BALANCE. Sum them into
+ * a bank balance and the books are short by the converted amount. Compute
+ * the balance from the real ledger first, then append these for the P&L —
+ * `reports/company-ops/page.tsx` shows the order.
+ */
+export function creditSalaryJournalLines(movements: readonly CreditMovement[]): JournalLine[] {
+  return movements
+    .filter(m => HITS_PNL.includes(m.direction))
+    .map(m => ({
+      id: `credit:${m.entryId}`,
+      date: m.entryDate,
+      scope: 'company' as const,
+      section: 'opex' as const,
+      accountCode: SALARY_FROM_CREDIT_CODE,
+      categoryId: null,
+      categoryName: 'Salaries (from credit given)',
+      clientId: null,
+      employeeId: null,
+      bankAccountId: null,
+      // Negative: an expense, in the sign convention the journal uses.
+      amountInr: -Math.abs(Number(m.amountInr) || 0),
+      description: m.description,
+      isTransfer: false,
+    }))
 }

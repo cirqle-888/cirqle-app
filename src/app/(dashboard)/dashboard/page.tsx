@@ -1,5 +1,5 @@
 import { createAdminClient, fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
-import { buildCreditLedger, fetchCreditMovements } from '@/lib/finance/credit-ledger'
+import { buildCreditLedger, creditSalaryJournalLines, fetchCreditMovements } from '@/lib/finance/credit-ledger'
 import { getHistoricalAnalytics, getHistoricalEarnings } from '@/lib/analytics/cache'
 import { mergeEarnings, type EarningsAggregate, type ScoreRow } from '@/lib/analytics/earnings'
 import { buildView, type AnalyticsView } from '@/lib/analytics/view'
@@ -286,7 +286,8 @@ export default async function DashboardPage() {
   // Only the OUTSTANDING part. A credit converted to the owner's share or
   // to somebody's pay is spent, not owed, and counting it here would
   // promise cash that is never arriving.
-  const creditOutstanding = buildCreditLedger(await fetchCreditMovements(supabase)).totalOutstandingInr
+  const creditMovements = await fetchCreditMovements(supabase)
+  const creditOutstanding = buildCreditLedger(creditMovements).totalOutstandingInr
 
   // ── Invoice stats (no double-counting) ──────────────────────────────────────
   // Sent/partial/overdue = money already claimed, waiting collection
@@ -427,7 +428,15 @@ export default async function DashboardPage() {
       const stripFrom =toISODate( new Date(now.getFullYear(), now.getMonth() - 3, 1))
       const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
       const journal = await fetchJournalLines(supabase, { from: stripFrom })
-      companyOps = computeCompanyOpsStrip(journal, { month: thisMonthKey, bankBalanceInr: bankBalance })
+      // Credit converted to salary is payroll spend with no cashbook entry.
+      // The Company Operations report adds it the same way; leaving it out
+      // here is how this strip and that report end up disagreeing.
+      companyOps = computeCompanyOpsStrip(
+        // Same window as the journal fetch — an older conversion would add a
+        // month the strip never meant to cover.
+        [...journal, ...creditSalaryJournalLines(creditMovements).filter(l => l.date >= stripFrom)],
+        { month: thisMonthKey, bankBalanceInr: bankBalance },
+      )
     } catch { /* finance engine unavailable (pre-migration) — strip hidden */ }
   }
 

@@ -274,3 +274,95 @@ describe('the three ways a credit ends', () => {
     expect(led.totalOutstandingInr).toBe(8000)
   })
 })
+
+import { creditSalaryJournalLines, SALARY_FROM_CREDIT_CODE, PAYROLL_ACCOUNTS } from './credit-ledger'
+import { buildCompanyPnl } from './pnl'
+
+describe('credit that became pay reaches the P&L', () => {
+  it('turns only converted_salary into a journal line', () => {
+    const lines = creditSalaryJournalLines([
+      move({ amountInr: 100000 }),
+      move({ direction: 'returned', amountInr: 10000, entryId: 'r' }),
+      move({ direction: 'converted_drawings', amountInr: 30000, entryId: 'd' }),
+      move({ direction: 'converted_salary', amountInr: 20000, entryId: 's' }),
+    ])
+    expect(lines).toHaveLength(1)
+    expect(lines[0].id).toBe('credit:s')
+  })
+
+  it('books it as an expense — negative, opex, company scope', () => {
+    const [line] = creditSalaryJournalLines([
+      move({ direction: 'converted_salary', amountInr: 20000, entryId: 's' }),
+    ])
+    expect(line.amountInr).toBe(-20000)
+    expect(line.section).toBe('opex')
+    expect(line.scope).toBe('company')
+    expect(line.accountCode).toBe(SALARY_FROM_CREDIT_CODE)
+    expect(line.isTransfer).toBe(false)
+  })
+
+  it('keeps its own account rather than hiding inside paid salaries', () => {
+    // A row on opex.salaries that no cashbook entry backs cannot be
+    // drilled into. Separate account, and the payroll total spans both.
+    expect(SALARY_FROM_CREDIT_CODE).not.toBe('opex.salaries')
+    expect(PAYROLL_ACCOUNTS).toContain('opex.salaries')
+    expect(PAYROLL_ACCOUNTS).toContain(SALARY_FROM_CREDIT_CODE)
+  })
+
+  it('shows up as spend on the statement', () => {
+    const pnl = buildCompanyPnl(creditSalaryJournalLines([
+      move({ direction: 'converted_salary', amountInr: 20000, entryId: 's', entryDate: '2026-09-20' }),
+    ]))
+    const opex = pnl.sections.find(s => s.section === 'opex')
+    expect(opex?.totalInr).toBe(-20000)
+  })
+
+  it('carries no employee id — the ledger reports CQIDs, never names', () => {
+    const [line] = creditSalaryJournalLines([
+      move({ direction: 'converted_salary', amountInr: 20000, entryId: 's' }),
+    ])
+    expect(line.employeeId).toBeNull()
+    expect(JSON.stringify(line)).not.toMatch(/CQID/)
+  })
+
+  it('is empty when nothing was converted, so the P&L is untouched', () => {
+    expect(creditSalaryJournalLines([move(), move({ direction: 'returned', entryId: 'r' })])).toEqual([])
+  })
+})
+
+import { settlementRefusal } from './credit-ledger'
+
+describe('what a settlement is not allowed to do', () => {
+  it('refuses more than is outstanding', () => {
+    expect(settlementRefusal(50000, 90000)).toBe('That is more than the ₹50,000 outstanding.')
+  })
+
+  it('allows exactly the outstanding amount', () => {
+    expect(settlementRefusal(50000, 50000)).toBeNull()
+  })
+
+  it('allows a partial', () => {
+    expect(settlementRefusal(50000, 1)).toBeNull()
+  })
+
+  it('refuses when nothing is owed', () => {
+    expect(settlementRefusal(0, 1000)).toBe('Nothing is outstanding to settle.')
+  })
+
+  it('refuses a balance already over-settled', () => {
+    expect(settlementRefusal(-5000, 1000)).toBe('Nothing is outstanding to settle.')
+  })
+
+  it('refuses zero, blank and rubbish amounts', () => {
+    for (const bad of [0, NaN, -0]) expect(settlementRefusal(50000, bad)).toBe('Enter an amount to settle.')
+  })
+
+  it('reads a negative amount as its magnitude, not as a credit', () => {
+    // -90,000 against 50,000 outstanding is still over-settling.
+    expect(settlementRefusal(50000, -90000)).toMatch(/more than/)
+  })
+
+  it('checks the amount before the balance, so a blank field says so', () => {
+    expect(settlementRefusal(0, 0)).toBe('Enter an amount to settle.')
+  })
+})
