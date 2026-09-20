@@ -199,3 +199,105 @@ export async function fetchCreditMovements(
   }
   return out
 }
+
+/* ── Writing it, on every credit entry ──────────────────────────────────── */
+
+export interface CreditEntryFacts {
+  /** The category's account code. Anything but the two credit codes is ignored. */
+  accountCode: string | null | undefined
+  amountInr: number
+  entryDate: string
+  bankAccountId: string | null
+  description: string | null
+  /** The entry form's "smart mode", when somebody used it. */
+  smart?: {
+    mode?: string | null
+    entityType?: string | null
+    entityId?: string | null
+    entityOther?: string | null
+  } | null
+  /** Who the entry was split across, which is the other way to know. */
+  splits?: readonly { employeeId: string; amountInr: number }[]
+}
+
+export interface CreditLedgerRow {
+  entity_type: string
+  entity_id: string | null
+  credit_type: CreditDirection
+  amount: number
+  credit_date: string
+  bank_account_id: string | null
+  notes: string | null
+}
+
+/**
+ * The credit_ledger rows a cashbook entry should produce.
+ *
+ * WHY THIS EXISTS. Writing the ledger row used to be gated on the entry
+ * form's "smart mode" having named an entity:
+ *
+ *     smartEffect.mode === 'credit_given' && (entity_id || entity_other)
+ *
+ * Save a Credit Given without touching smart mode and no row was written —
+ * no error, no warning, nothing. Two ₹50,000 withdrawals went out that way
+ * and the Credits tab never heard of either; the cashbook had them, the
+ * ledger meant to track them did not, and the only thing that would ever
+ * have revealed it is somebody asking.
+ *
+ * So the account code decides, not the form. A credit entry ALWAYS produces
+ * rows, from whichever of the three the entry actually has:
+ *
+ *   1 · smart mode named an entity     — the explicit answer, and it wins
+ *   2 · the entry is split across people — one row each, at their amounts
+ *   3 · neither                         — one row with no entity
+ *
+ * Case 3 is the important one. An unattributed row is not tidy, and that is
+ * the point: it puts the money on the Credits tab with a blank where the
+ * name should be, where somebody can see it and fix it. The alternative is
+ * what happened before, which is silence.
+ */
+export function plannedCreditRows(facts: CreditEntryFacts): CreditLedgerRow[] {
+  const direction: CreditDirection | null =
+    facts.accountCode === CREDIT_GIVEN_CODE ? 'given'
+      : facts.accountCode === CREDIT_RETURN_CODE ? 'returned'
+        : null
+  if (!direction) return []
+
+  const base = {
+    credit_type: direction,
+    credit_date: facts.entryDate,
+    bank_account_id: facts.bankAccountId ?? null,
+  }
+  const note = (extra?: string | null) =>
+    [facts.description, extra ? `(${extra})` : null].filter(Boolean).join(' ').trim() || null
+
+  const smart = facts.smart
+  if (smart && (smart.entityId || smart.entityOther)) {
+    return [{
+      ...base,
+      entity_type: smart.entityType || 'employee',
+      entity_id: smart.entityId || null,
+      amount: Math.abs(Number(facts.amountInr) || 0),
+      notes: note(smart.entityOther),
+    }]
+  }
+
+  const splits = facts.splits ?? []
+  if (splits.length) {
+    return splits.map(s => ({
+      ...base,
+      entity_type: 'employee',
+      entity_id: s.employeeId,
+      amount: Math.abs(Number(s.amountInr) || 0),
+      notes: note(),
+    }))
+  }
+
+  return [{
+    ...base,
+    entity_type: 'employee',
+    entity_id: null,
+    amount: Math.abs(Number(facts.amountInr) || 0),
+    notes: note('no one recorded'),
+  }]
+}

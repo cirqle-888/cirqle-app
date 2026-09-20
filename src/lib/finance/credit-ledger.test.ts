@@ -125,3 +125,83 @@ describe('what a balance carries with it', () => {
     expect(JSON.stringify(led)).not.toMatch(/name/i)
   })
 })
+
+import { plannedCreditRows, CREDIT_GIVEN_CODE, CREDIT_RETURN_CODE } from './credit-ledger'
+
+const facts = (over: Partial<Parameters<typeof plannedCreditRows>[0]> = {}) => ({
+  accountCode: CREDIT_GIVEN_CODE,
+  amountInr: 50000,
+  entryDate: '2026-09-05',
+  bankAccountId: 'bank-1',
+  description: 'Withdraw for fund rolling',
+  ...over,
+})
+
+describe('what a credit entry writes to the ledger', () => {
+  it('writes NOTHING for an entry that is not a credit', () => {
+    expect(plannedCreditRows(facts({ accountCode: 'opex.rent' }))).toEqual([])
+    expect(plannedCreditRows(facts({ accountCode: null }))).toEqual([])
+  })
+
+  it('takes the entity smart mode named, when it named one', () => {
+    const rows = plannedCreditRows(facts({
+      smart: { mode: 'credit_given', entityType: 'employee', entityId: 'emp-9' },
+    }))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ entity_id: 'emp-9', credit_type: 'given', amount: 50000 })
+  })
+
+  it('falls back to the split when smart mode was never touched', () => {
+    // The case that lost two ₹50,000 withdrawals: saved without smart mode,
+    // so the old gate wrote nothing at all.
+    const rows = plannedCreditRows(facts({
+      splits: [{ employeeId: 'emp-1', amountInr: 50000 }],
+    }))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ entity_id: 'emp-1', amount: 50000 })
+  })
+
+  it('writes one row per person on a shared credit, at their own amounts', () => {
+    const rows = plannedCreditRows(facts({
+      amountInr: 30000,
+      splits: [
+        { employeeId: 'emp-1', amountInr: 20000 },
+        { employeeId: 'emp-2', amountInr: 10000 },
+      ],
+    }))
+    expect(rows.map(r => [r.entity_id, r.amount])).toEqual([['emp-1', 20000], ['emp-2', 10000]])
+  })
+
+  it('STILL writes a row when nobody is recorded at all', () => {
+    // Not tidy, and that is the point: it puts the money on the Credits tab
+    // with a blank where the name should be, where somebody can see it. The
+    // alternative is the silence that hid ₹1,00,000.
+    const rows = plannedCreditRows(facts())
+    expect(rows).toHaveLength(1)
+    expect(rows[0].entity_id).toBe(null)
+    expect(rows[0].amount).toBe(50000)
+    expect(rows[0].notes).toContain('no one recorded')
+  })
+
+  it('marks a return as returned, not given', () => {
+    const rows = plannedCreditRows(facts({ accountCode: CREDIT_RETURN_CODE }))
+    expect(rows[0].credit_type).toBe('returned')
+  })
+
+  it('stores a magnitude, whatever sign it is handed', () => {
+    expect(plannedCreditRows(facts({ amountInr: -50000 }))[0].amount).toBe(50000)
+  })
+
+  it('keeps the entry description, and says who when smart mode named an "other"', () => {
+    const rows = plannedCreditRows(facts({
+      smart: { mode: 'credit_given', entityType: 'other', entityOther: 'Kalathingal' },
+    }))
+    expect(rows[0].notes).toBe('Withdraw for fund rolling (Kalathingal)')
+    expect(rows[0].entity_type).toBe('other')
+  })
+
+  it('carries the date and bank through, which is what makes it reconcilable', () => {
+    const rows = plannedCreditRows(facts())
+    expect(rows[0]).toMatchObject({ credit_date: '2026-09-05', bank_account_id: 'bank-1' })
+  })
+})

@@ -8,6 +8,7 @@
  */
 
 import { revalidatePath } from 'next/cache'
+import { plannedCreditRows } from '@/lib/finance/credit-ledger'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
@@ -349,31 +350,56 @@ export async function insertCashbookEntries(
     }
   }
 
-  // Smart mode side effects on the base (first) entry
+  // ── The credit ledger ────────────────────────────────────────────────
+  //
+  // THE CATEGORY DECIDES, NOT THE FORM. This used to be gated on smart mode
+  // having named an entity — save a Credit Given without touching smart
+  // mode and no ledger row was written, with no error and no warning. Two
+  // ₹50,000 withdrawals went out that way: the cashbook had them, the
+  // Credits tab never heard of either, and the only thing that would ever
+  // have revealed it is somebody asking.
+  //
+  // Now any entry in a credit category writes rows, from whichever of
+  // smart mode / the employee split / nothing-at-all it actually has. See
+  // plannedCreditRows for why the nothing-at-all case still writes one.
   if (firstEntry) {
-    if (smartEffect.mode === 'credit_given' && (smartEffect.entity_id || smartEffect.entity_other)) {
-      await admin.from('credit_ledger').insert({
-        entity_type: smartEffect.entity_type || 'employee',
-        entity_id: smartEffect.entity_id || null,
-        credit_type: 'given',
-        amount: basePayload.amount,
-        credit_date: baseDates[0],
-        bank_account_id: basePayload.bank_account_id,
-        notes: smartEffect.entity_other
-          ? `${baseDescription}${smartEffect.entity_other ? ` (${smartEffect.entity_other})` : ''}`.trim()
-          : baseDescription || null,
-      })
-    }
-    if (smartEffect.mode === 'credit_return' && smartEffect.credit_id) {
-      await admin.from('credit_ledger').insert({
-        entity_type: smartEffect.entity_type || 'employee',
-        entity_id: smartEffect.entity_id || null,
-        credit_type: 'returned',
-        amount: basePayload.amount,
-        credit_date: baseDates[0],
-        bank_account_id: basePayload.bank_account_id,
-        notes: baseDescription || null,
-      })
+    const { data: cat } = await admin
+      .from('cashbook_categories')
+      .select('account_code')
+      .eq('id', basePayload.category_id)
+      .maybeSingle()
+
+    const rows = plannedCreditRows({
+      accountCode: cat?.account_code,
+      amountInr: Number(basePayload.amount_inr ?? basePayload.amount) || 0,
+      entryDate: baseDates[0],
+      bankAccountId: basePayload.bank_account_id ?? null,
+      description: baseDescription || null,
+      smart: {
+        mode: smartEffect.mode,
+        entityType: smartEffect.entity_type,
+        entityId: smartEffect.entity_id,
+        entityOther: smartEffect.entity_other,
+      },
+      splits: (splitEmployeeIds ?? []).map(employeeId => ({
+        employeeId,
+        // Split evenly, the same share saveEntryEmployeeSplits wrote.
+        amountInr: (Number(basePayload.amount_inr ?? basePayload.amount) || 0) / splitEmployeeIds!.length,
+      })),
+    })
+
+    if (rows.length) {
+      // No cashbook_entry_id column on credit_ledger, so the two are linked
+      // only by date, amount and bank. Good enough to reconcile by eye and
+      // not good enough to dedupe on — which is why this runs on the create
+      // path alone.
+      const { error: creditErr } = await admin
+        .from('credit_ledger')
+        .insert(rows)
+      // Loud, not silent: the entry itself is saved and correct, and a
+      // ledger row that failed to write is exactly the thing whose absence
+      // nobody notices.
+      if (creditErr) console.error('[cashbook] credit_ledger insert failed:', creditErr.message)
     }
   }
 
