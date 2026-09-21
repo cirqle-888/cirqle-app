@@ -48,6 +48,7 @@ const ROUTE_LABELS: Record<string, string> = {
   capture:       'AI Capture',
   'pricing-matrix': 'Pricing Matrix',
   'quote-planner': 'Quote Planner',
+  'client-analytics': 'Client Analytics',
   partners:      'Business Partners',
   payroll:       'HR & Payroll',
   reports:       'Reports',

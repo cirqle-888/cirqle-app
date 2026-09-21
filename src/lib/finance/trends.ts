@@ -126,7 +126,15 @@ export function resolveComparisonPeriods(
 
 // ── Series building ───────────────────────────────────────────────────────────
 
-function bucketKeys(period: PeriodRange, granularity: TrendGranularity): string[] {
+/**
+ * The bucket keys a period breaks into — every day, or every month.
+ *
+ * Exported so the per-client series (src/lib/analytics/client-series.ts) can
+ * bucket on exactly the same boundaries this chart does. A second copy of
+ * this walk is how two charts on the same screen start disagreeing about
+ * which day a task fell on.
+ */
+export function bucketKeys(period: PeriodRange, granularity: TrendGranularity): string[] {
   const keys: string[] = []
   if (granularity === 'day') {
     for (let k = period.from; k <= period.to; k = addDays(k, 1)) keys.push(k)
@@ -143,6 +151,16 @@ function bucketKeys(period: PeriodRange, granularity: TrendGranularity): string[
 
 const keyOf = (date: string, granularity: TrendGranularity) =>
   granularity === 'day' ? date : date.slice(0, 7)
+
+/** The short display label for a bucket key — "7 Jul" or "Jul 26". */
+export function bucketLabel(key: string, granularity: TrendGranularity): string {
+  return granularity === 'day' ? dayLabel(key) : monthLabel(key)
+}
+
+/** Which bucket a date falls in, for the given granularity. */
+export function bucketKeyFor(date: string, granularity: TrendGranularity): string {
+  return keyOf(date, granularity)
+}
 
 const r2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100
 

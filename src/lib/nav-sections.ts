@@ -207,6 +207,7 @@ export const navSections: NavSection[] = [
       // ── Specialist reports — every report lives HERE, not scattered ──
       { label: 'Company Operations',   href: '/dashboard/reports/company-ops', icon: Building2, requiredAnyPerm: ['reports.view_company_financials', 'reports.view'], keywords: ['P&L', 'burn rate', 'runway'] },
       { label: 'Client Profitability', href: '/dashboard/reports/client-profitability', icon: TrendingUp, requiredAnyPerm: ['reports.view_client_financials', 'reports.view'], keywords: ['margin', 'finance engine'] },
+      { label: 'Client Analytics',     href: '/dashboard/client-analytics', icon: TrendingUp, requiredAnyPerm: ['reports.view_client_financials', 'reports.view'], keywords: ['per client', 'trend', 'compare', 'month', 'week', 'quarter', 'year', 'growth', 'chart', 'graph', 'how is this client doing'] },
       { label: 'Cost & Tags',          href: '/dashboard/reports/cost-attribution', icon: Tags, requiredAnyPerm: ['reports.view_company_financials', 'reports.view'], keywords: ['spend', 'attribution'] },
       { label: 'Client Ranking',       href: '/dashboard/clients/ranking', icon: Award, requiredAnyPerm: ['reports.view_client_financials', 'reports.view'], keywords: ['reliability', 'scoring'] },
     ],
