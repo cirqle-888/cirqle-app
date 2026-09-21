@@ -9,15 +9,15 @@
  * here; a formula in a component is how two screens start disagreeing.
  */
 
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts'
 import Header from '@/components/layout/header'
-import { resolveComparisonPeriods, addDays, type ComparisonMode } from '@/lib/finance/trends'
+import { resolveComparisonPeriods, addDays, rangeDays, type ComparisonMode } from '@/lib/finance/trends'
 import {
   buildClientSeries, seriesTotals, rankClients, alignClientSeries, deltaPct,
-  isMoneyMetric, METRIC_LABELS,
+  isMoneyMetric, likeForLikePrevious, METRIC_LABELS, METRIC_SHORT,
   type ClientTaskPoint, type ClientMetric, type ClientTotals,
 } from '@/lib/analytics/client-series'
 
@@ -34,12 +34,12 @@ const TOOLTIP_STYLE = {
 const COLORS = ['#8b5cf6', '#06b6d4', '#f59e0b', '#ec4899', '#10b981', '#ef4444']
 const ALL = '__all__'
 
-const MODES: { key: ComparisonMode; label: string; prev: string }[] = [
-  { key: 'week',    label: 'Week',    prev: 'last week' },
-  { key: 'month',   label: 'Month',   prev: 'last month' },
-  { key: 'quarter', label: 'Quarter', prev: 'last quarter' },
-  { key: 'year',    label: 'Year',    prev: 'last year' },
-  { key: 'custom',  label: 'Custom',  prev: 'the period before' },
+const MODES: { key: ComparisonMode; label: string; prev: string; prevShort: string }[] = [
+  { key: 'week',    label: 'Week',    prev: 'last week',         prevShort: 'Last week' },
+  { key: 'month',   label: 'Month',   prev: 'last month',        prevShort: 'Last month' },
+  { key: 'quarter', label: 'Quarter', prev: 'last quarter',      prevShort: 'Last qtr' },
+  { key: 'year',    label: 'Year',    prev: 'last year',         prevShort: 'Last year' },
+  { key: 'custom',  label: 'Custom',  prev: 'the period before', prevShort: 'Before' },
 ]
 
 const METRICS: ClientMetric[] = ['jobs', 'valueInr', 'revenueInr', 'creatives']
@@ -62,6 +62,13 @@ export default function ClientAnalyticsClient(
     mode === 'custom' && customFrom && customTo && customFrom <= customTo
       ? { from: customFrom, to: customTo } : undefined,
   ), [mode, today, customFrom, customTo])
+
+  /* Like for like. resolveComparisonPeriods clamps the CURRENT period to
+     today but leaves the previous one whole, so on the 21st "this month"
+     is 21 days and "last month" is 31 — and the difference reads as a
+     collapse. Everything below compares equal spans. */
+  const prevPeriod = useMemo(
+    () => likeForLikePrevious(periods.current, periods.previous), [periods])
 
   const nameById = useMemo(
     () => new Map(clients.map(c => [c.id, c.name])), [clients])
@@ -89,8 +96,8 @@ export default function ClientAnalyticsClient(
   )), [selected, points, periods])
 
   const previous = useMemo(() => new Map(selected.map(id =>
-    [id, buildClientSeries(points, id === ALL ? null : id, periods.previous, periods.granularity)],
-  )), [selected, points, periods])
+    [id, buildClientSeries(points, id === ALL ? null : id, prevPeriod, periods.granularity)],
+  )), [selected, points, prevPeriod, periods])
 
   const rows = useMemo(
     () => alignClientSeries(current, compare ? previous : new Map(), metric),
@@ -103,6 +110,16 @@ export default function ClientAnalyticsClient(
     now: seriesTotals(current.get(id) ?? []),
     before: seriesTotals(previous.get(id) ?? []),
   })), [selected, current, previous, nameById])
+
+  /* Built once per period, not twice per client per render. A custom year
+     over sixty clients is 43,000 bucket objects, and it was doing that on
+     every checkbox tick. */
+  const table = useMemo(() => ranked.map(r => ({
+    id: r.id,
+    name: r.name,
+    now: seriesTotals(buildClientSeries(points, r.id, periods.current, periods.granularity)),
+    before: seriesTotals(buildClientSeries(points, r.id, prevPeriod, periods.granularity)),
+  })), [ranked, points, periods, prevPeriod])
 
   const modeMeta = MODES.find(m => m.key === mode)!
   const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN')
@@ -127,7 +144,10 @@ export default function ClientAnalyticsClient(
             <div>
               <p className="text-[11px] text-muted-foreground">
                 {periods.current.from} → {periods.current.to}
-                {compare && <> · vs {periods.previous.from} → {periods.previous.to}</>}
+                {compare && <> · vs {prevPeriod.from} → {prevPeriod.to}</>}
+                {compare && prevPeriod.to !== periods.previous.to && (
+                  <> <span className="text-amber-500">(same {rangeDays(prevPeriod)} days)</span></>
+                )}
                 {' · '}{periods.granularity === 'day' ? 'daily' : 'monthly'} buckets
               </p>
             </div>
@@ -218,11 +238,31 @@ export default function ClientAnalyticsClient(
                   )}
                 </div>
                 <p className="text-[11px] text-muted-foreground mt-0.5">{METRIC_LABELS[metric]}</p>
-                <dl className="mt-3 grid grid-cols-2 gap-y-1 text-[11px]">
-                  <dt className="text-muted-foreground">Jobs</dt><dd className="text-right">{s.now.jobs}</dd>
-                  <dt className="text-muted-foreground">Job value</dt><dd className="text-right">{inr(s.now.valueInr)}</dd>
-                  <dt className="text-muted-foreground">Billable</dt><dd className="text-right">{inr(s.now.revenueInr)}</dd>
-                  <dt className="text-muted-foreground">Creatives</dt><dd className="text-right">{s.now.creatives}</dd>
+                {/* All four figures, this period against the one before.
+                    The headline above answers one metric; a client's month is
+                    rarely one number — jobs can fall while value rises. */}
+                <dl className={`mt-3 grid gap-x-3 gap-y-1 text-[11px] ${compare ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                  {/* Empty, but NOT sr-only: that is position:absolute, which
+                      takes the cell out of the grid and shifts every row one
+                      column left. */}
+                  <dt aria-hidden="true" />
+                  <dd className="text-right text-muted-foreground font-medium">{modeMeta.label}</dd>
+                  {compare && <dd className="text-right text-muted-foreground font-medium">{modeMeta.prevShort}</dd>}
+                  {METRICS.map(k => {
+                    const d = deltaPct(s.now[k], s.before[k])
+                    return (
+                      <Fragment key={k}>
+                        <dt className="text-muted-foreground">{METRIC_SHORT[k]}</dt>
+                        <dd className="text-right tabular-nums">{cell(s.now, k)}</dd>
+                        {compare && (
+                          <dd className="text-right tabular-nums text-muted-foreground"
+                            title={d == null ? 'nothing to compare against' : `${d >= 0 ? '+' : ''}${d}%`}>
+                            {cell(s.before, k)}
+                          </dd>
+                        )}
+                      </Fragment>
+                    )
+                  })}
                 </dl>
               </div>
             )
@@ -263,39 +303,63 @@ export default function ClientAnalyticsClient(
           <h3 className="text-sm font-semibold px-4 pt-4">Every client in this period</h3>
           <div className="overflow-x-auto mt-3">
             <table className="w-full text-xs">
+              {/* Each measure becomes a PAIR of columns when comparing, under
+                  one grouped heading — the previous figure beside the current
+                  one rather than a bare percentage that hides both. */}
               <thead className="text-muted-foreground border-b border-border">
                 <tr>
-                  <th className="text-left font-medium px-4 py-2">Client</th>
-                  <th className="text-right font-medium px-4 py-2">Jobs</th>
-                  <th className="text-right font-medium px-4 py-2">Job value</th>
-                  <th className="text-right font-medium px-4 py-2">Billable</th>
-                  <th className="text-right font-medium px-4 py-2">Creatives</th>
-                  <th className="text-right font-medium px-4 py-2">vs {modeMeta.prev}</th>
+                  <th rowSpan={compare ? 2 : 1} className="text-left font-medium px-4 py-2 align-bottom">Client</th>
+                  {METRICS.map(k => (
+                    <th key={k} colSpan={compare ? 2 : 1}
+                      className={`text-right font-medium px-4 py-2 ${compare ? 'border-l border-border/40' : ''}`}>
+                      {METRIC_SHORT[k]}
+                    </th>
+                  ))}
+                  <th rowSpan={compare ? 2 : 1}
+                    className="text-right font-medium px-4 py-2 align-bottom border-l border-border/40">
+                    vs {modeMeta.prev}
+                  </th>
                 </tr>
+                {compare && (
+                  <tr className="text-[10px]">
+                    {METRICS.map(k => (
+                      <Fragment key={k}>
+                        <th className="text-right font-normal px-4 pb-2 border-l border-border/40">{modeMeta.label}</th>
+                        <th className="text-right font-normal px-4 pb-2 opacity-70">{modeMeta.prevShort}</th>
+                      </Fragment>
+                    ))}
+                  </tr>
+                )}
               </thead>
               <tbody>
-                {ranked.map(r => {
-                  const now = seriesTotals(buildClientSeries(points, r.id, periods.current, periods.granularity))
-                  const before = seriesTotals(buildClientSeries(points, r.id, periods.previous, periods.granularity))
-                  const d = deltaPct(now[metric], before[metric])
+                {table.map(r => {
+                  const d = deltaPct(r.now[metric], r.before[metric])
                   return (
                     <tr key={r.id} className="border-b border-border/50 hover:bg-secondary/40">
                       <td className="px-4 py-2">
                         <button onClick={() => toggle(r.id)} className="hover:underline text-left">{r.name}</button>
                       </td>
-                      <td className="px-4 py-2 text-right tabular-nums">{cell(now, 'jobs')}</td>
-                      <td className="px-4 py-2 text-right tabular-nums">{cell(now, 'valueInr')}</td>
-                      <td className="px-4 py-2 text-right tabular-nums">{cell(now, 'revenueInr')}</td>
-                      <td className="px-4 py-2 text-right tabular-nums">{cell(now, 'creatives')}</td>
-                      <td className={`px-4 py-2 text-right tabular-nums ${d == null ? 'text-muted-foreground'
-                        : d >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                      {METRICS.map(k => (
+                        <Fragment key={k}>
+                          <td className={`px-4 py-2 text-right tabular-nums ${compare ? 'border-l border-border/40' : ''}`}>
+                            {cell(r.now, k)}
+                          </td>
+                          {compare && (
+                            <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
+                              {cell(r.before, k)}
+                            </td>
+                          )}
+                        </Fragment>
+                      ))}
+                      <td className={`px-4 py-2 text-right tabular-nums border-l border-border/40 ${d == null
+                        ? 'text-muted-foreground' : d >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
                         {d == null ? '—' : `${d >= 0 ? '+' : ''}${d}%`}
                       </td>
                     </tr>
                   )
                 })}
-                {!ranked.length && (
-                  <tr><td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
+                {!table.length && (
+                  <tr><td colSpan={compare ? 10 : 6} className="px-4 py-6 text-center text-muted-foreground">
                     No client did any work in this period.
                   </td></tr>
                 )}

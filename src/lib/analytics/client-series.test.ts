@@ -6,8 +6,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildClientSeries, seriesTotals, rankClients, alignClientSeries, deltaPct,
-  isMoneyMetric, type ClientTaskPoint,
+  isMoneyMetric, likeForLikePrevious, type ClientTaskPoint,
 } from './client-series'
+import { rangeDays } from '@/lib/finance/trends'
 
 const JULY = { from: '2026-07-01', to: '2026-07-31' }
 const JUNE = { from: '2026-06-01', to: '2026-06-30' }
@@ -140,5 +141,41 @@ describe('isMoneyMetric', () => {
     expect(isMoneyMetric('revenueInr')).toBe(true)
     expect(isMoneyMetric('jobs')).toBe(false)
     expect(isMoneyMetric('creatives')).toBe(false)
+  })
+})
+
+describe('likeForLikePrevious', () => {
+  it('cuts last month to the days of this month that have happened', () => {
+    // 21 September against all 31 days of August called a third of the gap a
+    // decline. Compare 1–21 against 1–21.
+    expect(likeForLikePrevious({ from: '2026-09-01', to: '2026-09-21' },
+                               { from: '2026-08-01', to: '2026-08-31' }))
+      .toEqual({ from: '2026-08-01', to: '2026-08-21' })
+  })
+
+  it('leaves a finished period alone', () => {
+    expect(likeForLikePrevious({ from: '2026-08-01', to: '2026-08-31' },
+                               { from: '2026-07-01', to: '2026-07-31' }))
+      .toEqual({ from: '2026-07-01', to: '2026-07-31' })
+  })
+
+  it('never stretches a shorter previous period to fit', () => {
+    // March has 31 days and February 28: comparing March-to-date against
+    // February must not invent three days of February.
+    expect(likeForLikePrevious({ from: '2026-03-01', to: '2026-03-31' },
+                               { from: '2026-02-01', to: '2026-02-28' }))
+      .toEqual({ from: '2026-02-01', to: '2026-02-28' })
+  })
+
+  it('cuts a part-year back to the same day of the year', () => {
+    expect(likeForLikePrevious({ from: '2026-01-01', to: '2026-09-21' },
+                               { from: '2025-01-01', to: '2025-12-31' }))
+      .toEqual({ from: '2025-01-01', to: '2025-09-21' })
+  })
+
+  it('makes the two ranges exactly equal in length', () => {
+    const cur = { from: '2026-09-01', to: '2026-09-21' }
+    const cut = likeForLikePrevious(cur, { from: '2026-08-01', to: '2026-08-31' })
+    expect(rangeDays(cut)).toBe(rangeDays(cur))
   })
 })

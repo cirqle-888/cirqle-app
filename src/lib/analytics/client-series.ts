@@ -24,9 +24,31 @@
  */
 
 import {
-  bucketKeys, bucketKeyFor, bucketLabel,
+  bucketKeys, bucketKeyFor, bucketLabel, addDays, rangeDays,
   type PeriodRange, type TrendGranularity,
 } from '@/lib/finance/trends'
+
+/**
+ * The previous period cut to the same number of days as the current one.
+ *
+ * WHY THIS IS NEEDED. resolveComparisonPeriods clamps the CURRENT period to
+ * today but leaves the PREVIOUS one whole: on 21 September "this month" is
+ * 1–21 Sept and "last month" is all 31 days of August. Totalling those
+ * against each other compares 21 days of trading with 31 and calls the
+ * difference a decline — on real data it read −66.1% when a third of the gap
+ * was simply days that have not happened yet.
+ *
+ * The chart was never wrong, because buckets align by index and day 22
+ * onwards had nothing to sit against. The TOTALS and the percentage were.
+ *
+ * Only ever truncates. A current period that is already complete, or a custom
+ * range whose previous is built to match, comes back untouched.
+ */
+export function likeForLikePrevious(current: PeriodRange, previous: PeriodRange): PeriodRange {
+  const want = rangeDays(current)
+  if (want >= rangeDays(previous)) return previous
+  return { from: previous.from, to: addDays(previous.from, want - 1) }
+}
 
 /** One task, reduced to what a client series needs. */
 export interface ClientTaskPoint {
@@ -67,6 +89,20 @@ export const METRIC_LABELS: Record<ClientMetric, string> = {
   jobs: 'Jobs',
   valueInr: 'Job value',
   revenueInr: 'Billable revenue',
+  creatives: 'Creatives',
+}
+
+/**
+ * The same four, short enough for a card column.
+ *
+ * "Billable revenue" truncates to "Billable reve…" in a summary card, which
+ * reads worse than the shorter word does. The long labels stay on the mode
+ * buttons and headings where there is room for them.
+ */
+export const METRIC_SHORT: Record<ClientMetric, string> = {
+  jobs: 'Jobs',
+  valueInr: 'Job value',
+  revenueInr: 'Billable',
   creatives: 'Creatives',
 }
 
