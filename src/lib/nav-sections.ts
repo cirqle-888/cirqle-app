@@ -15,7 +15,7 @@ import {
   BadgePercent, CalendarRange, HardHat, Repeat, Package as PackageIcon,
   Share2, UserPlus, Gauge, ShieldCheck, MapPin,
   Scale, Receipt, Images,
-  Calculator, CreditCard,
+  Calculator, CreditCard, Landmark,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -124,6 +124,10 @@ export const navSections: NavSection[] = [
       { label: 'Cash Book',         href: '/dashboard/cashbook',   icon: Wallet,   requiredPerm: 'cashbook.view', keywords: ['expenses', 'bank', 'transactions'] },
       { label: 'Recurring',         href: '/dashboard/cashbook/recurring', icon: Repeat, requiredPerm: 'cashbook.view', keywords: ['rent', 'subscription', 'monthly bill', 'repeat', 'standing'] },
       { label: 'Card Statements',   href: '/dashboard/cashbook/cards', icon: CreditCard, requiredPerm: 'card_reconciliation.view', keywords: ['credit card', 'statement', 'reconcile', 'reconciliation', 'billing cycle', 'card bill'] },
+      // Sits beside Card Statements because it answers the same question about
+      // the other half of the money. Keywords lean hard on the words people
+      // actually search with when the books and the bank disagree.
+      { label: 'Bank Reconciliation', href: '/dashboard/cashbook/bank', icon: Landmark, requiredPerm: 'bank_reconciliation.view', keywords: ['bank statement', 'reconcile', 'reconciliation', 'mismatch', 'missing entries', 'unmatched', 'passbook', 'balance', 'import statement', 'pdf statement'] },
       // The monthly control centre: profit composition, payroll status,
       // corrections and the lock action for each financial period.
       { label: 'Months',            href: '/dashboard/finance/months', icon: CalendarRange, requiredPerm: 'payroll.view', keywords: ['financial timeline', 'period', 'close', 'lock', 'profit', 'month end'] },

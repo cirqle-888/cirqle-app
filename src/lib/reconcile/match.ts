@@ -253,3 +253,208 @@ export function cycleBalance(
   const difference = round2(linesTotal - statementTotal)
   return { linesTotal, statementTotal, difference, agrees: Math.abs(difference) < SAME }
 }
+
+/* ── Why a line did not match ────────────────────────────────────────────── */
+
+/**
+ * "Unmatched" is not an answer a person can act on.
+ *
+ * A line that found no entry is one of a handful of quite different
+ * situations, and they need quite different fixing:
+ *
+ *   · the amount is right but the date is weeks away — the entry was recorded
+ *     late, or against the wrong month;
+ *   · the date is right but the amount is off by a little — a fee, a rounding,
+ *     or a typo in the entry;
+ *   · an entry of exactly this size exists pointing the OTHER WAY — money in
+ *     was recorded as money out, which is the error that moves a
+ *     reconciliation by twice the amount and still looks tidy;
+ *   · nothing resembles it at all — the transaction was simply never recorded.
+ *
+ * Only the last of those is "missing". The other three are already in the
+ * books and wrong, which is the harder thing to find by eye and the reason
+ * this function exists.
+ */
+export type HintKind =
+  | 'outside-window'
+  | 'wrong-direction'
+  | 'amount-differs'
+  | 'nothing-near'
+
+export interface Hint {
+  lineId: string
+  kind: HintKind
+  /** The entry this is talking about, when there is one. */
+  entryId: string | null
+  /** A sentence for a person, not an error code. */
+  message: string
+  /** line − entry, when both exist. Positive means the statement is larger. */
+  difference: number | null
+  dayGap: number | null
+}
+
+/** How close two amounts must be before "nearly the same" is worth saying. */
+function nearlySame(a: number, b: number): boolean {
+  const gap = Math.abs(Math.abs(a) - Math.abs(b))
+  if (gap < SAME) return false                        // that is the same, not near
+  return gap <= Math.max(50, Math.abs(a) * 0.05)      // ₹50, or 5% on bigger sums
+}
+
+function days(n: number): string {
+  return n === 1 ? '1 day' : `${n} days`
+}
+
+/**
+ * Explain each line that found nothing.
+ *
+ * Candidates are the entries still unclaimed — an entry already matched to
+ * another line is not an explanation for this one. The search deliberately
+ * looks FURTHER than the matcher does (a wide multiple of its window), because
+ * the whole point is to find the entry that is in the wrong place.
+ */
+export function explainUnmatched(
+  lines: readonly StatementLine[],
+  candidates: readonly EntryCandidate[],
+  options: MatchOptions = {},
+): Hint[] {
+  const windowDays = options.windowDays ?? 4
+  const wide = windowDays * 10
+  const free = candidates.filter(c => !c.taken)
+
+  return lines.map(line => {
+    const near = free
+      .map(c => ({ ...c, gap: daysBetween(line.txnDate, c.entryDate) }))
+      .filter(c => c.gap <= wide)
+      .sort((a, b) => a.gap - b.gap)
+
+    const base = { lineId: line.id, entryId: null, difference: null, dayGap: null }
+
+    // 1. The same money, recorded too far away for the matcher to reach.
+    const sameAmount = near.find(c => Math.abs(c.amount - line.amount) < SAME)
+    if (sameAmount) {
+      return {
+        ...base,
+        kind: 'outside-window' as const,
+        entryId: sameAmount.id,
+        difference: 0,
+        dayGap: sameAmount.gap,
+        message: `The same ${round2(Math.abs(line.amount))} is recorded as “${sameAmount.description || 'no description'}” on ${sameAmount.entryDate} — ${days(sameAmount.gap)} from this line. Check the entry's date.`,
+      }
+    }
+
+    // 2. The same money, pointing the other way. Checked before "nearly the
+    //    same amount" because it is exact evidence and a worse mistake.
+    const flipped = near.find(c => Math.abs(c.amount + line.amount) < SAME)
+    if (flipped) {
+      return {
+        ...base,
+        kind: 'wrong-direction' as const,
+        entryId: flipped.id,
+        difference: round2(line.amount - flipped.amount),
+        dayGap: flipped.gap,
+        message: `“${flipped.description || 'no description'}” on ${flipped.entryDate} is this exact amount recorded the other way round. The statement says ${line.amount < 0 ? 'money out' : 'money in'}; the entry says ${flipped.amount < 0 ? 'money out' : 'money in'}.`,
+      }
+    }
+
+    // 3. Nearly the same money, close by — a fee, a rounding, or a typo.
+    const close = near
+      .filter(c => c.gap <= windowDays * 2 && Math.sign(c.amount) === Math.sign(line.amount) && nearlySame(c.amount, line.amount))
+      .sort((a, b) => Math.abs(Math.abs(a.amount) - Math.abs(line.amount)) - Math.abs(Math.abs(b.amount) - Math.abs(line.amount)))[0]
+    if (close) {
+      const diff = round2(line.amount - close.amount)
+      return {
+        ...base,
+        kind: 'amount-differs' as const,
+        entryId: close.id,
+        difference: diff,
+        dayGap: close.gap,
+        message: `“${close.description || 'no description'}” on ${close.entryDate} is close but not equal — the statement is ${Math.abs(diff)} ${Math.abs(line.amount) > Math.abs(close.amount) ? 'more' : 'less'} than the entry.`,
+      }
+    }
+
+    // 4. Nothing resembles it. This one really is missing from the books.
+    return {
+      ...base,
+      kind: 'nothing-near' as const,
+      message: 'Nothing like this is recorded in the cash book. It looks like a transaction that was never entered.',
+    }
+  })
+}
+
+/* ── Entries recorded twice ──────────────────────────────────────────────── */
+
+export interface DuplicateGroup {
+  entryIds: string[]
+  amount: number
+  message: string
+}
+
+/**
+ * Unclaimed entries that look like the same transaction entered twice.
+ *
+ * The other half of "what is in the books but not on the statement". A line
+ * matches ONE of a duplicated pair and the twin is left over, so the leftover
+ * reads as an unexplained entry when the real story is a double entry. Same
+ * amount, within a day or two, is the shape that actually happens — someone
+ * records a payment, does not see it, and records it again.
+ */
+export function flagDuplicateEntries(
+  entries: readonly EntryCandidate[],
+  withinDays = 2,
+): DuplicateGroup[] {
+  const free = entries.filter(e => !e.taken)
+  const byAmount = new Map<string, EntryCandidate[]>()
+  for (const e of free) {
+    const key = round2(e.amount).toFixed(2)
+    byAmount.set(key, [...(byAmount.get(key) ?? []), e])
+  }
+
+  const groups: DuplicateGroup[] = []
+  for (const [, sameSize] of byAmount) {
+    if (sameSize.length < 2) continue
+    const sorted = [...sameSize].sort((a, b) => a.entryDate.localeCompare(b.entryDate))
+    let run: EntryCandidate[] = [sorted[0]]
+    const flush = () => {
+      if (run.length >= 2) {
+        groups.push({
+          entryIds: run.map(e => e.id),
+          amount: round2(run[0].amount),
+          message: `${run.length} entries of ${round2(Math.abs(run[0].amount))} within ${days(withinDays)} of each other, none of them on the statement. Recorded twice?`,
+        })
+      }
+      run = []
+    }
+    for (let i = 1; i < sorted.length; i++) {
+      if (daysBetween(sorted[i - 1].entryDate, sorted[i].entryDate) <= withinDays) run.push(sorted[i])
+      else { flush(); run = [sorted[i]] }
+    }
+    flush()
+  }
+  return groups
+}
+
+/* ── Does a bank period add up? ──────────────────────────────────────────── */
+
+/**
+ * The bank equivalent of `cycleBalance`, and a stronger check than a card's.
+ *
+ * A bank statement states the balance it started from and the balance it
+ * ended at, so the lines between them are fully constrained: opening plus
+ * every movement must BE the closing balance. If it is not, the import is
+ * missing a line or read one's direction backwards — and no amount of matching
+ * against the cash book would have revealed that, because the fault is in the
+ * statement as imported, before the books are consulted at all.
+ */
+export function periodBalance(
+  lines: readonly StatementLine[],
+  opening: number | null,
+  closing: number | null,
+): { movement: number; expectedClosing: number | null; difference: number | null; agrees: boolean } {
+  const movement = round2(lines.reduce((sum, l) => sum + l.amount, 0))
+  if (opening === null || closing === null) {
+    return { movement, expectedClosing: null, difference: null, agrees: false }
+  }
+  const expectedClosing = round2(opening + movement)
+  const difference = round2(expectedClosing - closing)
+  return { movement, expectedClosing, difference, agrees: Math.abs(difference) < SAME }
+}

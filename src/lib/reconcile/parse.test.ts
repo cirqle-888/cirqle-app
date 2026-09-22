@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { guessColumns, parseStatementRows, parseStatementText, readAmount } from './parse'
+import { periodBalance } from './match'
 
 /**
  * Parsing a statement, and the two ways it silently ruins a reconciliation.
@@ -48,8 +49,8 @@ describe('pasted statement text', () => {
     `)
     expect(got.problems).toEqual([])
     expect(got.lines).toEqual([
-      { txnDate: '2026-06-25', description: 'ANTHROPIC CLAUDE.AI SUBSCRIPTION', amount: 2286.83, raw: expect.any(String) },
-      { txnDate: '2026-07-01', description: 'GODADDY.COM 4806505', amount: 715.84, raw: expect.any(String) },
+      { txnDate: '2026-06-25', description: 'ANTHROPIC CLAUDE.AI SUBSCRIPTION', amount: 2286.83, raw: expect.any(String), balanceAfter: null, reference: null },
+      { txnDate: '2026-07-01', description: 'GODADDY.COM 4806505', amount: 715.84, raw: expect.any(String), balanceAfter: null, reference: null },
     ])
   })
 
@@ -180,5 +181,176 @@ describe('tabular rows', () => {
   it('keeps the raw row so a bad parse can be seen', () => {
     const got = parseStatementRows([['25/06/2026', 'CLAUDE', '2286.83']], { date: 0, description: 1, amount: 2 })
     expect(got.lines[0].raw).toContain('CLAUDE')
+  })
+})
+
+/* ── Bank statements ─────────────────────────────────────────────────────── */
+
+describe('bank convention', () => {
+  it('reads a withdrawal as money OUT and a deposit as money IN', () => {
+    // The same 'Dr' that means a charge on a card means money leaving a bank.
+    const rows = [
+      ['01/07/2026', 'NEFT SEA STAR SUPERMARKET', '', '25,000.00', '1,25,000.00'],
+      ['02/07/2026', 'UPI ZOHO CORP', '1,180.00', '', '1,23,820.00'],
+    ]
+    const got = parseStatementRows(rows, { date: 0, description: 1, debit: 2, credit: 3, balance: 4 }, { convention: 'bank' })
+    expect(got.problems).toEqual([])
+    expect(got.lines.map(l => l.amount)).toEqual([25000, -1180])
+    expect(got.lines[1].balanceAfter).toBe(123820)
+  })
+
+  it('reads the SAME columns the opposite way for a card', () => {
+    const rows = [['01/07/2026', 'GODADDY', '715.84', '', '']]
+    const card = parseStatementRows(rows, { date: 0, description: 1, debit: 2, credit: 3 }, { convention: 'card' })
+    const bank = parseStatementRows(rows, { date: 0, description: 1, debit: 2, credit: 3 }, { convention: 'bank' })
+    expect(card.lines[0].amount).toBe(715.84)    // a charge raises what is owed
+    expect(bank.lines[0].amount).toBe(-715.84)   // a debit lowers what is held
+  })
+
+  it('refuses to guess a bare unmarked amount on a bank account', () => {
+    const rows = [['01/07/2026', 'SOME TRANSFER', '5,000.00']]
+    const got = parseStatementRows(rows, { date: 0, description: 1, amount: 2 }, { convention: 'bank' })
+    expect(got.lines).toEqual([])
+    expect(got.problems[0].reason).toMatch(/money in or out/i)
+  })
+
+  it('still takes a marked amount on a bank account', () => {
+    const rows = [
+      ['01/07/2026', 'INTEREST', '412.00 Cr'],
+      ['02/07/2026', 'BANK CHARGES', '118.00 Dr'],
+    ]
+    const got = parseStatementRows(rows, { date: 0, description: 1, amount: 2 }, { convention: 'bank' })
+    expect(got.lines.map(l => l.amount)).toEqual([412, -118])
+  })
+
+  it('never lets a Balance column be mistaken for the amount', () => {
+    const guess = guessColumns(['Date', 'Narration', 'Withdrawal Amt.', 'Deposit Amt.', 'Closing Balance'])
+    expect(guess.debit).toBe(2)
+    expect(guess.credit).toBe(3)
+    expect(guess.balance).toBe(4)
+    expect(guess.amount).toBeUndefined()
+  })
+
+  it('picks up a reference column', () => {
+    expect(guessColumns(['Txn Date', 'Particulars', 'Chq No', 'Debit', 'Credit']).reference).toBe(2)
+  })
+})
+
+describe('a pasted bank statement with a running balance', () => {
+  // The balance column settles every sign, so nothing here carries Dr/Cr.
+  const paste = `
+    01/07/2026   NEFT SEA STAR SUPERMARKET      25,000.00   1,25,000.00
+    02/07/2026   UPI ZOHO CORP                   1,180.00   1,23,820.00
+    03/07/2026   SALARY CQID004                 18,000.00   1,05,820.00
+  `
+
+  it('uses the balance moving to decide direction', () => {
+    const got = parseStatementText(paste, { convention: 'bank', openingBalance: 100000 })
+    expect(got.problems).toEqual([])
+    expect(got.balanceChain?.used).toBe(true)
+    expect(got.lines.map(l => l.amount)).toEqual([25000, -1180, -18000])
+    expect(got.lines.map(l => l.balanceAfter)).toEqual([125000, 123820, 105820])
+  })
+
+  it('keeps the description clear of both numbers', () => {
+    const got = parseStatementText(paste, { convention: 'bank', openingBalance: 100000 })
+    expect(got.lines[0].description).toBe('NEFT SEA STAR SUPERMARKET')
+  })
+
+  it('reports the first line when nothing settles its direction', () => {
+    // No opening balance given, so line 1 has no predecessor to compare to and
+    // carries no marker. It is reported; the rest still come through.
+    const got = parseStatementText(paste, { convention: 'bank' })
+    expect(got.lines.map(l => l.amount)).toEqual([-1180, -18000])
+    expect(got.problems).toHaveLength(1)
+    expect(got.problems[0].reason).toMatch(/money in or out/i)
+  })
+
+  it('leaves a card paste alone', () => {
+    const got = parseStatementText('25/06/2026  ANTHROPIC  2,286.83')
+    expect(got.lines[0].amount).toBe(2286.83)
+    expect(got.balanceChain).toBeUndefined()
+  })
+})
+
+describe("the app's own statement template", () => {
+  it('maps its headers without the person touching anything', () => {
+    const guess = guessColumns(['account', 'date', 'description', 'reference', 'money_in', 'money_out', 'balance'])
+    expect(guess).toMatchObject({ date: 1, description: 2, reference: 3, credit: 4, debit: 5, balance: 6 })
+    expect(guess.amount).toBeUndefined()
+  })
+})
+
+describe('an account that goes overdrawn mid-statement', () => {
+  /**
+   * Found against a real Kotak statement, 2026-09-22.
+   *
+   * The balance column prints a MAGNITUDE. When the account is overdrawn the
+   * true balance is negative and the statement still shows a positive-looking
+   * number, with no minus and no Dr marker. Reading the column as written
+   * therefore inverts every line until the balance climbs back above zero —
+   * deposits are read as withdrawals, silently, and the reconciliation is out
+   * by twice each one while still looking tidy.
+   *
+   * Opening 10,000; a 30,000 payment takes it to −20,000 (printed 20,000);
+   * three receipts bring it back to +15,000.
+   */
+  const paste = `
+    01 Sep 2026  PAYMENT OUT      30,000.00   20,000.00
+    02 Sep 2026  RECEIPT ONE       5,000.00   15,000.00
+    03 Sep 2026  RECEIPT TWO       5,000.00   10,000.00
+    04 Sep 2026  RECEIPT THREE    25,000.00   15,000.00
+  `
+
+  it('reads the receipts as money IN, not money out', () => {
+    const got = parseStatementText(paste, { convention: 'bank', openingBalance: 10000 })
+    expect(got.problems).toEqual([])
+    expect(got.lines.map(l => l.amount)).toEqual([-30000, 5000, 5000, 25000])
+  })
+
+  it('records the balance as genuinely negative while it is', () => {
+    const got = parseStatementText(paste, { convention: 'bank', openingBalance: 10000 })
+    expect(got.lines.map(l => l.balanceAfter)).toEqual([-20000, -15000, -10000, 15000])
+  })
+
+  it('still trusts the balance column across the crossing', () => {
+    // A zero crossing shows up as the SUM of two balances rather than their
+    // difference. Counting only differences made the column look unreliable
+    // exactly where it mattered most.
+    const got = parseStatementText(paste, { convention: 'bank', openingBalance: 10000 })
+    expect(got.balanceChain).toEqual({ used: true, checked: 3, agreed: 3 })
+  })
+
+  it('cannot tell which side of zero it started on without an opening balance', () => {
+    // A LIMITATION, asserted so it stays visible rather than being discovered
+    // during a reconciliation.
+    //
+    // The balance column constrains only the GAPS between rows, so a statement
+    // running +20,000 → +15,000 and one running −20,000 → −15,000 print
+    // identically. Nothing inside the text can separate them; only the opening
+    // balance can, and without it the parser assumes the account is in credit,
+    // which is right for almost every statement and wrong for this one.
+    //
+    // It is not silent. The first line has nothing to reconcile against and is
+    // reported, and the period's own opening-plus-movement-equals-closing
+    // check (periodBalance) then fails, which is what the import screen refuses
+    // to close on. The fix for a person seeing that is to fill in the opening
+    // balance — which is exactly what the screen asks for.
+    const got = parseStatementText(paste, { convention: 'bank' })
+    expect(got.problems).toHaveLength(1)
+    expect(got.problems[0].reason).toMatch(/money in or out/i)
+    expect(got.lines.map(l => l.amount)).toEqual([-5000, -5000, -25000])
+  })
+
+  it('and the period check is what catches that', () => {
+    const got = parseStatementText(paste, { convention: 'bank' })
+    const lines = got.lines.map((l, i) => ({ id: String(i), txnDate: l.txnDate, description: l.description, amount: l.amount }))
+    // True closing is 15,000. The unanchored read moves the wrong way, so the
+    // period refuses to balance and the screen says a line was read backwards.
+    expect(periodBalance(lines, 10000, 15000).agrees).toBe(false)
+    // With the opening balance supplied, it reconciles exactly.
+    const ok = parseStatementText(paste, { convention: 'bank', openingBalance: 10000 })
+    const okLines = ok.lines.map((l, i) => ({ id: String(i), txnDate: l.txnDate, description: l.description, amount: l.amount }))
+    expect(periodBalance(okLines, 10000, 15000).agrees).toBe(true)
   })
 })

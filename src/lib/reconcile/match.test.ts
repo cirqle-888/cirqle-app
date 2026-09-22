@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { cycleBalance, proposeForLine, reconcile, type EntryCandidate, type StatementLine } from './match'
+import {
+  cycleBalance, explainUnmatched, flagDuplicateEntries, periodBalance, proposeForLine, reconcile,
+  type EntryCandidate, type StatementLine,
+} from './match'
 
 /**
  * The matcher, and mostly the ways it could be confidently wrong.
@@ -196,5 +199,109 @@ describe('does the cycle add up', () => {
     const b = cycleBalance([line('a', '2026-05-01', 'X', 700)], null)
     expect(b.agrees).toBe(false)
     expect(b.difference).toBeNull()
+  })
+})
+
+/* ── Explaining what did not match ───────────────────────────────────────── */
+
+// Bank-shaped builders: negative is money out, so these default to a payment
+// of 25,000 leaving the account on 10 July.
+const bankLine = (over: Partial<StatementLine> = {}): StatementLine =>
+  ({ id: 'L1', txnDate: '2026-07-10', description: 'NEFT SEA STAR', amount: -25000, ...over })
+
+const bankEntry = (over: Partial<EntryCandidate> = {}): EntryCandidate =>
+  ({ id: 'E1', entryDate: '2026-07-10', description: 'Sea Star payment', amount: -25000, ...over })
+
+describe('explainUnmatched', () => {
+  it('finds the right money recorded on the wrong date', () => {
+    const [hint] = explainUnmatched([bankLine()], [bankEntry({ entryDate: '2026-07-25' })])
+    expect(hint.kind).toBe('outside-window')
+    expect(hint.entryId).toBe('E1')
+    expect(hint.dayGap).toBe(15)
+    expect(hint.message).toMatch(/15 days/)
+  })
+
+  it('finds the amount recorded the wrong way round', () => {
+    // The statement says 25,000 went out; the cash book says it came in.
+    const [hint] = explainUnmatched([bankLine()], [bankEntry({ amount: 25000 })])
+    expect(hint.kind).toBe('wrong-direction')
+    expect(hint.message).toMatch(/other way round/)
+    expect(hint.message).toMatch(/statement says money out/)
+  })
+
+  it('finds an entry that is close but not equal', () => {
+    const [hint] = explainUnmatched([bankLine()], [bankEntry({ amount: -24800 })])
+    expect(hint.kind).toBe('amount-differs')
+    expect(hint.difference).toBe(-200)      // line − entry
+    expect(hint.message).toMatch(/200 more than the entry/)
+  })
+
+  it('says plainly when a transaction was never recorded', () => {
+    const [hint] = explainUnmatched([bankLine()], [bankEntry({ amount: -17, entryDate: '2026-01-01' })])
+    expect(hint.kind).toBe('nothing-near')
+    expect(hint.entryId).toBeNull()
+  })
+
+  it('never explains a line with an entry another line already claimed', () => {
+    const [hint] = explainUnmatched([bankLine()], [bankEntry({ entryDate: '2026-07-25', taken: true })])
+    expect(hint.kind).toBe('nothing-near')
+  })
+
+  it('prefers the exact amount over a near one', () => {
+    const [hint] = explainUnmatched([bankLine()], [
+      bankEntry({ id: 'NEAR', amount: -24900, entryDate: '2026-07-11' }),
+      bankEntry({ id: 'EXACT', amount: -25000, entryDate: '2026-07-28' }),
+    ])
+    expect(hint.entryId).toBe('EXACT')
+  })
+})
+
+describe('flagDuplicateEntries', () => {
+  it('spots the same payment entered twice', () => {
+    const groups = flagDuplicateEntries([
+      bankEntry({ id: 'A', entryDate: '2026-07-10' }),
+      bankEntry({ id: 'B', entryDate: '2026-07-11' }),
+    ])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].entryIds).toEqual(['A', 'B'])
+  })
+
+  it('leaves a genuine monthly repeat alone', () => {
+    // Same rent, a month apart — a standing payment, not a double entry.
+    const groups = flagDuplicateEntries([
+      bankEntry({ id: 'A', entryDate: '2026-06-10' }),
+      bankEntry({ id: 'B', entryDate: '2026-07-10' }),
+    ])
+    expect(groups).toEqual([])
+  })
+
+  it('ignores entries a statement line already claimed', () => {
+    expect(flagDuplicateEntries([
+      bankEntry({ id: 'A', entryDate: '2026-07-10', taken: true }),
+      bankEntry({ id: 'B', entryDate: '2026-07-10' }),
+    ])).toEqual([])
+  })
+})
+
+describe('periodBalance', () => {
+  it('agrees when the movement carries opening to closing', () => {
+    const got = periodBalance(
+      [bankLine({ amount: 25000 }), bankLine({ id: 'L2', amount: -1180 })],
+      100000, 123820,
+    )
+    expect(got.movement).toBe(23820)
+    expect(got.expectedClosing).toBe(123820)
+    expect(got.agrees).toBe(true)
+  })
+
+  it('names the gap when a line was missed on import', () => {
+    const got = periodBalance([bankLine({ amount: 25000 })], 100000, 123820)
+    expect(got.difference).toBe(1180)      // expected 125000, statement says 123820
+    expect(got.agrees).toBe(false)
+  })
+
+  it('cannot agree without both balances', () => {
+    expect(periodBalance([bankLine()], null, 5).agrees).toBe(false)
+    expect(periodBalance([bankLine()], 5, null).expectedClosing).toBeNull()
   })
 })

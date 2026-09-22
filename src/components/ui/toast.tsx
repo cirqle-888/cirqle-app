@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import { CheckCircle, AlertCircle, Info, X, RotateCcw } from 'lucide-react'
 
 export type ToastType = 'success' | 'error' | 'info'
@@ -148,25 +148,41 @@ export function ToastContainer({ toasts, onDismiss }: ContainerProps) {
 // ── Hook ─────────────────────────────────────────────────────────────────────
 let toastId = 0
 
+/**
+ * Toasts, with STABLE function identities.
+ *
+ * Every one of these used to be a fresh arrow function built during render, so
+ * `toastError` was a different value on every pass. That is invisible until
+ * one of them lands in a `useEffect` dependency array — at which point the
+ * effect re-runs on every render, sets state, and renders again. Bank
+ * Reconciliation did exactly that on 2026-09-22 and fired ~1,900 server-action
+ * requests at the dev server before anyone noticed, because a render loop
+ * driven by an effect shows up as load rather than as an error.
+ *
+ * The callbacks are therefore memoised once and never change. `toasts` itself
+ * still changes when one is added — it has to, or nothing would appear — so
+ * the returned object changes with it; what matters is that a component
+ * destructuring `toastError` gets the same function every time.
+ */
 export function useToast() {
   const [toasts, setToasts] = useState<ToastMessage[]>([])
 
-  function show(type: ToastType, title: string, body?: string, duration = 3000, action?: ToastMessage['action']) {
+  const show = useCallback((type: ToastType, title: string, body?: string, duration = 3000, action?: ToastMessage['action']) => {
     const id = String(++toastId)
     setToasts(prev => [...prev, { id, type, title, body, duration, action }])
     return id
-  }
+  }, [])
 
-  function dismiss(id: string) {
+  const dismiss = useCallback((id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id))
-  }
+  }, [])
 
-  return {
-    toasts,
-    dismiss,
-    success:    (title: string, body?: string, duration?: number, action?: ToastMessage['action']) => show('success', title, body, duration, action),
-    error:      (title: string, body?: string, duration?: number) => show('error',   title, body, duration),
-    info:       (title: string, body?: string, duration?: number, action?: ToastMessage['action']) => show('info',    title, body, duration, action),
-    toastError: (title: string, body?: string) => show('error', title, body),
-  }
+  const success = useCallback((title: string, body?: string, duration?: number, action?: ToastMessage['action']) => show('success', title, body, duration, action), [show])
+  const error = useCallback((title: string, body?: string, duration?: number) => show('error', title, body, duration), [show])
+  const info = useCallback((title: string, body?: string, duration?: number, action?: ToastMessage['action']) => show('info', title, body, duration, action), [show])
+  const toastError = useCallback((title: string, body?: string) => show('error', title, body), [show])
+
+  return useMemo(
+    () => ({ toasts, dismiss, success, error, info, toastError }),
+    [toasts, dismiss, success, error, info, toastError])
 }

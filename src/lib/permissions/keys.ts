@@ -229,6 +229,14 @@ export const PERMS = {
   /** Import a statement, match its lines to entries, and close a cycle. */
   CARD_RECONCILIATION_MANAGE: 'card_reconciliation.manage',
 
+  // Bank reconciliation (migration 20260922100000). A bank statement is every
+  // rupee that moved through the company, line by line, so viewing is a money
+  // permission — see FINANCIAL_READ_PERMS below.
+  /** Open a bank statement and see how it reconciles against the cash book. */
+  BANK_RECONCILIATION_VIEW:   'bank_reconciliation.view',
+  /** Import a statement, match its lines to entries, and close a period. */
+  BANK_RECONCILIATION_MANAGE: 'bank_reconciliation.manage',
+
   // Marketing asset ownership (migration 20260814140000). Assigning an asset
   // moves reporting, leads and billing between parties, so it is its own key
   // rather than riding on social.manage.
@@ -402,6 +410,9 @@ export const CRITICAL_PERMS: ReadonlySet<string> = new Set<string>([
   // A card statement is a line-by-line list of what the company spent, which
   // is the cashbook's amounts by another route.
   PERMS.CARD_RECONCILIATION_VIEW,
+  // A bank statement is the same exposure and then some: every receipt and
+  // payment, with the running balance beside it.
+  PERMS.BANK_RECONCILIATION_VIEW,
   PERMS.CASHBOOK_VIEW_AMOUNTS,
   // The bank's actual cash position — company-sensitive the same way a single
   // entry's amount is, just aggregated.

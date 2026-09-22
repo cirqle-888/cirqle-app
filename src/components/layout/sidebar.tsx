@@ -382,11 +382,26 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
       <WorkspaceSwitcher isCollapsed={isCollapsed} />
 
       {/* Nav */}
-      {/* pb-20 on mobile clears the fixed bottom nav bar this same content
-          renders inside of on a phone (the desktop rail has none, hence
-          md:pb-4) — without it the last section(s) sat underneath the bar,
-          unreachable no matter how far you scrolled. */}
-      <nav className={`flex-1 pt-4 pb-20 md:pb-4 overflow-y-auto ${isCollapsed ? 'px-2' : 'px-3'}`}>
+      {/* Nav — the scrolling region, and three things it needs to stay one.
+
+          min-h-0: a `flex-1` child of a flex COLUMN gets `min-height: auto`,
+          which means "at least as tall as my content". So `overflow-y-auto`
+          never engaged: instead of scrolling, the nav grew to its full height
+          and the parent's `overflow-hidden` clipped whatever did not fit. The
+          last sections — Tools, System — were not below a scroll position, they
+          were outside the box altogether, which is why no amount of scrolling
+          reached them.
+
+          pb: the fixed bottom bar measures 72px PLUS the home-indicator inset,
+          which is another 34px on a notched phone — so the old flat `pb-20`
+          (80px) was short by 26px exactly where it mattered. --bottom-nav-h
+          carries that sum (globals.css) and is already 0px at md+ and on
+          desktop, so one expression replaces the hardcoded pair.
+
+          overscroll-contain: stops a flick that reaches the end of the nav
+          from chaining into the page behind the drawer, which on iOS reads as
+          the menu scrolling the wrong thing. */}
+      <nav className={`flex-1 min-h-0 overscroll-contain pt-4 pb-[calc(var(--bottom-nav-h,0px)+1rem)] overflow-y-auto ${isCollapsed ? 'px-2' : 'px-3'}`}>
         <FavoritesSection isCollapsed={isCollapsed} activeHref={activeHref} onNavClick={onNavClick} />
         {visibleNavSections.map((section, sIdx) => {
           const visibleItems = section.items
@@ -521,8 +536,12 @@ function EmployeeProfileSheet({ onClose, onChangePassword }: { onClose: () => vo
         onClick={onClose}
         aria-hidden="true"
       />
-      {/* Sheet */}
-      <div className="fixed bottom-[57px] left-0 right-0 z-50 bg-sidebar border-t border-sidebar-border rounded-t-2xl shadow-2xl px-4 pt-4 pb-3 animate-in slide-in-from-bottom-4 duration-200">
+      {/* Sheet — sits directly on top of the bottom nav bar.
+          --bottom-nav-h rather than a literal: the old `bottom-[57px]` both
+          understated the bar's real height and ignored the home-indicator
+          inset entirely, so on a notched phone the sheet's lower edge slid
+          underneath the very bar it is anchored to. */}
+      <div className="fixed bottom-[var(--bottom-nav-h,0px)] left-0 right-0 z-50 bg-sidebar border-t border-sidebar-border rounded-t-2xl shadow-2xl px-4 pt-4 pb-3 animate-in slide-in-from-bottom-4 duration-200">
         {/* Handle */}
         <div className="w-10 h-1 bg-border rounded-full mx-auto mb-4" />
 
@@ -654,7 +673,14 @@ export default function Sidebar() {
           employee header reserves no room at top-left for one. */}
       {(
         <aside
-          className={`md:hidden fixed top-0 left-0 z-50 h-full w-72 bg-sidebar border-r border-sidebar-border shadow-2xl flex flex-col
+          /* h-dvh, not h-full. A `fixed` element's `height: 100%` resolves
+             against the initial containing block — the LARGE viewport, as if
+             the browser's toolbars were hidden. With them showing (Safari on
+             iPhone and iPad, and the in-app WebView) the drawer's bottom sits
+             below the visible area, taking the end of its scroller with it.
+             The desktop rail above already uses h-dvh; this had been left
+             behind. */
+          className={`md:hidden fixed top-0 left-0 z-50 h-dvh w-72 bg-sidebar border-r border-sidebar-border shadow-2xl flex flex-col
             transition-transform duration-300 ease-in-out
             ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
         >

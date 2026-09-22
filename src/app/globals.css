@@ -285,7 +285,15 @@
   --bottom-safe-pb: env(safe-area-inset-bottom, 0px);
 }
 [data-bottom-nav] {
-  --bottom-nav-h: calc(57px + env(safe-area-inset-bottom, 0px));
+  /* 72px is the bar's MEASURED height (icon + label + pt-1), verified in the
+     browser at 320, 375, 430 and 767px wide — it does not vary with width.
+     It read 57px until 2026-09-22, which was 15px short, so everything
+     positioned by this token — the Contributions save bar, the field-marketing
+     panel bar, the sidebar's own scroll padding — sat with its last 15px
+     underneath the nav. If the bar's contents ever change, re-measure with
+     `document.querySelector('.md\:hidden.fixed.bottom-0').getBoundingClientRect().height`
+     and put the answer here rather than padding around it at each call site. */
+  --bottom-nav-h: calc(72px + env(safe-area-inset-bottom, 0px));
   --bottom-bar-pb: 0.75rem;
   --bottom-safe-pb: 0px;
 }

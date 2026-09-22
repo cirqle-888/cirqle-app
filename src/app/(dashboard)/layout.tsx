@@ -223,7 +223,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 md:pb-0 restores normal layout on desktop where sidebar is visible. */}
             {/* pb-16 on mobile clears the bottom nav bar; md:pb-0 restores the
                 normal layout on desktop, where the bar is hidden. */}
-            <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto overscroll-none bg-background w-full pb-16 md:pb-0">
+            {/* pb from --bottom-nav-h, not a literal: `pb-16` was 64px against
+                a bar that measures 72px before the home-indicator inset is
+                added, so the last few pixels of every page sat under it. The
+                token is 0px at md+, which is what `md:pb-0` used to say. */}
+            <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto overscroll-none bg-background w-full pb-[var(--bottom-nav-h,0px)]">
               {children}
             </main>
             {/* TEMPORARY — remove with the permission bypass.

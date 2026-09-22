@@ -14,7 +14,7 @@
  *   · one statement per card per cycle — UNIQUE (bank_account_id, cycle_end),
  *     so a second import of the same month is refused rather than duplicated.
  *
- * Matching itself is in src/lib/cards/match.ts and proposes only; nothing here
+ * Matching itself is in src/lib/reconcile/match.ts and proposes only; nothing here
  * applies a proposal without a person asking for it.
  */
 
@@ -25,8 +25,8 @@ import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { round2 } from '@/lib/calculations/currency'
 import { cycleFor, cycleLabel, type Cycle } from '@/lib/cards/cycle'
-import { reconcile, type EntryCandidate, type Proposal, type StatementLine } from '@/lib/cards/match'
-import type { ParsedLine } from '@/lib/cards/parse'
+import { reconcile, type EntryCandidate, type Proposal, type StatementLine } from '@/lib/reconcile/match'
+import type { ParsedLine } from '@/lib/reconcile/parse'
 
 const REVALIDATE = '/dashboard/cashbook/cards'
 

@@ -45,6 +45,10 @@ const ROUTE_PERMS: Array<[RegExp, string | string[]]> = [
   // Card statements are the company's own spending line by line, so they get
   // their own key rather than riding on cashbook.view — see keys.ts.
   [/^\/dashboard\/cashbook\/cards/,          'card_reconciliation.view'],
+  // A bank statement is every rupee that moved, with the running balance
+  // beside it — the same reasoning as cards, and the same need for its own
+  // key rather than riding on cashbook.view.
+  [/^\/dashboard\/cashbook\/bank/,           'bank_reconciliation.view'],
   [/^\/dashboard\/cashbook/,                'cashbook.view'],
   // Three rungs of one ladder — any of them opens the page. The page itself
   // then strips the rows to what that rung actually allows.
