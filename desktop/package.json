@@ -1,16 +1,18 @@
 {
   "name": "cirqle-desktop",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "description": "Cirqle + WhatsApp Web, side by side, with one-tap clipboard \u2192 Quick Capture.",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "dev": "CIRQLE_URL=http://localhost:3000 electron .",
-    "pack": "npm run check:ipc && electron-builder --mac --dir",
-    "dmg": "npm run check:ipc && electron-builder --mac dmg",
-    "dmg:universal": "npm run check:ipc && electron-builder --mac dmg --universal",
-    "check:ipc": "node scripts/check-ipc-channels.js"
+    "pack": "npm run check && electron-builder --mac --dir",
+    "dmg": "npm run check && electron-builder --mac dmg",
+    "dmg:universal": "npm run check && electron-builder --mac dmg --universal",
+    "check": "npm run check:ipc && npm run check:panes",
+    "check:ipc": "node scripts/check-ipc-channels.js",
+    "check:panes": "node scripts/check-panes.js"
   },
   "devDependencies": {
     "electron": "^43.4.0",

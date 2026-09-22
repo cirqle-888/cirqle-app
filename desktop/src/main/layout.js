@@ -39,14 +39,41 @@ const MIN_PANE = 0.12   // no pane may shrink below 12% of the window
 const MAX_PANES = 4
 
 // ── Pane helpers ─────────────────────────────────────────────────────────────
+/**
+ * The one-of-a-kind panes, in one place.
+ *
+ * ONE place on purpose. This used to be a chain of ifs in viewFor() and a
+ * separate hand-written list of setVisible(false) calls in layout(), and the
+ * two drifted: 'studio' was added to the first and forgotten in the second,
+ * so closing the Offer Studio split left its view painted at its old bounds,
+ * floating over whatever re-laid out beneath it. Both now read this map, so a
+ * new pane cannot be half-registered.
+ */
+const SINGLETON_PANES = {
+  cirqle: () => deps.getCirqle(),
+  cirqle2: () => deps.getCirqle2(),
+  studio: () => deps.getStudio(),
+  studio2: () => deps.getStudio2(),
+}
+
 function viewFor(pane) {
-  if (pane === 'cirqle') return deps.getCirqle()
-  if (pane === 'cirqle2') return deps.getCirqle2()
-  if (pane === 'studio') return deps.getStudio()
-  if (pane === 'studio2') return deps.getStudio2()
+  if (SINGLETON_PANES[pane]) return SINGLETON_PANES[pane]() || null
   if (pane.startsWith('wa:')) return whatsapps[pane.slice(3)] || null
   if (pane.startsWith('web:')) return deps.getWebs()[pane.slice(4)] || null
   return null
+}
+
+/** Every pane view that exists, on screen or not — what layout() hides first. */
+function allPaneViews() {
+  const out = []
+  for (const key in SINGLETON_PANES) {
+    const v = SINGLETON_PANES[key]()
+    if (v) out.push(v)
+  }
+  for (const id in whatsapps) out.push(whatsapps[id])
+  const webs = deps.getWebs()
+  for (const id in webs) out.push(webs[id])
+  return out
 }
 
 function normalizeSizes() {
@@ -97,11 +124,7 @@ function layout() {
   }
 
   // Hide everything first, then place + show only the panes in the list.
-  for (const id in whatsapps) whatsapps[id].setVisible(false)
-  const webs = deps.getWebs()
-  for (const id in webs) webs[id].setVisible(false)
-  if (deps.getCirqle()) deps.getCirqle().setVisible(false)
-  if (deps.getCirqle2()) deps.getCirqle2().setVisible(false)
+  for (const v of allPaneViews()) v.setVisible(false)
 
   const n = state.panes.length
   deps.ensureSplitters(Math.max(0, n - 1))
