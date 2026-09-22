@@ -12,6 +12,7 @@
  *              'cirqle'   the main Cirqle pane
  *              'cirqle2'  the duplicated Cirqle pane (compare)
  *              'studio'   Offer Studio, the flyer app
+ *              'studio2'  a 2nd Offer Studio pane, the flyer app split in two
  *              'wa:<id>'  a WhatsApp account pane
  *              'web:<id>' a built-in browser pane
  * `sizes`  — width fraction per pane, same length as `panes`, sums to ~1.

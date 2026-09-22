@@ -19,6 +19,8 @@ const deps = {
   getChrome: () => null,
   getCirqle: () => null,
   getCirqle2: () => null,
+  getStudio: () => null,
+  getStudio2: () => null,
   getWebs: () => ({}),
   getSplitters: () => [],
   getOverlay: () => null,
@@ -41,6 +43,7 @@ function viewFor(pane) {
   if (pane === 'cirqle') return deps.getCirqle()
   if (pane === 'cirqle2') return deps.getCirqle2()
   if (pane === 'studio') return deps.getStudio()
+  if (pane === 'studio2') return deps.getStudio2()
   if (pane.startsWith('wa:')) return whatsapps[pane.slice(3)] || null
   if (pane.startsWith('web:')) return deps.getWebs()[pane.slice(4)] || null
   return null

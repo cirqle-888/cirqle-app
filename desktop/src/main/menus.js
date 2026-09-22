@@ -19,6 +19,9 @@ const FILE_URL_RE = /\.(pdf|xlsx?|csv|docx?|pptx?|png|jpe?g|zip)(\?|#|$)/i
 const deps = {
   getWin: () => null,
   reloadCirqle: () => {},
+  reloadStudio: () => {},
+  toggleStudio: () => {},
+  toggleStudio2: () => {},
   sendTextToCirqle: () => {},
   sendClipboardToCirqle: () => {},
   navigate: () => {},
@@ -121,12 +124,18 @@ function buildMenu() {
       submenu: [
         { label: 'Reload Cirqle', accelerator: 'CmdOrCtrl+R', click: () => deps.reloadCirqle() },
         { label: 'Reload WhatsApp', click: () => wa.whatsapps[state.activeWa] && wa.whatsapps[state.activeWa].webContents.reload() },
-        { label: 'Reload Offer Studio', enabled: state.panes.includes('studio'), click: () => deps.reloadStudio() },
+        { label: 'Reload Offer Studio', enabled: state.panes.includes('studio'), click: () => deps.reloadStudio('studio') },
+        { label: 'Reload Offer Studio 2', enabled: state.panes.includes('studio2'), click: () => deps.reloadStudio('studio2') },
         { type: 'separator' },
         {
           label: state.panes.includes('studio') ? 'Close Offer Studio' : 'Offer Studio',
           accelerator: 'CmdOrCtrl+Shift+O',
           click: () => deps.toggleStudio(),
+        },
+        {
+          label: state.panes.includes('studio2') ? 'Close Offer Studio 2' : 'Offer Studio 2 (split in two)',
+          accelerator: 'Alt+CmdOrCtrl+Shift+O',
+          click: () => deps.toggleStudio2(),
         },
         { type: 'separator' },
         { label: 'Split 50 / 50', click: () => applyPresetL('50') },

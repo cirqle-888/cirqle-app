@@ -38,8 +38,9 @@ const { buildMenu, wireContextMenu, truncate, FILE_URL_RE } = menus
 menus.init({
   getWin: () => win,
   reloadCirqle: () => reloadCirqleView(),
-  reloadStudio: () => reloadStudio(),
+  reloadStudio: (which) => reloadStudio(which),
   toggleStudio: () => toggleStudio(),
+  toggleStudio2: () => toggleStudio2(),
   sendTextToCirqle: (t) => sendTextToCirqle(t),
   sendClipboardToCirqle: () => sendClipboardToCirqle(),
   navigate: (r) => navigate(r),
@@ -53,6 +54,7 @@ layoutMod.init({
   getCirqle: () => cirqle,
   getCirqle2: () => cirqle2,
   getStudio: () => studio,
+  getStudio2: () => studio2,
   getWebs: () => webs,
   getSplitters: () => splitters,
   getOverlay: () => overlay,
@@ -85,7 +87,7 @@ const CIRQLE_URL = (process.env.CIRQLE_URL || 'https://app.cirqle.work').replace
 // same people, same sign-in, and the thing designers have open all day beside
 // it. STUDIO_URL overrides it the way CIRQLE_URL does, for `npm run dev`.
 const STUDIO_URL = (process.env.STUDIO_URL || 'https://flyer.cirqle.work').replace(/\/$/, '')
-let win, chrome, cirqle, cirqle2, studio, overlay
+let win, chrome, cirqle, cirqle2, studio, studio2, overlay
 const splitters = []   // one per pane boundary, managed by ensureSplitters()
 const webs = {}        // built-in browser panes, keyed by web-tab id
 
@@ -180,20 +182,52 @@ function createCirqle2() {
  */
 function createStudio() {
   if (studio) return
+  studio = buildStudioView(STUDIO_URL, 'studio')
+}
+
+/**
+ * The second Offer Studio pane — the flyer app split in two.
+ *
+ * Two panes of the same app rather than one, because that is how the work is
+ * actually done: the offer sheet open on one side, and the offer list, the
+ * photo library, or another client's sheet on the other. It opens on whatever
+ * page pane one is showing ("split this in two") and the two navigate apart
+ * from there.
+ *
+ * Unlike cirqle2, which settings.js strips at startup, this pane comes back
+ * with the window. Same reason the first Studio pane does: a half-typed
+ * spreadsheet is not a view you glanced at, and a second one is no less
+ * somebody's work in progress.
+ */
+function createStudio2() {
+  if (studio2) return
+  studio2 = buildStudioView(studioUrlNow(), 'studio2')
+}
+
+/** Whatever the first Studio pane is showing, or the home page if it is not up. */
+function studioUrlNow() {
+  return (studio && studio.webContents.getURL()) || STUDIO_URL
+}
+
+/** Shared builder: the two Studio panes differ only in where they start. */
+function buildStudioView(startUrl, paneId) {
   // backgroundThrottling off for the same reason as Cirqle's panes: the sheet
   // autosaves on a timer, and Chromium slows timers in a hidden view to about
   // one a minute.
-  studio = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-cirqle.js'), backgroundThrottling: false } })
-  studio.webContents.loadURL(STUDIO_URL)
-  dl.wireDownloads(studio.webContents.session, 'cirqle')
-  wireContextMenu(studio, true)
-  dl.wireEscToCloseDownloads(studio)
-  studio.webContents.setWindowOpenHandler(makeWindowOpenHandler(() => studio))
-  studio.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
-    if (isMainFrame && code !== -3) loadError(studio, STUDIO_URL, 'studio')
+  const v = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-cirqle.js'), backgroundThrottling: false } })
+  v.webContents.loadURL(startUrl)
+  dl.wireDownloads(v.webContents.session, 'cirqle')
+  wireContextMenu(v, true)
+  dl.wireEscToCloseDownloads(v)
+  v.webContents.setWindowOpenHandler(makeWindowOpenHandler(() => v))
+  v.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
+    // paneId, not a hard-coded 'studio': both panes can be on screen, and the
+    // error page's Retry has to reload the one that actually failed.
+    if (isMainFrame && code !== -3) loadError(v, STUDIO_URL, paneId)
   })
-  win.contentView.addChildView(studio)
+  win.contentView.addChildView(v)
   raiseChrome()
+  return v
 }
 
 /** Open Offer Studio beside whatever is there, or put it away if it is up. */
@@ -203,10 +237,23 @@ function toggleStudio() {
   layoutMod.broadcast()
 }
 
-/** Reload in place, keeping the page. See reloadCirqleView for why. */
-function reloadStudio() {
-  if (!studio) return
-  const wc = studio.webContents
+/**
+ * The same, for the second pane. Note what this deliberately does NOT do:
+ * re-point the view at pane one's page the way the Cirqle compare toggle
+ * does. Closing the split and opening it again should find the sheet where
+ * you left it, not back at the top.
+ */
+function toggleStudio2() {
+  if (state.panes.includes('studio2')) layoutMod.removePane('studio2')
+  else layoutMod.addPane('studio2')
+  layoutMod.broadcast()
+}
+
+/** Reload a Studio pane in place, keeping the page. See reloadCirqleView for why. */
+function reloadStudio(which) {
+  const v = which === 'studio2' ? studio2 : studio
+  if (!v) return
+  const wc = v.webContents
   if (wc.getURL().startsWith(STUDIO_URL)) wc.reload()
   else wc.loadURL(STUDIO_URL)
 }
@@ -279,6 +326,7 @@ function destroyWebView(id) {
 function ensureView(pane) {
   if (pane === 'cirqle2') { createCirqle2(); return }
   if (pane === 'studio') { createStudio(); return }
+  if (pane === 'studio2') { createStudio2(); return }
   if (pane.startsWith('wa:')) {
     const id = pane.slice(3)
     const account = state.waAccounts.find(a => a.id === id)
@@ -395,7 +443,7 @@ function createViews() {
     // beside Cirqle and having it gone the next morning is the opposite of
     // what putting it in the toolbar was for. Its view is created lazily by
     // ensureView, like every other restored pane.
-    if (p === 'studio') return true
+    if (p === 'studio' || p === 'studio2') return true
     return p === 'cirqle' // cirqle2 was already stripped by settings migration
   })
   if (state.panes.length === 0) state.panes = ['cirqle']
@@ -479,7 +527,7 @@ presence.register()
 ipcMain.on(CH.LAYOUT_PRESET, (_e, p) => applyPreset(p))
 ipcMain.on(CH.RELOAD, (_e, which) => {
   if (which === 'cirqle') reloadCirqleView()
-  if (which === 'studio') reloadStudio()
+  if (which === 'studio' || which === 'studio2') reloadStudio(which)
   if (which === 'whatsapp' && whatsapps[state.activeWa]) whatsapps[state.activeWa].webContents.reload()
 })
 ipcMain.on(CH.GO_BACK, () => { if (cirqle && cirqle.webContents.canGoBack()) cirqle.webContents.goBack() })
@@ -599,6 +647,7 @@ function paneTitle(p) {
   if (p === 'cirqle') return 'Cirqle'
   if (p === 'cirqle2') return 'Cirqle (copy)'
   if (p === 'studio') return 'Offer Studio'
+  if (p === 'studio2') return 'Offer Studio 2'
   if (p.startsWith('wa:')) return (state.waAccounts.find(a => a.id === p.slice(3)) || {}).label || 'WhatsApp'
   if (p.startsWith('web:')) return (webTabFor(p.slice(4)) || {}).label || 'Browser'
   return p
@@ -615,6 +664,9 @@ ipcMain.on(CH.SPLIT_MENU, () => {
   })
   if (!state.panes.includes('studio')) {
     add.push({ label: 'Offer Studio', enabled: !full, click: () => layoutMod.addPane('studio') })
+  }
+  if (!state.panes.includes('studio2')) {
+    add.push({ label: 'Offer Studio 2 (split the flyer app)', enabled: !full, click: () => layoutMod.addPane('studio2') })
   }
   for (const a of state.waAccounts) {
     if (state.panes.includes(`wa:${a.id}`)) continue
@@ -650,6 +702,8 @@ ipcMain.on(CH.SPLIT_ADD, (_e, pane) => {
     }
   } else if (pane.kind === 'studio') {
     if (!state.panes.includes('studio')) layoutMod.addPane('studio')
+  } else if (pane.kind === 'studio2') {
+    if (!state.panes.includes('studio2')) layoutMod.addPane('studio2')
   } else if (pane.kind === 'cirqle') {
     layoutMod.addPane('cirqle', { front: true })
   } else if (pane.kind === 'wa' && pane.id) {
@@ -721,6 +775,7 @@ ipcMain.on(CH.CAPTURE_CLIPBOARD, sendClipboardToCirqle)
 ipcMain.on(CH.RETRY, (_e, pane) => {
   if (pane === 'whatsapp' && whatsapps[state.activeWa]) whatsapps[state.activeWa].webContents.loadURL(WHATSAPP_URL, { userAgent: CHROME_UA })
   else if (pane === 'studio' && studio) studio.webContents.loadURL(STUDIO_URL)
+  else if (pane === 'studio2' && studio2) studio2.webContents.loadURL(STUDIO_URL)
   else if (cirqle) cirqle.webContents.loadURL(CIRQLE_URL)
 })
 ipcMain.handle(CH.APP_VERSION, () => app.getVersion())

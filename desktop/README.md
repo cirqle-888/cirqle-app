@@ -45,6 +45,14 @@ so you stay logged in across restarts.
 - **Drag downloaded files out:** grab any item in the Downloads shelf and drag it
   straight into the WhatsApp pane's chat, into Finder, or onto any other app — a
   real OS file drag.
+- **Offer Studio beside Cirqle (toolbar button, or ⌘⇧O):** the flyer app as a
+  real pane, not a browser tab — downloads land in the common shelf, right-click
+  offers *Share Image to Linked WhatsApp*, and it shares Cirqle's login. It comes
+  back when you reopen the window. **⌥-click the same button** (or ⌥⌘⇧O, or
+  the split menu's *Offer Studio 2*) for a **second Studio pane**: the sheet on
+  one side, the offer list or another client's sheet on the other. The two
+  navigate independently, and closing a split keeps its page for when you
+  reopen it.
 - **Compare two Cirqle pages (⧉ toolbar button):** open a **second Cirqle page
   side-by-side** in the right pane (duplicates the current page; shares your
   login). Great for comparing/analysing two records at once. Click it again — or
