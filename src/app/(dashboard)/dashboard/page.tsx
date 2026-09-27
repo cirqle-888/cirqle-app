@@ -8,6 +8,8 @@ import { computeCompanyOpsStrip, type CompanyOpsStrip } from '@/lib/finance/kpis
 import { recognisedRevenue, collectedAmount, badDebtLoss } from '@/lib/finance/invoice-revenue'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
+import { navSections, isNavItemVisible } from '@/lib/nav-sections'
+import { redirect } from 'next/navigation'
 import { getPendingPricing } from '@/lib/pricing/pending'
 import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
 import { summarizeFollowups } from '@/lib/followups/grouping'
@@ -42,19 +44,24 @@ export default async function DashboardPage() {
   const isAdmin = me?.isAdmin ?? false
   const employeeId = me?.employeeId
 
-  // `dashboard.view` gates this page. Every OTHER page in the app redirects a
-  // denied user to `/dashboard` — this IS `/dashboard`, so that redirect would
-  // loop. Render a minimal restricted notice instead, before any of the heavy
-  // queries below run. (The nav link is hidden separately in nav-sections.ts;
-  // this is what stops someone who still lands here — a direct link, a
-  // bookmark, browser history — from seeing the page anyway.)
+  // `dashboard.view` gates this page. A user without it never sees a
+  // "no access" notice — telling someone about a page they can't open is
+  // noise. Send them to the first page their role DOES open, in sidebar
+  // order (for a Designer, My Work). Safe from loops: the layout's denied-
+  // route guard only ever redirects TO /dashboard, and the target here is a
+  // page `isNavItemVisible` has already passed. The notice below is only for
+  // the edge case of a role that opens nothing at all.
   const canViewDashboard = isAdmin || hasPermission(me, PERMS.DASHBOARD_VIEW)
   if (!canViewDashboard) {
+    const landing = navSections
+      .flatMap(s => s.items)
+      .find(i => i.href !== '/dashboard' && isNavItemVisible(i, key => hasPermission(me, key), isAdmin))
+    if (landing) redirect(landing.href)
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-6">
-        <h1 className="text-lg font-semibold text-foreground">No dashboard access</h1>
+        <h1 className="text-lg font-semibold text-foreground">Nothing to show yet</h1>
         <p className="text-sm text-muted-foreground mt-1.5 max-w-sm">
-          Your role doesn't include dashboard access. Use the sidebar to reach what you do have access to.
+          Your account hasn&apos;t been given access to any pages. Ask an admin to set up your role.
         </p>
       </div>
     )
