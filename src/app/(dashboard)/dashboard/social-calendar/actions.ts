@@ -722,10 +722,17 @@ export async function quickAddIdea(
  */
 export async function moveCalendarItem(
   itemId: string, date: string | null,
+  /**
+   * Undo only: restore this exact end date instead of shifting the old one.
+   * A move to the Idea Board clears the end date, so shifting can't bring a
+   * multi-day item back — the undo passes the end date it remembered.
+   */
+  restoreEndDate?: string | null,
 ): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.SOCIAL_MANAGE)
   if (!guard.ok) return { ok: false, error: guard.error }
   if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: 'Invalid date.' }
+  if (restoreEndDate && !/^\d{4}-\d{2}-\d{2}$/.test(restoreEndDate)) return { ok: false, error: 'Invalid end date.' }
 
   const admin = createAdminClient()
   const selectCols = 'id, calendar_id, scheduled_date, scheduled_end_date, calendar:social_calendars(month), request:task_requests(id, status, promoted_task_id)'
@@ -768,7 +775,9 @@ export async function moveCalendarItem(
   const patch: Record<string, unknown> = { scheduled_date: date, updated_at: new Date().toISOString() }
   const oldStart = joined.scheduled_date
   const oldEnd = joined.scheduled_end_date ?? null
-  if (!date) {
+  if (restoreEndDate !== undefined) {
+    patch.scheduled_end_date = date ? restoreEndDate : null
+  } else if (!date) {
     patch.scheduled_end_date = null
   } else if (oldStart && oldEnd) {
     const delta = Math.round((new Date(date + 'T00:00:00Z').getTime() - new Date(oldStart + 'T00:00:00Z').getTime()) / dayMs)

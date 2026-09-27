@@ -15,7 +15,7 @@ import type { PackageRow, PackageItemRow, PackageTaskLike } from '@/lib/packages
 import CaptionCanvasEditor from './caption-canvas'
 import { DiscussButton } from '@/components/chat/discuss-button'
 import {
-  DndContext, PointerSensor, useSensor, useSensors, useDraggable, useDroppable,
+  DndContext, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable,
   pointerWithin, type DragEndEvent,
 } from '@dnd-kit/core'
 import {
@@ -40,7 +40,7 @@ import {
   Link2, Clipboard, PanelRightClose, PanelRightOpen,
   Bold, Italic, Underline, Strikethrough, List, ListOrdered, Heading2, Quote,
   Link as LinkIcon, Highlighter, Palette, Smile, Eraser,
-  AlignLeft, AlignCenter, AlignRight, CalendarRange, ChevronDown,
+  AlignLeft, AlignCenter, AlignRight, CalendarRange, ChevronDown, Undo2,
 } from 'lucide-react'
 
 // ─── Types (mirror the page's selects) ────────────────────────────────────────
@@ -760,7 +760,62 @@ export default function SocialCalendarClient({
   // Collapsible Idea Board (persisted, expanded by default).
   const boardCollapsed = useSyncExternalStore(boardStore.subscribe, boardStore.get, () => false)
   const toggleBoard = () => boardStore.set(!boardCollapsed)
-  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+  // Mouse: a 6px nudge starts a drag, as before. Touch (iPad / phone): a
+  // drag needs a deliberate press-and-hold. With the old pointer sensor a
+  // 6px finger movement started a drag, so an ordinary scroll across the
+  // calendar could pick a card up and drop it on the wrong day.
+  const dndSensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
+  )
+
+  // ── Undo for moves ──────────────────────────────────────────────────────
+  // Every drag that lands is remembered for this session, newest last. Undo
+  // is offered three ways, because a toast alone is easy to miss on a
+  // phone: the toast's Undo button, an "Undo move" button in the toolbar
+  // that stays until the history is empty, and Ctrl/Cmd+Z.
+  type MoveEntry = { id: number; itemId: string; title: string; from: string | null; fromEnd: string | null; to: string | null }
+  const [moveHistory, setMoveHistory] = useState<MoveEntry[]>([])
+  const moveSeq = useRef(0)
+  const undoingRef = useRef(false)
+  // The toast's Undo holds its own entry; this stops it undoing a move the
+  // toolbar button already undid.
+  const undoneIds = useRef(new Set<number>())
+  useEffect(() => { setMoveHistory([]) }, [selectedId])
+
+  const dayLabel = (d: string | null) => d
+    ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+    : 'Idea Board'
+
+  async function undoMove(entry?: MoveEntry) {
+    const target = entry ?? moveHistory[moveHistory.length - 1]
+    if (!target || undoingRef.current || undoneIds.current.has(target.id)) return
+    undoingRef.current = true
+    try {
+      const res = await moveCalendarItem(target.itemId, target.from, target.fromEnd)
+      if (!res.ok) { toast.toastError('Could not undo the move', res.error); return }
+      undoneIds.current.add(target.id)
+      setMoveHistory(h => h.filter(m => m.id !== target.id))
+      toast.info(`Moved back to ${dayLabel(target.from)}`, target.title)
+      router.refresh()
+    } finally {
+      undoingRef.current = false
+    }
+  }
+
+  useEffect(() => {
+    if (!moveHistory.length) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.key.toLowerCase() !== 'z') return
+      // Leave text undo alone inside inputs, captions and the canvas editor.
+      const el = e.target as HTMLElement | null
+      if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return
+      e.preventDefault()
+      void undoMove()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
 
   async function submitQuickIdea() {
     const title = quickTitle.trim()
@@ -783,6 +838,13 @@ export default function SocialCalendarClient({
     if (targetDate === undefined || targetDate === item.scheduled_date) return
     const res = await moveCalendarItem(itemId, targetDate)
     if (!res.ok) { toast.toastError('Could not move the item', res.error); return }
+    const entry: MoveEntry = {
+      id: ++moveSeq.current, itemId, title: item.title,
+      from: item.scheduled_date ?? null, fromEnd: item.scheduled_end_date ?? null, to: targetDate,
+    }
+    setMoveHistory(h => [...h.slice(-19), entry])
+    toast.success(`Moved to ${dayLabel(targetDate)}`, `${item.title} · was ${dayLabel(entry.from)}`, 8000,
+      { label: 'Undo', onClick: () => { void undoMove(entry) } })
     router.refresh()
   }
 
@@ -1541,6 +1603,19 @@ export default function SocialCalendarClient({
             ))}
             {/* Only offered when there IS off-plan delivered work — a toggle
                 that can only ever reveal nothing is just another control. */}
+            {moveHistory.length > 0 && (() => {
+              const last = moveHistory[moveHistory.length - 1]
+              return (
+                <button
+                  onClick={() => void undoMove()}
+                  title={`Put "${last.title}" back on ${dayLabel(last.from)} (Ctrl/Cmd+Z)`}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ml-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/15">
+                  <Undo2 className="w-3.5 h-3.5" />
+                  Undo move{moveHistory.length > 1 ? ` (${moveHistory.length})` : ''}
+                  <span className="hidden sm:inline text-amber-600/70 dark:text-amber-400/70 font-normal">· {dayLabel(last.to)} → {dayLabel(last.from)}</span>
+                </button>
+              )
+            })()}
             {deliveredTasks.length > 0 && (
               <button
                 onClick={toggleDelivered}
