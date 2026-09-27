@@ -129,7 +129,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
   { title, subtitle, actions, crumbLabel },
   ref,
 ) {
-  const { user } = usePermissions()
+  const { user, can } = usePermissions()
   const { isUnlocked } = usePrivacy()
   const { mine, available: presenceAvailable } = usePresence()
   const router = useRouter()
@@ -180,6 +180,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
 
   const globalActions = (
     <>
+      {can('capture.use') && (
       <button
         type="button"
         onClick={() => void openAiCapture()}
@@ -189,6 +190,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
         <Sparkles className="h-3.5 w-3.5" />
         <span className="hidden lg:inline">AI Capture</span>
       </button>
+      )}
       <LiveClock className="mr-1" />
       <CommandPaletteTrigger className="hidden md:flex w-52 lg:w-64" />
       <CommandPaletteTrigger className="md:hidden" isCollapsed={true} />

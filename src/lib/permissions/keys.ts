@@ -8,6 +8,10 @@ export const PERMS = {
   DASHBOARD_VIEW:           'dashboard.view',
   DASHBOARD_VIEW_ANALYTICS: 'dashboard.view_analytics',
 
+  // AI Capture
+  /** Use AI Capture: paste a message/email/list and have it drafted into a request, campaign or offer. Each paste is a paid AI call. */
+  CAPTURE_USE: 'capture.use',
+
   // Reports
   /**
    * Base key: the Reports index and any report that carries no money.

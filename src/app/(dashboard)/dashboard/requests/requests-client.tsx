@@ -18,6 +18,7 @@ import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-sea
 import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { usePrivacy } from '@/contexts/privacy-context'
+import { usePermissions } from '@/contexts/permission-context'
 import {
   Inbox, AlertTriangle, ChevronRight, Clock, Link2, Loader2, Play,
   CalendarDays, MessageSquarePlus, Save, CheckCircle2, X, Flag,
@@ -245,6 +246,7 @@ export default function RequestsClient({
   const router = useRouter()
   // Assigned-employee names respect the global privacy lock — name only when unlocked, else CQID.
   const { dn } = usePrivacy()
+  const { can } = usePermissions()
   const { toasts, dismiss, success, error: toastError } = useToast()
   const [requests, setRequests] = useState(initialRequests)
   const [tab, setTab] = useState('new')
@@ -882,11 +884,13 @@ export default function RequestsClient({
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap bg-secondary border border-border hover:text-foreground text-muted-foreground transition-colors">
               <Share2 className="w-3.5 h-3.5" /> Share
             </button>
+            {can('capture.use') && (
             <button onClick={handleAiCaptureClick}
               title="Create a new request from clipboard — same as the Cirqle Desktop toolbar's New Request button"
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap bg-secondary border border-border hover:text-foreground text-muted-foreground transition-colors">
               <Sparkles className="w-3.5 h-3.5" /> AI Capture
             </button>
+            )}
             {/* A dropdown anchored here would be clipped by this toolbar's
                 overflow-x-auto, so the type chooser opens as a small modal. */}
             <button onClick={() => setShowNewMenu(true)}

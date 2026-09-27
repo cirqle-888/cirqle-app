@@ -3,12 +3,13 @@
 /**
  * Capture surface — server actions.
  *
- * analyze* only PREPARE a draft (read-only AI parsing); being a signed-in
- * employee is the gate. commit* go through each module's own
+ * analyze* only PREPARE a draft (read-only AI parsing) but each one is a paid
+ * AI call, so they need `capture.use`. commit* go through each module's own
  * permission-guarded action, so capture never bypasses module security.
  */
 
-import { resolveCurrentEmployeeId } from '@/lib/permissions/check'
+import { resolveCurrentEmployeeId, loadCurrentUser, hasPermission } from '@/lib/permissions/check'
+import { PERMS } from '@/lib/permissions/keys'
 import { runCapture, prepareAs } from '@/lib/capture/engine'
 import { createManualRequest } from '@/app/(dashboard)/dashboard/requests/actions'
 import { createAdvertisingRequest } from '@/app/(dashboard)/dashboard/advertising/actions'
@@ -18,15 +19,22 @@ async function ensureSignedIn(): Promise<string | null> {
   return resolveCurrentEmployeeId()
 }
 
+async function canCapture(): Promise<boolean> {
+  const me = await loadCurrentUser().catch(() => null)
+  return hasPermission(me, PERMS.CAPTURE_USE)
+}
+
 /** Classify + route + prepare a review draft for pasted/forwarded content. */
 export async function analyzeCapture(input: CaptureInput): Promise<CaptureResult> {
   if (!(await ensureSignedIn())) return { ok: false, error: 'Not signed in.' }
+  if (!(await canCapture())) return { ok: false, error: 'Permission denied.' }
   return runCapture(input)
 }
 
 /** Re-prepare for a destination the user chose (misclassification redirect). */
 export async function analyzeCaptureAs(input: CaptureInput, type: CaptureType): Promise<CaptureResult> {
   if (!(await ensureSignedIn())) return { ok: false, error: 'Not signed in.' }
+  if (!(await canCapture())) return { ok: false, error: 'Permission denied.' }
   return prepareAs(input, type)
 }
 

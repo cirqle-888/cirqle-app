@@ -36,6 +36,7 @@ disaster-recovery path from migrations. That needs a baseline dump — see
 
 | Migration | What it adds | Until it is applied |
 |---|---|---|
+| `20260927100000_capture_permission` | New `capture.use` permission gating AI Capture (page, sidebar item, header and Requests buttons, `analyze*` actions). Backfills it to admins and every designation holding `requests.view`, `advertising.view` or `offer.prepare`. | **Apply before deploying the code.** The code fails closed: until this runs, no non-admin has `capture.use`, so AI Capture disappears for everyone except admins — including offer-flyer staff who rely on it. |
 | `20260906120000_ownership_entries_basis` | Adds `'entries'` to the `ownership_programs.basis` CHECK — a per-participant COUNT basis that pays a rupee rate per hand-typed cash-book row. Also a partial index on `cashbook_entries (created_by, created_at)` and column comments recording that `ownership_awards.basis_amount_inr` holds a COUNT on this basis, and `ownership_rules.fixed_amount_inr` a rate PER UNIT. | Everything else keeps working — the basis is inert until a program uses it. Choosing **₹ per cash-book entry** in Settings → Ownership and saving is rejected by the old CHECK; `friendly()` turns that into a run-the-migration sentence rather than a raw Postgres error. |
 ### Follow-up: Realtime is not delivering for `employee_presence`
 

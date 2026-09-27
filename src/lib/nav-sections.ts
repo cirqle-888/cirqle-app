@@ -86,7 +86,7 @@ export const navSections: NavSection[] = [
     label: 'Work',
     defaultOpen: true,
     items: [
-      { label: 'AI Capture',    href: '/dashboard/capture',       icon: Sparkles, keywords: ['quick capture', 'paste', 'whatsapp', 'email', 'offer flyer'] },
+      { label: 'AI Capture',    href: '/dashboard/capture',       icon: Sparkles, requiredPerm: 'capture.use', keywords: ['quick capture', 'paste', 'whatsapp', 'email', 'offer flyer'] },
       // First in the section for the people who hold it: a designer's whole
       // job lives here, and requests.work_own is granted to nobody who also
       // has the inbox, so this never doubles up with Requests below.

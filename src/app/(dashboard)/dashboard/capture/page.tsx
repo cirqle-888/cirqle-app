@@ -1,5 +1,6 @@
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
+import { redirect } from 'next/navigation'
 import CaptureClient from './capture-client'
 
 export const metadata = { title: 'AI Capture · Cirqle' }
@@ -17,6 +18,7 @@ export const dynamic = 'force-dynamic'
  */
 export default async function CapturePage() {
   const me = await loadCurrentUser().catch(() => null)
+  if (!hasPermission(me, PERMS.CAPTURE_USE)) redirect('/dashboard')
   const offerMode = !!me && !me.isAdmin
     && hasPermission(me, PERMS.OFFER_PREPARE)
     && !hasPermission(me, PERMS.REQUESTS_VIEW)
