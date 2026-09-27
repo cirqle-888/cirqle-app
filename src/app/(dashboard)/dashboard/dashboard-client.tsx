@@ -73,6 +73,13 @@ interface Props {
   payrollPendingCount?: number
   /** Company Ops strip (Finance Engine) — null pre-scope-migration or for non-admins. */
   companyOps?: import('@/lib/finance/kpis').CompanyOpsStrip | null
+  /**
+   * `dashboard.view_analytics` — gates the employee KPI cards, Contribution
+   * Range Breakdown and Contribution Activity chart. Admins always see them
+   * (isAdmin bypasses); a Designer with this switched off still gets their
+   * "needs contribution" / "open tasks" lists, just not the score analytics.
+   */
+  canViewAnalytics?: boolean
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -236,6 +243,7 @@ export default function DashboardClient(props: Props) {
           payrollRecords={props.payrollRecords}
           pendingContribCount={props.pendingContribCount}
           myActions={props.myActions}
+          canViewAnalytics={props.canViewAnalytics ?? false}
         />
       </Suspense>
     )
@@ -757,9 +765,12 @@ function statusBadgeClass(status: string) {
 function EmployeeDashboard({
   todayStr, scoresPromise, payrollRecords: _payrollRecords, pendingContribCount = 0,
   myActions = { active: [], needContribution: [] },
+  canViewAnalytics = false,
 }: {
   todayStr: string; scoresPromise: Promise<any[]>; payrollRecords: any[]; pendingContribCount?: number
   myActions?: { active: any[]; needContribution: any[] }
+  /** `dashboard.view_analytics` — gates the KPI cards, breakdown and activity chart below. */
+  canViewAnalytics?: boolean
 }) {
   // Unwrap the streamed (employee-scoped) scores. Suspends until resolved; the
   // <Suspense> boundary in the router shows EmployeeDashboardSkeleton meanwhile.
@@ -1041,7 +1052,12 @@ function EmployeeDashboard({
           </div>
         )}
 
-        {/* ── Analytics filters (control KPI + breakdown + chart) ───────────── */}
+        {/* ── Analytics: filters + KPI cards + breakdown + activity chart ─────
+            Gated by `dashboard.view_analytics`. Without it, an employee still
+            gets everything above (their assigned tasks / contribution-owed
+            list) — just not the score analytics. */}
+        {canViewAnalytics && (
+          <>
         <div className="flex items-center gap-2 flex-wrap bg-secondary/30 p-2 rounded-xl">
           <DateFilter value={dateFilter} onChange={v => { setDateFilter(v) }} />
           {dateFilter && (
@@ -1141,6 +1157,8 @@ function EmployeeDashboard({
             <ContributionActivityBar data={trendData} />
           )}
         </div>
+          </>
+        )}
 
         {/* ── My Recent Contributions ────────────────────────────────────────── */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">

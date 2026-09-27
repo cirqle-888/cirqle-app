@@ -6,7 +6,8 @@ import { buildView, type AnalyticsView } from '@/lib/analytics/view'
 import { fetchJournalLines } from '@/lib/finance/journal'
 import { computeCompanyOpsStrip, type CompanyOpsStrip } from '@/lib/finance/kpis'
 import { recognisedRevenue, collectedAmount, badDebtLoss } from '@/lib/finance/invoice-revenue'
-import { loadCurrentUser } from '@/lib/permissions/check'
+import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
+import { PERMS } from '@/lib/permissions/keys'
 import { getPendingPricing } from '@/lib/pricing/pending'
 import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
 import { summarizeFollowups } from '@/lib/followups/grouping'
@@ -40,6 +41,28 @@ export default async function DashboardPage() {
   const me = await loadCurrentUser().catch(() => null)
   const isAdmin = me?.isAdmin ?? false
   const employeeId = me?.employeeId
+
+  // `dashboard.view` gates this page. Every OTHER page in the app redirects a
+  // denied user to `/dashboard` — this IS `/dashboard`, so that redirect would
+  // loop. Render a minimal restricted notice instead, before any of the heavy
+  // queries below run. (The nav link is hidden separately in nav-sections.ts;
+  // this is what stops someone who still lands here — a direct link, a
+  // bookmark, browser history — from seeing the page anyway.)
+  const canViewDashboard = isAdmin || hasPermission(me, PERMS.DASHBOARD_VIEW)
+  if (!canViewDashboard) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-6">
+        <h1 className="text-lg font-semibold text-foreground">No dashboard access</h1>
+        <p className="text-sm text-muted-foreground mt-1.5 max-w-sm">
+          Your role doesn't include dashboard access. Use the sidebar to reach what you do have access to.
+        </p>
+      </div>
+    )
+  }
+
+  // `dashboard.view_analytics` gates the employee KPI cards / breakdown /
+  // activity chart further down (see dashboard-client.tsx). Admins bypass.
+  const canViewAnalytics = isAdmin || hasPermission(me, PERMS.DASHBOARD_VIEW_ANALYTICS)
 
   // ── Streamed analytics promises ──────────────────────────────────────────────
   // The two heaviest queries (36-month analytics tasks + contribution scores) are
@@ -486,6 +509,7 @@ export default async function DashboardPage() {
       draftInvoicesSample={draftInvoicesSample}
       payrollPendingCount={payrollPendingCount}
       companyOps={companyOps}
+      canViewAnalytics={canViewAnalytics}
     />
     </>
   )
