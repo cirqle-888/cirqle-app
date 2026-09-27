@@ -5,6 +5,7 @@ import QRCode from 'qrcode'
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
+import Link from 'next/link'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { useCopy } from '@/lib/hooks/use-copy'
 import Header from '@/components/layout/header'
@@ -3109,10 +3110,22 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             )
           })()}
 
+          {/* ── Invoice preview frame ──────────────────────────────────────────
+              Line items + amounts are what the client receives, so they sit in
+              a tinted, dashed frame with a label — visibly different from the
+              working controls (status, actions, discount calculator) around
+              them. */}
+          <div className="mb-6 rounded-2xl border-2 border-dashed border-sky-500/35 bg-sky-500/[0.05] p-2.5 sm:p-3">
+          <div className="flex items-center gap-1.5 px-1 pb-2.5 text-[10px] font-bold uppercase tracking-widest text-sky-700 dark:text-sky-300">
+            <Eye className="w-3.5 h-3.5" />
+            Invoice preview
+            <span className="font-medium normal-case tracking-normal text-sky-700/70 dark:text-sky-300/70">· what {inv.client?.name || 'the client'} will see</span>
+          </div>
+
           {/* Line items — document-style ledger card: framed header band,
               a column rule, numbered ruled rows and an in-card subtotal, so
               the section reads like the actual invoice the client receives. */}
-          <div className="mb-6 rounded-2xl border border-border/60 bg-card overflow-hidden shadow-sm">
+          <div className="mb-3 rounded-2xl border border-border/60 bg-card overflow-hidden shadow-sm">
             <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-violet-500/[0.08] via-violet-500/[0.02] to-transparent border-b border-border/50">
               <h4 className="text-sm font-semibold text-foreground tracking-tight flex items-center gap-2">
                 <span className="w-6 h-6 rounded-lg bg-violet-500/15 flex items-center justify-center shrink-0">
@@ -3196,6 +3209,17 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
                         <span className={cn("px-1.5 py-0.5 rounded-md", getStatusColor(item.task.status))}>
                           {getStatusLabel(item.task.status)}
                         </span>
+                      )}
+                      {/* Straight to the task's edit form, so a title, amount or
+                          date can be fixed at the source before the invoice goes
+                          out. Back returns here — this page keeps ?id= in the URL. */}
+                      {item.task?.id && (
+                        <Link
+                          href={`/dashboard/tasks?edit=${item.task.id}`}
+                          title="Open this task on the Tasks page to edit it"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-violet-600 dark:text-violet-300 hover:bg-violet-500/10 border border-transparent hover:border-violet-500/25 transition-colors">
+                          <ExternalLink className="w-3 h-3" />{editable ? 'Edit task' : 'Open task'}
+                        </Link>
                       )}
                     </div>
                   </div>
@@ -3454,7 +3478,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
 
           {/* Amounts — deliberately AFTER the line items: review the work first,
               then the money it adds up to. */}
-          <div className="bg-secondary/20 rounded-xl border border-border/50 p-4 space-y-3">
+          <div className="bg-card rounded-xl border border-border/50 p-4 space-y-3">
             {editable && invPaidInr(inv) === 0 && (
               <div className="flex justify-between items-center text-sm">
                 <span className="text-muted-foreground font-medium">Invoice Currency</span>
@@ -3599,6 +3623,7 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
               </div>
             )}
           </div>
+          </div>{/* /Invoice preview frame */}
 
 
 
@@ -5715,7 +5740,10 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
         </div>
 
         {/* Right: detail / payment / new */}
-        {showRightPanel ? (
+        {/* Nothing selected → no right pane at all; the list above already
+            takes the full width. The split only opens once there's something
+            to show in it. */}
+        {showRightPanel && (
           <div className="flex-1 overflow-hidden flex flex-col">
             {/* Mobile back button */}
             <div className="sm:hidden px-3 py-2 border-b border-border/40">
@@ -5730,15 +5758,6 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
             {panelMode === 'discounts'      && renderDiscountsPanel()}
             {panelMode === 'detail'    && selectedInv && renderDetail(selectedInv)}
             {panelMode === 'pay'       && selectedInv && renderPayPanel(selectedInv)}
-          </div>
-        ) : (
-          /* Empty state when no selection on desktop */
-          <div className="hidden sm:flex flex-1 items-center justify-center text-muted-foreground">
-            <div className="text-center">
-              <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
-              <p className="text-sm">Select an invoice to view details</p>
-              <p className="text-xs mt-1 opacity-60">Tasks marked &quot;done&quot; auto-generate draft invoices</p>
-            </div>
           </div>
         )}
       </div>

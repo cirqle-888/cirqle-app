@@ -1285,6 +1285,26 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     setQuickSaving(false)
   }
 
+  // Arriving with ?edit=<id> (the invoice's "Edit task" link) opens that
+  // task's edit form straight away, so a line can be corrected before the
+  // invoice goes out. The URL is cleaned so a refresh doesn't reopen it; the
+  // invoice page keeps its own ?id=, so Back returns to the same invoice.
+  // Falls back to scroll-and-highlight via ?highlight if the task isn't in
+  // the loaded working set.
+  const editFromUrlDone = useRef(false)
+  useEffect(() => {
+    if (editFromUrlDone.current) return
+    const id = new URLSearchParams(window.location.search).get('edit')
+    if (!id) return
+    editFromUrlDone.current = true
+    window.history.replaceState(null, '', window.location.pathname)
+    const t = tasks.find(x => x.id === id)
+    if (t) { openEdit(t); return }
+    setHighlightedTaskId(id)
+    setTimeout(() => setHighlightedTaskId(null), 2500)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function openEdit(task: Task) {
     setEditTask(task)
     setEditForm({
