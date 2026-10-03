@@ -66,6 +66,12 @@ export interface ContentBriefFieldsProps {
   disabled?: boolean
   /** Calendar items must have a type; requests may leave it "Not set". */
   contentTypeRequired?: boolean
+  /**
+   * Hide the Content type picker. The Requests form asks for the Service
+   * instead and the server reads the content type off it — one question,
+   * not two (see suggestContentType in lib/social/plan).
+   */
+  showContentType?: boolean
   /** One page-specific field shown beside Content type (Date / Service). */
   typeSide?: React.ReactNode
   /** Page-specific workflow fields, shown between the type row and the copy. */
@@ -78,7 +84,7 @@ export interface ContentBriefFieldsProps {
 
 export default function ContentBriefFields({
   title, onTitleChange, value, onChange, disabled = false, contentTypeRequired = false,
-  typeSide, children, titlePlaceholder = 'e.g. Onam offer poster', autoFocusTitle, onError,
+  showContentType = true, typeSide, children, titlePlaceholder = 'e.g. Onam offer poster', autoFocusTitle, onError,
 }: ContentBriefFieldsProps) {
   const set = (patch: Partial<ContentBriefDraft>) => onChange({ ...value, ...patch })
   const [copyTab, setCopyTab] = useState<'text' | 'canvas'>(value.captionCanvas?.blocks?.length && !value.caption ? 'canvas' : 'text')
@@ -134,7 +140,9 @@ export default function ContentBriefFields({
           onChange={e => onTitleChange(e.target.value)} placeholder={titlePlaceholder} className={FIELD} />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      {(showContentType || typeSide) && (
+      <div className={`grid gap-3 ${showContentType && typeSide ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        {showContentType && (
         <div>
           <label className={LABEL}>Content type{contentTypeRequired && <span className="text-red-500"> *</span>}</label>
           <AppSelect value={value.contentType} disabled={disabled}
@@ -143,8 +151,10 @@ export default function ContentBriefFields({
             {CONTENT_TYPES.map(t => <option key={t} value={t}>{CONTENT_TYPE_LABEL[t]}</option>)}
           </AppSelect>
         </div>
+        )}
         {typeSide && <div>{typeSide}</div>}
       </div>
+      )}
 
       {children}
 

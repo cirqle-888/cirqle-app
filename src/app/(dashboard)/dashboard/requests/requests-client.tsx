@@ -1844,7 +1844,11 @@ export default function RequestsClient({
               <button onClick={() => setShowNew(false)} aria-label="Close" className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground"><X className="w-4 h-4" /></button>
             </div>
             <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
-              <div>
+              {/* Client + Service: who it's for and what it is. Service is the
+                  only "type" question — the brief's content type is filled in
+                  from it on save, so nobody picks the same thing twice. */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
                 <label className={label}>Client <span className="text-red-500">*</span></label>
                   <Combobox
                     options={clients.map(c => ({ id: c.id, label: c.name, sub: clientPickerSub(c) }))}
@@ -1862,6 +1866,15 @@ export default function RequestsClient({
                   </a>
                 )}
               </div>
+                <div>
+                  <label className={label}>Service</label>
+                  <select value={newForm.serviceId} onChange={e => setNewForm(f => ({ ...f, serviceId: e.target.value }))}
+                    className={`${field} ${newForm.serviceId ? '' : 'text-muted-foreground'}`}>
+                    <option value="">Select service…</option>
+                    {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              </div>
 
               <ContentBriefFields
                 title={newForm.title}
@@ -1870,15 +1883,7 @@ export default function RequestsClient({
                 onChange={brief => setNewForm(f => ({ ...f, brief }))}
                 titlePlaceholder="e.g. Onam campaign poster set"
                 onError={(t, d) => toastError(t, d)}
-                typeSide={
-                  <>
-                    <label className={label}>Service</label>
-                    <select value={newForm.serviceId} onChange={e => setNewForm(f => ({ ...f, serviceId: e.target.value }))} className={field}>
-                      <option value="">Not set</option>
-                      {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </>
-                }
+                showContentType={false}
               >
                 <div className="grid grid-cols-3 gap-3">
                   <div>

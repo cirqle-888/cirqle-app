@@ -4,6 +4,7 @@ import {
   isTerminalRequestStatus, isClosedRequestStatus, contentTypeWithVariants,
   sanitizeCaptionHtml, captionHtmlToText, formatShortDateRange,
   sanitizeCaptionCanvas, canvasToText, isUnrouted, canPullBack, dueDateForPublish,
+  suggestContentType,
 } from './plan'
 
 describe('sanitizeCaptionHtml', () => {
@@ -517,5 +518,37 @@ describe('dueDateForPublish', () => {
   it('a malformed date is returned untouched rather than silently moved', () => {
     expect(dueDateForPublish('not-a-date', 3)).toBe('not-a-date')
     expect(dueDateForPublish('2026-08-15', NaN)).toBe('2026-08-15')
+  })
+})
+
+describe('suggestContentType (service → content type, for the Requests form)', () => {
+  const services = [
+    { id: 's1', name: 'Social Media Poster' },
+    { id: 's2', name: 'Logo Design' },
+    { id: 's3', name: 'Hoarding Design' },
+    { id: 's4', name: 'Reels Editing' },
+    { id: 's5', name: 'Product Packaging Design' },
+    { id: 's6', name: 'Collateral Design' },
+    { id: 's7', name: 'Email Newsletter' },
+    { id: 's8', name: 'Flyer & Brochure' },
+  ]
+  it('reads the team mapping backwards first', () => {
+    expect(suggestContentType('s1', services, { post: 's1', poster: 's1' })).toBe('post')
+  })
+  it('falls back to specific words in the service name', () => {
+    expect(suggestContentType('s1', services)).toBe('poster')   // "Poster" beats "post"
+    expect(suggestContentType('s4', services)).toBe('reel')
+    expect(suggestContentType('s7', services)).toBe('email')
+    expect(suggestContentType('s8', services)).toBe('flyer')
+  })
+  it('leaves non-content services without a type', () => {
+    expect(suggestContentType('s2', services)).toBeNull()
+    expect(suggestContentType('s3', services)).toBeNull()
+    expect(suggestContentType('s5', services)).toBeNull()
+    expect(suggestContentType('s6', services)).toBeNull()
+  })
+  it('handles no service / unknown service', () => {
+    expect(suggestContentType(null, services)).toBeNull()
+    expect(suggestContentType('nope', services)).toBeNull()
   })
 })

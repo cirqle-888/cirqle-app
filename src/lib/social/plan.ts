@@ -367,6 +367,48 @@ export function suggestServiceId(
   return null
 }
 
+/**
+ * The reverse of suggestServiceId: which content type does a SERVICE mean?
+ * Lets the Requests form ask one question (Service — what pricing and
+ * routing need) and still file the brief under a content type, the way the
+ * Calendar asks only for the content type and resolves the service.
+ *
+ *  1. The team's explicit mapping, read backwards (first type in CONTENT_TYPES
+ *     order that maps to this service).
+ *  2. Specific words in the service name — most specific first, so "Poster"
+ *     wins over "post" and "Reel" over "video". A bare "Design" service (logo,
+ *     hoarding, packaging) means no particular content type: null.
+ */
+const CONTENT_TYPE_FROM_NAME: readonly (readonly [ContentType, readonly string[]])[] = [
+  ['reel', ['reel']],
+  ['story', ['story', 'stories']],
+  ['carousel', ['carousel']],
+  ['video', ['video', 'motion', 'animation']],
+  ['flyer', ['flyer', 'leaflet', 'brochure', 'pamphlet']],
+  ['poster', ['poster']],
+  ['blog', ['blog', 'article']],
+  ['seo', ['seo']],
+  ['ad', ['advertis', 'ad campaign', 'ads ']],
+  ['email', ['email', 'newsletter', 'mailer']],
+  ['post', ['social', 'post', 'instagram', 'facebook']],
+]
+
+export function suggestContentType(
+  serviceId: string | null | undefined,
+  services: { id: string; name: string }[],
+  serviceMap: Record<string, string> = {},
+): ContentType | null {
+  if (!serviceId) return null
+  const mapped = CONTENT_TYPES.find(t => serviceMap[t] === serviceId)
+  if (mapped) return mapped
+  const name = ` ${(services.find(s => s.id === serviceId)?.name ?? '').toLowerCase()} `
+  if (!name.trim()) return null
+  for (const [type, words] of CONTENT_TYPE_FROM_NAME) {
+    if (words.some(w => name.includes(w))) return type
+  }
+  return null
+}
+
 // ── Request description composer ─────────────────────────────────────────────
 
 export interface PlanItemInput {

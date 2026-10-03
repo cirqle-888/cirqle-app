@@ -9,6 +9,8 @@
 
 import { revalidatePath } from 'next/cache'
 import { normalizeContentBrief, contentBriefToText, type ContentBrief, type ContentBriefDraft } from '@/lib/content-brief'
+import { suggestContentType } from '@/lib/social/plan'
+import { getCompanySettings } from '@/lib/settings/company-settings'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission, requireReadPermission, resolveCurrentEmployeeId } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
@@ -475,7 +477,24 @@ export async function createManualRequest(input: {
   } catch { /* defensive */ }
 
   const isChecklist = input.kind === REQUEST_KIND_CHECKLIST
-  const brief = normalizeContentBrief(input.contentBrief)
+  // The Requests form asks only for the Service; the brief's content type is
+  // read off it (team mapping, then the service name). Only for callers that
+  // send a brief — a capture/legacy request must not turn into a brief that
+  // holds nothing but a type and hides its own description.
+  let briefInput = input.contentBrief
+  if (briefInput && !briefInput.contentType && input.serviceId) {
+    try {
+      const [{ data: svcs }, settings] = await Promise.all([
+        admin.from('services').select('id, name'),
+        getCompanySettings(),
+      ])
+      let serviceMap: Record<string, string> = {}
+      try { serviceMap = JSON.parse(settings['social_content_type_services'] || '{}') } catch { /* malformed map */ }
+      const derived = suggestContentType(input.serviceId, (svcs || []) as { id: string; name: string }[], serviceMap)
+      if (derived) briefInput = { ...briefInput, contentType: derived }
+    } catch { /* never block a request on this */ }
+  }
+  const brief = normalizeContentBrief(briefInput)
   const payload: Record<string, unknown> = {
     source: 'manual',
     kind: input.kind || REQUEST_KIND_REQUEST,
