@@ -35,6 +35,8 @@ export type NotificationType =
   | 'social_post_failed'
   | 'social_sync_failed'
   | 'meta_reauth_required'
+  /** A performance_alert_rules threshold breached (reach/leads drop, CPL, ROAS…). */
+  | 'performance_alert'
   // Field Marketing
   | 'field_place_assigned'
   | 'field_followup_due'
