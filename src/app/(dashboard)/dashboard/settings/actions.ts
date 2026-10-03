@@ -3,6 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission, requireAnyPermission, resolveCurrentEmployeeId, requireAdmin } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
+import { sanitizeClientForm } from '@/lib/clients/form'
 import { logActivity } from '@/lib/activity/log'
 import { syncRatesToDb, ratesAreStale } from '@/lib/fx/sync'
 import { revalidatePath, revalidateTag } from 'next/cache'
@@ -339,12 +340,6 @@ async function invalidateEmployeeUserCache(
 
 // ── Clients ───────────────────────────────────────────────────────────────────
 
-// The clients list is loaded with the pricing matrix embedded
-// (`service_pricings:client_service_pricing(*)`). When the edit form spreads a
-// loaded client, that embedded relation rides along — but it's not a real
-// `clients` column, so PostgREST rejects the write ("Could not find the
-// 'service_pricings' column of 'clients'"). Strip embedded relations before any
-// insert/update; pricing rows are saved separately via upsertClientServicePricings.
 /**
  * Who may change an existing client: `clients.edit`, or Settings access as
  * before. One helper so every client write — details, pricing, archive,
@@ -353,12 +348,6 @@ async function invalidateEmployeeUserCache(
  */
 function requireClientEditor() {
   return requireAnyPermission([PERMS.CLIENTS_EDIT, PERMS.SETTINGS_ACCESS])
-}
-
-function sanitizeClientForm(form: Record<string, unknown>): Record<string, unknown> {
-  const { service_pricings, ...columns } = form
-  void service_pricings
-  return columns
 }
 
 export async function createClient(form: Record<string, unknown>): Promise<ActionResult<any>> {
