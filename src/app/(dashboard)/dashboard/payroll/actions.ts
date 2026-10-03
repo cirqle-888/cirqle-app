@@ -370,6 +370,13 @@ export interface MarkPaidInput {
   /** Ownership rewards (revenue/profit share, incentives, bonuses) in finalNet. */
   liveOwnership?: number
   salaryCategory: string
+  /**
+   * The bank account the salary left from. Without it the cash-book salary
+   * row had no account at all, so every salary vanished from bank
+   * reconciliation — ₹30,677 of Kotak salaries had to be fixed by hand in
+   * Sep 2026. Omitted → the default bank account.
+   */
+  bankAccountId?: string | null
 }
 
 export async function markPayrollPaid(
@@ -427,8 +434,20 @@ export async function markPayrollPaid(
     // per-entry ownership basis, and this row is machine-written by marking
     // payroll paid. `employee_id` below is who the salary is FOR, not who
     // typed anything.
+    // Only an ACTIVE account is accepted; anything else falls back to the
+    // default, so a stale id from an old tab can't write a dead account.
+    const { data: accounts } = await admin
+      .from('bank_accounts')
+      .select('id, is_default')
+      .eq('is_active', true)
+    const active = (accounts || []) as { id: string; is_default: boolean | null }[]
+    const bankAccountId =
+      active.find(a => a.id === input.bankAccountId)?.id
+      ?? active.find(a => a.is_default)?.id
+      ?? null
     const salaryRow = {
       entry_date:  today,
+      bank_account_id: bankAccountId,
       type:        'outflow',
       category_id: input.salaryCategory,
       employee_id: input.employeeId,

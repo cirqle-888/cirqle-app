@@ -176,8 +176,17 @@ export default async function PayrollPage() {
       }))
     : []
 
+  // "Paid from" on Mark Paid. Small table; the default account is preselected.
+  const { data: bankAccountRows } = await supabase
+    .from('bank_accounts')
+    .select('id, name, is_default')
+    .eq('is_active', true)
+    .order('display_order')
+  const bankAccounts = (bankAccountRows || []) as { id: string; name: string; is_default: boolean | null }[]
+
   return (
     <PayrollClient
+      bankAccounts={bankAccounts}
       employees={employeesRes.data || []}
       payrollRecords={payrollRecords}
       advances={advances}

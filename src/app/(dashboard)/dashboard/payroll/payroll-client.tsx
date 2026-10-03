@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/header'
@@ -8,7 +8,7 @@ import { createClient, safeFetchAll } from '@/lib/supabase/client'
 import {
   bulkGeneratePayroll, createPayrollRecord, markPayrollPaid, markPayrollUnpaid,
   toggleRevealSalary, createSalaryAdvance, createCreditEntry, refreshPayrollRecord, recalculatePayrollForMonth,
-  convertCredit
+  convertCredit,
 } from './actions'
 import {
   buildCreditLedger, stillOwing, UNATTRIBUTED,
@@ -16,7 +16,7 @@ import {
 } from '@/lib/finance/credit-ledger'
 import { formatCompact } from '@/lib/calculations/currency'
 import { usePrivacy } from "@/contexts/privacy-context"
-import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
+import { cn } from "@/lib/utils"
 import { AlertTriangle, ArrowRight, BarChart2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, EyeOff, FileText, Loader2, Mail, Plus, Printer, RefreshCw, TrendingDown, TrendingUp, Wallet, X, Zap, History } from 'lucide-react'
 import { sendBulkPayslips } from '@/lib/payslip/actions'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
@@ -124,6 +124,8 @@ interface PayrollRecord {
 }
 
 interface Props {
+  /** Active bank accounts for Mark Paid's "Paid from" choice. */
+  bankAccounts?: { id: string; name: string; is_default: boolean | null }[]
   employees: Employee[]
   payrollRecords: PayrollRecord[]
   advances: any[]
@@ -243,6 +245,7 @@ function storedExtras(record: { adjustment_earned?: number | null; ownership_ear
 }
 
 export default function PayrollClient({
+  bankAccounts = [],
   employees, payrollRecords, advances, credits, deductions, contributionScores, allTasks,
   ownershipAwards = [],
   payrollAdjustments = [],
@@ -270,7 +273,16 @@ export default function PayrollClient({
   const [bulkSending, setBulkSending] = useState(false)
   const [confirmModal, setConfirmModal]       = useState<{
     title: string; body: string; confirmLabel: string; onConfirm: () => void
+    /** Shows the "Paid from" account picker (Mark Paid only). */
+    bankPicker?: boolean
   } | null>(null)
+  // Preselected to the default account; kept across payments in one sitting,
+  // so paying five people from Kotak is five clicks, not ten.
+  const [paidFromId, setPaidFromId] = useState<string>(
+    () => bankAccounts.find(a => a.is_default)?.id ?? bankAccounts[0]?.id ?? '')
+  // The confirm callback is captured when the dialog opens, so it reads the
+  // choice through a ref rather than a stale copy of the state.
+  const paidFromRef = useRef(paidFromId)
   const [saving, setSaving] = useState(false)
   const [showBulkGenerate, setShowBulkGenerate] = useState(false)
   const [refreshingId, setRefreshingId] = useState<string | null>(null)
@@ -564,6 +576,7 @@ export default function PayrollClient({
         `Records today as the payment date and adds this amount as a salary expense in the Cash Book.`,
       confirmLabel: 'Mark Paid',
       onConfirm:    () => markPaid(id),
+      bankPicker:   true,
     })
   }
 
@@ -584,6 +597,7 @@ export default function PayrollClient({
       finalNet,
       liveCommission,
       salaryCategory: '001480fa-6ea1-47e5-9461-aef7a914fac5',
+      bankAccountId: paidFromRef.current || null,
     })
     if (result.ok && result.data) {
       setPayroll(p => p.map(r => r.id === id ? { ...r, ...result.data!.updates } : r))
@@ -2697,6 +2711,17 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
           <div className="relative bg-secondary border border-foreground/15 rounded-2xl shadow-2xl w-full max-w-sm p-5">
             <h3 className="font-semibold text-sm mb-2">{confirmModal.title}</h3>
             <p className="text-sm text-muted-foreground mb-5 leading-relaxed whitespace-pre-line">{confirmModal.body}</p>
+            {confirmModal.bankPicker && bankAccounts.length > 0 && (
+              <label className="block mb-5 -mt-2">
+                <span className="block text-xs font-medium text-muted-foreground mb-1.5">Paid from</span>
+                <select
+                  value={paidFromId}
+                  onChange={e => { setPaidFromId(e.target.value); paidFromRef.current = e.target.value }}
+                  className="w-full bg-background border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-green-500/60">
+                  {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </label>
+            )}
             <div className="flex gap-2">
               <button onClick={() => setConfirmModal(null)}
                 className="flex-1 py-2.5 rounded-xl border border-foreground/15 text-sm font-medium text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors">
