@@ -1333,7 +1333,7 @@ export default function RequestsClient({
             )}
           </div>
         )}
-        <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <DndContext id="requests-dnd" sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={rows.filter(r => r.kind !== 'offer').map(r => r.id)} strategy={verticalListSortingStrategy}>
             {(() => { let ri = -1; return rows.map((r) => {
               if (r.kind === 'offer') {

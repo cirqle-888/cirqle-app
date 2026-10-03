@@ -179,6 +179,9 @@ function RichTextEditor({
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [openMenu, setOpenMenu] = useState<null | 'color' | 'highlight' | 'emoji' | 'link'>(null)
+  // Everyday tools show by default; the rest (underline, headings, alignment,
+  // colour…) sit behind the "Aa" toggle so the toolbar isn't a wall of icons.
+  const [allTools, setAllTools] = useState(false)
   const [linkUrl, setLinkUrl] = useState('')
   // Opening a toolbar popover moves focus out of the contenteditable and the
   // caret is lost, so stash the range first and put it back before running the
@@ -277,29 +280,33 @@ function RichTextEditor({
         <EditorGroup>
           <EditorTool disabled={disabled} icon={<Bold className="w-3.5 h-3.5" />} title="Bold (⌘B)" on={() => run('bold')} />
           <EditorTool disabled={disabled} icon={<Italic className="w-3.5 h-3.5" />} title="Italic (⌘I)" on={() => run('italic')} />
-          <EditorTool disabled={disabled} icon={<Underline className="w-3.5 h-3.5" />} title="Underline (⌘U)" on={() => run('underline')} />
-          <EditorTool disabled={disabled} icon={<Strikethrough className="w-3.5 h-3.5" />} title="Strikethrough" on={() => run('strikeThrough')} />
-        </EditorGroup>
-        
-        {/* Structure */}
-        <EditorGroup>
-          <EditorTool disabled={disabled} icon={<Heading2 className="w-3.5 h-3.5" />} title="Heading" on={() => run('formatBlock', '<h3>')} />
-          <EditorTool disabled={disabled} icon={<Quote className="w-3.5 h-3.5" />} title="Quote" on={() => run('formatBlock', '<blockquote>')} />
+          {allTools && <EditorTool disabled={disabled} icon={<Underline className="w-3.5 h-3.5" />} title="Underline (⌘U)" on={() => run('underline')} />}
+          {allTools && <EditorTool disabled={disabled} icon={<Strikethrough className="w-3.5 h-3.5" />} title="Strikethrough" on={() => run('strikeThrough')} />}
           <EditorTool disabled={disabled} icon={<List className="w-3.5 h-3.5" />} title="Bullet list" on={() => run('insertUnorderedList')} />
-          <EditorTool disabled={disabled} icon={<ListOrdered className="w-3.5 h-3.5" />} title="Numbered list" on={() => run('insertOrderedList')} />
         </EditorGroup>
-        
-        {/* Alignment */}
-        <EditorGroup>
-          <EditorTool disabled={disabled} icon={<AlignLeft className="w-3.5 h-3.5" />} title="Align left" on={() => run('justifyLeft', undefined, true)} />
-          <EditorTool disabled={disabled} icon={<AlignCenter className="w-3.5 h-3.5" />} title="Align center" on={() => run('justifyCenter', undefined, true)} />
-          <EditorTool disabled={disabled} icon={<AlignRight className="w-3.5 h-3.5" />} title="Align right" on={() => run('justifyRight', undefined, true)} />
-        </EditorGroup>
+
+        {allTools && (
+          <>
+            {/* Structure */}
+            <EditorGroup>
+              <EditorTool disabled={disabled} icon={<Heading2 className="w-3.5 h-3.5" />} title="Heading" on={() => run('formatBlock', '<h3>')} />
+              <EditorTool disabled={disabled} icon={<Quote className="w-3.5 h-3.5" />} title="Quote" on={() => run('formatBlock', '<blockquote>')} />
+              <EditorTool disabled={disabled} icon={<ListOrdered className="w-3.5 h-3.5" />} title="Numbered list" on={() => run('insertOrderedList')} />
+            </EditorGroup>
+            {/* Alignment */}
+            <EditorGroup>
+              <EditorTool disabled={disabled} icon={<AlignLeft className="w-3.5 h-3.5" />} title="Align left" on={() => run('justifyLeft', undefined, true)} />
+              <EditorTool disabled={disabled} icon={<AlignCenter className="w-3.5 h-3.5" />} title="Align center" on={() => run('justifyCenter', undefined, true)} />
+              <EditorTool disabled={disabled} icon={<AlignRight className="w-3.5 h-3.5" />} title="Align right" on={() => run('justifyRight', undefined, true)} />
+            </EditorGroup>
+          </>
+        )}
 
         <div className="flex-1" />
 
         {/* Inserts & Decorators */}
         <EditorGroup>
+          {allTools && (<>
           <div className="relative">
             <EditorTool disabled={disabled} icon={<Palette className="w-3.5 h-3.5 text-blue-500" />} title="Text colour" on={() => setOpenMenu(m => m === 'color' ? null : 'color')} />
             {openMenu === 'color' && (
@@ -324,6 +331,7 @@ function RichTextEditor({
               </div>
             )}
           </div>
+          </>)}
           <div className="relative">
             <EditorTool disabled={disabled} icon={<Smile className="w-3.5 h-3.5 text-emerald-500" />} title="Emoji" on={() => setOpenMenu(m => m === 'emoji' ? null : 'emoji')} />
             {openMenu === 'emoji' && (
@@ -361,9 +369,16 @@ function RichTextEditor({
         </EditorGroup>
         
         {/* Clear */}
-        <EditorGroup>
-          <EditorTool disabled={disabled} icon={<Eraser className="w-3.5 h-3.5 text-red-400" />} title="Clear formatting" className="hover:text-red-500 hover:bg-red-500/10" on={() => run('removeFormat')} />
-        </EditorGroup>
+        {allTools && (
+          <EditorGroup>
+            <EditorTool disabled={disabled} icon={<Eraser className="w-3.5 h-3.5 text-red-400" />} title="Clear formatting" className="hover:text-red-500 hover:bg-red-500/10" on={() => run('removeFormat')} />
+          </EditorGroup>
+        )}
+        <button type="button" onClick={() => setAllTools(v => !v)}
+          title={allTools ? 'Fewer formatting tools' : 'More formatting — underline, headings, alignment, colour'}
+          className={`h-7 px-2 rounded-md text-[11px] font-semibold transition-colors ${allTools ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}>
+          Aa
+        </button>
       </div>
       <div className="relative">
         {empty && placeholder && (
@@ -375,7 +390,7 @@ function RichTextEditor({
           suppressContentEditableWarning
           onInput={e => onChange((e.target as HTMLDivElement).innerHTML)}
           onPaste={handlePaste}
-          className="min-h-[240px] max-h-[50dvh] overflow-y-auto px-3 py-2 text-sm focus:outline-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_h1]:text-base [&_h1]:font-bold [&_h2]:text-base [&_h2]:font-bold [&_h3]:font-semibold [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:underline"
+          className="min-h-[120px] max-h-[50dvh] overflow-y-auto px-3 py-2 text-sm focus:outline-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_h1]:text-base [&_h1]:font-bold [&_h2]:text-base [&_h2]:font-bold [&_h3]:font-semibold [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:underline"
         />
       </div>
     </div>
@@ -1645,7 +1660,7 @@ export default function SocialCalendarClient({
           </div>
 
           {viewMode === 'calendar' ? (
-          <DndContext sensors={dndSensors} collisionDetection={pointerWithin} onDragEnd={handleDragEnd}>
+          <DndContext id="social-calendar-dnd" sensors={dndSensors} collisionDetection={pointerWithin} onDragEnd={handleDragEnd}>
           <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-start">
 
             {/* ── Month grid — the main focus, so it leads the row ── */}
