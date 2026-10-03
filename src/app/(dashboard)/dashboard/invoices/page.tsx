@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/server'
+import { withDraftFlag } from '@/lib/clients/draft'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, stripInvoiceList } from '@/lib/permissions/strip'
 import { getPendingPricing } from '@/lib/pricing/pending'
@@ -39,11 +40,13 @@ export default async function InvoicesPage() {
       `)
       .order('created_at', { ascending: false })
       .limit(500),
-    supabase
+    // is_draft: trial clients are kept out of every invoice picker and the
+    // batch generator until approved (falls back pre-migration).
+    withDraftFlag(x => supabase
       .from('clients')
-      .select('id, name, code, phone, email, address, default_currency')
+      .select(`id, name, code, phone, email, address, default_currency${x}`)
       .eq('is_active', true)
-      .order('name'),
+      .order('name')),
     supabase
       .from('bank_accounts')
       .select('id, name, is_default')
@@ -121,7 +124,8 @@ export default async function InvoicesPage() {
     {canSeePricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
     <InvoicesClient
       initialInvoices={initialInvoices}
-      clients={clientsRes.data || []}
+      clients={((clientsRes.data || []) as any[]).filter(c => !c.is_draft)}
+      draftClientIds={((clientsRes.data || []) as any[]).filter(c => c.is_draft).map(c => c.id as string)}
       bankAccounts={bankRes.data || []}
       cashbookCategories={categoriesRes.data || []}
       services={servicesRes.data || []}

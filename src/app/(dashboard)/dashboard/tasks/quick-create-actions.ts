@@ -24,19 +24,44 @@ export interface QuickClientInput {
   contact_name?: string
   default_currency?: string
   country?: string
+  address?: string
+  gstin?: string
+  /**
+   * Save as a draft (trial) client. Forced on for anyone who holds only
+   * clients.create_draft; optional for those who can add real clients.
+   */
+  as_draft?: boolean
+  /** What the trial is for — shown to whoever approves the draft. */
+  draft_note?: string
 }
 
 export async function quickCreateClient(
   input: QuickClientInput,
 ): Promise<ActionResult<{ client: any; pricingPending: boolean }>> {
-  // Either the dedicated create perm OR full settings access may add clients.
-  const guard = await requireAnyPermission([PERMS.CLIENTS_CREATE, PERMS.SETTINGS_ACCESS])
+  // Real clients: the dedicated create perm OR full settings access.
+  // Draft (trial) clients: clients.create_draft is enough on its own.
+  const guard = await requireAnyPermission([PERMS.CLIENTS_CREATE, PERMS.SETTINGS_ACCESS, PERMS.CLIENTS_CREATE_DRAFT])
   if (!guard.ok) return { ok: false, error: guard.error }
+  const canAddReal = guard.isAdmin
+    || (await requireAnyPermission([PERMS.CLIENTS_CREATE, PERMS.SETTINGS_ACCESS])).ok
+  const isDraft = !!input.as_draft || !canAddReal
 
   const name = (input.name || '').trim()
   if (!name) return { ok: false, error: 'Client name is required.' }
 
   const admin = createAdminClient()
+
+  // A trial prospect is often re-added by a second person who didn't see the
+  // first draft. Same name (case-insensitive) → reuse rather than duplicate.
+  if (isDraft) {
+    const { data: same } = await admin.from('clients')
+      .select('id, name, code, is_draft').ilike('name', name).limit(1)
+    if (same?.[0]) {
+      return { ok: false, error: same[0].is_draft
+        ? `"${same[0].name}" is already a draft client — pick it from the list.`
+        : `"${same[0].name}" is already a client — pick it from the list.` }
+    }
+  }
 
   // Auto-generate the next 3-digit code (matches the Settings convention).
   const { data: last } = await admin
@@ -58,15 +83,55 @@ export async function quickCreateClient(
       contact_name: input.contact_name?.trim() || null,
       default_currency: input.default_currency || 'INR',
       country: input.country || 'India',
+      address: input.address?.trim() || null,
+      gstin: input.gstin?.trim() || null,
       is_active: true,
       pricing_pending: pricingPending,
+      ...(isDraft ? {
+        is_draft: true,
+        draft_note: input.draft_note?.trim() || null,
+        draft_created_by: guard.employeeId || null,
+        draft_created_at: new Date().toISOString(),
+      } : {}),
     })
     .select()
     .single()
-  if (error) return { ok: false, error: error.message }
+  if (error) {
+    if (/is_draft|draft_/i.test(error.message || '')) {
+      return { ok: false, error: 'Draft clients aren’t set up yet — run the 20261003100000_draft_clients migration.' }
+    }
+    return { ok: false, error: error.message }
+  }
 
   revalidatePath('/dashboard/tasks')
+  revalidatePath('/dashboard/requests')
+  revalidatePath('/dashboard/social-calendar')
+  revalidatePath('/dashboard/clients')
   return { ok: true, data: { client: data, pricingPending } }
+}
+
+// ─── Approve a draft (trial) client ─────────────────────────────────────────────
+
+/**
+ * Turn a draft client into a real one. From here it is invoiced like any
+ * other client — its done trial tasks become billable in the generators
+ * (unless they were waived on the task). Archiving a draft is the existing
+ * Archive action on the Clients page.
+ */
+export async function approveDraftClient(id: string): Promise<ActionResult> {
+  const guard = await requireAnyPermission([PERMS.CLIENTS_CREATE, PERMS.SETTINGS_ACCESS])
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const admin = createAdminClient()
+  const { error } = await admin.from('clients').update({
+    is_draft: false,
+    draft_approved_by: guard.employeeId || null,
+    draft_approved_at: new Date().toISOString(),
+  }).eq('id', id).eq('is_draft', true)
+  if (error) return { ok: false, error: error.message }
+  revalidatePath('/dashboard/clients')
+  revalidatePath('/dashboard/invoices')
+  revalidatePath('/dashboard/tasks')
+  return { ok: true }
 }
 
 // ─── Quick-create service ───────────────────────────────────────────────────────

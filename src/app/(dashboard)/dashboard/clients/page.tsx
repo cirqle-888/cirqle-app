@@ -35,9 +35,16 @@ export default async function ClientsPage() {
   const scope = await loadServiceScope(supabase, me, 'global')
 
   const [clientsRes, invoicesRes, tasksRes, pricingRes, servicesRes] = await Promise.all([
-    fetchAll(supabase.from('clients')
-      .select('id, name, code, contact_name, email, phone, country, default_currency, is_active, pricing_pending, business_partner_id, created_at')
-      .order('name')),
+    // Draft (trial) columns need 20261003100000_draft_clients; without them
+    // the list loads as before and nothing shows as a draft.
+    (async () => {
+      const base = 'id, name, code, contact_name, email, phone, country, default_currency, is_active, pricing_pending, business_partner_id, created_at'
+      const res = await fetchAll(supabase.from('clients')
+        .select(`${base}, is_draft, draft_note, draft_created_at, draft_creator:employees!clients_draft_created_by_fkey(name)`)
+        .order('name'))
+      if (!res.error) return res
+      return fetchAll(supabase.from('clients').select(base).order('name'))
+    })(),
     // Minimal columns — only what the outstanding rollup needs.
     showAmounts
       ? fetchAll(supabase.from('invoices').select('client_id, total_amount, paid_amount, status'))
@@ -121,6 +128,7 @@ export default async function ClientsPage() {
       showAmounts={showAmounts}
       canCreate={isAdmin || hasPermission(me, PERMS.CLIENTS_CREATE) || hasPermission(me, PERMS.SETTINGS_ACCESS)}
       canEdit={isAdmin || hasPermission(me, PERMS.SETTINGS_ACCESS)}
+      canApproveDraft={isAdmin || hasPermission(me, PERMS.CLIENTS_CREATE) || hasPermission(me, PERMS.SETTINGS_ACCESS)}
     />
   )
 }

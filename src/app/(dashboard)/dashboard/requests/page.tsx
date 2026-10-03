@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { withDraftFlag } from '@/lib/clients/draft'
 import { createAdminClient } from '@/lib/supabase/server'
 import { selectWithOptionalColumns } from '@/lib/offer-columns'
 import { loadCurrentUser } from '@/lib/permissions/check'
@@ -35,9 +36,11 @@ export default async function RequestsPage({
 
   // Pickers for the New Request form + employee assignment.
   // drive_folder_link needs the v1.1 patch migration — fall back without it.
-  let clientsRes = await admin.from('clients').select('id, name, code, drive_folder_link').order('name')
+  // is_draft (draft-clients migration) labels trial clients "Draft" in the
+  // picker; withDraftFlag drops it again if that migration isn't applied.
+  let clientsRes = await withDraftFlag(x => admin.from('clients').select(`id, name, code, drive_folder_link${x}`).order('name')) as any
   if (clientsRes.error && /drive_folder_link/i.test(clientsRes.error.message || '')) {
-    clientsRes = await admin.from('clients').select('id, name, code').order('name') as any
+    clientsRes = await withDraftFlag(x => admin.from('clients').select(`id, name, code${x}`).order('name')) as any
   }
   const [employeesRes, servicesRes, pricingRes] = await Promise.all([
     admin.from('employees').select('id, cqid, name').eq('is_active', true).order('cqid'),

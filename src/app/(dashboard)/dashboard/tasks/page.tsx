@@ -1,4 +1,5 @@
 import { createAdminClient, fetchAll, stablePaginationQuery, safeQuery, columnExists } from '@/lib/supabase/server'
+import { withDraftFlag } from '@/lib/clients/draft'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, stripTaskListPricing, userCanSee } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
@@ -308,7 +309,8 @@ export default async function TasksPage({
     hasDeletedAt
       ? supabase.from('tasks').select('id', { count: 'exact', head: true }).is('deleted_at', null)
       : supabase.from('tasks').select('id', { count: 'exact', head: true }),
-    supabase.from('clients').select('id, name, code').eq('is_active', true).order('name'),
+    // is_draft labels trial clients "Draft" in the picker (falls back pre-migration).
+    withDraftFlag(x => supabase.from('clients').select(`id, name, code${x}`).eq('is_active', true).order('name')),
     // Services: viewers with `tasks.view_pricing` get default_price/currency/
     // pricing_type so admin task editors can use them; others get name only.
     vis.tasksPricing
@@ -513,7 +515,7 @@ export default async function TasksPage({
       fullHistory={fullHistory}
       initialTasks={initialTasks}
       initialTrash={initialTrash}
-      clients={clientsRes.data || []}
+      clients={(clientsRes.data || []) as unknown as { id: string; name: string; code: string; is_draft?: boolean | null }[]}
       services={scopedServices}
       packages={(packagesRes.data || []) as any[]}
       packageItems={(packageItemsRes.data || []) as any[]}

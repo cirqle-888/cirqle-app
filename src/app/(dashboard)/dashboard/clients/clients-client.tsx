@@ -11,9 +11,10 @@ import AppSelect from '@/components/ui/app-select'
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
   Plus, Search, X, Edit2, Archive, ArchiveRestore, ChevronRight,
-  Users2, Award, IndianRupee, AlertTriangle, Settings2, Layers,
+  Users2, Award, IndianRupee, AlertTriangle, Settings2, Layers, FlaskConical, CheckCircle2,
 } from 'lucide-react'
 import { createClient, updateClient, deactivateClient, reactivateClient } from '@/app/(dashboard)/dashboard/settings/actions'
+import { approveDraftClient } from '@/app/(dashboard)/dashboard/tasks/quick-create-actions'
 import type { Currency } from '@/types'
 
 const CURRENCIES: Currency[] = ['AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
@@ -38,6 +39,11 @@ interface ClientRow {
   pricing_pending: boolean
   business_partner_id: string | null
   created_at: string | null
+  /** Draft (trial) client — added from a planning screen, not yet approved. */
+  is_draft?: boolean | null
+  draft_note?: string | null
+  draft_created_at?: string | null
+  draft_creator?: { name: string | null } | { name: string | null }[] | null
 }
 
 interface ClientStats {
@@ -56,17 +62,22 @@ interface Props {
   showAmounts: boolean
   canCreate: boolean
   canEdit: boolean
+  /** clients.create / settings.access — may turn a draft into a real client. */
+  canApproveDraft?: boolean
 }
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
 
-export default function ClientsClient({ clients: initialClients, stats, departments = [], clientDepartments = {}, showAmounts, canCreate, canEdit }: Props) {
+const draftCreatorName = (c: { draft_creator?: ClientRow['draft_creator'] }) =>
+  (Array.isArray(c.draft_creator) ? c.draft_creator[0]?.name : c.draft_creator?.name) || null
+
+export default function ClientsClient({ clients: initialClients, stats, departments = [], clientDepartments = {}, showAmounts, canCreate, canEdit, canApproveDraft = false }: Props) {
   const router = useRouter()
   const toast = useToast()
   const { ds } = usePrivacy()
   const [clients, setClients] = useState(initialClients)
   const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState<'active' | 'archived' | 'all'>('active')
+  const [filter, setFilter] = useState<'active' | 'drafts' | 'archived' | 'all'>('active')
   const [sort, setSort] = useState<'name' | 'outstanding' | 'tasks'>('name')
   const [groupByDept, setGroupByDept] = useState(false)
   const [showForm, setShowForm] = useState(false)
@@ -79,6 +90,7 @@ export default function ClientsClient({ clients: initialClients, stats, departme
     let pool = clients
     if (filter === 'active')   pool = pool.filter(c => c.is_active !== false)
     if (filter === 'archived') pool = pool.filter(c => c.is_active === false)
+    if (filter === 'drafts')   pool = pool.filter(c => c.is_draft && c.is_active !== false)
     if (search) {
       const q = search.toLowerCase()
       pool = pool.filter(c =>
@@ -95,13 +107,25 @@ export default function ClientsClient({ clients: initialClients, stats, departme
   // Portfolio totals for the KPI strip (active clients only).
   const totals = useMemo(() => {
     const active = clients.filter(c => c.is_active !== false)
-    let outstanding = 0, pendingPricing = 0
+    let outstanding = 0, pendingPricing = 0, drafts = 0
     for (const c of active) {
       outstanding += stats[c.id]?.outstanding || 0
       if (c.pricing_pending) pendingPricing += 1
+      if (c.is_draft) drafts += 1
     }
-    return { count: active.length, outstanding, pendingPricing }
+    return { count: active.length - drafts, outstanding, pendingPricing, drafts }
   }, [clients, stats])
+
+  // ── Draft (trial) clients ───────────────────────────────────────────────
+  const [approvingId, setApprovingId] = useState<string | null>(null)
+  async function approve(client: ClientRow) {
+    setApprovingId(client.id)
+    const res = await approveDraftClient(client.id)
+    setApprovingId(null)
+    if (!res.ok) { toast.error('Could not approve', res.error); return }
+    setClients(prev => prev.map(c => c.id === client.id ? { ...c, is_draft: false } : c))
+    toast.success(`${client.name} is now a client`, 'Its done work can be invoiced from now on. Waive any free trial tasks first.')
+  }
 
   async function openForm(client?: ClientRow) {
     setEditingId(client?.id ?? null)
@@ -201,12 +225,12 @@ export default function ClientsClient({ clients: initialClients, stats, departme
         {/* Controls */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex bg-secondary/30 border border-border/50 rounded-lg p-0.5 shrink-0">
-            {(['active', 'archived', 'all'] as const).map(f => (
+            {(['active', ...(totals.drafts > 0 || filter === 'drafts' ? ['drafts' as const] : []), 'archived', 'all'] as const).map(f => (
               <button key={f} onClick={() => setFilter(f)}
                 className={`px-3 py-1.5 text-[13px] font-medium rounded-md transition-all ${
                   filter === f ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50' : 'text-muted-foreground hover:text-foreground'
                 }`}>
-                {f === 'active' ? 'Active' : f === 'archived' ? 'Archived' : 'All'}
+                {f === 'active' ? 'Active' : f === 'drafts' ? `Drafts (${totals.drafts})` : f === 'archived' ? 'Archived' : 'All'}
               </button>
             ))}
           </div>
@@ -263,6 +287,12 @@ export default function ClientsClient({ clients: initialClients, stats, departme
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-semibold text-sm truncate">{client.name}</p>
+                    {client.is_draft && (
+                      <span title={client.draft_note || 'Trial client — not invoiced until approved'}
+                        className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-sky-500/10 text-sky-600 dark:text-sky-300 border border-sky-500/25 shrink-0 inline-flex items-center gap-1">
+                        <FlaskConical className="w-3 h-3" />Draft · trial
+                      </span>
+                    )}
                     {client.pricing_pending && (
                       <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/25 shrink-0">Needs pricing</span>
                     )}
@@ -276,6 +306,11 @@ export default function ClientsClient({ clients: initialClients, stats, departme
                   <p className="text-xs text-muted-foreground truncate mt-0.5">
                     {[client.contact_name, ds(client.email, '••••@••••'), client.country].filter(Boolean).join(' · ') || '—'}
                   </p>
+                  {client.is_draft && (client.draft_note || draftCreatorName(client)) && (
+                    <p className="text-[11px] text-sky-700/80 dark:text-sky-300/80 truncate mt-0.5">
+                      {[client.draft_note, draftCreatorName(client) && `added by ${draftCreatorName(client)}`].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
                 </div>
                 {/* Stats */}
                 <div className="hidden sm:flex items-center gap-5 shrink-0 text-right">
@@ -296,6 +331,13 @@ export default function ClientsClient({ clients: initialClients, stats, departme
                 </div>
                 {/* Row actions */}
                 <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                  {client.is_draft && canApproveDraft && client.is_active !== false && (
+                    <button onClick={() => approve(client)} disabled={approvingId === client.id}
+                      title="Make this a real client — from now on its work can be invoiced"
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 hover:bg-emerald-500/15 transition-colors disabled:opacity-50">
+                      <CheckCircle2 className="w-3.5 h-3.5" />Approve
+                    </button>
+                  )}
                   {canEdit && (
                     <button onClick={() => openForm(client)} title="Edit client"
                       className="p-2 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity">

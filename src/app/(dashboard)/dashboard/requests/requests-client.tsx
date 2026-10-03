@@ -19,6 +19,10 @@ import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-face
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { usePermissions } from '@/contexts/permission-context'
+import Combobox from '@/components/ui/combobox'
+import dynamic from 'next/dynamic'
+import { clientPickerSub } from '@/lib/clients/draft'
+const QuickCreateClientModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(m => m.QuickCreateClientModal), { ssr: false })
 import {
   Inbox, AlertTriangle, ChevronRight, Clock, Link2, Loader2, Play,
   CalendarDays, MessageSquarePlus, Save, CheckCircle2, X, Flag,
@@ -229,13 +233,13 @@ function getShareStatusStyle(status: string): React.CSSProperties {
 }
 
 export default function RequestsClient({
-  migrated, initialRequests, perms, clients = [], employees = [], services = [],
+  migrated, initialRequests, perms, clients: clientsProp = [], employees = [], services = [],
   servicePricing = [], offerCampaigns = [], initialFocusId = null,
 }: {
   migrated: boolean
   initialRequests: any[]
   perms: { review: boolean; start: boolean; manage: boolean; activity: boolean }
-  clients?: { id: string; name: string; code?: string | null; drive_folder_link?: string | null }[]
+  clients?: { id: string; name: string; code?: string | null; drive_folder_link?: string | null; is_draft?: boolean | null }[]
   employees?: { id: string; cqid?: string | null; name: string }[]
   services?: { id: string; name: string }[]
   servicePricing?: { client_id: string; service_id: string; price: number | null }[]
@@ -247,6 +251,15 @@ export default function RequestsClient({
   // Assigned-employee names respect the global privacy lock — name only when unlocked, else CQID.
   const { dn } = usePrivacy()
   const { can } = usePermissions()
+
+  // Inline "Add client" in the New Request form — including DRAFT (trial)
+  // clients for prospects who asked for trial creatives. clients.create_draft
+  // alone ⇒ every add is a draft; real clients need clients.create.
+  const canAddRealClient = can('clients.create') || can('settings.access')
+  const canAddClient = canAddRealClient || can('clients.create_draft')
+  const [addedClients, setAddedClients] = useState<NonNullable<typeof clientsProp>>([])
+  const [quickClient, setQuickClient] = useState<string | null>(null)
+  const clients = useMemo(() => [...addedClients, ...clientsProp], [addedClients, clientsProp])
   const { toasts, dismiss, success, error: toastError } = useToast()
   const [requests, setRequests] = useState(initialRequests)
   const [tab, setTab] = useState('new')
@@ -1621,11 +1634,17 @@ export default function RequestsClient({
             <div className="overflow-y-auto flex-1 p-5 space-y-3.5">
               <div>
                 <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Client *</label>
-                <select value={newForm.clientId} onChange={e => setNewForm(f => ({ ...f, clientId: e.target.value }))}
-                  className="mt-1 w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50">
-                  <option value="">Select client…</option>
-                  {clients.map(c => <option key={c.id} value={c.id}>{c.name}{c.code ? ` · ${c.code}` : ''}</option>)}
-                </select>
+                <div className="mt-1">
+                  <Combobox
+                    options={clients.map(c => ({ id: c.id, label: c.name, sub: clientPickerSub(c) }))}
+                    value={newForm.clientId}
+                    onChange={id => setNewForm(f => ({ ...f, clientId: id }))}
+                    placeholder="Search client…"
+                    sortKey="clients"
+                    onAddNew={canAddClient ? (q => setQuickClient(q)) : undefined}
+                    addNewLabel={canAddRealClient ? 'Add client' : 'Add draft client'}
+                  />
+                </div>
                 {driveLinkOf(newForm.clientId) && (
                   <a href={driveLinkOf(newForm.clientId)!} target="_blank" rel="noreferrer"
                     className="mt-1.5 inline-flex items-center gap-1 text-xs text-blue-400 hover:underline">
@@ -1886,6 +1905,22 @@ export default function RequestsClient({
         </div>
       )}
 
+      {quickClient !== null && (
+        <QuickCreateClientModal
+          initialName={quickClient}
+          canSeePricing={false}
+          canAddReal={canAddRealClient}
+          defaultDraft
+          onClose={() => setQuickClient(null)}
+          onCreated={client => {
+            setAddedClients(prev => [{ id: client.id, name: client.name, code: client.code, is_draft: client.is_draft }, ...prev])
+            setNewForm(f => ({ ...f, clientId: client.id }))
+            setQuickClient(null)
+            success(client.is_draft ? `Draft client "${client.name}" added` : `Client "${client.name}" added`,
+              client.is_draft ? 'Raise the trial request now — approve them later on the Clients page' : undefined)
+          }}
+        />
+      )}
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
   )

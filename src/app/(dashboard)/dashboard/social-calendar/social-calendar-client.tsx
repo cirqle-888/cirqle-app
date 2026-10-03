@@ -6,6 +6,10 @@ import Link from 'next/link'
 import Header from '@/components/layout/header'
 import { SocialTabs } from '@/components/social-hub/social-tabs'
 import Combobox from '@/components/ui/combobox'
+import dynamic from 'next/dynamic'
+import { usePermissions } from '@/contexts/permission-context'
+import { clientPickerSub } from '@/lib/clients/draft'
+const QuickCreateClientModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(m => m.QuickCreateClientModal), { ssr: false })
 import AppSelect from '@/components/ui/app-select'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useToast, ToastContainer } from '@/components/ui/toast'
@@ -104,7 +108,7 @@ interface Props {
     id: string; task_number: number | null; title: string
     task_date: string; status: string; service_name: string | null
   }[]
-  clients: { id: string; name: string; code: string }[]
+  clients: { id: string; name: string; code: string; is_draft?: boolean | null }[]
   services?: { id: string; name: string }[]
   /** Variant tags used across every plan — autocomplete for the "Also as" field. */
   knownVariants?: string[]
@@ -524,6 +528,16 @@ export default function SocialCalendarClient({
 }: Props) {
   const router = useRouter()
   const toast = useToast()
+
+  // Inline "Add client" in the New Plan picker — including DRAFT (trial)
+  // clients, so a prospect who asked for trial posters can get a content plan
+  // before they're a real client. clients.create_draft alone ⇒ always a draft.
+  const { can } = usePermissions()
+  const canAddRealClient = can('clients.create') || can('settings.access')
+  const canAddClient = canAddRealClient || can('clients.create_draft')
+  const [addedClients, setAddedClients] = useState<Props['clients']>([])
+  const [quickClient, setQuickClient] = useState<string | null>(null)
+  const clientOptions = [...addedClients, ...clients]
 
   const selected = calendars.find(c => c.id === selectedId) ?? null
   const items = initialItems
@@ -1849,11 +1863,13 @@ export default function SocialCalendarClient({
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1.5">Client *</label>
                 <Combobox
-                  options={clients.map(c => ({ id: c.id, label: c.name, sub: c.code }))}
+                  options={clientOptions.map(c => ({ id: c.id, label: c.name, sub: clientPickerSub(c) }))}
                   value={planForm.clientId}
                   onChange={id => setPlanForm(p => ({ ...p, clientId: id }))}
                   placeholder="Search client…"
                   sortKey="clients"
+                  onAddNew={canAddClient ? (q => setQuickClient(q)) : undefined}
+                  addNewLabel={canAddRealClient ? 'Add client' : 'Add draft client'}
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -2496,6 +2512,23 @@ export default function SocialCalendarClient({
             </div>
           </div>
         </ModalOverlay>
+      )}
+
+      {quickClient !== null && (
+        <QuickCreateClientModal
+          initialName={quickClient}
+          canSeePricing={false}
+          canAddReal={canAddRealClient}
+          defaultDraft
+          onClose={() => setQuickClient(null)}
+          onCreated={client => {
+            setAddedClients(prev => [{ id: client.id, name: client.name, code: client.code, is_draft: client.is_draft }, ...prev])
+            setPlanForm(p => ({ ...p, clientId: client.id }))
+            setQuickClient(null)
+            toast.success(client.is_draft ? `Draft client "${client.name}" added` : `Client "${client.name}" added`,
+              client.is_draft ? 'Plan and assign their trial work — approve them later on the Clients page' : undefined)
+          }}
+        />
       )}
 
       <ToastContainer toasts={toast.toasts} onDismiss={toast.dismiss} />

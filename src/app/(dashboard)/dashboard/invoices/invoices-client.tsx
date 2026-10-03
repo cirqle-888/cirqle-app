@@ -181,6 +181,8 @@ interface Invoice {
 interface Props {
   initialInvoices: Invoice[]
   clients: { id: string; name: string; code: string; phone?: string; email?: string; address?: string; default_currency?: string }[]
+  /** Draft (trial) clients — never offered for invoicing until approved. */
+  draftClientIds?: string[]
   bankAccounts: { id: string; name: string; is_default?: boolean }[]
   cashbookCategories: { id: string; name: string }[]
   services: { id: string; name: string }[]
@@ -284,7 +286,7 @@ function findLinkedCashbookEntry(inv: Invoice, p: Payment) {
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function InvoicesClient({ initialInvoices, clients, bankAccounts, cashbookCategories, services, companySettings, exchangeRates, visibility, agreementBreakdowns }: Props) {
+export default function InvoicesClient({ initialInvoices, clients, draftClientIds = [], bankAccounts, cashbookCategories, services, companySettings, exchangeRates, visibility, agreementBreakdowns }: Props) {
   const showAmounts     = visibility.amounts
   const showTotals      = visibility.totals
   const showLinePricing = visibility.linePricing
@@ -2003,6 +2005,14 @@ export default function InvoicesClient({ initialInvoices, clients, bankAccounts,
       if (error || !data) break
       doneTasks.push(...data)
       if (data.length < PAGE) break   // last page reached
+    }
+    // Draft (trial) clients' work is never batch-invoiced — the trial isn't
+    // billable until someone approves the client on the Clients page.
+    if (draftClientIds.length) {
+      const drafts = new Set(draftClientIds)
+      for (let i = doneTasks.length - 1; i >= 0; i--) {
+        if (doneTasks[i].client_id && drafts.has(doneTasks[i].client_id)) doneTasks.splice(i, 1)
+      }
     }
     if (!doneTasks.length) { setBatchLoading(false); return }
 

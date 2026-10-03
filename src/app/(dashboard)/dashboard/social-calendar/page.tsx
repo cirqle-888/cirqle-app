@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { withDraftFlag } from '@/lib/clients/draft'
 import { createAdminClient } from '@/lib/supabase/server'
 import { coverageTaskColumns } from '@/lib/packages/coverage-select'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
@@ -192,8 +193,9 @@ export default async function SocialCalendarPage({
     departments = (data || []) as { id: string; name: string }[]
   } catch { /* pre-migration — picker falls back to a flat list */ }
 
-  const clients = (await admin
-    .from('clients').select('id, name, code').eq('is_active', true).order('name')).data || []
+  // is_draft labels trial clients "Draft" in the New Plan picker.
+  const clients = (await withDraftFlag(x => admin
+    .from('clients').select(`id, name, code${x}`).eq('is_active', true).order('name'))).data || []
 
   // ── Package commitments for the plan on screen ────────────────────────────
   //

@@ -41,6 +41,7 @@ import { deriveWorkScope, retryWithoutScope, withoutScope, isScopeColumnMissing 
 import { seedFromTasks } from '@/lib/hooks/use-smart-sort'
 import { useRole } from '@/contexts/role-context'
 import { usePermissions } from '@/contexts/permission-context'
+import { clientPickerSub } from '@/lib/clients/draft'
 import {
   serverDeleteTask,
   serverRestoreTask,
@@ -227,7 +228,7 @@ interface Props {
   fullHistory?: boolean
   initialTasks: Task[]
   initialTrash: (Task & { deleted_at: string })[]
-  clients: { id: string; name: string; code: string }[]
+  clients: { id: string; name: string; code: string; is_draft?: boolean | null }[]
   services: Service[]
   clientPricings: { client_id: string; service_id: string; price: number; currency: string }[]
   /** Active packages + their included lines — the list's Package/Extra labels. */
@@ -710,7 +711,10 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
 
   // Inline quick-create (client / service) opened from the Add Task dropdowns.
   const [quickCreate, setQuickCreate] = useState<{ kind: 'client' | 'service'; query: string } | null>(null)
-  const canCreateClient  = can('clients.create')
+  // Real clients need clients.create (or settings.access); clients.create_draft
+  // alone still offers "Add client", but every add is a draft (trial) client.
+  const canAddRealClient = can('clients.create') || can('settings.access')
+  const canCreateClient  = canAddRealClient || can('clients.create_draft')
   const canCreateService = can('services.create')
   const canSeePricing    = permissionFlags?.pricing ?? false
 
@@ -4842,7 +4846,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                   <Combobox
                     options={[
                       { id: INTERNAL_CLIENT, label: 'Internal — Cirqle', sub: 'own brand work · never invoiced' },
-                      ...clientList.map(c => ({ id: c.id, label: c.name, sub: c.code })),
+                      ...clientList.map(c => ({ id: c.id, label: c.name, sub: clientPickerSub(c) })),
                     ]}
                     value={form.client_id}
                     onChange={handleClientChange}
@@ -5654,12 +5658,14 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
         <QuickCreateClientModal
           initialName={quickCreate.query}
           canSeePricing={canSeePricing}
+          canAddReal={canAddRealClient}
           onClose={() => setQuickCreate(null)}
           onCreated={(client, pricingPending) => {
-            setClientList(prev => [{ id: client.id, name: client.name, code: client.code }, ...prev])
+            setClientList(prev => [{ id: client.id, name: client.name, code: client.code, is_draft: client.is_draft }, ...prev])
             handleClientChange(client.id)
             setQuickCreate(null)
-            success(`Client "${client.name}" added`, pricingPending ? 'Flagged for pricing by an admin' : undefined)
+            success(client.is_draft ? `Draft client "${client.name}" added` : `Client "${client.name}" added`,
+              client.is_draft ? 'Not invoiced until approved on the Clients page' : pricingPending ? 'Flagged for pricing by an admin' : undefined)
           }}
         />
       )}

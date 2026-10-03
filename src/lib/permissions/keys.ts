@@ -322,6 +322,12 @@ export const PERMS = {
   CLIENTS_VIEW:    'clients.view',
   /** Create new clients (e.g. + Add client in the task form). */
   CLIENTS_CREATE:  'clients.create',
+  /**
+   * Add a prospect as a DRAFT (trial) client — full details, usable for
+   * requests, plans and tasks, never invoiced until someone with
+   * clients.create / settings.access approves it.
+   */
+  CLIENTS_CREATE_DRAFT: 'clients.create_draft',
   /** Create new services (e.g. + Add service in the task form). */
   SERVICES_CREATE: 'services.create',
 

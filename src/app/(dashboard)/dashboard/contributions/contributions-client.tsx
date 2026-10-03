@@ -187,7 +187,8 @@ export default function ContributionsClient({
   const [clientList, setClientList] = useState(clients)
   const [serviceList, setServiceList] = useState(services)
   const [quickCreate, setQuickCreate] = useState<{ kind: 'client' | 'service'; query: string } | null>(null)
-  const canCreateClient  = can('clients.create')
+  const canAddRealClient = can('clients.create') || can('settings.access')
+  const canCreateClient  = canAddRealClient || can('clients.create_draft')
   const canCreateService = can('services.create')
 
   // ── View state ──────────────────────────────────────
@@ -2408,12 +2409,13 @@ export default function ContributionsClient({
           <QuickCreateClientModal
             initialName={quickCreate.query}
             canSeePricing={showFinancials}
+            canAddReal={canAddRealClient}
             onClose={() => setQuickCreate(null)}
             onCreated={(client) => {
               setClientList(prev => [{ id: client.id, name: client.name, code: client.code }, ...prev])
               setAddTaskForm(f => ({ ...f, client_id: client.id }))
               setQuickCreate(null)
-              toast.success(`Client "${client.name}" added`)
+              toast.success(client.is_draft ? `Draft client "${client.name}" added` : `Client "${client.name}" added`)
             }}
           />
         )}
