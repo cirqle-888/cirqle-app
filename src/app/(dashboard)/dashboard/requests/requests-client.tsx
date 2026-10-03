@@ -25,6 +25,7 @@ import { clientPickerSub } from '@/lib/clients/draft'
 import ContentBriefFields from '@/components/content-brief/content-brief-fields'
 import ContentBriefView from '@/components/content-brief/content-brief-view'
 import { EMPTY_BRIEF_DRAFT, asContentBrief, type ContentBriefDraft } from '@/lib/content-brief'
+import { predictTask } from '@/lib/requests/predict-task'
 const QuickCreateClientModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(m => m.QuickCreateClientModal), { ssr: false })
 import {
   Inbox, AlertTriangle, ChevronRight, Clock, Link2, Loader2, Play,
@@ -385,6 +386,38 @@ export default function RequestsClient({
   const [showNew, setShowNew] = useState(false)
   const [showNewMenu, setShowNewMenu] = useState(false)
   const [newForm, setNewForm] = useState(EMPTY_NEW)
+
+  // ── Smart Task default ────────────────────────────────────────────────────
+  // The Task (service) pre-fills from the title and the client's history
+  // (lib/requests/predict-task) until the user picks one themselves; after
+  // that it's theirs and is never overwritten.
+  const [taskTouched, setTaskTouched] = useState(false)
+  const taskHistory = useMemo(() => requests.map((r: any) => ({
+    title: r.title, service_id: r.service?.id ?? r.service_id ?? null,
+    client_id: r.client?.id ?? r.client_id ?? null, created_at: r.created_at,
+  })), [requests])
+  const taskPrediction = useMemo(() => showNew ? predictTask({
+    title: newForm.title,
+    clientId: newForm.clientId || null,
+    clientName: clients.find(c => c.id === newForm.clientId)?.name ?? null,
+    services,
+    history: taskHistory,
+    commitments: servicePricing,
+  }) : null, [showNew, newForm.title, newForm.clientId, clients, services, taskHistory, servicePricing])
+  // Tasks this client has used or is committed to — listed first in the picker.
+  const clientTaskIds = useMemo(() => {
+    if (!newForm.clientId) return [] as string[]
+    const ids = new Set<string>()
+    for (const h of taskHistory) if (h.client_id === newForm.clientId && h.service_id) ids.add(h.service_id)
+    for (const c of servicePricing) if (c.client_id === newForm.clientId) ids.add(c.service_id)
+    return [...ids]
+  }, [newForm.clientId, taskHistory, servicePricing])
+  useEffect(() => { if (showNew) setTaskTouched(false) }, [showNew])
+  useEffect(() => {
+    if (!showNew || taskTouched) return
+    const next = taskPrediction?.serviceId ?? ''
+    setNewForm(f => (f.serviceId === next ? f : { ...f, serviceId: next }))
+  }, [showNew, taskTouched, taskPrediction?.serviceId])
   const [creating, setCreating] = useState(false)
 
   // View mode: flat list (tabbed) or kanban board (all statuses at once)
@@ -1867,12 +1900,44 @@ export default function RequestsClient({
                 )}
               </div>
                 <div>
-                  <label className={label}>Service</label>
-                  <select value={newForm.serviceId} onChange={e => setNewForm(f => ({ ...f, serviceId: e.target.value }))}
+                  <label className={label}>Task</label>
+                  <select value={newForm.serviceId}
+                    onChange={e => { setTaskTouched(true); setNewForm(f => ({ ...f, serviceId: e.target.value })) }}
                     className={`${field} ${newForm.serviceId ? '' : 'text-muted-foreground'}`}>
-                    <option value="">Select service…</option>
-                    {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    <option value="">Select task…</option>
+                    {/* This client's usual tasks first, then everything else. */}
+                    {clientTaskIds.length > 0 ? (
+                      <>
+                        <optgroup label="Usual for this client">
+                          {services.filter(sv => clientTaskIds.includes(sv.id)).map(sv => <option key={sv.id} value={sv.id}>{sv.name}</option>)}
+                        </optgroup>
+                        <optgroup label="All tasks">
+                          {services.filter(sv => !clientTaskIds.includes(sv.id)).map(sv => <option key={sv.id} value={sv.id}>{sv.name}</option>)}
+                        </optgroup>
+                      </>
+                    ) : services.map(sv => <option key={sv.id} value={sv.id}>{sv.name}</option>)}
                   </select>
+                  {/* Why it was pre-filled, plus one-tap alternatives. */}
+                  {!taskTouched && taskPrediction?.serviceId && newForm.serviceId === taskPrediction.serviceId && (
+                    <p className="mt-1.5 flex items-center gap-1 text-[11px] text-violet-700 dark:text-violet-300">
+                      <Sparkles className="w-3 h-3 shrink-0" /><span className="truncate">Suggested — {taskPrediction.reason}</span>
+                    </p>
+                  )}
+                  {(() => {
+                    const chips = (taskPrediction?.ranked ?? []).filter(r => r.serviceId !== newForm.serviceId)
+                    if (!chips.length) return null
+                    return (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {chips.map(r => (
+                          <button key={r.serviceId} type="button" title={r.reason}
+                            onClick={() => { setTaskTouched(true); setNewForm(f => ({ ...f, serviceId: r.serviceId })) }}
+                            className="px-2 py-0.5 rounded-full text-[11px] border border-border bg-secondary/60 text-muted-foreground hover:text-foreground hover:border-violet-500/40 transition-colors">
+                            {services.find(sv => sv.id === r.serviceId)?.name}
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  })()}
                 </div>
               </div>
 
