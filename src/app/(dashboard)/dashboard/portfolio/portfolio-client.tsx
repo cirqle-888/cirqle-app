@@ -7,7 +7,7 @@ import {
   Play, Link2, Film,
 } from 'lucide-react'
 import {
-  DndContext, PointerSensor, useSensor, useSensors, closestCenter, type DragEndEvent,
+  DndContext, MouseSensor, TouchSensor, useSensor, useSensors, closestCenter, type DragEndEvent,
 } from '@dnd-kit/core'
 import { SortableContext, arrayMove, rectSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -157,7 +157,10 @@ export default function PortfolioClient({
   const [renameBusy, setRenameBusy] = useState<string | null>(null)
   const renameCoverRef = useRef<HTMLInputElement>(null)
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
+  )
 
   // ─── Setup states ──────────────────────────────────────────────────────────
   if (!configured) {
@@ -1520,9 +1523,9 @@ function ItemCard({
  * A brand chip that can be dragged to reorder the brands.
  *
  * Drag and click share one element on purpose — a separate grip on something
- * this small is fiddly. dnd-kit's PointerSensor is configured with a distance
- * threshold, so a plain click still selects the brand and only a real drag
- * moves it.
+ * this small is fiddly. A drag needs a 6px mouse move or a touch
+ * press-and-hold, so a plain click or tap still selects the brand and only a
+ * real drag moves it.
  */
 function BrandChip({
   brand, active, canManage, onSelect,

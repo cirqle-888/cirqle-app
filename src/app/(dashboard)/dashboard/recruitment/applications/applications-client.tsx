@@ -3,8 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from 'react'
 import Link from 'next/link'
 import {
-  DndContext, PointerSensor, useSensor, useSensors, useDraggable, useDroppable,
-  type DragEndEvent,
+  DndContext, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable, type DragEndEvent,
 } from '@dnd-kit/core'
 import { listApplications, moveApplicationStage } from '@/lib/recruitment/actions'
 import { STAGE_ORDER, STAGE_LABELS, type ApplicationStage, type JobApplicationSummary } from '@/lib/recruitment/types'
@@ -87,7 +86,10 @@ export default function ApplicationsClient({ canEdit }: { canEdit: boolean }) {
   const [, startTransition] = useTransition()
   const { toasts, dismiss, success, error: toastError } = useToast()
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
+  )
 
   useEffect(() => {
     listApplications().then(res => {

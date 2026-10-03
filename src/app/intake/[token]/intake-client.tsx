@@ -2,8 +2,7 @@
 
 import { useState } from 'react'
 import {
-  DndContext, closestCenter, PointerSensor, TouchSensor,
-  useSensor, useSensors, type DragEndEvent,
+  DndContext, closestCenter, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent,
 } from '@dnd-kit/core'
 import {
   SortableContext, verticalListSortingStrategy,
@@ -143,7 +142,7 @@ export default function IntakeClient({
   const [intakeEditRank, setIntakeEditRank] = useState<{ id: string; val: string } | null>(null)
 
   const dndSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
   )
 

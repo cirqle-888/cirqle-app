@@ -2,8 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef, Fragment, useCallback } from 'react'
 import {
-  DndContext, closestCenter, PointerSensor, useSensor, useSensors,
-  type DragEndEvent,
+  DndContext, closestCenter, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent,
 } from '@dnd-kit/core'
 import {
   SortableContext, horizontalListSortingStrategy, verticalListSortingStrategy,
@@ -482,7 +481,10 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     return () => document.removeEventListener('mousedown', h)
   }, [showColPanel])
 
-  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+  const dndSensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
+  )
 
   const handleColHeaderDragEnd = useCallback((e: DragEndEvent) => {
     const { active, over } = e

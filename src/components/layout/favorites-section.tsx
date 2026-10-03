@@ -7,8 +7,7 @@
  */
 import { useId } from 'react'
 import {
-  DndContext, closestCenter, PointerSensor, useSensor, useSensors,
-  type DragEndEvent,
+  DndContext, closestCenter, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent,
 } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -88,7 +87,10 @@ export function FavoritesSection({
 }) {
   const { favorites, reorder, toggleFavorite } = useFavorites()
   const { can, user } = usePermissions()
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
+  )
   // SSR-stable id: without it dnd-kit auto-numbers its aria-describedby ids,
   // which don't line up between server and client when the sidebar renders
   // two instances (desktop + mobile) → hydration-mismatch warnings.

@@ -243,7 +243,7 @@ function DraggableItem({ id, disabled, children }: { id: string; disabled?: bool
       {...attributes}
       {...listeners}
       style={transform ? { transform: `translate(${transform.x}px, ${transform.y}px)`, zIndex: 60, position: 'relative' } : undefined}
-      className={`${isDragging ? 'opacity-90 shadow-xl cursor-grabbing' : disabled ? '' : 'cursor-grab'} touch-none`}
+      className={`${isDragging ? 'opacity-90 shadow-xl cursor-grabbing' : disabled ? '' : 'cursor-grab'} touch-manipulation`}
     >
       {children}
     </div>

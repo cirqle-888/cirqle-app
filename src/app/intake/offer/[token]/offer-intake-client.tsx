@@ -10,8 +10,7 @@ import {
   Download, History, Table2, Eraser,
 } from 'lucide-react'
 import {
-  DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors,
-  type DragEndEvent,
+  DndContext, closestCenter, MouseSensor, TouchSensor, KeyboardSensor, useSensor, useSensors, type DragEndEvent,
 } from '@dnd-kit/core'
 import {
   SortableContext, useSortable, arrayMove, sortableKeyboardCoordinates,
@@ -1579,7 +1578,8 @@ function OfferIntakeClientInner({
   // Drag-reorder sensors (pointer with a small activation distance so clicks on
   // the row's inputs never start a drag; keyboard for accessibility).
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   )
 

@@ -3,8 +3,7 @@
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  DndContext, PointerSensor, TouchSensor, useSensor, useSensors,
-  useDraggable, useDroppable, closestCorners, type DragEndEvent,
+  DndContext, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable, closestCorners, type DragEndEvent,
 } from '@dnd-kit/core'
 import {
   LayoutGrid, CalendarDays, List, Loader2, Check, ChevronRight, CircleAlert, X as XIcon,
@@ -196,12 +195,12 @@ function DraggableCard({ row, disabled, onOpen }: {
   return (
     <div
       ref={setNodeRef} {...attributes} {...listeners}
-      // onClick, not onPointerUp: dnd-kit's PointerSensor has a 6px activation
-      // distance, so a real drag never fires a click and this cannot open the
-      // brief every time a card is moved.
+      // onClick, not onPointerUp: a drag only starts after a 6px mouse move or
+      // a touch press-and-hold, so a real drag never fires a click and this
+      // cannot open the brief every time a card is moved.
       onClick={() => { if (!isDragging) onOpen(row) }}
       style={transform ? { transform: `translate(${transform.x}px, ${transform.y}px)`, zIndex: 60, position: 'relative' } : undefined}
-      className={`${isDragging ? 'opacity-90 cursor-grabbing' : disabled ? '' : 'cursor-grab'} touch-none`}
+      className={`${isDragging ? 'opacity-90 cursor-grabbing' : disabled ? '' : 'cursor-grab'} touch-manipulation`}
     >
       <Card row={row} dragging={isDragging} />
     </div>
@@ -261,7 +260,7 @@ export default function MyWorkClient({ initialRows, firstName }: Props) {
   // board scrolls, and without the delay every attempt to scroll a column
   // picks a card up instead.
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
   )
 

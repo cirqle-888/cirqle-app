@@ -4,8 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  DndContext, closestCenter, PointerSensor, TouchSensor,
-  useSensor, useSensors, type DragEndEvent,
+  DndContext, closestCenter, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent,
 } from '@dnd-kit/core'
 import {
   SortableContext, verticalListSortingStrategy,
@@ -446,7 +445,7 @@ export default function RequestsClient({
   // DnD sensors — require 8px move (pointer) or 200ms hold (touch) before drag activates,
   // so normal taps still open the drawer.
   const dndSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
   )
 

@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Upload, Loader2, Trash2, Eye, EyeOff, GripVertical, ImageOff, Pencil, Link2, Link2Off } from 'lucide-react'
 import {
-  DndContext, PointerSensor, useSensor, useSensors, closestCenter, type DragEndEvent,
+  DndContext, MouseSensor, TouchSensor, useSensor, useSensors, closestCenter, type DragEndEvent,
 } from '@dnd-kit/core'
 import { SortableContext, arrayMove, rectSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -44,7 +44,10 @@ export default function FlyersPanel({ flyers, error, canManage, siteUrl, onToast
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
   const [confirm, setConfirm] = useState<{ title: string; body: string; run: () => Promise<void> } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
+  )
 
   const pages = useMemo(() => {
     if (!order) return flyers
