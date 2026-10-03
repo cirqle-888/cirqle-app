@@ -23,7 +23,7 @@ import { unstable_cache } from 'next/cache'
 import { resolveBrandingUrl } from '@/lib/utils/branding'
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { navSections, isNavItemVisible, resolveActiveHref } from '@/lib/nav-sections'
+import { canOpenHref } from '@/lib/nav-sections'
 import { hasPermission } from '@/lib/permissions/check'
 // Workspace logo URL fetch — pulls both dark and light variants.
 // Service-role client so RLS on company_settings can't block it.
@@ -144,13 +144,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const headersList = await headers()
   const pathname = headersList.get('x-pathname') || '/dashboard'
-  const activeHref = resolveActiveHref(navSections, pathname)
-  if (activeHref && activeHref !== '/dashboard') {
-    const section = navSections.find(s => s.items.some(i => i.href === activeHref))
-    const item = section?.items.find(i => i.href === activeHref)
-    if (item && !isNavItemVisible(item, (key) => hasPermission(me, key), user.isAdmin)) {
-      redirect('/dashboard?denied=1')
-    }
+  // Same helper the UI uses to decide whether to show a link at all — see
+  // canOpenHref. Keeping one rule is what stops a button from offering a page
+  // this guard would then bounce the user away from.
+  if (!canOpenHref(pathname, (key) => hasPermission(me, key), user.isAdmin)) {
+    redirect('/dashboard?denied=1')
   }
 
   return (

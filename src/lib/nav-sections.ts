@@ -54,6 +54,21 @@ export function isNavItemVisible(item: NavItem, can: (key: string) => boolean, i
  * is active. Shared by Sidebar and App Launcher so both highlight the same
  * page the same way.
  */
+/**
+ * Would the dashboard layout let this user open `href`? This IS the rule the
+ * layout's denied-route guard applies (the layout calls it), so a link or
+ * button gated on it can never lead somewhere that silently bounces the user
+ * back to /dashboard. Query strings and hashes are ignored. Routes outside
+ * the sidebar, and /dashboard itself, are left to their own page checks.
+ */
+export function canOpenHref(href: string, can: (key: string) => boolean, isAdmin: boolean): boolean {
+  const path = href.split(/[?#]/)[0]
+  const active = resolveActiveHref(navSections, path)
+  if (!active || active === '/dashboard') return true
+  const item = navSections.flatMap(s => s.items).find(i => i.href === active)
+  return !item || isNavItemVisible(item, can, isAdmin)
+}
+
 export function resolveActiveHref(sections: { items: NavItem[] }[], pathname: string): string | null {
   const candidates = sections
     .flatMap(s => s.items.map(i => i.href))

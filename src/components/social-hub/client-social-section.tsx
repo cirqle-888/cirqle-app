@@ -6,6 +6,8 @@
  */
 
 import Link from 'next/link'
+import { usePermissions } from '@/contexts/permission-context'
+import { canOpenHref } from '@/lib/nav-sections'
 import { PlatformIcon } from './platform-icon'
 import { Share2, ChevronRight } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
@@ -29,25 +31,39 @@ const STATUS_DOT: Record<string, string> = {
 }
 
 export function ClientSocialSection({ accounts }: { accounts: ClientSocialAccount[] }) {
+  // Each link only shows to someone its page will let in — the Hub and the
+  // account pages check social permissions themselves (no sidebar entry), and
+  // Connections is admin-only, so a plain link bounced e.g. a Task Manager to
+  // the dashboard.
+  const { user, can } = usePermissions()
+  const canHub = can('social.view_insights') || can('social.connect')
+  const canAccount = can('social.view_insights')
+  const canConnect = canOpenHref('/dashboard/connections', can, user.isAdmin)
   return (
     <div className="bg-card border border-border rounded-2xl p-5">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-semibold flex items-center gap-1.5"><Share2 className="w-4 h-4" /> Social accounts</h2>
-        <Link href="/dashboard/social" className="text-xs text-primary hover:underline flex items-center">Hub <ChevronRight className="w-3 h-3" /></Link>
+        {canHub && (
+          <Link href="/dashboard/social" className="text-xs text-primary hover:underline flex items-center">Hub <ChevronRight className="w-3 h-3" /></Link>
+        )}
       </div>
 
       {accounts.length === 0 ? (
         <p className="text-xs text-muted-foreground leading-relaxed">
-          No Meta assets connected. Connect this client&apos;s Facebook Pages and Instagram accounts from the{' '}
-          <Link href="/dashboard/connections" className="text-primary hover:underline">integrations</Link> page.
+          No Meta assets connected.{' '}
+          {canConnect ? (
+            <>Connect this client&apos;s Facebook Pages and Instagram accounts from the{' '}
+            <Link href="/dashboard/connections" className="text-primary hover:underline">integrations</Link> page.</>
+          ) : (
+            <>An admin can connect this client&apos;s Facebook Pages and Instagram accounts.</>
+          )}
         </p>
       ) : (
         <div className="space-y-2">
           {accounts.map((a) => (
-            <Link
+            <AccountRow
               key={a.id}
-              href={`/dashboard/social/accounts/${a.id}`}
-              className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 -mx-2 hover:bg-secondary/50 transition-colors"
+              href={canAccount ? `/dashboard/social/accounts/${a.id}` : null}
             >
               <div className="relative">
                 {a.profile_picture_url ? (
@@ -68,10 +84,18 @@ export function ClientSocialSection({ accounts }: { accounts: ClientSocialAccoun
                 </div>
               </div>
               {a.status === 'needs_reauth' && <span className="text-[10px] text-red-400 shrink-0">Reauth</span>}
-            </Link>
+            </AccountRow>
           ))}
         </div>
       )}
     </div>
   )
+}
+
+/** A clickable row when the account page will open for this user, a plain one otherwise. */
+function AccountRow({ href, children }: { href: string | null; children: React.ReactNode }) {
+  const cls = 'flex items-center gap-2.5 rounded-lg px-2 py-1.5 -mx-2'
+  return href
+    ? <Link href={href} className={`${cls} hover:bg-secondary/50 transition-colors`}>{children}</Link>
+    : <div className={cls}>{children}</div>
 }

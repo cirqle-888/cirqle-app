@@ -4,6 +4,8 @@ import { useMemo } from 'react'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
 import { usePrivacy } from '@/contexts/privacy-context'
+import { usePermissions } from '@/contexts/permission-context'
+import { canOpenHref } from '@/lib/nav-sections'
 import {
   IndianRupee, CheckCircle2, Clock, FileText, CheckSquare, Handshake,
   Mail, Phone, MapPin, Globe, ExternalLink, Award, Tag, Plus, AlertTriangle,
@@ -52,6 +54,12 @@ export default function ClientDetailClient({
   socialAccounts = [],
 }: Props) {
   const { ds } = usePrivacy()
+  // Only offer links this user can actually open. Edit Client goes to
+  // Settings, which needs settings.access — a Task Manager could see the
+  // button, click it, and be bounced to the dashboard with no explanation.
+  const { user, can } = usePermissions()
+  const opens = (href: string) => canOpenHref(href, can, user.isAdmin)
+  const editHref = `/dashboard/settings?tab=clients&editClient=${client.id}&returnTo=/dashboard/clients/${client.id}`
 
   const kpi = useMemo(() => {
     let billed = 0, paid = 0, drafts = 0
@@ -87,14 +95,18 @@ export default function ClientDetailClient({
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
               <CheckSquare className="w-4 h-4" /> Tasks
             </Link>
-            <Link href="/dashboard/invoices"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
-              <FileText className="w-4 h-4" /> Invoices
-            </Link>
-            <Link href={`/dashboard/settings?tab=clients&editClient=${client.id}&returnTo=/dashboard/clients/${client.id}`}
-              className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">
-              Edit Client
-            </Link>
+            {opens('/dashboard/invoices') && (
+              <Link href="/dashboard/invoices"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+                <FileText className="w-4 h-4" /> Invoices
+              </Link>
+            )}
+            {opens(editHref) && (
+              <Link href={editHref}
+                className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">
+                Edit Client
+              </Link>
+            )}
           </>
         }
       />
@@ -142,9 +154,11 @@ export default function ClientDetailClient({
               <div className="bg-card border border-border rounded-2xl overflow-hidden">
                 <div className="px-5 py-3.5 border-b border-border/60 flex items-center justify-between">
                   <h2 className="text-sm font-semibold">Unpaid invoices</h2>
-                  <Link href="/dashboard/invoices/follow-ups" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
-                    Follow-ups <ExternalLink className="w-3 h-3" />
-                  </Link>
+                  {opens('/dashboard/invoices/follow-ups') && (
+                    <Link href="/dashboard/invoices/follow-ups" className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+                      Follow-ups <ExternalLink className="w-3 h-3" />
+                    </Link>
+                  )}
                 </div>
                 <div className="divide-y divide-border/40">
                   {kpi.openInvoices.slice(0, 6).map(inv => (
@@ -203,7 +217,12 @@ export default function ClientDetailClient({
               {client.address && <p className="text-sm flex items-start gap-2 text-foreground/90"><MapPin className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" /> <span className="whitespace-pre-line">{client.address}</span></p>}
               {client.gstin && <p className="text-sm flex items-center gap-2 text-foreground/90"><Tag className="w-3.5 h-3.5 text-muted-foreground shrink-0" /> GSTIN {client.gstin}</p>}
               <p className="text-sm flex items-center gap-2 text-foreground/90"><Globe className="w-3.5 h-3.5 text-muted-foreground shrink-0" /> Billing currency {client.default_currency || 'INR'}</p>
-              {partner && (
+              {partner && !opens(`/dashboard/partners/${partner.id}`) && (
+                <p className="text-sm flex items-center gap-2 text-foreground/90">
+                  <Handshake className="w-3.5 h-3.5 text-muted-foreground shrink-0" /> Referred by {partner.name} ({partner.partner_code})
+                </p>
+              )}
+              {partner && opens(`/dashboard/partners/${partner.id}`) && (
                 <Link href={`/dashboard/partners/${partner.id}`} className="text-sm flex items-center gap-2 text-blue-400 hover:text-blue-700 dark:text-blue-300 transition-colors">
                   <Handshake className="w-3.5 h-3.5 shrink-0" /> Referred by {partner.name} ({partner.partner_code})
                 </Link>
@@ -221,10 +240,12 @@ export default function ClientDetailClient({
               <div className="bg-card border border-border rounded-2xl overflow-hidden">
                 <div className="px-5 py-3.5 border-b border-border/60 flex items-center justify-between">
                   <h2 className="text-sm font-semibold">Service pricing</h2>
-                  <Link href={`/dashboard/settings?tab=clients&editClient=${client.id}&returnTo=/dashboard/clients/${client.id}`}
-                    className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
-                    <Plus className="w-3 h-3" /> Edit
-                  </Link>
+                  {opens(editHref) && (
+                    <Link href={editHref}
+                      className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+                      <Plus className="w-3 h-3" /> Edit
+                    </Link>
+                  )}
                 </div>
                 {pricing.length === 0 ? (
                   <p className="px-5 py-6 text-sm text-muted-foreground text-center">No service pricing configured yet.</p>
@@ -244,17 +265,23 @@ export default function ClientDetailClient({
               </div>
             )}
 
+            {(opens('/dashboard/clients/ranking') || opens('/dashboard/reports/client-profitability')) && (
             <div className="bg-card border border-border rounded-2xl p-5">
               <h2 className="text-sm font-semibold mb-3">Analytics</h2>
               <div className="space-y-1.5">
-                <Link href="/dashboard/clients/ranking" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors py-1">
-                  <Award className="w-4 h-4" /> Client Ranking
-                </Link>
-                <Link href="/dashboard/reports/client-profitability" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors py-1">
-                  <IndianRupee className="w-4 h-4" /> Client Profitability
-                </Link>
+                {opens('/dashboard/clients/ranking') && (
+                  <Link href="/dashboard/clients/ranking" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors py-1">
+                    <Award className="w-4 h-4" /> Client Ranking
+                  </Link>
+                )}
+                {opens('/dashboard/reports/client-profitability') && (
+                  <Link href="/dashboard/reports/client-profitability" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors py-1">
+                    <IndianRupee className="w-4 h-4" /> Client Profitability
+                  </Link>
+                )}
               </div>
             </div>
+            )}
           </div>
         </div>
       </div>
