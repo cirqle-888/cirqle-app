@@ -3,6 +3,7 @@ import { withDraftFlag } from '@/lib/clients/draft'
 import { createAdminClient } from '@/lib/supabase/server'
 import { selectWithOptionalColumns } from '@/lib/offer-columns'
 import { loadCurrentUser } from '@/lib/permissions/check'
+import { financialVisibility } from '@/lib/permissions/strip'
 import RequestsClient from './requests-client'
 
 export const dynamic = 'force-dynamic'
@@ -75,7 +76,20 @@ export default async function RequestsPage({
     offerCampaigns = data || []
   } catch { /* offer intake not set up yet */ }
 
+  // Money on this page (pipeline value, estimated values, client prices) is
+  // for people who can see billing amounts — managing requests isn't enough.
+  // Stripped HERE, not just hidden, so it never reaches the browser.
+  const canSeeValue = isAdmin || financialVisibility(me).billingAmounts
+  if (!canSeeValue) {
+    requests = requests.map(({ estimated_value: _ev, ...r }: any) => r)
+  }
+  const pricingRows = ((pricingRes.data || []) as { client_id: string; service_id: string; price: number | null }[])
+    // Without the money permission only the client↔task pairing survives —
+    // the Task suggestion uses it; the price is dropped.
+    .map(r => (canSeeValue ? r : { client_id: r.client_id, service_id: r.service_id, price: null }))
+
   const perms = {
+    value:    canSeeValue,
     review:   isAdmin || !!me?.permissions?.has('requests.review'),
     start:    isAdmin || !!me?.permissions?.has('requests.start'),
     manage:   isAdmin || !!me?.permissions?.has('requests.manage'),
@@ -90,7 +104,7 @@ export default async function RequestsPage({
       clients={clientsRes.data || []}
       employees={employeesRes.data || []}
       services={servicesRes.data || []}
-      servicePricing={pricingRes.data || []}
+      servicePricing={pricingRows}
       offerCampaigns={offerCampaigns}
       initialFocusId={focusId}
     />

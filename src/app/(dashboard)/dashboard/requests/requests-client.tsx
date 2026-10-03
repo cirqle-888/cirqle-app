@@ -319,7 +319,8 @@ export default function RequestsClient({
 }: {
   migrated: boolean
   initialRequests: any[]
-  perms: { review: boolean; start: boolean; manage: boolean; activity: boolean }
+  /** value = may see money (billing.view_amounts): pipeline value, estimated values. */
+  perms: { review: boolean; start: boolean; manage: boolean; activity: boolean; value?: boolean }
   clients?: { id: string; name: string; code?: string | null; drive_folder_link?: string | null; is_draft?: boolean | null }[]
   employees?: { id: string; cqid?: string | null; name: string }[]
   services?: { id: string; name: string }[]
@@ -762,7 +763,7 @@ export default function RequestsClient({
       priority: newForm.priority,
       dueDate: newForm.dueDate || null,
       assignedEmployeeId: newForm.assignedEmployeeId || null,
-      estimatedValue: newForm.estimatedValue ? parseFloat(newForm.estimatedValue) : null,
+      estimatedValue: perms.value && newForm.estimatedValue ? parseFloat(newForm.estimatedValue) : null,
       kind: newForm.isChecklist ? REQUEST_KIND_CHECKLIST : REQUEST_KIND_REQUEST,
     })
     setCreating(false)
@@ -998,7 +999,7 @@ export default function RequestsClient({
               <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />{pipeline.count} open
             </span>
           )}
-          {perms.manage && pipeline.count > 0 && (
+          {perms.value && pipeline.count > 0 && (
             <span title="Estimated value of open requests (staff estimate, else Pricing Matrix price)"
               className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium bg-violet-500/8 border border-violet-500/20 text-violet-700 dark:text-violet-300">
               Pipeline <b className="font-semibold">{inrFmt(pipeline.value)}</b>
@@ -1865,7 +1866,7 @@ export default function RequestsClient({
       {showNew && (() => {
         const field = 'w-full h-10 bg-background border border-border rounded-lg px-3 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/15 transition-colors'
         const label = 'block text-xs font-medium text-foreground/80 mb-1.5'
-        const hasMore = !!(newForm.estimatedValue || newForm.isPlanned || newForm.isChecklist)
+        const hasMore = !!((perms.value && newForm.estimatedValue) || newForm.isPlanned || newForm.isChecklist)
         return (
         <ModalOverlay onClose={() => setShowNew(false)}>
           <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-2xl shadow-2xl max-h-[92dvh] flex flex-col overflow-hidden">
@@ -1978,15 +1979,17 @@ export default function RequestsClient({
                 <summary className="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium text-muted-foreground cursor-pointer select-none list-none hover:text-foreground">
                   <ChevronRight className="w-3.5 h-3.5 transition-transform group-open:rotate-90" />
                   More options
-                  <span className="font-normal text-muted-foreground/70">· value, planned, complimentary</span>
+                  <span className="font-normal text-muted-foreground/70">· {perms.value ? 'value, planned, complimentary' : 'planned, complimentary'}</span>
                 </summary>
                 <div className="px-3 pb-3 space-y-3.5">
+                  {perms.value && (
                   <div>
                     <label className={label}>Estimated value (₹)</label>
                     <input type="number" min="0" value={newForm.estimatedValue}
                       onChange={e => setNewForm(f => ({ ...f, estimatedValue: e.target.value }))}
                       placeholder="Uses the Pricing Matrix price if blank" className={field} />
                   </div>
+                  )}
                   <label className="flex items-start gap-2 text-xs cursor-pointer select-none">
                     <input type="checkbox" checked={newForm.isPlanned}
                       onChange={e => setNewForm(f => ({ ...f, isPlanned: e.target.checked }))}
