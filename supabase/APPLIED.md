@@ -33,12 +33,12 @@ disaster-recovery path from migrations. That needs a baseline dump — see
 | 2026-09-25 | `20260922140000_bank_line_kinds` | applied | `bank_statement_lines.line_kind` readable. Verified live on the same statement: **Suggest kinds** set aside 54 of the 91 unmatched in one action - Cashback & rewards 8 / 23.31, Interest earned 16 / 1,359.00, Fixed-deposit sweep 30 / **0.00** (confirming sweeps are internal, not income). Non-company total 1,382.31. Unmatched fell 91 -> 37, the residual the offline analysis predicted. |
 | 2026-09-27 | `20260927100000_capture_permission` | applied | Run by hand in the SQL editor: "Success. No rows returned". Adds `capture.use` and backfills it to admins and designations holding `requests.view`, `advertising.view` or `offer.prepare`. Per-designation grant counts not yet checked. |
 | 2026-10-03 | `20261003100000_draft_clients` | applied | Run by hand in the SQL editor: "Success. No rows returned". Adds the `clients.is_draft` / `draft_*` columns and `clients.create_draft` (admins only — grant per designation). |
+| 2026-10-03 | `20261003120000_content_brief` | applied | Run by hand in the SQL editor: "Success. No rows returned". Adds `task_requests.content_brief` and `social_calendar_items.links`. |
 
 ## Waiting to be applied
 
 | Migration | What it adds | Until it is applied |
 |---|---|---|
-| `20261003120000_content_brief` | Shared Content Brief: `task_requests.content_brief` (jsonb — the brief exactly as planned) and `social_calendar_items.links` (jsonb). | Everything keeps working. New requests still save, with their brief in `description` as plain text (no formatting or thumbnails in the inbox), and Calendar links are not stored — saving warns that the links could not be stored. Apply, then new requests and pushes carry the full brief. |
 | `20260906120000_ownership_entries_basis` | Adds `'entries'` to the `ownership_programs.basis` CHECK — a per-participant COUNT basis that pays a rupee rate per hand-typed cash-book row. Also a partial index on `cashbook_entries (created_by, created_at)` and column comments recording that `ownership_awards.basis_amount_inr` holds a COUNT on this basis, and `ownership_rules.fixed_amount_inr` a rate PER UNIT. | Everything else keeps working — the basis is inert until a program uses it. Choosing **₹ per cash-book entry** in Settings → Ownership and saving is rejected by the old CHECK; `friendly()` turns that into a run-the-migration sentence rather than a raw Postgres error. |
 ### Follow-up: Realtime is not delivering for `employee_presence`
 
