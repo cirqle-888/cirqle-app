@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
 import {
-  Landmark, Wallet, TrendingUp, TrendingDown, ArrowLeft,
+  Landmark, Wallet, ArrowLeft,
   ChevronDown, ChevronRight, Plus, Search, Calendar,
   ArrowUpRight, ArrowDownRight,
 } from 'lucide-react'

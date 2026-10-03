@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -18,16 +18,12 @@ import {
   Menu,
   X,
   ChevronLeft,
-  Pin,
-  PinOff,
   Sun,
   Moon,
   Monitor,
   KeyRound,
   UserCircle,
   ChevronDown,
-  Tag,
-  Package,
 } from 'lucide-react'
 import { navSections, isNavItemVisible, resolveActiveHref } from '@/lib/nav-sections'
 import { useWorkspace } from '@/contexts/workspace-context'

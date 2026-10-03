@@ -2,11 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { AlertCircle, CheckCircle2, ShieldAlert, RefreshCw, History, Unlink, Trash2, RotateCcw, FileBarChart } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ShieldAlert, RefreshCw, History, Unlink, Trash2, RotateCcw } from 'lucide-react'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
-import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
+import { cn, ROW_INTERACTIVE_CLASS } from "@/lib/utils"
 
 type Tab = 'overview' | 'orphans' | 'mismatches' | 'softdeleted' | 'auditlog'
 

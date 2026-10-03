@@ -22,7 +22,7 @@ import {
   setEmployeeServices, setServiceEmployees, setEmployeeServiceCategories,
   createServiceCategory, updateServiceCategory, setServiceCategoryActive, reorderServiceCategories,
 } from './actions'
-import { Plus, X, Edit2, Archive, ArchiveRestore, Save, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Lock, Eye, EyeOff, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Mail, Send, RotateCcw as ResetKey, RefreshCw, Star, Building2, MapPin, Users , UserCog } from 'lucide-react'
+import { Plus, X, Edit2, Archive, ArchiveRestore, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Lock, ShieldCheck, Zap, Search, ArrowUpDown, ArrowUp, ArrowDown, AlertTriangle, Link2, Check, KeyRound, CalendarDays, Send, RotateCcw as ResetKey, RefreshCw, Star, Users, UserCog } from 'lucide-react'
 import type { Currency } from '@/types'
 import InfoTip from '@/components/ui/info-tip'
 import { resolveBrandingUrl } from '@/lib/utils/branding'
@@ -30,7 +30,7 @@ import { usePrivacy, getStoredPin, setStoredPin, isForceLocked } from '@/context
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { generateInviteToken, revokeInviteToken, archiveEmployee, restoreEmployee, adminResetPassword, updateEmployeeAvatar } from './employee-actions'
+import { generateInviteToken, archiveEmployee, restoreEmployee, adminResetPassword, updateEmployeeAvatar } from './employee-actions'
 import dynamic from 'next/dynamic'
 
 const RecalcCommissionsModal = dynamic(() => import('./recalc-commissions-modal').then(mod => mod.RecalcCommissionsModal), { ssr: false })

@@ -7,7 +7,7 @@
     "build": "npm run lint:privacy && next build",
     "lint:privacy": "node scripts/check-name-privacy.mjs",
     "start": "next start",
-    "lint": "eslint --max-warnings 2184",
+    "lint": "eslint --max-warnings 2128",
     "test": "vitest run",
     "test:watch": "vitest"
   },

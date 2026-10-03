@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
-import { createClient, safeFetchAll } from '@/lib/supabase/client'
+import { useState, useMemo } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
   X, ChevronRight, Zap, AlertTriangle, CheckCircle2,
   RefreshCw, SkipForward, Users, Calendar, BarChart2,
-  TrendingUp, FileText, ArrowRight, Filter,
+  FileText, ArrowRight, Filter,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────

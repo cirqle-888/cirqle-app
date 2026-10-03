@@ -15,7 +15,7 @@ import Link from 'next/link'
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
   Megaphone, ArrowLeft, Loader2, Plus, Check, Trash2, FileText, ExternalLink, BarChart2,
-  Download, Calendar, ChevronDown, CheckCircle, XCircle, Clock,
+  Download, Calendar, CheckCircle, XCircle, Clock,
 } from 'lucide-react'
 import {
   AD_STATUS_CHIP, STATUS_LABEL, STATUSES, PLATFORM_LABEL, CAMPAIGN_TYPE_LABEL, adRefLabel,

@@ -6,8 +6,7 @@ import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { calculatePerformanceScore, getQualityBand } from '@/lib/calculations/commission'
-import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts'
-import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
+import { cn, ROW_INTERACTIVE_CLASS } from '@/lib/utils'
 import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
 import type { ContribWithDate } from './_skills/SkillsTab'
 import type { Param, Group } from '@/lib/analytics/performance'
@@ -45,7 +44,7 @@ const TeamScoreBar = dynamic(
   { ssr: false, loading: () => <ChartSkeleton h={180} /> },
 )
 import type { DateFilterValue } from '@/components/ui/date-filter'
-import { TrendingUp, TrendingDown, Award, Target, ChevronDown, ChevronUp, ExternalLink, Download, Printer } from 'lucide-react'
+import { Target, ChevronDown, ChevronUp, Download, Printer } from 'lucide-react'
 import { todayISO } from '@/lib/utils/local-date'
 
 interface Employee { id: string; cqid: string; name?: string; performance_rating: number }

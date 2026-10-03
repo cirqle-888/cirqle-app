@@ -10,11 +10,10 @@ import { useMemo, useRef, useState } from 'react'
 import { createClient as createBrowserClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import AppSelect from '@/components/ui/app-select'
-import { Badge } from '@/components/ui/badge'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { PlatformIcon } from '@/components/social-hub/platform-icon'
 import {
-  X, Upload, Loader2, AlertTriangle, Info, Trash2, ImageIcon,
+  X, Upload, Loader2, AlertTriangle, Info, Trash2,
 } from 'lucide-react'
 import {
   validateSocialPost, PLATFORM_CONTENT_SUPPORT,

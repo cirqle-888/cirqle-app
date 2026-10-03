@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   FileText, Plus, Calendar, Download, Clock, CheckCircle, XCircle, Loader2,
-  BarChart2, Megaphone, ChevronDown, Eye,
+  BarChart2, ChevronDown, Eye,
 } from 'lucide-react'
 import WebReportViewer from './components/WebReportViewer'
 import type { RenderData } from '@/lib/reporting/types'

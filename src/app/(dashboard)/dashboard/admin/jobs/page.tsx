@@ -1,5 +1,4 @@
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
-import { PERMS } from '@/lib/permissions/keys'
 import { redirect } from 'next/navigation'
 import { JobsClient } from './jobs-client'
 import { fetchJobsSummary, fetchRecentJobs } from './actions'

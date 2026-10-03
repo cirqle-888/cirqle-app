@@ -22,7 +22,7 @@ import { setClientGreeting } from '@/app/(dashboard)/dashboard/invoices/follow-u
 import type { MessageTemplates } from '@/lib/messaging/templates'
 import { formatDate } from '@/lib/utils/format-date'
 import {
-  PhoneCall, MessageCircle, Send, Clock, AlertTriangle, CalendarClock,
+  MessageCircle, Send, Clock, AlertTriangle, CalendarClock,
   ChevronDown, ChevronRight, ExternalLink, Copy, Trash2, History,
   Plus, X, Phone, Inbox, BellRing, CircleDollarSign, CheckCircle2, CreditCard,
   TrendingUp, Handshake,

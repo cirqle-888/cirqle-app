@@ -11,7 +11,6 @@ import Link from 'next/link'
 import Header from '@/components/layout/header'
 import { SocialTabs } from '@/components/social-hub/social-tabs'
 import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import AppSelect from '@/components/ui/app-select'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -19,7 +18,7 @@ import { ToastContainer, useToast } from '@/components/ui/toast'
 import { PlatformIcon } from '@/components/social-hub/platform-icon'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
-  ChevronLeft, ChevronRight, Plus, CalendarDays, ExternalLink, Trash2, Send, Loader2,
+  ChevronLeft, ChevronRight, Plus, CalendarDays, ExternalLink, Trash2, Send,
 } from 'lucide-react'
 import { Composer, type ComposerAccount, type ComposerEmployee, type EditablePost } from './composer'
 import type { SocialContentType } from '@/lib/social-hub/validation'

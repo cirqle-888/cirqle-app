@@ -19,7 +19,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { ToastContainer, useToast } from '@/components/ui/toast'
 import {
   Sparkles, Loader2, FileText, Bell, Plus, Trash2, X, ArrowUpRight, ArrowDownRight,
-  TrendingUp, Users, IndianRupee, Target, AlertTriangle, ExternalLink,
+  TrendingUp, Users, IndianRupee, Target, AlertTriangle,
 } from 'lucide-react'
 import type { ClientRollup, AgencyTotals } from '@/lib/integrations/meta/aggregate'
 import type { MetaNarrative } from '@/lib/integrations/meta/ai-insights'

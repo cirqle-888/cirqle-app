@@ -6,7 +6,6 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import InfoTip from '@/components/ui/info-tip'
 import { DateFilter, matchesDateFilter } from '@/components/ui/date-filter'
-import type { DateFilterValue } from '@/components/ui/date-filter'
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
   applyFilters, sortRows, computeSummary, toMatrix, toMatrixGrouped, matrixToCSV, empShare,

@@ -11,7 +11,7 @@ import { saveTaskContributions } from '@/app/(dashboard)/dashboard/contributions
 import { closedPeriodNotice } from '@/lib/payroll/correction-notice'
 import { formatDate } from '@/lib/utils/format-date'
 import {
-  Minus, Plus, X, Check, Eye, EyeOff, Users,
+  Minus, Plus, Check, Eye, EyeOff, Users,
   CheckCircle2, AlertCircle, Clock, ChevronRight, ChevronLeft,
 } from 'lucide-react'
 

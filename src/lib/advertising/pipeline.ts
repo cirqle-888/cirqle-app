@@ -9,7 +9,7 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { publishAdEvent, publishAdEventsBatch, AdEventType, AdEventPayload } from './events'
 import { AdDailyMetricRow } from './types'
-import { notifyAdmins, notifyAdminsBatch } from '@/lib/notifications/create'
+import { notifyAdminsBatch } from '@/lib/notifications/create'
 import { aggregateMetrics } from './reporting'
 import { todayISO } from '@/lib/utils/local-date'
 

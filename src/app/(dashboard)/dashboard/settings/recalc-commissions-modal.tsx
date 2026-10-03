@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { usePrivacy } from '@/contexts/privacy-context'
-import { X, RefreshCw, AlertTriangle, Check, CalendarIcon } from 'lucide-react'
+import { X, RefreshCw, AlertTriangle, Check } from 'lucide-react'
 
 interface Props {
   open: boolean

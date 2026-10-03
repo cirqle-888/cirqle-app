@@ -15,7 +15,7 @@
 import { useState, useMemo } from 'react'
 import {
   ChevronDown, ChevronUp, CheckCircle2, AlertTriangle,
-  Info, Loader2, RefreshCw, ShieldAlert, X, Search,
+  Loader2, RefreshCw, ShieldAlert, Search,
 } from 'lucide-react'
 import {
   matchEntriesToClients,

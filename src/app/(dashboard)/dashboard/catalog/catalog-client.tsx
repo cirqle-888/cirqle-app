@@ -3,9 +3,9 @@
 import { useState, useRef, useMemo } from 'react'
 import Link from 'next/link'
 import {
-  Search, Plus, Upload, ImageIcon, Tag, Building2, Filter,
+  Search, Plus, Upload, ImageIcon,
   X, Check, Loader2, Pencil, Users, ChevronDown, ChevronUp,
-  Package, AlertCircle, ExternalLink, RefreshCw, Trash2, Star,
+  Package, AlertCircle, Trash2, Star,
 } from 'lucide-react'
 import {
   createProduct, updateProduct, assignProductToClients,

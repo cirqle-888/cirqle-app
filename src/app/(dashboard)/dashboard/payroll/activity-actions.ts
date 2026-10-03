@@ -3,7 +3,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
-import type { LogActivityInput } from '@/lib/activity/log'
 
 export interface ActivityLogRow {
   id:          string

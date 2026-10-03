@@ -1,7 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { retryWithoutScope, withoutScope } from '@/lib/finance/classify'
 import { logActivity } from '@/lib/activity/log'
-import { revalidatePath } from 'next/cache'
 
 export interface RecordInvoicePaymentInput {
   invoiceId:       string
