@@ -22,6 +22,9 @@ import { usePermissions } from '@/contexts/permission-context'
 import Combobox from '@/components/ui/combobox'
 import dynamic from 'next/dynamic'
 import { clientPickerSub } from '@/lib/clients/draft'
+import ContentBriefFields from '@/components/content-brief/content-brief-fields'
+import ContentBriefView from '@/components/content-brief/content-brief-view'
+import { EMPTY_BRIEF_DRAFT, asContentBrief, type ContentBriefDraft } from '@/lib/content-brief'
 const QuickCreateClientModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(m => m.QuickCreateClientModal), { ssr: false })
 import {
   Inbox, AlertTriangle, ChevronRight, Clock, Link2, Loader2, Play,
@@ -170,10 +173,11 @@ const hasNewExternal = (r: any) =>
   r.last_external_activity_at && (!r.last_staff_viewed_at || r.last_external_activity_at > r.last_staff_viewed_at)
 
 const EMPTY_NEW = {
-  clientId: '', title: '', description: '', designPlan: '', remarks: '',
-  contentLink: '', referenceLink: '', isPlanned: false, serviceId: '',
+  clientId: '', title: '', isPlanned: false, serviceId: '',
   priority: 'normal', dueDate: '', assignedEmployeeId: '', estimatedValue: '',
-  extraLinks: [] as { label: string; url: string }[],
+  // The shared Content Brief (caption, images, notes, links) — the same block
+  // the Social Calendar's "Plan an item" uses. See lib/content-brief.
+  brief: { ...EMPTY_BRIEF_DRAFT } as ContentBriefDraft,
   // Complimentary / setup work: assigned and tracked, never a task, never
   // billed, never shown to the client. See lib/requests/kind.
   isChecklist: false,
@@ -719,12 +723,7 @@ export default function RequestsClient({
     const res = await createManualRequest({
       clientId: newForm.clientId,
       title: newForm.title,
-      description: newForm.description,
-      designPlan: newForm.designPlan,
-      remarks: newForm.remarks,
-      contentLink: newForm.contentLink,
-      referenceLink: newForm.referenceLink,
-      extraLinks: newForm.extraLinks,
+      contentBrief: newForm.brief,
       isPlanned: newForm.isPlanned,
       serviceId: newForm.serviceId || null,
       priority: newForm.priority,
@@ -1654,9 +1653,19 @@ export default function RequestsClient({
                 </div>
               )}
 
-              {/* ── The brief ── */}
-              {(open.description || open.design_plan || open.remarks) ? (
+              {/* ── The brief ──
+                  New requests carry the shared Content Brief (formatted
+                  caption, images, notes, links) — identical to the Calendar.
+                  Older requests keep their original fields, read-only. */}
+              {asContentBrief(open.content_brief) ? (
+                <ContentBriefView
+                  brief={asContentBrief(open.content_brief)!}
+                  platforms={open.social_meta?.platforms}
+                  scheduledDate={open.social_meta?.scheduled_date}
+                />
+              ) : (open.description || open.design_plan || open.remarks) ? (
                 <div className="space-y-4">
+                  <p className="text-[10px] text-muted-foreground/70">Earlier brief format · read-only</p>
                   {open.description && (
                     <div>
                       <p className={SECTION_LABEL}>Brief</p>
@@ -1681,7 +1690,7 @@ export default function RequestsClient({
               )}
 
               {/* Links as compact chips */}
-              {(open.content_link || open.reference_link || open.deliverables_link || open.drive_folder_link || (open.extra_links || []).length > 0) && (
+              {(open.content_link || open.reference_link || open.deliverables_link || open.drive_folder_link || (!open.content_brief && (open.extra_links || []).length > 0)) && (
                 <div>
                   <p className={SECTION_LABEL}>Links</p>
                   <div className="flex flex-wrap gap-1.5">
@@ -1690,7 +1699,8 @@ export default function RequestsClient({
                       open.content_link && { href: open.content_link, label: 'Content', tone: 'blue' },
                       open.reference_link && { href: open.reference_link, label: 'Reference', tone: 'blue' },
                       open.deliverables_link && { href: open.deliverables_link, label: 'Deliverables', tone: 'green' },
-                      ...(open.extra_links || []).map((l: any) => ({ href: l.url, label: l.label || l.url, tone: 'blue' })),
+                      // A brief's links are shown in the brief itself (extra_links mirrors them).
+                      ...(open.content_brief ? [] : (open.extra_links || []).map((l: any) => ({ href: l.url, label: l.label || l.url, tone: 'blue' }))),
                     ].filter(Boolean).map((l: any, i: number) => (
                       <a key={i} href={l.href} target="_blank" rel="noreferrer"
                         className={`inline-flex items-center gap-1 max-w-[260px] px-2.5 py-1 rounded-lg text-xs border transition-colors ${
@@ -1815,18 +1825,17 @@ export default function RequestsClient({
       )}
 
       {/* ── New Request (staff-created opportunity) ──────────────────────────
-          The few fields every request needs are up front; the rarely-used
-          ones (design plan, remarks, links, value, tags) fold under
-          "More options" — opened automatically if any of them has a value. */}
+          Client, then the shared Content Brief block (same as the Social
+          Calendar's "Plan an item"), with this page's workflow fields —
+          service, due date, assignee, priority — inside it. Value and the
+          planned / complimentary flags fold under "More options". */}
       {showNew && (() => {
-        const hasMore = !!(newForm.designPlan || newForm.remarks || newForm.contentLink || newForm.referenceLink
-          || newForm.extraLinks.length || newForm.estimatedValue || newForm.isPlanned || newForm.isChecklist)
         const field = 'w-full h-10 bg-background border border-border rounded-lg px-3 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/15 transition-colors'
-        const area = 'w-full bg-background border border-border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/15 transition-colors'
         const label = 'block text-xs font-medium text-foreground/80 mb-1.5'
+        const hasMore = !!(newForm.estimatedValue || newForm.isPlanned || newForm.isChecklist)
         return (
         <ModalOverlay onClose={() => setShowNew(false)}>
-          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-lg shadow-2xl max-h-[92dvh] flex flex-col overflow-hidden">
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-2xl shadow-2xl max-h-[92dvh] flex flex-col overflow-hidden">
             <div className="flex items-start justify-between px-5 py-4 border-b border-border shrink-0 gap-3">
               <div>
                 <h2 className="font-bold text-base">New design request</h2>
@@ -1853,94 +1862,55 @@ export default function RequestsClient({
                   </a>
                 )}
               </div>
-              <div>
-                <label className={label}>Title <span className="text-red-500">*</span></label>
-                <input value={newForm.title} onChange={e => setNewForm(f => ({ ...f, title: e.target.value }))}
-                  placeholder="e.g. Onam campaign poster set" className={field} />
-              </div>
-              <div>
-                <label className={label}>Brief</label>
-                <textarea rows={3} value={newForm.description} onChange={e => setNewForm(f => ({ ...f, description: e.target.value }))}
-                  placeholder="What's needed, sizes, copy, deadline notes…" className={area} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={label}>Service</label>
-                  <select value={newForm.serviceId} onChange={e => setNewForm(f => ({ ...f, serviceId: e.target.value }))} className={field}>
-                    <option value="">Not set</option>
-                    {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
+
+              <ContentBriefFields
+                title={newForm.title}
+                onTitleChange={title => setNewForm(f => ({ ...f, title }))}
+                value={newForm.brief}
+                onChange={brief => setNewForm(f => ({ ...f, brief }))}
+                titlePlaceholder="e.g. Onam campaign poster set"
+                onError={(t, d) => toastError(t, d)}
+                typeSide={
+                  <>
+                    <label className={label}>Service</label>
+                    <select value={newForm.serviceId} onChange={e => setNewForm(f => ({ ...f, serviceId: e.target.value }))} className={field}>
+                      <option value="">Not set</option>
+                      {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </>
+                }
+              >
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className={label}>Due date</label>
+                    <input type="date" value={newForm.dueDate} onChange={e => setNewForm(f => ({ ...f, dueDate: e.target.value }))} className={field} />
+                  </div>
+                  <div>
+                    <label className={label}>Assign to</label>
+                    <select value={newForm.assignedEmployeeId} onChange={e => setNewForm(f => ({ ...f, assignedEmployeeId: e.target.value }))} className={field}>
+                      <option value="">Unassigned</option>
+                      {employees.map(e => <option key={e.id} value={e.id}>{dn(e)}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={label}>Priority</label>
+                    <select value={newForm.priority} onChange={e => setNewForm(f => ({ ...f, priority: e.target.value }))} className={field}>
+                      <option value="low">Low</option>
+                      <option value="normal">Normal</option>
+                      <option value="high">High</option>
+                      <option value="urgent">Urgent</option>
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label className={label}>Due date</label>
-                  <input type="date" value={newForm.dueDate} onChange={e => setNewForm(f => ({ ...f, dueDate: e.target.value }))} className={field} />
-                </div>
-                <div>
-                  <label className={label}>Assign to</label>
-                  <select value={newForm.assignedEmployeeId} onChange={e => setNewForm(f => ({ ...f, assignedEmployeeId: e.target.value }))} className={field}>
-                    <option value="">Unassigned</option>
-                    {employees.map(e => <option key={e.id} value={e.id}>{dn(e)}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className={label}>Priority</label>
-                  <select value={newForm.priority} onChange={e => setNewForm(f => ({ ...f, priority: e.target.value }))} className={field}>
-                    <option value="low">Low</option>
-                    <option value="normal">Normal</option>
-                    <option value="high">High</option>
-                    <option value="urgent">Urgent</option>
-                  </select>
-                </div>
-              </div>
+              </ContentBriefFields>
 
               <details className="group rounded-xl border border-border/70" open={hasMore}>
                 <summary className="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium text-muted-foreground cursor-pointer select-none list-none hover:text-foreground">
                   <ChevronRight className="w-3.5 h-3.5 transition-transform group-open:rotate-90" />
                   More options
-                  <span className="font-normal text-muted-foreground/70">· design plan, links, value, tags</span>
+                  <span className="font-normal text-muted-foreground/70">· value, planned, complimentary</span>
                 </summary>
                 <div className="px-3 pb-3 space-y-3.5">
-                  <div>
-                    <label className={label}>Design plan</label>
-                    <textarea rows={2} value={newForm.designPlan} onChange={e => setNewForm(f => ({ ...f, designPlan: e.target.value }))}
-                      placeholder="Layout, sizes, formats, copy direction…" className={area} />
-                  </div>
-                  <div>
-                    <label className={label}>Remarks</label>
-                    <textarea rows={2} value={newForm.remarks} onChange={e => setNewForm(f => ({ ...f, remarks: e.target.value }))} className={area} />
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className={label}>Content link</label>
-                      <input value={newForm.contentLink} onChange={e => setNewForm(f => ({ ...f, contentLink: e.target.value }))} placeholder="https://…" className={field} />
-                    </div>
-                    <div>
-                      <label className={label}>Reference link</label>
-                      <input value={newForm.referenceLink} onChange={e => setNewForm(f => ({ ...f, referenceLink: e.target.value }))} placeholder="https://…" className={field} />
-                    </div>
-                  </div>
-                  <div>
-                {newForm.extraLinks.map((l, i) => (
-                  <div key={i} className="flex gap-2 mt-1.5">
-                    <input value={l.label} onChange={e => setNewForm(f => ({ ...f, extraLinks: f.extraLinks.map((x, j) => j === i ? { ...x, label: e.target.value } : x) }))}
-                      placeholder="Label"
-                      className="w-28 bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50" />
-                    <input value={l.url} onChange={e => setNewForm(f => ({ ...f, extraLinks: f.extraLinks.map((x, j) => j === i ? { ...x, url: e.target.value } : x) }))}
-                      placeholder="https://…"
-                      className="flex-1 bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50" />
-                    <button onClick={() => setNewForm(f => ({ ...f, extraLinks: f.extraLinks.filter((_, j) => j !== i) }))}
-                      className="px-2.5 rounded-xl bg-secondary border border-border text-muted-foreground hover:text-red-400 transition-colors shrink-0">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
-                {newForm.extraLinks.length < 10 && (
-                  <button onClick={() => setNewForm(f => ({ ...f, extraLinks: [...f.extraLinks, { label: '', url: '' }] }))}
-                    className="mt-1.5 flex items-center gap-1 text-xs text-violet-400 hover:text-violet-700 dark:text-violet-300 transition-colors">
-                    <Plus className="w-3 h-3" /> Add link
-                  </button>
-                )}
-                  </div>
                   <div>
                     <label className={label}>Estimated value (₹)</label>
                     <input type="number" min="0" value={newForm.estimatedValue}

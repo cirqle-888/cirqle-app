@@ -241,7 +241,7 @@ describe('composeRequestDescription', () => {
       'Planned reel for 2026-08-05 (August content plan)\n\n' +
       'Platforms: Instagram, Facebook\n\n' +
       'Caption / copy:\nLights on! ✨\n\n' +
-      'Notes:\nUse last year footage',
+      'Notes for designer:\nUse last year footage',
     )
   })
 

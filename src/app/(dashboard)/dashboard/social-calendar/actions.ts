@@ -29,6 +29,7 @@ import {
   sanitizeCaptionHtml, captionHtmlToText, sanitizeCaptionCanvas, dueDateForPublish,
 } from '@/lib/social/plan'
 import { todayISO } from '@/lib/utils/local-date'
+import { normalizeContentBrief, cleanBriefLinks } from '@/lib/content-brief'
 
 const REVALIDATE = '/dashboard/social-calendar'
 const MIGRATION_HINT = 'Apply migration 20260716120000_social_calendar.sql first.'
@@ -215,6 +216,8 @@ export interface ItemInput {
   referenceUrls?: string[] | null
   /** Free-drag visual board attached to the copy (validated server-side). */
   captionCanvas?: unknown
+  /** Content Brief links for the designer — http(s) only, max 10. */
+  links?: { label?: string; url: string }[] | null
   /** Service the pushed design request should carry (aligns the item with the
    *  Requests inbox's service-based pricing/routing). Optional; nullable. */
   serviceId?: string | null
@@ -230,7 +233,7 @@ export interface ItemInput {
 /** Optional patch-migration columns (each added in a later migration). When a
  *  write fails on one, we retry WITHOUT that column only — stripping all of
  *  them would silently drop data for columns that DO exist. */
-const PATCH_COLUMNS = ['service_id', 'variants', 'reference_url', 'reference_urls', 'scheduled_end_date', 'caption_canvas', 'assigned_employee_id'] as const
+const PATCH_COLUMNS = ['service_id', 'variants', 'reference_url', 'reference_urls', 'scheduled_end_date', 'caption_canvas', 'assigned_employee_id', 'links'] as const
 
 /** Resolve WHICH patch column an error is about.
  *
@@ -307,6 +310,19 @@ const cleanReferenceUrls = (urls: string[] | null | undefined): string[] => {
   return out.slice(0, 8)
 }
 
+/** The Content Brief a calendar item carries into Requests (see lib/content-brief). */
+const briefFromItem = (x: {
+  contentType: string; caption?: string | null; captionCanvas?: unknown
+  referenceUrls?: string[] | null; notes?: string | null; links?: { label?: string; url: string }[] | null
+}) => normalizeContentBrief({
+  contentType: x.contentType,
+  caption: x.caption ?? '',
+  captionCanvas: sanitizeCaptionCanvas(x.captionCanvas),
+  referenceImages: x.referenceUrls ?? [],
+  notes: x.notes ?? '',
+  links: (x.links ?? []).map(l => ({ label: l.label ?? '', url: l.url })),
+})
+
 /**
  * Resolve the service a content type's design request should carry —
  * automatically, so planners never see a Service field. Priority: the team's
@@ -378,6 +394,7 @@ function migrationWarning(dropped: string[], input: ItemInput, refs: string[]): 
   if (dropped.includes('reference_urls') && refs.length > 1) lost.push('the extra reference images')
   if (dropped.includes('variants') && cleanVariants(input).length) lost.push('the format variants')
   if (dropped.includes('assigned_employee_id') && input.assignedEmployeeId) lost.push('the assigned designer')
+  if (dropped.includes('links') && cleanBriefLinks(input.links).length) lost.push('the links')
   if (!lost.length) return undefined
   return `Saved, but ${lost.join(' and ')} could not be stored — the database migration for those columns has not been applied yet.`
 }
@@ -423,6 +440,7 @@ export async function addCalendarItem(
     reference_url: refs[0] ?? null, // legacy single kept in sync with refs[0]
     caption_canvas: sanitizeCaptionCanvas(input.captionCanvas),
     assigned_employee_id: input.assignedEmployeeId || null,
+    links: cleanBriefLinks(input.links),
   }
   const dropped: string[] = []
   const { data, error } = await withPatchColumnFallback(row, r =>
@@ -478,6 +496,7 @@ export async function updateCalendarItem(
     reference_url: refs[0] ?? null,
     caption_canvas: sanitizeCaptionCanvas(input.captionCanvas),
     assigned_employee_id: input.assignedEmployeeId || null,
+    links: cleanBriefLinks(input.links),
     updated_at: new Date().toISOString(),
   }
   const dropped: string[] = []
@@ -493,7 +512,7 @@ export async function updateCalendarItem(
   if (req?.id && !isTerminalRequestStatus(req.status)) {
     const calTitle = (item as any).calendar?.title ?? null
     try {
-      await admin.from('task_requests').update({
+      const reqPatch: Record<string, unknown> = {
         title: input.title.trim(),
         due_date: input.scheduledDate || null,
         assigned_employee_id: input.assignedEmployeeId || null,
@@ -504,12 +523,27 @@ export async function updateCalendarItem(
           calendarTitle: calTitle, variants: cleanVariants(input),
           referenceUrls: cleanReferenceUrls(input.referenceUrls),
           captionCanvas: sanitizeCaptionCanvas(input.captionCanvas),
+          links: cleanBriefLinks(input.links),
         }),
+        // The same brief object the item holds — the request reads exactly
+        // what the planner wrote, formatting and images included.
+        content_brief: briefFromItem({
+          contentType: input.contentType, caption: input.caption, captionCanvas: input.captionCanvas,
+          referenceUrls: input.referenceUrls, notes: input.notes, links: input.links,
+        }),
+        extra_links: cleanBriefLinks(input.links),
         updated_at: new Date().toISOString(),
-      })
+      }
+      const syncRequest = (patch: Record<string, unknown>) => admin.from('task_requests').update(patch)
         .eq('id', req.id)
         .is('promoted_task_id', null)
         .not('status', 'in', '("completed","delivered","cancelled","rejected","archived")')
+      const { error: syncErr } = await syncRequest(reqPatch)
+      // Pre-migration: no content_brief column — still sync everything else.
+      if (syncErr && /content_brief/i.test(syncErr.message || '')) {
+        delete reqPatch.content_brief
+        await syncRequest(reqPatch)
+      }
     } catch { /* request update is cosmetic — never block the plan edit */ }
   }
 
@@ -904,12 +938,13 @@ export async function pushItemsToRequests(
     status: string; request_id: string | null; service_id?: string | null
     variants?: string[] | null; reference_url?: string | null; reference_urls?: string[] | null
     caption_canvas?: unknown
+    links?: { label?: string; url: string }[] | null
   }
   let items: PushItemRow[] | null = null
   let itemsErr: { message: string } | null = null
   // Pre-migration fallback: drop ONLY the column each retry trips on, so a
   // pending migration doesn't also blank columns that DO exist.
-  let cols = ['id', 'scheduled_date', 'scheduled_end_date', 'title', 'content_type', 'platforms', 'caption', 'notes', 'status', 'request_id', 'service_id', 'variants', 'reference_url', 'reference_urls', 'caption_canvas', 'assigned_employee_id']
+  let cols = ['id', 'scheduled_date', 'scheduled_end_date', 'title', 'content_type', 'platforms', 'caption', 'notes', 'status', 'request_id', 'service_id', 'variants', 'reference_url', 'reference_urls', 'caption_canvas', 'assigned_employee_id', 'links']
   for (let attempt = 0; attempt <= PATCH_COLUMNS.length; attempt++) {
     const res = await admin.from('social_calendar_items')
       .select(cols.join(', '))
@@ -949,6 +984,13 @@ export async function pushItemsToRequests(
         calendarTitle: (cal as any).title, variants: item.variants,
         referenceUrls: item.reference_urls?.length ? item.reference_urls : (item.reference_url ? [item.reference_url] : []),
         captionCanvas: sanitizeCaptionCanvas(item.caption_canvas),
+        links: item.links || [],
+      }),
+      // The item's brief, unchanged — formatting, canvas, images, notes, links.
+      contentBrief: briefFromItem({
+        contentType: item.content_type, caption: item.caption, captionCanvas: item.caption_canvas,
+        referenceUrls: item.reference_urls?.length ? item.reference_urls : (item.reference_url ? [item.reference_url] : []),
+        notes: item.notes, links: item.links,
       }),
       isPlanned: true,
       // The DESIGNER's deadline, not the publish date. With a lead time set,

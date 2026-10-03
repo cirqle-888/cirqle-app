@@ -25,6 +25,8 @@ import { normalizeTaskTitle } from '@/lib/utils/title-case'
 const QuickCreateClientModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(mod => mod.QuickCreateClientModal), { ssr: false })
 const QuickCreateServiceModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(mod => mod.QuickCreateServiceModal), { ssr: false })
 import { markRequestPromoted, getRequestBriefForTask } from '@/app/(dashboard)/dashboard/requests/actions'
+import ContentBriefView from '@/components/content-brief/content-brief-view'
+import { asContentBrief } from '@/lib/content-brief'
 import { markSocialItemTasked } from '@/app/(dashboard)/dashboard/social-calendar/actions'
 import { createContributionSlots } from '@/app/(dashboard)/dashboard/contributions/actions'
 import { DiscussButton } from '@/components/chat/discuss-button'
@@ -5714,7 +5716,29 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
             <div className="overflow-y-auto flex-1 p-5 space-y-4 text-sm">
               {requestBrief.loading && <p className="text-xs text-muted-foreground flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading brief…</p>}
               {requestBrief.error && <p className="text-xs text-red-400">{requestBrief.error}</p>}
-              {requestBrief.data && (
+              {requestBrief.data && asContentBrief(requestBrief.data.content_brief) && (
+                <>
+                  {/* Shared Content Brief — the same view as the Requests inbox. */}
+                  <ContentBriefView
+                    brief={asContentBrief(requestBrief.data.content_brief)!}
+                    platforms={requestBrief.data.social_meta?.platforms}
+                    scheduledDate={requestBrief.data.social_meta?.scheduled_date}
+                  />
+                  {(requestBrief.data.drive_folder_link || requestBrief.data.deliverables_link) && (
+                    <div className="flex flex-wrap gap-3">
+                      {requestBrief.data.drive_folder_link && <a href={requestBrief.data.drive_folder_link} target="_blank" rel="noreferrer" className="text-xs text-blue-400 hover:underline">Drive folder</a>}
+                      {requestBrief.data.deliverables_link && <a href={requestBrief.data.deliverables_link} target="_blank" rel="noreferrer" className="text-xs text-emerald-400 hover:underline">Deliverables</a>}
+                    </div>
+                  )}
+                  {can('requests.view') && (
+                    <a href={`/dashboard/requests?focus=${requestBrief.data.id}`}
+                      className="inline-flex items-center gap-1.5 text-xs text-violet-400 hover:text-violet-700 dark:text-violet-300 transition-colors">
+                      Open in Requests inbox →
+                    </a>
+                  )}
+                </>
+              )}
+              {requestBrief.data && !asContentBrief(requestBrief.data.content_brief) && (
                 <>
                   {requestBrief.data.description && (
                     <div><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Details</p><p className="whitespace-pre-wrap text-foreground/90">{requestBrief.data.description}</p></div>

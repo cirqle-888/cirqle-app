@@ -386,6 +386,8 @@ export interface PlanItemInput {
   referenceUrls?: string[] | null
   /** Free-drag visual board attached to the copy. */
   captionCanvas?: CaptionCanvas | null
+  /** Plain links for the designer (Drive, Canva, product page…). */
+  links?: { label?: string | null; url: string }[] | null
 }
 
 /** Short "03 Jul" / "03 Jul – 11 Jul" range label. Empty when no start. */
@@ -436,7 +438,7 @@ export function composeRequestDescription(item: PlanItemInput): string {
   // projection (bullets become "• ", blocks become lines).
   const captionText = captionHtmlToText(item.caption).trim()
   if (captionText) parts.push(`Caption / copy:\n${captionText}`)
-  if (item.notes?.trim()) parts.push(`Notes:\n${item.notes.trim()}`)
+  if (item.notes?.trim()) parts.push(`Notes for designer:\n${item.notes.trim()}`)
   // Labels placed on the visual board are part of the brief — a designer
   // reading only the text must still get everything the planner wrote.
   const boardText = canvasToText(item.captionCanvas)
@@ -447,6 +449,8 @@ export function composeRequestDescription(item: PlanItemInput): string {
     ...canvasImageUrls(item.captionCanvas),
   ].filter((u, i, a) => a.indexOf(u) === i)
   if (refs.length) parts.push(`Reference image${refs.length > 1 ? 's' : ''}:\n${refs.join('\n')}`)
+  const links = (item.links ?? []).filter(l => l?.url?.trim())
+  if (links.length) parts.push(`Links:\n${links.map(l => (l.label?.trim() ? `${l.label.trim()} — ${l.url}` : l.url)).join('\n')}`)
   return parts.join('\n\n')
 }
 

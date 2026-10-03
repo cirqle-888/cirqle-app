@@ -24,6 +24,7 @@ const ROOT = process.cwd()
 const ALLOWED_ON_WRITE_GUARD = new Set([
   'getRefUploadUrl',           // storage upload URL — social calendar references
   'getProductImageUploadUrl',  // storage upload URL — catalog product photos
+  'getBriefImageUploadUrl',    // storage upload URL — shared Content Brief images
 ])
 
 const READ_NAME = /^(get|list|fetch|load|search|count)[A-Z]/

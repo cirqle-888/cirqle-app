@@ -202,12 +202,13 @@ export default async function TasksPage({
       // prefill outright — otherwise, before the migration lands, "Send to
       // Tasks" would drop the user on an empty Tasks page with no explanation.
       let raw: any = null
-      for (const withTaskId of [true, false]) {
+      // `links` needs 20261003120000 — dropped first if it isn't there yet.
+      for (const [withTaskId, withLinks] of [[true, true], [true, false], [false, false]] as const) {
         const res = await supabase
           .from('social_calendar_items')
           .select('id, title, content_type, platforms, caption, notes, scheduled_date, scheduled_end_date, ' +
             'variants, reference_url, reference_urls, caption_canvas, service_id, assigned_employee_id, ' +
-            'status, request_id' + (withTaskId ? ', task_id' : '') +
+            'status, request_id' + (withTaskId ? ', task_id' : '') + (withLinks ? ', links' : '') +
             ', calendar:social_calendars(id, title, client_id)')
           .eq('id', fromSocialItem)
           .maybeSingle()
@@ -232,6 +233,7 @@ export default async function TasksPage({
             calendarTitle: cal?.title, variants: it.variants,
             referenceUrls: it.reference_urls?.length ? it.reference_urls : (it.reference_url ? [it.reference_url] : []),
             captionCanvas: sanitizeCaptionCanvas(it.caption_canvas),
+            links: it.links || [],
           }),
           client_id: cal?.client_id ?? '',
           service_id: it.service_id || '',

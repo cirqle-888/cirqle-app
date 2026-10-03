@@ -8,6 +8,7 @@
  */
 
 import { revalidatePath } from 'next/cache'
+import { normalizeContentBrief, contentBriefToText, type ContentBrief, type ContentBriefDraft } from '@/lib/content-brief'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission, requireReadPermission, resolveCurrentEmployeeId } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
@@ -444,6 +445,15 @@ export async function createManualRequest(input: {
    * request, so every existing caller is unaffected.
    */
   kind?: RequestKind
+  /**
+   * The shared Content Brief (src/lib/content-brief.ts) — written by the
+   * Requests form and by a Social Calendar push. When present, the request is
+   * a "brief" request: content_brief holds it exactly, and `description` gets
+   * its plain-text projection for text-only readers (Tasks prefill, portal).
+   * A caller may still pass `description` to prepend context (the calendar's
+   * "Planned post for …" header) — it is used as-is when given.
+   */
+  contentBrief?: Partial<ContentBriefDraft> | ContentBrief | null
 }): Promise<ActionResult<any>> {
   const guard = await requirePermission(PERMS.REQUESTS_MANAGE)
   if (!guard.ok) return { ok: false, error: guard.error }
@@ -465,17 +475,20 @@ export async function createManualRequest(input: {
   } catch { /* defensive */ }
 
   const isChecklist = input.kind === REQUEST_KIND_CHECKLIST
+  const brief = normalizeContentBrief(input.contentBrief)
   const payload: Record<string, unknown> = {
     source: 'manual',
     kind: input.kind || REQUEST_KIND_REQUEST,
     client_id: input.clientId,
     title,
-    description: (input.description || '').trim() || null,
+    description: (input.description || '').trim() || (brief ? contentBriefToText(brief) : '') || null,
     design_plan: (input.designPlan || '').trim() || null,
     remarks: (input.remarks || '').trim() || null,
     content_link: (input.contentLink || '').trim() || null,
     reference_link: (input.referenceLink || '').trim() || null,
-    extra_links: (input.extraLinks || []).filter(l => l.url?.trim()).slice(0, 10),
+    // A brief's links are mirrored here too, so older readers still list them.
+    extra_links: brief ? brief.links : (input.extraLinks || []).filter(l => l.url?.trim()).slice(0, 10),
+    ...(brief ? { content_brief: brief } : {}),
     is_planned: !!input.isPlanned,
     service_id: input.serviceId || null,
     priority: ['low', 'normal', 'high', 'urgent'].includes(input.priority || '') ? input.priority : 'normal',
@@ -493,6 +506,13 @@ export async function createManualRequest(input: {
   // Graceful pre-patch fallbacks: columns from later migrations may be missing.
   if (error && /priority_rank/i.test(error.message || '')) {
     delete payload.priority_rank
+    ;({ data, error } = await admin.from('task_requests').insert(payload).select(SELECT_COLS).single())
+  }
+  // Pre-migration (20261003120000): no content_brief column. The plain-text
+  // description already carries the whole brief, so nothing is lost to a
+  // reader — only the formatting and thumbnails.
+  if (error && /content_brief/i.test(error.message || '')) {
+    delete payload.content_brief
     ;({ data, error } = await admin.from('task_requests').insert(payload).select(SELECT_COLS).single())
   }
   if (error && /estimated_value/i.test(error.message || '')) {
@@ -601,12 +621,15 @@ export async function getRequestBriefForTask(taskId: string): Promise<ActionResu
   if (!employeeId) return { ok: false, error: 'Not signed in.' }
   const admin = createAdminClient()
   try {
-    const { data } = await admin.from('task_requests')
-      .select('id, ref_no, title, description, design_plan, remarks, priority, due_date, status, source, created_at, ' +
-        'content_link, reference_link, deliverables_link, drive_folder_link, extra_links, ' +
-        'client:clients(id, name, code), agency:agencies(id, name), service:services(id, name), ' +
-        'assigned_employee:employees!task_requests_assigned_employee_id_fkey(id, name)')
+    const base = 'id, ref_no, title, description, design_plan, remarks, priority, due_date, status, source, created_at, ' +
+      'content_link, reference_link, deliverables_link, drive_folder_link, extra_links, ' +
+      'client:clients(id, name, code), agency:agencies(id, name), service:services(id, name), ' +
+      'assigned_employee:employees!task_requests_assigned_employee_id_fkey(id, name)'
+    // content_brief / social_meta come from later migrations — retry without.
+    let res = await admin.from('task_requests').select(`${base}, content_brief, social_meta`)
       .eq('promoted_task_id', taskId).maybeSingle()
+    if (res.error) res = await admin.from('task_requests').select(base).eq('promoted_task_id', taskId).maybeSingle() as any
+    const data = res.data
     if (!data) return { ok: false, error: 'No request linked to this task.' }
     return { ok: true, data }
   } catch { return { ok: false, error: 'Request portal not set up.' } }

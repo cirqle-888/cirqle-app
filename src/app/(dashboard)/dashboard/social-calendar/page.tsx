@@ -76,7 +76,7 @@ export default async function SocialCalendarPage({
       `
     // Drop ONLY the column each retry trips on — a pending patch migration
     // must not also hide columns that already exist.
-    let extraCols = ['service_id', 'variants', 'reference_url', 'reference_urls', 'scheduled_end_date', 'caption_canvas', 'assigned_employee_id', 'task_id']
+    let extraCols = ['service_id', 'variants', 'reference_url', 'reference_urls', 'scheduled_end_date', 'caption_canvas', 'assigned_employee_id', 'links', 'task_id']
     for (let attempt = 0; attempt <= extraCols.length; attempt++) {
       const sel = [
         ...extraCols, ITEM_COLS,

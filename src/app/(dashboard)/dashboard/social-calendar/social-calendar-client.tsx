@@ -17,6 +17,7 @@ import { refLabel } from '@/lib/requests/core'
 import { planPackageCalendar, cadenceLabel, suggestPlacements } from '@/lib/packages/calendar-coverage'
 import type { PackageRow, PackageItemRow, PackageTaskLike } from '@/lib/packages/types'
 import CaptionCanvasEditor from './caption-canvas'
+import ContentBriefFields from '@/components/content-brief/content-brief-fields'
 import { DiscussButton } from '@/components/chat/discuss-button'
 import {
   DndContext, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable,
@@ -34,7 +35,7 @@ import {
   createSocialCalendar, updateSocialCalendar, deleteSocialCalendar,
   addCalendarItem, updateCalendarItem, deleteCalendarItem, pushItemsToRequests,
   revertItemToPlanned, saveContentTypeServiceMap, saveSocialLeadDays,
-  quickAddIdea, moveCalendarItem, getRefUploadUrl,
+  quickAddIdea, moveCalendarItem,
   type ItemInput,
 } from './actions'
 import {
@@ -80,6 +81,8 @@ interface ItemRow {
   reference_url?: string | null
   reference_urls?: string[] | null
   caption_canvas?: CaptionCanvas | null
+  /** Content Brief links (20261003120000). */
+  links?: { label?: string; url: string }[] | null
   request?: {
     id: string
     ref_no: number | null
@@ -133,284 +136,6 @@ interface Props {
 // mapping + keyword fallback in @/lib/social/plan) — planners never pick one.
 // The gear-icon "Service defaults" modal below is where the team edits that
 // mapping; `services`/`serviceMap` props exist only to power it.
-
-// ── Rich caption editor ───────────────────────────────────────────────────────
-// Self-contained contenteditable editor with a full formatting toolbar
-// (emphasis, headings, quote, lists, alignment, colour, highlight, links,
-// emoji). Emits HTML; the server sanitizes to the caption allowlist and the
-// PDF renders the same formatting. execCommand is legacy but universally
-// supported and exactly right for a caption field.
-
-const CAPTION_COLORS = ['#111827', '#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899']
-const CAPTION_HIGHLIGHTS = ['#fef08a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#e9d5ff']
-const CAPTION_EMOJI = ['✨', '🔥', '🎉', '✅', '👉', '⭐', '💥', '🛍️', '📣', '❤️', '🎁', '⏰', '📍', '💯']
-
-// Toolbar button + separator — module-scope so they keep a stable identity
-// across editor re-renders (defining them inline would remount every keystroke).
-function EditorTool({ icon, title, on, disabled, className = '' }: {
-  icon: React.ReactNode; title: string; on: () => void; disabled?: boolean; className?: string
-}) {
-  return (
-    <button type="button" tabIndex={-1} disabled={disabled} title={title}
-      onMouseDown={e => { e.preventDefault(); on() }}
-      className={`w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-background transition-colors disabled:opacity-50 ${className}`}>
-      {icon}
-    </button>
-  )
-}
-
-function EditorGroup({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-center p-0.5 bg-background/50 border border-border/40 rounded-md shadow-sm gap-0.5">
-      {children}
-    </div>
-  )
-}
-
-function RichTextEditor({
-  value, onChange, disabled = false, placeholder, onPasteImage,
-}: {
-  value: string
-  onChange: (html: string) => void
-  disabled?: boolean
-  placeholder?: string
-  /** Image pasted into the caption — routed to the reference gallery. */
-  onPasteImage?: (file: File) => void
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [openMenu, setOpenMenu] = useState<null | 'color' | 'highlight' | 'emoji' | 'link'>(null)
-  // Everyday tools show by default; the rest (underline, headings, alignment,
-  // colour…) sit behind the "Aa" toggle so the toolbar isn't a wall of icons.
-  const [allTools, setAllTools] = useState(false)
-  const [linkUrl, setLinkUrl] = useState('')
-  // Opening a toolbar popover moves focus out of the contenteditable and the
-  // caret is lost, so stash the range first and put it back before running the
-  // command — otherwise "Insert link" would apply to nothing.
-  const savedRange = useRef<Range | null>(null)
-
-  useEffect(() => {
-    const el = ref.current
-    if (el && el.innerHTML !== (value || '') && document.activeElement !== el) {
-      el.innerHTML = value || ''
-    }
-  }, [value])
-
-  // css=true makes execCommand emit inline styles (needed for colour/align);
-  // css=false keeps semantic tags (b/i/u). We toggle per command so output
-  // stays predictable for the sanitizer.
-  const run = (command: string, value?: string, css = false) => {
-    const el = ref.current
-    if (!el || disabled) return
-    el.focus()
-    try { document.execCommand('styleWithCSS', false, css ? 'true' : 'false') } catch { /* older engines */ }
-    document.execCommand(command, false, value)
-    onChange(el.innerHTML)
-    setOpenMenu(null)
-  }
-
-  const insert = (text: string) => {
-    const el = ref.current
-    if (!el || disabled) return
-    el.focus()
-    document.execCommand('insertText', false, text)
-    onChange(el.innerHTML)
-    setOpenMenu(null)
-  }
-
-  const saveSelection = () => {
-    const sel = window.getSelection()
-    savedRange.current = sel && sel.rangeCount && ref.current?.contains(sel.anchorNode)
-      ? sel.getRangeAt(0).cloneRange()
-      : null
-  }
-
-  // window.prompt() is not available here (Next 16 blocks it in the App Router
-  // dev runtime and browsers suppress it in some embeds), so the link tool is
-  // an inline popover instead of a modal prompt.
-  const openLinkMenu = () => {
-    if (disabled) return
-    saveSelection()
-    setLinkUrl('')
-    setOpenMenu(m => (m === 'link' ? null : 'link'))
-  }
-
-  const applyLink = () => {
-    const el = ref.current
-    const url = linkUrl.trim()
-    if (!el || !/^(https?:|mailto:)/i.test(url)) return
-    el.focus()
-    const r = savedRange.current
-    if (r) {
-      const sel = window.getSelection()
-      sel?.removeAllRanges()
-      sel?.addRange(r)
-    }
-    try { document.execCommand('styleWithCSS', false, 'false') } catch { /* older engines */ }
-    if (!r || r.collapsed) {
-      // Nothing selected — drop the URL in as its own link rather than no-op.
-      const safe = url.replace(/"/g, '&quot;')
-      const text = url.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      document.execCommand('insertHTML', false, `<a href="${safe}">${text}</a>`)
-    } else {
-      document.execCommand('createLink', false, url)
-    }
-    onChange(el.innerHTML)
-    setLinkUrl('')
-    setOpenMenu(null)
-  }
-
-  // Images are NOT part of the caption allowlist, so an inline paste would be
-  // embedded as a base64 blob here and then silently stripped on save. Catch it
-  // and hand the file to the reference gallery, where images actually belong.
-  const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
-    const img = Array.from(e.clipboardData?.files ?? []).find(f => f.type.startsWith('image/'))
-    if (img && onPasteImage) {
-      e.preventDefault()
-      onPasteImage(img)
-    }
-  }
-
-  const empty = !value || !value.replace(/<[^>]*>|&nbsp;|&#65279;/g, '').trim()
-
-  return (
-    <div className={`rounded-xl border border-border/80 bg-background overflow-visible shadow-sm focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10 transition-all ${disabled ? 'opacity-60' : ''}`}>
-      <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 border-b border-border/40 bg-secondary/30 relative rounded-t-xl">
-        
-        {/* Typography */}
-        <EditorGroup>
-          <EditorTool disabled={disabled} icon={<Bold className="w-3.5 h-3.5" />} title="Bold (⌘B)" on={() => run('bold')} />
-          <EditorTool disabled={disabled} icon={<Italic className="w-3.5 h-3.5" />} title="Italic (⌘I)" on={() => run('italic')} />
-          {allTools && <EditorTool disabled={disabled} icon={<Underline className="w-3.5 h-3.5" />} title="Underline (⌘U)" on={() => run('underline')} />}
-          {allTools && <EditorTool disabled={disabled} icon={<Strikethrough className="w-3.5 h-3.5" />} title="Strikethrough" on={() => run('strikeThrough')} />}
-          <EditorTool disabled={disabled} icon={<List className="w-3.5 h-3.5" />} title="Bullet list" on={() => run('insertUnorderedList')} />
-        </EditorGroup>
-
-        {allTools && (
-          <>
-            {/* Structure */}
-            <EditorGroup>
-              <EditorTool disabled={disabled} icon={<Heading2 className="w-3.5 h-3.5" />} title="Heading" on={() => run('formatBlock', '<h3>')} />
-              <EditorTool disabled={disabled} icon={<Quote className="w-3.5 h-3.5" />} title="Quote" on={() => run('formatBlock', '<blockquote>')} />
-              <EditorTool disabled={disabled} icon={<ListOrdered className="w-3.5 h-3.5" />} title="Numbered list" on={() => run('insertOrderedList')} />
-            </EditorGroup>
-            {/* Alignment */}
-            <EditorGroup>
-              <EditorTool disabled={disabled} icon={<AlignLeft className="w-3.5 h-3.5" />} title="Align left" on={() => run('justifyLeft', undefined, true)} />
-              <EditorTool disabled={disabled} icon={<AlignCenter className="w-3.5 h-3.5" />} title="Align center" on={() => run('justifyCenter', undefined, true)} />
-              <EditorTool disabled={disabled} icon={<AlignRight className="w-3.5 h-3.5" />} title="Align right" on={() => run('justifyRight', undefined, true)} />
-            </EditorGroup>
-          </>
-        )}
-
-        <div className="flex-1" />
-
-        {/* Inserts & Decorators */}
-        <EditorGroup>
-          {allTools && (<>
-          <div className="relative">
-            <EditorTool disabled={disabled} icon={<Palette className="w-3.5 h-3.5 text-blue-500" />} title="Text colour" on={() => setOpenMenu(m => m === 'color' ? null : 'color')} />
-            {openMenu === 'color' && (
-              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 flex gap-1 p-1.5 rounded-lg border border-border bg-card shadow-xl animate-in fade-in zoom-in-95 duration-100">
-                {CAPTION_COLORS.map(c => (
-                  <button key={c} type="button" title={c} onMouseDown={e => { e.preventDefault(); run('foreColor', c, true) }}
-                    className="w-5 h-5 rounded-full border border-black/10 hover:scale-110 transition-transform" style={{ backgroundColor: c }} />
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="relative">
-            <EditorTool disabled={disabled} icon={<Highlighter className="w-3.5 h-3.5 text-amber-500" />} title="Highlight" on={() => setOpenMenu(m => m === 'highlight' ? null : 'highlight')} />
-            {openMenu === 'highlight' && (
-              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 flex gap-1 p-1.5 rounded-lg border border-border bg-card shadow-xl animate-in fade-in zoom-in-95 duration-100">
-                {CAPTION_HIGHLIGHTS.map(c => (
-                  <button key={c} type="button" title={c} onMouseDown={e => { e.preventDefault(); run('hiliteColor', c, true) }}
-                    className="w-5 h-5 rounded border border-black/10 hover:scale-110 transition-transform" style={{ backgroundColor: c }} />
-                ))}
-                <button type="button" title="No highlight" onMouseDown={e => { e.preventDefault(); run('hiliteColor', 'transparent', true) }}
-                  className="w-5 h-5 rounded border border-border flex items-center justify-center text-muted-foreground hover:bg-secondary"><X className="w-3 h-3" /></button>
-              </div>
-            )}
-          </div>
-          </>)}
-          <div className="relative">
-            <EditorTool disabled={disabled} icon={<Smile className="w-3.5 h-3.5 text-emerald-500" />} title="Emoji" on={() => setOpenMenu(m => m === 'emoji' ? null : 'emoji')} />
-            {openMenu === 'emoji' && (
-              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 grid grid-cols-7 gap-0.5 p-1.5 rounded-lg border border-border bg-card shadow-xl w-56 animate-in fade-in zoom-in-95 duration-100">
-                {CAPTION_EMOJI.map(e => (
-                  <button key={e} type="button" onMouseDown={ev => { ev.preventDefault(); insert(e) }}
-                    className="w-7 h-7 flex justify-center items-center rounded hover:bg-secondary text-base hover:scale-110 transition-transform">{e}</button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="relative">
-            <EditorTool disabled={disabled} icon={<LinkIcon className="w-3.5 h-3.5" />} title="Insert link" on={openLinkMenu} />
-            {openMenu === 'link' && (
-              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 p-1.5 rounded-lg border border-border bg-card shadow-xl animate-in fade-in zoom-in-95 duration-100">
-                <input
-                  autoFocus
-                  value={linkUrl}
-                  onChange={e => setLinkUrl(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') { e.preventDefault(); applyLink() }
-                    if (e.key === 'Escape') { e.preventDefault(); setOpenMenu(null) }
-                  }}
-                  placeholder="https://…"
-                  className="w-56 bg-secondary border border-border rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/50"
-                />
-                <button type="button" onMouseDown={e => { e.preventDefault(); applyLink() }}
-                  disabled={!/^(https?:|mailto:)/i.test(linkUrl.trim())}
-                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground disabled:opacity-40 hover:bg-primary/90 transition-colors">
-                  Add
-                </button>
-              </div>
-            )}
-          </div>
-        </EditorGroup>
-        
-        {/* Clear */}
-        {allTools && (
-          <EditorGroup>
-            <EditorTool disabled={disabled} icon={<Eraser className="w-3.5 h-3.5 text-red-400" />} title="Clear formatting" className="hover:text-red-500 hover:bg-red-500/10" on={() => run('removeFormat')} />
-          </EditorGroup>
-        )}
-        <button type="button" onClick={() => setAllTools(v => !v)}
-          title={allTools ? 'Fewer formatting tools' : 'More formatting — underline, headings, alignment, colour'}
-          className={`h-7 px-2 rounded-md text-[11px] font-semibold transition-colors ${allTools ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}>
-          Aa
-        </button>
-      </div>
-      <div className="relative">
-        {empty && placeholder && (
-          <div className="pointer-events-none absolute left-3 top-2 text-sm text-muted-foreground/60">{placeholder}</div>
-        )}
-        <div
-          ref={ref}
-          contentEditable={!disabled}
-          suppressContentEditableWarning
-          onInput={e => onChange((e.target as HTMLDivElement).innerHTML)}
-          onPaste={handlePaste}
-          className="min-h-[120px] max-h-[50dvh] overflow-y-auto px-3 py-2 text-sm focus:outline-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_h1]:text-base [&_h1]:font-bold [&_h2]:text-base [&_h2]:font-bold [&_h3]:font-semibold [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-muted-foreground [&_a]:text-primary [&_a]:underline"
-        />
-      </div>
-    </div>
-  )
-}
-
-// Pull an image off the clipboard (a pasted screenshot) as a File for upload.
-async function readImageFromClipboard(): Promise<File | null> {
-  try {
-    if (!navigator.clipboard?.read) return null
-    for (const item of await navigator.clipboard.read()) {
-      const type = item.types.find(t => t.startsWith('image/'))
-      if (type) {
-        const blob = await item.getType(type)
-        return new File([blob], `ref-${type.split('/')[1] || 'png'}`, { type })
-      }
-    }
-  } catch { /* permission denied / unsupported */ }
-  return null
-}
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
@@ -467,7 +192,7 @@ const fmtDay = (date: string) => {
 
 // serviceId deliberately absent: the server auto-assigns it from the content type.
 const EMPTY_ITEM: ItemInput = {
-  scheduledDate: '', scheduledEndDate: '', title: '', contentType: 'post', platforms: [], caption: '', notes: '', variants: [], referenceUrls: [], captionCanvas: null, assignedEmployeeId: null,
+  scheduledDate: '', scheduledEndDate: '', title: '', contentType: 'post', platforms: [], caption: '', notes: '', variants: [], referenceUrls: [], captionCanvas: null, assignedEmployeeId: null, links: [],
 }
 
 /** Effective reference list (array supersedes the legacy single field). */
@@ -764,28 +489,6 @@ export default function SocialCalendarClient({
   const [quickTitle, setQuickTitle] = useState('')
   const [quickType, setQuickType] = useState<string>('post')
   const [quickBusy, setQuickBusy] = useState(false)
-  const [refUploading, setRefUploading] = useState(false)
-  const [refLink, setRefLink] = useState('')
-  // Caption has two views: the written brief and the free-drag layout board.
-  const [copyTab, setCopyTab] = useState<'text' | 'canvas'>('text')
-  const canvasBlockCount = (itemForm.captionCanvas as CaptionCanvas | null)?.blocks?.length ?? 0
-
-  /** Upload for canvas blocks — same storage path as reference images, but the
-   *  URL goes into a board block instead of the reference gallery. */
-  const uploadImageForCanvas = async (file: File): Promise<string | null> => {
-    try {
-      const res = await getRefUploadUrl(file.name)
-      if (!res.ok || !res.data) { toast.toastError('Upload failed', res.error); return null }
-      const put = await fetch(res.data.uploadUrl, {
-        method: 'PUT', headers: { 'Content-Type': file.type }, body: file,
-      })
-      if (!put.ok) { toast.toastError('Upload failed', 'Storage rejected the file.'); return null }
-      return res.data.publicUrl
-    } catch (e) {
-      toast.toastError('Upload failed', e instanceof Error ? e.message : 'Please try again.')
-      return null
-    }
-  }
   // Collapsible Idea Board (persisted, expanded by default).
   const boardCollapsed = useSyncExternalStore(boardStore.subscribe, boardStore.get, () => false)
   const toggleBoard = () => boardStore.set(!boardCollapsed)
@@ -878,7 +581,6 @@ export default function SocialCalendarClient({
   }
 
   function openEdit(it: ItemRow) {
-    setRefLink('')
     setShowAllDesigners(false)
     setItemForm({
       scheduledDate: it.scheduled_date ?? '', scheduledEndDate: it.scheduled_end_date ?? '',
@@ -887,48 +589,10 @@ export default function SocialCalendarClient({
       caption: it.caption ?? '', notes: it.notes ?? '',
       variants: it.variants ?? [], referenceUrls: itemRefs(it),
       captionCanvas: it.caption_canvas ?? null,
+      links: it.links ?? [],
     })
-    // Open straight onto whichever view this item actually uses.
-    setCopyTab(it.caption_canvas?.blocks?.length ? 'canvas' : 'text')
+    // The brief block opens on whichever caption view the item uses.
     setItemModal({ mode: 'edit', itemId: it.id })
-  }
-
-  const addReference = (url: string) => setItemForm(p => {
-    const u = url.trim()
-    const list = p.referenceUrls ?? []
-    if (!u || list.includes(u) || list.length >= 8) return p
-    return { ...p, referenceUrls: [...list, u] }
-  })
-  const removeReference = (idx: number) => setItemForm(p => ({
-    ...p, referenceUrls: (p.referenceUrls ?? []).filter((_, i) => i !== idx),
-  }))
-
-  async function uploadReference(file: File) {
-    setRefUploading(true)
-    try {
-      const res = await getRefUploadUrl(file.name)
-      if (!res.ok || !res.data) { toast.toastError('Upload failed', res.error); return }
-      const put = await fetch(res.data.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file })
-      if (!put.ok) { toast.toastError('Upload failed', 'Storage rejected the file.'); return }
-      addReference(res.data.publicUrl)
-      toast.success('Reference image added')
-    } catch (e) {
-      // Call sites fire-and-forget this; without a catch a dropped connection
-      // becomes an unhandled rejection and the user sees nothing at all.
-      toast.toastError('Upload failed', e instanceof Error ? e.message : 'Please try again.')
-    } finally {
-      setRefUploading(false)
-    }
-  }
-
-  async function pasteReference() {
-    try {
-      const file = await readImageFromClipboard()
-      if (!file) { toast.toastError('No image on the clipboard', 'Copy an image first, then Paste.'); return }
-      await uploadReference(file)
-    } catch (e) {
-      toast.toastError('Paste failed', e instanceof Error ? e.message : 'Could not read the clipboard.')
-    }
   }
 
   const editingItem = itemModal?.mode === 'edit'
@@ -1688,7 +1352,6 @@ export default function SocialCalendarClient({
                         onClick={() => {
                           if (!canManage || !cell.inMonth) return
                           setItemForm({ ...EMPTY_ITEM, scheduledDate: cell.key })
-                          setCopyTab('text')
                           setShowAllDesigners(false)
                           setItemModal({ mode: 'add' })
                         }}
@@ -1784,7 +1447,6 @@ export default function SocialCalendarClient({
                                 scheduledDate: cell.key,
                                 serviceId: hint.serviceId,
                               })
-                              setCopyTab('text')
                               setShowAllDesigners(false)
                               setItemModal({ mode: 'add' })
                             }}
@@ -2066,44 +1728,49 @@ export default function SocialCalendarClient({
                   {editingPullable && ' Use Re-plan below to unlink it and edit the plan again; the task itself is left untouched.'}
                 </div>
               )}
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Title *</label>
-                <input
-                  type="text" value={itemForm.title} disabled={editingFrozen}
-                  onChange={e => setItemForm(p => ({ ...p, title: e.target.value }))}
-                  placeholder="e.g. Diwali teaser reel"
-                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none disabled:opacity-60"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
+              {/* Shared Content Brief (Title, Content type, Caption, Reference
+                  images, Notes for designer, Links) — the same block the
+                  Requests form uses. Calendar-only fields sit inside it. */}
+              <ContentBriefFields
+                title={itemForm.title}
+                onTitleChange={title => setItemForm(p => ({ ...p, title }))}
+                value={{
+                  contentType: itemForm.contentType,
+                  caption: itemForm.caption ?? '',
+                  captionCanvas: (itemForm.captionCanvas as CaptionCanvas | null) ?? null,
+                  referenceImages: itemForm.referenceUrls ?? [],
+                  notes: itemForm.notes ?? '',
+                  links: (itemForm.links ?? []).map(l => ({ label: l.label ?? '', url: l.url })),
+                }}
+                onChange={d => setItemForm(p => ({
+                  ...p,
+                  contentType: d.contentType || 'post',
+                  // The main type can't also be a variant of itself.
+                  variants: (p.variants ?? []).filter(v => v !== d.contentType),
+                  caption: d.caption,
+                  captionCanvas: d.captionCanvas,
+                  referenceUrls: d.referenceImages,
+                  notes: d.notes,
+                  links: d.links,
+                }))}
+                disabled={editingFrozen}
+                contentTypeRequired
+                titlePlaceholder="e.g. Diwali teaser reel"
+                onError={(t, d) => toast.toastError(t, d)}
+                typeSide={
                 <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5" title="Leave blank to keep it on the Idea Board">
+                  <label className="block text-xs font-medium text-foreground/80 mb-1.5" title="Leave blank to keep it on the Idea Board">
                     {itemForm.scheduledEndDate ? 'Start date' : 'Date'} <span className="text-muted-foreground/60">(blank = idea)</span>
                   </label>
                   <input
                     type="date" value={itemForm.scheduledDate ?? ''} disabled={editingFrozen}
                     onChange={e => setItemForm(p => ({ ...p, scheduledDate: e.target.value }))}
-                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none disabled:opacity-60"
+                    className="w-full h-10 bg-background border border-border rounded-lg px-3 text-sm focus:outline-none focus:border-violet-500/50 disabled:opacity-60"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Content type *</label>
-                  <AppSelect
-                    value={itemForm.contentType} disabled={editingFrozen}
-                    onChange={e => {
-                      const contentType = e.target.value
-                      setItemForm(p => ({
-                        ...p,
-                        contentType,
-                        // The new main type can't also be a variant of itself.
-                        variants: (p.variants ?? []).filter(v => v !== contentType),
-                      }))
-                    }}
-                  >
-                    {CONTENT_TYPES.map(t => <option key={t} value={t}>{CONTENT_TYPE_LABEL[t]}</option>)}
-                  </AppSelect>
-                </div>
-              </div>
+                }
+              >
+                <div className="space-y-3">
               {/* Multi-day run (campaigns, SEO sprints, email series). */}
               {itemForm.scheduledEndDate ? (
                 <div className="flex items-end gap-2">
@@ -2338,107 +2005,8 @@ export default function SocialCalendarClient({
                         })}
                 </div>
               </OptionalSection>
-              <div>
-                <div className="flex items-center gap-2 mb-1.5">
-                  <label className="block text-xs font-medium text-muted-foreground">Caption / copy</label>
-                  <div className="flex items-center gap-1 ml-auto">
-                    {([['text', 'Text'], ['canvas', 'Canvas']] as const).map(([key, label]) => (
-                      <button key={key} type="button" onClick={() => setCopyTab(key)}
-                        className={`px-2 py-0.5 rounded-md text-[11px] font-medium border transition-colors ${
-                          copyTab === key
-                            ? 'bg-primary/10 text-primary border-primary/30'
-                            : 'bg-secondary text-muted-foreground border-transparent hover:text-foreground'}`}>
-                        {label}
-                        {key === 'canvas' && canvasBlockCount > 0 && (
-                          <span className="ml-1 text-[9px] opacity-70">{canvasBlockCount}</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
                 </div>
-                {copyTab === 'text' ? (
-                  <RichTextEditor
-                    value={itemForm.caption ?? ''}
-                    onChange={caption => setItemForm(p => ({ ...p, caption }))}
-                    disabled={editingFrozen}
-                    placeholder="Draft caption for the designer…"
-                    onPasteImage={f => void uploadReference(f)}
-                  />
-                ) : (
-                  <CaptionCanvasEditor
-                    value={(itemForm.captionCanvas as CaptionCanvas | null) ?? null}
-                    onChange={c => setItemForm(p => ({ ...p, captionCanvas: c }))}
-                    disabled={editingFrozen}
-                    onUploadImage={uploadImageForCanvas}
-                  />
-                )}
-              </div>
-              <OptionalSection
-                label="Reference images"
-                hint="Mood board — what the creative should look like"
-                summary={(itemForm.referenceUrls?.length ?? 0) > 0
-                  ? `${itemForm.referenceUrls!.length} image${itemForm.referenceUrls!.length === 1 ? '' : 's'}` : ''}
-                open={secOpen('refs', (itemForm.referenceUrls?.length ?? 0) > 0)}
-                onToggle={() => toggleSec('refs', (itemForm.referenceUrls?.length ?? 0) > 0)}
-              >
-                {(itemForm.referenceUrls?.length ?? 0) > 0 && (
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    {(itemForm.referenceUrls ?? []).map((url, i) => (
-                      <div key={`${url}-${i}`} className="relative group">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={url} alt="" className="w-16 h-16 rounded-lg object-cover border border-border" />
-                        {!editingFrozen && (
-                          <button type="button" onClick={() => removeReference(i)}
-                            className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-card border border-border text-muted-foreground hover:text-red-500 flex items-center justify-center shadow opacity-0 group-hover:opacity-100 transition-opacity"
-                            title="Remove">
-                            <X className="w-3 h-3" />
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {!editingFrozen && (itemForm.referenceUrls?.length ?? 0) < 8 && (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <label className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border bg-secondary text-xs text-muted-foreground hover:text-foreground cursor-pointer ${refUploading ? 'opacity-50 pointer-events-none' : ''}`}>
-                      {refUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} Upload
-                      <input type="file" accept="image/*" className="hidden" disabled={refUploading}
-                        onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadReference(f) }} />
-                    </label>
-                    <button type="button" onClick={() => void pasteReference()} disabled={refUploading}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border bg-secondary text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
-                      title="Paste a copied image / screenshot">
-                      <Clipboard className="w-3.5 h-3.5" /> Paste
-                    </button>
-                    <div className="relative flex-1 min-w-[160px]">
-                      <Link2 className="w-3.5 h-3.5 text-muted-foreground/50 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="url" value={refLink}
-                        onChange={e => setRefLink(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addReference(refLink); setRefLink('') } }}
-                        placeholder="…or paste an image link + Enter"
-                        className="w-full bg-secondary border border-border rounded-lg pl-8 pr-3 py-2 text-xs focus:outline-none"
-                      />
-                    </div>
-                    {refLink.trim() && (
-                      <button type="button" onClick={() => { addReference(refLink); setRefLink('') }}
-                        className="px-2.5 py-2 rounded-lg gradient-bg text-white text-xs">Add</button>
-                    )}
-                  </div>
-                )}
-              </OptionalSection>
-              <OptionalSection
-                label="Internal notes"
-                summary={itemForm.notes?.trim() ? '✓' : ''}
-                open={secOpen('notes', !!itemForm.notes?.trim())}
-                onToggle={() => toggleSec('notes', !!itemForm.notes?.trim())}
-              >
-                <textarea
-                  value={itemForm.notes ?? ''} rows={2} disabled={editingFrozen}
-                  onChange={e => setItemForm(p => ({ ...p, notes: e.target.value }))}
-                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none resize-none disabled:opacity-60"
-                />
-              </OptionalSection>
+              </ContentBriefFields>
             </div>
 
             {/* Up to seven buttons live here (Discuss / Remove / both Send
