@@ -34,6 +34,7 @@ disaster-recovery path from migrations. That needs a baseline dump — see
 | 2026-09-27 | `20260927100000_capture_permission` | applied | Run by hand in the SQL editor: "Success. No rows returned". Adds `capture.use` and backfills it to admins and designations holding `requests.view`, `advertising.view` or `offer.prepare`. Per-designation grant counts not yet checked. |
 | 2026-10-03 | `20261003100000_draft_clients` | applied | Run by hand in the SQL editor: "Success. No rows returned". Adds the `clients.is_draft` / `draft_*` columns and `clients.create_draft` (admins only — grant per designation). |
 | 2026-10-03 | `20261003120000_content_brief` | applied | Run by hand in the SQL editor: "Success. No rows returned". Adds `task_requests.content_brief` and `social_calendar_items.links`. |
+| 2026-10-03 | `20261003220000_clients_edit_permission` | applied | Applied through the service connection (plain inserts, same statements as the file). `clients.edit` created; holders verified by query: Admin, Task Manager. No other designation held `settings.access`, so the backfill added nobody else. |
 
 ## Waiting to be applied
 

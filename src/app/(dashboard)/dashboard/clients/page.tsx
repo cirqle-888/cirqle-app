@@ -127,7 +127,8 @@ export default async function ClientsPage() {
       clientDepartments={clientDepartments}
       showAmounts={showAmounts}
       canCreate={isAdmin || hasPermission(me, PERMS.CLIENTS_CREATE) || hasPermission(me, PERMS.SETTINGS_ACCESS)}
-      canEdit={isAdmin || hasPermission(me, PERMS.SETTINGS_ACCESS)}
+      canEdit={isAdmin || hasPermission(me, PERMS.CLIENTS_EDIT) || hasPermission(me, PERMS.SETTINGS_ACCESS)}
+      canPricingMatrix={isAdmin || hasPermission(me, PERMS.SETTINGS_ACCESS)}
       canApproveDraft={isAdmin || hasPermission(me, PERMS.CLIENTS_CREATE) || hasPermission(me, PERMS.SETTINGS_ACCESS)}
     />
   )

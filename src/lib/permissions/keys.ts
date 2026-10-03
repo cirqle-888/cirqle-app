@@ -320,6 +320,12 @@ export const PERMS = {
   /** Create new clients (e.g. + Add client in the task form). */
   CLIENTS_CREATE:  'clients.create',
   /**
+   * Edit existing clients — details, service pricing, archive / restore —
+   * without the rest of Settings. Before this, editing a client needed
+   * settings.access, which also opens designations, company settings and more.
+   */
+  CLIENTS_EDIT:    'clients.edit',
+  /**
    * Add a prospect as a DRAFT (trial) client — full details, usable for
    * requests, plans and tasks, never invoiced until someone with
    * clients.create / settings.access approves it.

@@ -8,6 +8,7 @@ import { ModalOverlay } from './modal-overlay'
 import AppSelect from './app-select'
 import { Button } from './button'
 import type { Currency } from '@/types'
+import { updateClient, upsertClientServicePricings, deactivateClientServices } from '@/app/(dashboard)/dashboard/settings/actions'
 
 interface Props {
   clientId: string
@@ -35,6 +36,7 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
   const supabase = createClient()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [form, setForm] = useState<Record<string, any>>({})
   const [services, setServices] = useState<any[]>([])
 
@@ -102,7 +104,15 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
-    const { data: updated } = await supabase.from('clients').update(form).eq('id', clientId).select().single()
+    setSaveError(null)
+    // Writes go through the server actions, not the browser client: they are
+    // what enforce clients.edit / settings.access and keep a view-as preview
+    // read-only. Writing from the browser skipped both — the save "worked"
+    // for anyone signed in, preview included.
+    const fail = (msg?: string) => { setSaveError(msg || 'Could not save.'); setSaving(false) }
+    const clientRes = await updateClient(clientId, form)
+    if (!clientRes.ok) return fail(clientRes.error)
+    const updated = clientRes.data
 
     // Build rows to upsert: selected services (shown + edited) + hidden DB services (unchanged)
     const upsertRows: any[] = []
@@ -148,7 +158,8 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
     // needs no "preservation" — leaving it alone preserves it.
 
     if (upsertRows.length > 0) {
-      await supabase.from('client_service_pricing').upsert(upsertRows, { onConflict: 'client_id,service_id' })
+      const pricingRes = await upsertClientServicePricings(upsertRows)
+      if (!pricingRes.ok) return fail(pricingRes.error)
     }
 
     // Removing a service DEACTIVATES it rather than deleting the row: the row
@@ -167,9 +178,8 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
     }
     const uniqueToDeactivate = [...new Set(toDeactivate)]
     if (uniqueToDeactivate.length > 0) {
-      await supabase.from('client_service_pricing')
-        .update({ is_active: false, deactivated_at: new Date().toISOString() })
-        .eq('client_id', clientId).in('service_id', uniqueToDeactivate)
+      const removeRes = await deactivateClientServices(clientId, uniqueToDeactivate)
+      if (!removeRes.ok) return fail(removeRes.error)
     }
 
     setSaving(false)
@@ -383,6 +393,11 @@ export function ClientEditModal({ clientId, serviceId, onClose, onSaved }: Props
               </div>
             )}
 
+            {saveError && (
+              <p role="alert" className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-3 py-2">
+                {saveError}
+              </p>
+            )}
             <div className="flex gap-3 pt-2 border-t border-border mt-4">
               <Button type="button" variant="outline" onClick={onClose} className="flex-1" size="lg">Cancel</Button>
               <Button type="submit" loading={saving} className="flex-1 bg-gradient-to-r from-primary to-violet-600 hover:from-primary/90 hover:to-violet-600/90 text-primary-foreground" size="lg">Save</Button>

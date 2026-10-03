@@ -1,11 +1,13 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { usePermissions } from '@/contexts/permission-context'
 import { canOpenHref } from '@/lib/nav-sections'
+import { ClientEditModal } from '@/components/ui/client-edit-modal'
 import {
   IndianRupee, CheckCircle2, Clock, FileText, CheckSquare, Handshake,
   Mail, Phone, MapPin, Globe, ExternalLink, Award, Tag, Plus, AlertTriangle,
@@ -54,12 +56,15 @@ export default function ClientDetailClient({
   socialAccounts = [],
 }: Props) {
   const { ds } = usePrivacy()
-  // Only offer links this user can actually open. Edit Client goes to
-  // Settings, which needs settings.access — a Task Manager could see the
-  // button, click it, and be bounced to the dashboard with no explanation.
+  // Only offer links this user can actually open (see canOpenHref).
   const { user, can } = usePermissions()
   const opens = (href: string) => canOpenHref(href, can, user.isAdmin)
-  const editHref = `/dashboard/settings?tab=clients&editClient=${client.id}&returnTo=/dashboard/clients/${client.id}`
+  // Editing opens in place rather than in Settings: it needs clients.edit (or
+  // settings.access, as before) — the same rule the save actions enforce — so
+  // a Task Manager can edit a client without being handed all of Settings.
+  const canEditClient = can('clients.edit') || can('settings.access')
+  const [editing, setEditing] = useState(false)
+  const router = useRouter()
 
   const kpi = useMemo(() => {
     let billed = 0, paid = 0, drafts = 0
@@ -101,11 +106,11 @@ export default function ClientDetailClient({
                 <FileText className="w-4 h-4" /> Invoices
               </Link>
             )}
-            {opens(editHref) && (
-              <Link href={editHref}
+            {canEditClient && (
+              <button type="button" onClick={() => setEditing(true)}
                 className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90">
                 Edit Client
-              </Link>
+              </button>
             )}
           </>
         }
@@ -240,11 +245,11 @@ export default function ClientDetailClient({
               <div className="bg-card border border-border rounded-2xl overflow-hidden">
                 <div className="px-5 py-3.5 border-b border-border/60 flex items-center justify-between">
                   <h2 className="text-sm font-semibold">Service pricing</h2>
-                  {opens(editHref) && (
-                    <Link href={editHref}
+                  {canEditClient && (
+                    <button type="button" onClick={() => setEditing(true)}
                       className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
                       <Plus className="w-3 h-3" /> Edit
-                    </Link>
+                    </button>
                   )}
                 </div>
                 {pricing.length === 0 ? (
@@ -285,6 +290,13 @@ export default function ClientDetailClient({
           </div>
         </div>
       </div>
+      {editing && (
+        <ClientEditModal
+          clientId={client.id}
+          onClose={() => setEditing(false)}
+          onSaved={() => router.refresh()}
+        />
+      )}
     </>
   )
 }

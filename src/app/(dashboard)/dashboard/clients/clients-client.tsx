@@ -62,6 +62,8 @@ interface Props {
   showAmounts: boolean
   canCreate: boolean
   canEdit: boolean
+  /** The Pricing Matrix page needs settings.access, which canEdit no longer implies. */
+  canPricingMatrix?: boolean
   /** clients.create / settings.access — may turn a draft into a real client. */
   canApproveDraft?: boolean
 }
@@ -71,7 +73,7 @@ const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
 const draftCreatorName = (c: { draft_creator?: ClientRow['draft_creator'] }) =>
   (Array.isArray(c.draft_creator) ? c.draft_creator[0]?.name : c.draft_creator?.name) || null
 
-export default function ClientsClient({ clients: initialClients, stats, departments = [], clientDepartments = {}, showAmounts, canCreate, canEdit, canApproveDraft = false }: Props) {
+export default function ClientsClient({ clients: initialClients, stats, departments = [], clientDepartments = {}, showAmounts, canCreate, canEdit, canPricingMatrix = false, canApproveDraft = false }: Props) {
   const router = useRouter()
   const toast = useToast()
   const { ds } = usePrivacy()
@@ -187,7 +189,7 @@ export default function ClientsClient({ clients: initialClients, stats, departme
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
               <Award className="w-4 h-4" /> Ranking
             </Link>
-            {canEdit && (
+            {canPricingMatrix && (
               <Link href="/dashboard/pricing-matrix"
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
                 <Settings2 className="w-4 h-4" /> Pricing Matrix

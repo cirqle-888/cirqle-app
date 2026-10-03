@@ -1,7 +1,8 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission, resolveCurrentEmployeeId, requireAdmin } from '@/lib/permissions/check'
+import { requirePermission, requireAnyPermission, resolveCurrentEmployeeId, requireAdmin } from '@/lib/permissions/check'
+import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { syncRatesToDb, ratesAreStale } from '@/lib/fx/sync'
 import { revalidatePath, revalidateTag } from 'next/cache'
@@ -344,6 +345,16 @@ async function invalidateEmployeeUserCache(
 // `clients` column, so PostgREST rejects the write ("Could not find the
 // 'service_pricings' column of 'clients'"). Strip embedded relations before any
 // insert/update; pricing rows are saved separately via upsertClientServicePricings.
+/**
+ * Who may change an existing client: `clients.edit`, or Settings access as
+ * before. One helper so every client write — details, pricing, archive,
+ * restore — answers the same question the client pages use to show the
+ * Edit button.
+ */
+function requireClientEditor() {
+  return requireAnyPermission([PERMS.CLIENTS_EDIT, PERMS.SETTINGS_ACCESS])
+}
+
 function sanitizeClientForm(form: Record<string, unknown>): Record<string, unknown> {
   const { service_pricings, ...columns } = form
   void service_pricings
@@ -351,7 +362,9 @@ function sanitizeClientForm(form: Record<string, unknown>): Record<string, unkno
 }
 
 export async function createClient(form: Record<string, unknown>): Promise<ActionResult<any>> {
-  const auth = await requirePermission('settings.access')
+  // clients.create is what puts "Add Client" on the Clients page; requiring
+  // settings.access here refused the very people that button was shown to.
+  const auth = await requireAnyPermission([PERMS.CLIENTS_CREATE, PERMS.SETTINGS_ACCESS])
   if (!auth.ok) return { ok: false, error: auth.error }
 
   const admin = createAdminClient()
@@ -368,7 +381,7 @@ export async function updateClient(
   id: string,
   form: Record<string, unknown>,
 ): Promise<ActionResult<any>> {
-  const auth = await requirePermission('settings.access')
+  const auth = await requireClientEditor()
   if (!auth.ok) return { ok: false, error: auth.error }
 
   const admin = createAdminClient()
@@ -395,7 +408,7 @@ export async function upsertClientServicePricings(
     is_active: boolean
   }[],
 ): Promise<ActionResult> {
-  const auth = await requirePermission('settings.access')
+  const auth = await requireClientEditor()
   if (!auth.ok) return { ok: false, error: auth.error }
 
   if (pricingRows.length === 0) return { ok: true }
@@ -442,7 +455,7 @@ export async function deactivateClientServices(
   clientId: string,
   serviceIds: string[],
 ): Promise<ActionResult> {
-  const auth = await requirePermission('settings.access')
+  const auth = await requireClientEditor()
   if (!auth.ok) return { ok: false, error: auth.error }
   if (serviceIds.length === 0) return { ok: true }
 
@@ -557,7 +570,7 @@ function revalidateCommitmentSurfaces(): void {
 }
 
 export async function reactivateClient(id: string): Promise<ActionResult> {
-  const auth = await requirePermission('settings.access')
+  const auth = await requireClientEditor()
   if (!auth.ok) return { ok: false, error: auth.error }
 
   const admin = createAdminClient()
@@ -567,7 +580,7 @@ export async function reactivateClient(id: string): Promise<ActionResult> {
 }
 
 export async function deactivateClient(id: string): Promise<ActionResult> {
-  const auth = await requirePermission('settings.access')
+  const auth = await requireClientEditor()
   if (!auth.ok) return { ok: false, error: auth.error }
 
   const admin = createAdminClient()
@@ -585,7 +598,7 @@ export async function quickEditClient(
   field: string,
   value: unknown,
 ): Promise<ActionResult> {
-  const auth = await requirePermission('settings.access')
+  const auth = await requireClientEditor()
   if (!auth.ok) return { ok: false, error: auth.error }
 
   const admin = createAdminClient()
