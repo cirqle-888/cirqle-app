@@ -29,6 +29,7 @@ import {
   Search, Plus, UserRound, List, LayoutGrid, Link as LinkIcon, Trash2,
   ExternalLink, GripVertical, Share2, RefreshCw, Sparkles,
   BadgePercent, Megaphone, ChevronDown, ListChecks, Building2, Tag,
+  FolderOpen, MoreHorizontal, Send,
 } from 'lucide-react'
 import {
   CLIENT_STATUS_LABEL, STATUS_CHIP, PRIORITY_CHIP, refLabel, type RequestStatus,
@@ -64,6 +65,11 @@ const TABS: { key: string; label: string; statuses: string[] }[] = [
 
 const SORTABLE_TABS = new Set(['new', 'ongoing'])
 
+// Reject / Cancel tucked into the request popup's ⋯ menu, so the visible
+// buttons only ever move work forward.
+const DESTRUCTIVE = new Set<string>(['rejected', 'cancelled'])
+const SECTION_LABEL = 'text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 mb-1.5'
+
 // Filter dropdowns share one look; a filter that's narrowing the list gets a
 // tinted border so it's obvious why rows are missing.
 const FILTER_SELECT = 'h-9 flex-1 min-w-[130px] max-w-[220px] bg-card border border-border rounded-lg px-3 text-[13px] text-foreground focus:outline-none focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/15 transition-colors'
@@ -83,11 +89,11 @@ const NEW_REQUEST_TYPES: {
   action: { kind: 'form' } | { kind: 'href'; href: string } | { kind: 'onboarding' }
   soon?: boolean
 }[] = [
-  { key: 'design',      label: 'Design Request',       description: 'Brief a design / creative job for a client', icon: Inbox,        action: { kind: 'form' } },
-  { key: 'onboarding',  label: 'New Brand Setup',      description: 'Facebook page, Instagram, Meta config — the whole checklist', icon: ListChecks, action: { kind: 'onboarding' } },
-  { key: 'offer',       label: 'Offer Flyer',          description: 'Weekly offer list → designer Google Sheet',  icon: BadgePercent, action: { kind: 'href', href: '/dashboard/offer-prepare' } },
-  { key: 'advertising', label: 'Advertising Campaign', description: 'Paid-ads campaign brief and budget',         icon: Megaphone,    action: { kind: 'href', href: '/dashboard/advertising/new' } },
-  { key: 'calendar',    label: 'Calendar Plan',        description: 'Monthly social content plan → push items to Requests', icon: CalendarDays, action: { kind: 'href', href: '/dashboard/social-calendar' } },
+  { key: 'design',      label: 'Design Request',       description: 'A poster, post or creative for a client', icon: Inbox,        action: { kind: 'form' } },
+  { key: 'onboarding',  label: 'New Brand Setup',      description: 'Facebook, Instagram and Meta setup checklist', icon: ListChecks, action: { kind: 'onboarding' } },
+  { key: 'offer',       label: 'Offer Flyer',          description: 'Weekly offer list for the designer',       icon: BadgePercent, action: { kind: 'href', href: '/dashboard/offer-prepare' } },
+  { key: 'advertising', label: 'Advertising Campaign', description: 'Paid ads brief and budget',                icon: Megaphone,    action: { kind: 'href', href: '/dashboard/advertising/new' } },
+  { key: 'calendar',    label: 'Calendar Plan',        description: 'Plan a month of social posts', icon: CalendarDays, action: { kind: 'href', href: '/dashboard/social-calendar' } },
 ]
 
 /** Stage ordering for the "All" tab — active work on top, Completed/closed at
@@ -190,6 +196,62 @@ const PENDING_STATUSES = ['submitted', 'under_review', 'approved']
 const ACTIVE_STATUSES  = ['started', 'in_progress', 'waiting_for_content', 'revision_requested', 'delivered']
 const DONE_STATUSES    = ['completed']
 
+const URL_LINE = /^https?:\/\/\S+$/i
+const IMAGE_URL = /\.(jpe?g|png|webp|gif|avif)(\?\S*)?$/i
+
+/**
+ * A request brief as written, except that bare URLs on their own line become
+ * something usable: image links render as thumbnails (the Social Calendar
+ * pushes "Reference images:" as a list of storage URLs), other links as
+ * clickable links — instead of a wall of raw https://… text.
+ */
+function BriefText({ text }: { text: string }) {
+  const lines = text.split('\n')
+  const images: string[] = []
+  const out: React.ReactNode[] = []
+  let buf: string[] = []
+  const flush = (k: number) => {
+    const t = buf.join('\n').replace(/\n+$/, '')
+    if (t.trim()) out.push(<p key={`t${k}`} className="whitespace-pre-wrap text-sm text-foreground/90 leading-relaxed">{t}</p>)
+    buf = []
+  }
+  lines.forEach((raw, i) => {
+    const line = raw.trim()
+    if (URL_LINE.test(line)) {
+      flush(i)
+      if (IMAGE_URL.test(line)) { images.push(line); return }
+      out.push(
+        <a key={`u${i}`} href={line} target="_blank" rel="noreferrer"
+          className="inline-flex items-center gap-1 max-w-full text-sm text-blue-600 dark:text-blue-400 hover:underline">
+          <Link2 className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{line.replace(/^https?:\/\//, '')}</span>
+        </a>,
+      )
+      return
+    }
+    // "Reference images:" label lines right before the thumbnails are dropped
+    // — the thumbnails speak for themselves.
+    if (/^reference images:?$/i.test(line) && lines.slice(i + 1).some(l => IMAGE_URL.test(l.trim()))) return
+    buf.push(raw)
+  })
+  flush(lines.length)
+  return (
+    <div className="space-y-2">
+      {out}
+      {images.length > 0 && (
+        <div className="flex flex-wrap gap-2 pt-1">
+          {images.map((src, i) => (
+            <a key={i} href={src} target="_blank" rel="noreferrer" title="Open reference image"
+              className="block w-24 h-24 rounded-lg overflow-hidden border border-border bg-secondary hover:ring-2 hover:ring-violet-500/40 transition-all">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={src} alt={`Reference ${i + 1}`} loading="lazy" className="w-full h-full object-cover" />
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Small amber pill flagging an unread client/agency update on a row. */
 function UpdatePill({ label }: { label: string }) {
   return (
@@ -285,6 +347,8 @@ export default function RequestsClient({
   const [updateMsg, setUpdateMsg] = useState('')
   const [notes, setNotes] = useState('')
   const [noteMsg, setNoteMsg] = useState('')
+  const [composeMode, setComposeMode] = useState<'reply' | 'note'>('reply')
+  const [moreOpen, setMoreOpen] = useState(false)
 
   // Filters + staff-created request modal
   const [searchFacets, setSearchFacets] = useState<SearchFacet[]>([])
@@ -511,6 +575,7 @@ export default function RequestsClient({
   }, [requests, offerItems, tab, activeFacets, clientFilter, typeFilter, assigneeFilter, matchesTypeFilter, matchesAssignee])
 
   async function openRequest(r: any) {
+    setMoreOpen(false)
     setOpen(r); setNotes(r.internal_notes || ''); setUpdateMsg('')
     setLinkOpen(false); setLinkQ(''); setLinkResults(null)
     setTimeline([]); setRevisions([]); setTlLoading(true)
@@ -1036,11 +1101,14 @@ export default function RequestsClient({
       {showNewMenu && (
         <ModalOverlay onClose={() => setShowNewMenu(false)} sheetOnMobile>
           <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md overflow-hidden">
-            <div className="px-5 py-4 border-b border-border">
-              <h2 className="font-bold text-base">What are you creating?</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Every request type starts here.</p>
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-border">
+              <div>
+                <h2 className="font-bold text-base">What are you creating?</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Pick a type to get started.</p>
+              </div>
+              <button onClick={() => setShowNewMenu(false)} aria-label="Close" className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground"><X className="w-4 h-4" /></button>
             </div>
-            <div className="p-2.5">
+            <div className="p-2">
               {NEW_REQUEST_TYPES.map(t => (
                 <button
                   key={t.key}
@@ -1054,7 +1122,7 @@ export default function RequestsClient({
                     }
                     else router.push(t.action.href)
                   }}
-                  className="w-full text-left px-3 py-3 rounded-xl flex items-start gap-3 hover:bg-secondary/60 transition-colors disabled:opacity-45 disabled:cursor-not-allowed"
+                  className="group w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-3 hover:bg-secondary/70 transition-colors disabled:opacity-45 disabled:cursor-not-allowed"
                 >
                   <span className="w-9 h-9 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center shrink-0">
                     <t.icon className="w-4 h-4 text-violet-500" />
@@ -1066,7 +1134,7 @@ export default function RequestsClient({
                     </span>
                     <span className="block text-xs text-muted-foreground">{t.description}</span>
                   </span>
-                  <ChevronRight className="w-4 h-4 text-muted-foreground/40 ml-auto mt-2 shrink-0" />
+                  <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground group-hover:translate-x-0.5 transition-all ml-auto shrink-0" />
                 </button>
               ))}
             </div>
@@ -1433,82 +1501,127 @@ export default function RequestsClient({
               </>
             ) : (
               <>
-                {/* Standard Request Header */}
-                <div className="flex items-start justify-between px-5 py-4 border-b border-border shrink-0 gap-3">
+                {/* ── Header: identity + quick tools ───────────────────────────
+                    Discuss / Drive / More live up here as icons, so the body
+                    starts with the one thing to do next. */}
+                <div className="flex items-start justify-between px-5 pt-4 pb-3 border-b border-border shrink-0 gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[11px] font-mono text-muted-foreground">{refLabel(open.ref_no)}</span>
-                      <span className={`text-[11px] px-2 py-0.5 rounded-full border ${STATUS_CHIP[open.status] || ''}`}>{STATUS_LABEL[open.status] || open.status}</span>
-                      {open.priority !== 'normal' && <span className={`text-[11px] font-medium ${PRIORITY_CHIP[open.priority]}`}>⚑ {open.priority}</span>}
+                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${STATUS_CHIP[open.status] || ''}`}>{STATUS_LABEL[open.status] || open.status}</span>
+                      {open.priority !== 'normal' && (
+                        <span className={`inline-flex items-center gap-0.5 text-[11px] font-semibold capitalize ${PRIORITY_CHIP[open.priority]}`}><Flag className="w-3 h-3" />{open.priority}</span>
+                      )}
                     </div>
-                    <h2 className="font-bold text-base mt-1 leading-snug">{open.title}</h2>
-                    <p className="text-xs text-muted-foreground mt-0.5">{requesterOf(open)} · submitted {fmtDate(open.created_at)}{open.due_date ? ` · due ${fmtDate(open.due_date)}` : ''}</p>
+                    <h2 className="font-bold text-lg mt-1 leading-snug">{open.title}</h2>
+                    <div className="flex items-center gap-x-3 gap-y-0.5 mt-1 text-xs text-muted-foreground flex-wrap">
+                      <span className="inline-flex items-center gap-1"><Building2 className="w-3.5 h-3.5" />{requesterOf(open)}</span>
+                      {open.service?.name && <span className="inline-flex items-center gap-1 text-cyan-700 dark:text-cyan-400/80"><Tag className="w-3.5 h-3.5" />{open.service.name}</span>}
+                      <span className="inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5" />Submitted {fmtDate(open.created_at)}</span>
+                      {open.due_date && <span className="inline-flex items-center gap-1 font-medium text-foreground/80"><CalendarDays className="w-3.5 h-3.5" />Due {fmtDate(open.due_date)}</span>}
+                    </div>
                   </div>
-                  <button onClick={() => setOpen(null)} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground shrink-0"><X className="w-4 h-4" /></button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <DiscussButton entityType="request" entityId={open.id} variant="icon" label="Discuss this request" panelTitle={open.title} />
+                    {(driveLinkOf(open.client?.id) || open.drive_folder_link) && (
+                      <a href={driveLinkOf(open.client?.id) || open.drive_folder_link} target="_blank" rel="noreferrer"
+                        className="p-2 rounded-lg text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 transition-colors"
+                        title="Open the client's Drive folder">
+                        <FolderOpen className="w-4 h-4" />
+                      </a>
+                    )}
+                    {(() => {
+                      const menu = [
+                        ...(!open.promoted_task_id ? (TRANSITIONS[open.status] || []).filter(t => DESTRUCTIVE.has(t.to) && (t.to === 'rejected' ? perms.review : perms.manage)) : []),
+                        ...(perms.manage && open.status !== 'archived' ? [{ to: 'archived' as RequestStatus, label: 'Archive' }] : []),
+                      ]
+                      if (!menu.length) return null
+                      return (
+                        <div className="relative">
+                          <button onClick={() => setMoreOpen(v => !v)} title="More actions" aria-label="More actions"
+                            className={`p-2 rounded-lg transition-colors ${moreOpen ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}>
+                            <MoreHorizontal className="w-4 h-4" />
+                          </button>
+                          {moreOpen && (
+                            <>
+                              <div className="fixed inset-0 z-10" onClick={() => setMoreOpen(false)} />
+                              <div className="absolute right-0 top-full mt-1 z-20 w-44 bg-card border border-border rounded-xl shadow-xl p-1">
+                                {menu.map(t => (
+                                  <button key={t.to} disabled={busy}
+                                    onClick={() => { setMoreOpen(false); doStatus(open, t.to) }}
+                                    className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors disabled:opacity-50 ${
+                                      t.to === 'archived' ? 'hover:bg-secondary text-foreground' : 'hover:bg-red-500/10 text-red-600 dark:text-red-400'}`}>
+                                    {t.label === 'Cancel' ? 'Cancel request' : t.label === 'Reject' ? 'Reject request' : t.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )
+                    })()}
+                    <button onClick={() => setOpen(null)} aria-label="Close" className="p-2 rounded-lg hover:bg-secondary text-muted-foreground"><X className="w-4 h-4" /></button>
+                  </div>
+                </div>
+
+                {/* ── Next step: the main action + who's on it ─────────────── */}
+                <div className="px-5 py-3 border-b border-border bg-secondary/30 shrink-0 flex items-center gap-2 flex-wrap">
+                  {perms.start && !open.promoted_task_id && ['submitted', 'under_review', 'approved'].includes(open.status) && (
+                    <>
+                      <Link href={`/dashboard/tasks?fromRequest=${open.id}`}
+                        className="inline-flex items-center gap-1.5 h-9 px-4 text-sm font-semibold rounded-lg gradient-bg text-white shadow-sm hover:opacity-90 transition-opacity">
+                        <Play className="w-4 h-4" /> Start task
+                      </Link>
+                      <button onClick={() => setLinkOpen(v => !v)}
+                        className={`inline-flex items-center gap-1.5 h-9 px-3 text-xs font-medium rounded-lg border transition-colors ${linkOpen ? 'bg-violet-500/10 border-violet-500/30 text-violet-700 dark:text-violet-300' : 'bg-card border-border hover:bg-secondary'}`}>
+                        <LinkIcon className="w-3.5 h-3.5" /> Link existing task
+                      </button>
+                    </>
+                  )}
+                  {open.promoted_task_id && (
+                    <Link href={`/dashboard/tasks?q=${encodeURIComponent('#' + (open.promoted_task?.task_number ?? ''))}`}
+                      className="inline-flex items-center gap-1.5 h-9 px-3 text-xs font-medium rounded-lg bg-green-500/10 text-green-700 dark:text-green-400 border border-green-500/25 hover:bg-green-500/15 transition-colors"
+                      title={open.promoted_task?.title || 'Open the linked task'}>
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      View task{open.promoted_task?.task_number != null ? ` #${open.promoted_task.task_number}` : ''}
+                      <ExternalLink className="w-3 h-3" />
+                    </Link>
+                  )}
+                  {open.promoted_task_id && !['completed', 'rejected', 'cancelled', 'archived'].includes(open.status) && (
+                    <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <RefreshCw className="w-3 h-3" /> Status follows the task
+                    </span>
+                  )}
+                  {/* Forward-moving manual steps stay visible; Reject / Cancel live in the ⋯ menu. */}
+                  {!open.promoted_task_id && (TRANSITIONS[open.status] || []).filter(t => !DESTRUCTIVE.has(t.to)).map(t => (
+                    perms.manage && (
+                      <button key={t.to} disabled={busy} onClick={() => doStatus(open, t.to)}
+                        className="inline-flex items-center h-9 px-3 text-xs font-medium rounded-lg bg-card border border-border hover:bg-secondary transition-colors disabled:opacity-50">
+                        {t.label}
+                      </button>
+                    )
+                  ))}
+                  {open.promoted_task_id && open.status === 'archived' && perms.manage && (
+                    <button disabled={busy} onClick={() => doStatus(open, 'submitted')}
+                      className="inline-flex items-center h-9 px-3 text-xs font-medium rounded-lg bg-card border border-border hover:bg-secondary transition-colors disabled:opacity-50">
+                      Unarchive
+                    </button>
+                  )}
+                  {perms.manage && (
+                    <label className="ml-auto inline-flex items-center gap-2 text-xs text-muted-foreground"
+                      title={!open.promoted_task_id ? 'Becomes the task assignee when you press Start' : undefined}>
+                      <UserRound className="w-3.5 h-3.5 shrink-0" />
+                      <select value={open.assigned_employee_id || ''} disabled={busy}
+                        onChange={e => doAssign(open, e.target.value)}
+                        className={`h-9 bg-card border rounded-lg px-2.5 text-xs text-foreground focus:outline-none focus:border-violet-500/50 disabled:opacity-50 ${open.assigned_employee_id ? 'border-border' : 'border-amber-500/40'}`}>
+                        <option value="">Unassigned</option>
+                        {employees.map(e => <option key={e.id} value={e.id}>{dn(e)}</option>)}
+                      </select>
+                    </label>
+                  )}
                 </div>
 
                 <div className="overflow-y-auto flex-1 p-5 space-y-5">
-              {/* Action bar */}
-              <div className="flex flex-wrap gap-2">
-                <DiscussButton entityType="request" entityId={open.id} label="Discuss" panelTitle={open.title} />
-                {perms.start && !open.promoted_task_id && ['submitted', 'under_review', 'approved'].includes(open.status) && (
-                  <Link href={`/dashboard/tasks?fromRequest=${open.id}`}
-                    className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg gradient-bg text-white hover:opacity-90 transition-opacity">
-                    <Play className="w-4 h-4" /> Start — Create Task
-                  </Link>
-                )}
-                {perms.start && !open.promoted_task_id && ['submitted', 'under_review', 'approved'].includes(open.status) && (
-                  <button onClick={() => setLinkOpen(v => !v)}
-                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors">
-                    <LinkIcon className="w-3.5 h-3.5" /> Link Existing Task
-                  </button>
-                )}
-                {open.promoted_task_id && (
-                  <Link href={`/dashboard/tasks?q=${encodeURIComponent('#' + (open.promoted_task?.task_number ?? ''))}`}
-                    className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-green-500/10 text-green-400 border border-green-500/25 hover:bg-green-500/20 transition-colors"
-                    title={open.promoted_task?.title || 'Open the linked task'}>
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    View Task{open.promoted_task?.task_number != null ? ` #${open.promoted_task.task_number}` : ''}
-                    <ExternalLink className="w-3 h-3" />
-                  </Link>
-                )}
-                {/* Status is task-driven once linked — show a note instead of manual controls. */}
-                {open.promoted_task_id && !['completed', 'rejected', 'cancelled', 'archived'].includes(open.status) && (
-                  <span className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg bg-secondary/60 border border-border text-muted-foreground">
-                    <RefreshCw className="w-3.5 h-3.5" /> Status follows Task{open.promoted_task?.task_number != null ? ` #${open.promoted_task.task_number}` : ''}
-                  </span>
-                )}
-                {/* Manual override — only when there's no linked task to drive the status. */}
-                {!open.promoted_task_id && (TRANSITIONS[open.status] || []).map(t => (
-                  (t.to === 'rejected' ? perms.review : perms.manage) && (
-                    <button key={t.to} disabled={busy} onClick={() => doStatus(open, t.to)}
-                      className="px-3 py-2 text-xs font-medium rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors disabled:opacity-50">
-                      {t.label}
-                    </button>
-                  )
-                ))}
-                {/* Archived requests can always be unarchived even if a task was linked. */}
-                {open.promoted_task_id && open.status === 'archived' && perms.manage && (
-                  <button disabled={busy} onClick={() => doStatus(open, 'submitted')}
-                    className="px-3 py-2 text-xs font-medium rounded-lg bg-secondary border border-border hover:bg-secondary/70 transition-colors disabled:opacity-50">
-                    Unarchive
-                  </button>
-                )}
-                {perms.manage && open.status !== 'archived' && (
-                  <button disabled={busy} onClick={() => doStatus(open, 'archived')}
-                    className="px-3 py-2 text-xs font-medium rounded-lg bg-secondary border border-border text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50">
-                    Archive
-                  </button>
-                )}
-                {(driveLinkOf(open.client?.id) || open.drive_folder_link) && (
-                  <a href={driveLinkOf(open.client?.id) || open.drive_folder_link} target="_blank" rel="noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/25 hover:bg-blue-500/20 transition-colors"
-                    title="The client's Drive folder (set on Settings → Intake Links)">
-                    <ExternalLink className="w-3.5 h-3.5" /> Drive Folder
-                  </a>
-                )}
-              </div>
-
               {/* Link an existing task (work already created on the Tasks page) */}
               {linkOpen && !open.promoted_task_id && (
                 <div className="bg-secondary/40 border border-border rounded-xl p-3.5">
@@ -1541,41 +1654,51 @@ export default function RequestsClient({
                 </div>
               )}
 
-              {/* Assign employee — planning marker until Start; the task
-                  assignment is created automatically at promotion. */}
-              {perms.manage && (
-                <div className="flex items-center gap-2.5">
-                  <UserRound className="w-4 h-4 text-muted-foreground shrink-0" />
-                  <select value={open.assigned_employee_id || ''} disabled={busy}
-                    onChange={e => doAssign(open, e.target.value)}
-                    className="bg-secondary border border-border rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:border-violet-500/50 disabled:opacity-50">
-                    <option value="">Unassigned</option>
-                    {employees.map(e => <option key={e.id} value={e.id}>{dn(e)}</option>)}
-                  </select>
-                  {!open.promoted_task_id && open.assigned_employee_id && (
-                    <span className="text-[10px] text-muted-foreground">assigned on the task when you press Start</span>
+              {/* ── The brief ── */}
+              {(open.description || open.design_plan || open.remarks) ? (
+                <div className="space-y-4">
+                  {open.description && (
+                    <div>
+                      <p className={SECTION_LABEL}>Brief</p>
+                      <BriefText text={open.description} />
+                    </div>
+                  )}
+                  {open.design_plan && (
+                    <div>
+                      <p className={SECTION_LABEL}>Design plan</p>
+                      <BriefText text={open.design_plan} />
+                    </div>
+                  )}
+                  {open.remarks && (
+                    <div>
+                      <p className={SECTION_LABEL}>Requester remarks</p>
+                      <BriefText text={open.remarks} />
+                    </div>
                   )}
                 </div>
+              ) : (
+                <p className="text-sm text-muted-foreground/70 italic">No brief added.</p>
               )}
 
-              {/* Details */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                {open.description && <div className="sm:col-span-2"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Details</p><p className="whitespace-pre-wrap text-foreground/90">{open.description}</p></div>}
-                {open.design_plan && <div className="sm:col-span-2"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Design plan</p><p className="whitespace-pre-wrap text-foreground/90">{open.design_plan}</p></div>}
-                {open.remarks && <div className="sm:col-span-2"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Requester remarks</p><p className="whitespace-pre-wrap text-foreground/90">{open.remarks}</p></div>}
-              </div>
-
-              {/* Links */}
+              {/* Links as compact chips */}
               {(open.content_link || open.reference_link || open.deliverables_link || open.drive_folder_link || (open.extra_links || []).length > 0) && (
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">Links</p>
-                  <div className="space-y-1">
-                    {open.drive_folder_link && <a href={open.drive_folder_link} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs text-blue-400 hover:underline"><Link2 className="w-3 h-3" />Drive folder</a>}
-                    {open.content_link && <a href={open.content_link} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs text-blue-400 hover:underline"><Link2 className="w-3 h-3" />Content</a>}
-                    {open.reference_link && <a href={open.reference_link} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs text-blue-400 hover:underline"><Link2 className="w-3 h-3" />Reference</a>}
-                    {open.deliverables_link && <a href={open.deliverables_link} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs text-emerald-400 hover:underline"><Link2 className="w-3 h-3" />Deliverables</a>}
-                    {(open.extra_links || []).map((l: any, i: number) => (
-                      <a key={i} href={l.url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs text-blue-400 hover:underline"><Link2 className="w-3 h-3" />{l.label || l.url}</a>
+                  <p className={SECTION_LABEL}>Links</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      open.drive_folder_link && { href: open.drive_folder_link, label: 'Drive folder', tone: 'blue' },
+                      open.content_link && { href: open.content_link, label: 'Content', tone: 'blue' },
+                      open.reference_link && { href: open.reference_link, label: 'Reference', tone: 'blue' },
+                      open.deliverables_link && { href: open.deliverables_link, label: 'Deliverables', tone: 'green' },
+                      ...(open.extra_links || []).map((l: any) => ({ href: l.url, label: l.label || l.url, tone: 'blue' })),
+                    ].filter(Boolean).map((l: any, i: number) => (
+                      <a key={i} href={l.href} target="_blank" rel="noreferrer"
+                        className={`inline-flex items-center gap-1 max-w-[260px] px-2.5 py-1 rounded-lg text-xs border transition-colors ${
+                          l.tone === 'green'
+                            ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/15'
+                            : 'bg-blue-500/8 border-blue-500/20 text-blue-700 dark:text-blue-300 hover:bg-blue-500/12'}`}>
+                        <Link2 className="w-3 h-3 shrink-0" /><span className="truncate">{l.label}</span>
+                      </a>
                     ))}
                   </div>
                 </div>
@@ -1603,58 +1726,66 @@ export default function RequestsClient({
                 </div>
               )}
 
-              {/* Post requester-visible update */}
+              {/* ── One composer: reply to the requester, or an internal note ── */}
               {perms.manage && (
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">Post an update to the requester</p>
-                  <div className="flex gap-2">
-                    <input value={updateMsg} onChange={e => setUpdateMsg(e.target.value)}
-                      className="flex-1 bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50"
-                      placeholder='e.g. "Waiting for your content — please upload to the Drive folder"' />
-                    <button onClick={doPostUpdate} disabled={busy || !updateMsg.trim()} aria-label="Post update"
-                      className="px-3 rounded-xl gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity shrink-0">
-                      <MessageSquarePlus className="w-4 h-4" />
+                <div className="rounded-xl border border-border bg-card">
+                  <div className="flex items-center gap-1 px-2 pt-2">
+                    {([['reply', 'Reply to requester'], ['note', 'Internal note']] as const).map(([k, label]) => (
+                      <button key={k} onClick={() => setComposeMode(k)}
+                        className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                          composeMode === k
+                            ? k === 'reply' ? 'bg-violet-500/10 text-violet-700 dark:text-violet-300' : 'bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                            : 'text-muted-foreground hover:text-foreground'}`}>
+                        {label}
+                      </button>
+                    ))}
+                    <span className="ml-auto pr-1 text-[10px] text-muted-foreground/70">
+                      {composeMode === 'reply' ? 'Visible to the client / agency' : 'Only your team sees this'}
+                    </span>
+                  </div>
+                  <div className="flex items-end gap-2 p-2">
+                    {composeMode === 'reply' ? (
+                      <input value={updateMsg} onChange={e => setUpdateMsg(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter' && updateMsg.trim()) { e.preventDefault(); doPostUpdate() } }}
+                        className="flex-1 bg-secondary/60 border border-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500/40"
+                        placeholder='e.g. "Please upload your content to the Drive folder"' />
+                    ) : (
+                      <input value={noteMsg} onChange={e => setNoteMsg(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && noteMsg.trim()) { e.preventDefault(); doPostNote() } }}
+                        className="flex-1 bg-amber-500/[0.06] border border-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500/40"
+                        placeholder='e.g. "Called client, awaiting brand assets"' />
+                    )}
+                    <button
+                      onClick={composeMode === 'reply' ? doPostUpdate : doPostNote}
+                      disabled={busy || !(composeMode === 'reply' ? updateMsg : noteMsg).trim()}
+                      className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-semibold transition-opacity disabled:opacity-40 shrink-0 ${
+                        composeMode === 'reply' ? 'gradient-bg text-white' : 'bg-amber-500 text-white'}`}>
+                      <Send className="w-3.5 h-3.5" />{composeMode === 'reply' ? 'Send' : 'Add note'}
                     </button>
                   </div>
-                </div>
-              )}
-
-              {/* Internal notes */}
-              {perms.manage && (
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">Internal notes <span className="normal-case text-muted-foreground/40">(never visible externally)</span></p>
-                  <div className="flex gap-2">
-                    <textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)}
-                      className="flex-1 bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm resize-none focus:outline-none focus:border-violet-500/50" />
-                    <button onClick={doSaveNotes} disabled={busy} aria-label="Save notes"
-                      className="px-3 rounded-xl bg-secondary border border-border hover:bg-secondary/70 disabled:opacity-50 transition-colors shrink-0">
-                      <Save className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Internal log note → appends to the timeline (Odoo-style comment) */}
-              {perms.manage && (
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">Log note <span className="normal-case text-muted-foreground/40">(internal comment on the timeline)</span></p>
-                  <div className="flex gap-2">
-                    <input value={noteMsg} onChange={e => setNoteMsg(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && noteMsg.trim()) { e.preventDefault(); doPostNote() } }}
-                      className="flex-1 bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50"
-                      placeholder='e.g. "Called client, awaiting brand assets"' />
-                    <button onClick={doPostNote} disabled={busy || !noteMsg.trim()} aria-label="Post internal note"
-                      className="px-3 rounded-xl bg-secondary border border-border hover:bg-secondary/70 disabled:opacity-50 transition-colors shrink-0">
-                      <MessageSquarePlus className="w-4 h-4" />
-                    </button>
-                  </div>
+                  {/* The request's pinned notes field — kept, but folded away. */}
+                  <details className="group border-t border-border/60" open={!!notes}>
+                    <summary className="flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium text-muted-foreground cursor-pointer select-none list-none hover:text-foreground">
+                      <ChevronRight className="w-3 h-3 transition-transform group-open:rotate-90" />
+                      Pinned internal notes {notes ? '' : '(none)'}
+                    </summary>
+                    <div className="flex items-end gap-2 px-2 pb-2">
+                      <textarea rows={2} value={notes} onChange={e => setNotes(e.target.value)}
+                        placeholder="Anything the team should always see on this request…"
+                        className="flex-1 bg-secondary/60 border border-transparent rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:border-violet-500/40" />
+                      <button onClick={doSaveNotes} disabled={busy} aria-label="Save notes" title="Save notes"
+                        className="h-9 px-3 rounded-lg bg-secondary border border-border hover:bg-secondary/70 disabled:opacity-50 transition-colors shrink-0">
+                        <Save className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </details>
                 </div>
               )}
 
               {/* Timeline */}
               {perms.activity && (
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-2">Activity timeline</p>
+                  <p className={SECTION_LABEL}>Activity</p>
                   {tlLoading ? (
                     <p className="text-xs text-muted-foreground flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</p>
                   ) : (
@@ -1683,23 +1814,29 @@ export default function RequestsClient({
         </ModalOverlay>
       )}
 
-      {/* ── New Request (staff-created opportunity) ── */}
-      {showNew && (
+      {/* ── New Request (staff-created opportunity) ──────────────────────────
+          The few fields every request needs are up front; the rarely-used
+          ones (design plan, remarks, links, value, tags) fold under
+          "More options" — opened automatically if any of them has a value. */}
+      {showNew && (() => {
+        const hasMore = !!(newForm.designPlan || newForm.remarks || newForm.contentLink || newForm.referenceLink
+          || newForm.extraLinks.length || newForm.estimatedValue || newForm.isPlanned || newForm.isChecklist)
+        const field = 'w-full h-10 bg-background border border-border rounded-lg px-3 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/15 transition-colors'
+        const area = 'w-full bg-background border border-border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/15 transition-colors'
+        const label = 'block text-xs font-medium text-foreground/80 mb-1.5'
+        return (
         <ModalOverlay onClose={() => setShowNew(false)}>
           <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-lg shadow-2xl max-h-[92dvh] flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+            <div className="flex items-start justify-between px-5 py-4 border-b border-border shrink-0 gap-3">
               <div>
-                <h2 className="font-bold text-base">New Request</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Lands in the inbox as New and shows on the client’s intake portal. No task number until you press Start.
-                </p>
+                <h2 className="font-bold text-base">New design request</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Goes to the inbox as New — it becomes a task when you press Start.</p>
               </div>
-              <button onClick={() => setShowNew(false)} className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground"><X className="w-4 h-4" /></button>
+              <button onClick={() => setShowNew(false)} aria-label="Close" className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground"><X className="w-4 h-4" /></button>
             </div>
-            <div className="overflow-y-auto flex-1 p-5 space-y-3.5">
+            <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
               <div>
-                <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Client *</label>
-                <div className="mt-1">
+                <label className={label}>Client <span className="text-red-500">*</span></label>
                   <Combobox
                     options={clients.map(c => ({ id: c.id, label: c.name, sub: clientPickerSub(c) }))}
                     value={newForm.clientId}
@@ -1709,52 +1846,80 @@ export default function RequestsClient({
                     onAddNew={canAddClient ? (q => setQuickClient(q)) : undefined}
                     addNewLabel={canAddRealClient ? 'Add client' : 'Add draft client'}
                   />
-                </div>
                 {driveLinkOf(newForm.clientId) && (
                   <a href={driveLinkOf(newForm.clientId)!} target="_blank" rel="noreferrer"
-                    className="mt-1.5 inline-flex items-center gap-1 text-xs text-blue-400 hover:underline">
-                    <ExternalLink className="w-3 h-3" /> Open this client&rsquo;s Drive folder
+                    className="mt-1.5 inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline">
+                    <FolderOpen className="w-3.5 h-3.5" /> Client&rsquo;s Drive folder
                   </a>
                 )}
               </div>
               <div>
-                <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Title *</label>
+                <label className={label}>Title <span className="text-red-500">*</span></label>
                 <input value={newForm.title} onChange={e => setNewForm(f => ({ ...f, title: e.target.value }))}
-                  placeholder="e.g. Onam campaign poster set"
-                  className="mt-1 w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50" />
+                  placeholder="e.g. Onam campaign poster set" className={field} />
               </div>
               <div>
-                <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Details</label>
+                <label className={label}>Brief</label>
                 <textarea rows={3} value={newForm.description} onChange={e => setNewForm(f => ({ ...f, description: e.target.value }))}
-                  className="mt-1 w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm resize-none focus:outline-none focus:border-violet-500/50" />
+                  placeholder="What's needed, sizes, copy, deadline notes…" className={area} />
               </div>
-              <div>
-                <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Design plan</label>
-                <textarea rows={2} value={newForm.designPlan} onChange={e => setNewForm(f => ({ ...f, designPlan: e.target.value }))}
-                  placeholder="Layout, sizes, formats, copy direction…"
-                  className="mt-1 w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm resize-none focus:outline-none focus:border-violet-500/50" />
-              </div>
-              <div>
-                <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Remarks</label>
-                <textarea rows={2} value={newForm.remarks} onChange={e => setNewForm(f => ({ ...f, remarks: e.target.value }))}
-                  className="mt-1 w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm resize-none focus:outline-none focus:border-violet-500/50" />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Content link</label>
-                  <input value={newForm.contentLink} onChange={e => setNewForm(f => ({ ...f, contentLink: e.target.value }))}
-                    placeholder="https://…"
-                    className="mt-1 w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50" />
+                  <label className={label}>Service</label>
+                  <select value={newForm.serviceId} onChange={e => setNewForm(f => ({ ...f, serviceId: e.target.value }))} className={field}>
+                    <option value="">Not set</option>
+                    {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
                 </div>
                 <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Reference link</label>
-                  <input value={newForm.referenceLink} onChange={e => setNewForm(f => ({ ...f, referenceLink: e.target.value }))}
-                    placeholder="https://…"
-                    className="mt-1 w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50" />
+                  <label className={label}>Due date</label>
+                  <input type="date" value={newForm.dueDate} onChange={e => setNewForm(f => ({ ...f, dueDate: e.target.value }))} className={field} />
+                </div>
+                <div>
+                  <label className={label}>Assign to</label>
+                  <select value={newForm.assignedEmployeeId} onChange={e => setNewForm(f => ({ ...f, assignedEmployeeId: e.target.value }))} className={field}>
+                    <option value="">Unassigned</option>
+                    {employees.map(e => <option key={e.id} value={e.id}>{dn(e)}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={label}>Priority</label>
+                  <select value={newForm.priority} onChange={e => setNewForm(f => ({ ...f, priority: e.target.value }))} className={field}>
+                    <option value="low">Low</option>
+                    <option value="normal">Normal</option>
+                    <option value="high">High</option>
+                    <option value="urgent">Urgent</option>
+                  </select>
                 </div>
               </div>
-              <div>
-                <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">More links</label>
+
+              <details className="group rounded-xl border border-border/70" open={hasMore}>
+                <summary className="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium text-muted-foreground cursor-pointer select-none list-none hover:text-foreground">
+                  <ChevronRight className="w-3.5 h-3.5 transition-transform group-open:rotate-90" />
+                  More options
+                  <span className="font-normal text-muted-foreground/70">· design plan, links, value, tags</span>
+                </summary>
+                <div className="px-3 pb-3 space-y-3.5">
+                  <div>
+                    <label className={label}>Design plan</label>
+                    <textarea rows={2} value={newForm.designPlan} onChange={e => setNewForm(f => ({ ...f, designPlan: e.target.value }))}
+                      placeholder="Layout, sizes, formats, copy direction…" className={area} />
+                  </div>
+                  <div>
+                    <label className={label}>Remarks</label>
+                    <textarea rows={2} value={newForm.remarks} onChange={e => setNewForm(f => ({ ...f, remarks: e.target.value }))} className={area} />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className={label}>Content link</label>
+                      <input value={newForm.contentLink} onChange={e => setNewForm(f => ({ ...f, contentLink: e.target.value }))} placeholder="https://…" className={field} />
+                    </div>
+                    <div>
+                      <label className={label}>Reference link</label>
+                      <input value={newForm.referenceLink} onChange={e => setNewForm(f => ({ ...f, referenceLink: e.target.value }))} placeholder="https://…" className={field} />
+                    </div>
+                  </div>
+                  <div>
                 {newForm.extraLinks.map((l, i) => (
                   <div key={i} className="flex gap-2 mt-1.5">
                     <input value={l.label} onChange={e => setNewForm(f => ({ ...f, extraLinks: f.extraLinks.map((x, j) => j === i ? { ...x, label: e.target.value } : x) }))}
@@ -1775,79 +1940,43 @@ export default function RequestsClient({
                     <Plus className="w-3 h-3" /> Add link
                   </button>
                 )}
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Service</label>
-                  <select value={newForm.serviceId} onChange={e => setNewForm(f => ({ ...f, serviceId: e.target.value }))}
-                    className="mt-1 w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50">
-                    <option value="">—</option>
-                    {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
+                  </div>
+                  <div>
+                    <label className={label}>Estimated value (₹)</label>
+                    <input type="number" min="0" value={newForm.estimatedValue}
+                      onChange={e => setNewForm(f => ({ ...f, estimatedValue: e.target.value }))}
+                      placeholder="Uses the Pricing Matrix price if blank" className={field} />
+                  </div>
+                  <label className="flex items-start gap-2 text-xs cursor-pointer select-none">
+                    <input type="checkbox" checked={newForm.isPlanned}
+                      onChange={e => setNewForm(f => ({ ...f, isPlanned: e.target.checked }))}
+                      className="w-3.5 h-3.5 rounded accent-violet-500 mt-0.5" />
+                    <span><span className="font-medium">Planned / future campaign</span><span className="block text-muted-foreground">Shows a &ldquo;Planned&rdquo; tag in the inbox.</span></span>
+                  </label>
+                  {/* Complimentary work — highlight icons thrown in with a package,
+                      the setup a new brand needs. Assigned and tracked like anything
+                      else; it just never becomes a task and never reaches a bill. */}
+                  <label className="flex items-start gap-2 text-xs cursor-pointer select-none">
+                    <input type="checkbox" checked={newForm.isChecklist}
+                      onChange={e => setNewForm(f => ({ ...f, isChecklist: e.target.checked }))}
+                      className="w-3.5 h-3.5 rounded accent-emerald-500 mt-0.5" />
+                    <span><span className="font-medium text-emerald-700 dark:text-emerald-300">Complimentary / setup work</span><span className="block text-muted-foreground">Never a task, never billed, never shown to the client.</span></span>
+                  </label>
                 </div>
-                <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Assign employee</label>
-                  <select value={newForm.assignedEmployeeId} onChange={e => setNewForm(f => ({ ...f, assignedEmployeeId: e.target.value }))}
-                    className="mt-1 w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50">
-                    <option value="">Unassigned</option>
-                    {employees.map(e => <option key={e.id} value={e.id}>{dn(e)}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Due date</label>
-                  <input type="date" value={newForm.dueDate} onChange={e => setNewForm(f => ({ ...f, dueDate: e.target.value }))}
-                    className="mt-1 w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50" />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Estimated value (₹)</label>
-                  <input type="number" min="0" value={newForm.estimatedValue}
-                    onChange={e => setNewForm(f => ({ ...f, estimatedValue: e.target.value }))}
-                    placeholder="Pricing Matrix price if blank"
-                    className="mt-1 w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50" />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Priority</label>
-                  <select value={newForm.priority} onChange={e => setNewForm(f => ({ ...f, priority: e.target.value }))}
-                    className="mt-1 w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50">
-                    <option value="low">Low</option>
-                    <option value="normal">Normal</option>
-                    <option value="high">High</option>
-                    <option value="urgent">Urgent</option>
-                  </select>
-                </div>
-              </div>
-              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
-                <input type="checkbox" checked={newForm.isPlanned}
-                  onChange={e => setNewForm(f => ({ ...f, isPlanned: e.target.checked }))}
-                  className="w-3.5 h-3.5 rounded accent-violet-500" />
-                Planned / future campaign (shows a “planned” tag in the inbox)
-              </label>
-              {/* Complimentary work — highlight icons thrown in with a package,
-                  the setup a new brand needs. Assigned and tracked like anything
-                  else; it just never becomes a task and never reaches a bill. */}
-              <label className="flex items-start gap-2 text-xs cursor-pointer select-none rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2.5">
-                <input type="checkbox" checked={newForm.isChecklist}
-                  onChange={e => setNewForm(f => ({ ...f, isChecklist: e.target.checked }))}
-                  className="w-3.5 h-3.5 rounded accent-emerald-500 mt-0.5" />
-                <span>
-                  <span className="font-medium text-emerald-700 dark:text-emerald-300">Complimentary / setup work</span>
-                  <span className="block text-muted-foreground mt-0.5">
-                    Never becomes a task, never billed, never shown to the client — it just has to get done.
-                  </span>
-                </span>
-              </label>
+              </details>
             </div>
-            <div className="px-5 py-4 border-t border-border flex justify-end gap-2 shrink-0">
+            <div className="px-5 py-3.5 border-t border-border flex justify-end gap-2 shrink-0">
               <button onClick={() => setShowNew(false)}
-                className="px-4 py-2 text-sm rounded-xl bg-secondary border border-border hover:bg-secondary/70 transition-colors">Cancel</button>
+                className="h-10 px-4 text-sm rounded-lg border border-border hover:bg-secondary transition-colors">Cancel</button>
               <button onClick={doCreate} disabled={creating || !newForm.clientId || !newForm.title.trim()}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-xl gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity">
-                {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Create Request
+                className="inline-flex items-center gap-1.5 h-10 px-4 text-sm font-semibold rounded-lg gradient-bg text-white shadow-sm hover:opacity-90 disabled:opacity-50 transition-opacity">
+                {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />} Create request
               </button>
             </div>
           </div>
         </ModalOverlay>
-      )}
+        )
+      })()}
 
       {/* ── Share modal ── */}
       {showShare && (
