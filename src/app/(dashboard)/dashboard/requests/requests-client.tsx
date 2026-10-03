@@ -28,7 +28,7 @@ import {
   CalendarDays, MessageSquarePlus, Save, CheckCircle2, X, Flag,
   Search, Plus, UserRound, List, LayoutGrid, Link as LinkIcon, Trash2,
   ExternalLink, GripVertical, Share2, RefreshCw, Sparkles,
-  BadgePercent, Megaphone, ChevronDown, ListChecks,
+  BadgePercent, Megaphone, ChevronDown, ListChecks, Building2, Tag,
 } from 'lucide-react'
 import {
   CLIENT_STATUS_LABEL, STATUS_CHIP, PRIORITY_CHIP, refLabel, type RequestStatus,
@@ -63,6 +63,11 @@ const TABS: { key: string; label: string; statuses: string[] }[] = [
 ]
 
 const SORTABLE_TABS = new Set(['new', 'ongoing'])
+
+// Filter dropdowns share one look; a filter that's narrowing the list gets a
+// tinted border so it's obvious why rows are missing.
+const FILTER_SELECT = 'h-9 flex-1 min-w-[130px] max-w-[220px] bg-card border border-border rounded-lg px-3 text-[13px] text-foreground focus:outline-none focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/15 transition-colors'
+const FILTER_SELECT_ON = 'border-violet-500/50 bg-violet-500/5'
 
 /**
  * The "New Request" button is the single front door for creating ANY kind of
@@ -184,6 +189,15 @@ const OPEN_LOAD_STATUSES = [
 const PENDING_STATUSES = ['submitted', 'under_review', 'approved']
 const ACTIVE_STATUSES  = ['started', 'in_progress', 'waiting_for_content', 'revision_requested', 'delivered']
 const DONE_STATUSES    = ['completed']
+
+/** Small amber pill flagging an unread client/agency update on a row. */
+function UpdatePill({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 border border-amber-500/25 dark:text-amber-300 shrink-0 whitespace-nowrap">
+      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />{label}
+    </span>
+  )
+}
 
 function SortableListItem({ id, disabled, children }: {
   id: string
@@ -841,22 +855,71 @@ export default function RequestsClient({
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
-      {/* pl-12 on mobile clears the fixed global sidebar hamburger that would
-          otherwise cover the Inbox icon / 'Requests' heading. */}
-      <div className="flex items-center gap-2.5 mb-1 flex-wrap pl-12 md:pl-0">
-        <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center"><Inbox className="w-4.5 h-4.5 text-primary" /></div>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-bold">Requests</h1>
-          <p className="text-xs text-muted-foreground">External submissions from clients &amp; agencies — isolated from Tasks until you Start them.</p>
+      {/* ── Header ──────────────────────────────────────────────────────────
+          Title on the left, the page's actions on the right — kept OUT of the
+          status tabs so the primary button never scrolls away with them.
+          pl-12 on mobile clears the fixed global sidebar hamburger. */}
+      <div className="flex items-start gap-3 flex-wrap pl-12 md:pl-0">
+        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+          <Inbox className="w-5 h-5 text-primary" />
         </div>
-        {perms.manage && migrated && pipeline.count > 0 && (
-          <div className="text-right shrink-0" title="Estimated value of open requests (staff estimate, else Pricing Matrix price)">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Pipeline Value</p>
-            <p className="text-base font-bold text-violet-400">{inrFmt(pipeline.value)}</p>
-            <p className="text-[10px] text-muted-foreground">{pipeline.count} open · {inrFmt(pipeline.pendingValue)} not started</p>
+        <div className="flex-1 min-w-[220px]">
+          <h1 className="text-xl font-bold tracking-tight leading-tight">Requests</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Client &amp; agency submissions — they stay out of Tasks until you start them.
+          </p>
+        </div>
+        {perms.manage && migrated && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => { setShowShare(true); setShareClientId(clientFilter || ''); setShareIncludeCompleted(false) }}
+              title="Share a client's request status as an image"
+              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-medium border border-border bg-card hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
+              <Share2 className="w-3.5 h-3.5" /><span className="hidden sm:inline">Share</span>
+            </button>
+            {can('capture.use') && (
+              <button onClick={handleAiCaptureClick}
+                title="Create a new request from clipboard — same as the Cirqle Desktop toolbar's New Request button"
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-medium border border-violet-500/30 bg-violet-500/5 hover:bg-violet-500/10 text-violet-700 dark:text-violet-300 transition-colors">
+                <Sparkles className="w-3.5 h-3.5" /><span className="hidden sm:inline">AI Capture</span>
+              </button>
+            )}
+            <button onClick={() => setShowNewMenu(true)}
+              className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-xs font-semibold gradient-bg text-white shadow-sm hover:opacity-90 transition-opacity">
+              <Plus className="w-4 h-4" /> New Request <ChevronDown className="w-3 h-3 opacity-80" />
+            </button>
           </div>
         )}
       </div>
+
+      {/* At-a-glance: what's open, what it's worth, and the pile nobody owns.
+          "Unassigned" is a shortcut straight into that filter. */}
+      {migrated && (pipeline.count > 0 || openLoad.unassigned > 0) && (
+        <div className="flex items-center gap-2 flex-wrap mt-3">
+          {pipeline.count > 0 && (
+            <span className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium bg-secondary/70 border border-border/60 text-foreground/80">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />{pipeline.count} open
+            </span>
+          )}
+          {perms.manage && pipeline.count > 0 && (
+            <span title="Estimated value of open requests (staff estimate, else Pricing Matrix price)"
+              className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium bg-violet-500/8 border border-violet-500/20 text-violet-700 dark:text-violet-300">
+              Pipeline <b className="font-semibold">{inrFmt(pipeline.value)}</b>
+              {pipeline.pendingValue > 0 && <span className="text-violet-700/70 dark:text-violet-300/70">· {inrFmt(pipeline.pendingValue)} not started</span>}
+            </span>
+          )}
+          {openLoad.unassigned > 0 && (
+            <button onClick={() => setAssigneeFilter(assigneeFilter === 'unassigned' ? '' : 'unassigned')}
+              title="Show only open requests nobody is assigned to"
+              className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium border transition-colors ${
+                assigneeFilter === 'unassigned'
+                  ? 'bg-amber-500 text-white border-amber-500'
+                  : 'bg-amber-500/10 border-amber-500/25 text-amber-700 dark:text-amber-300 hover:bg-amber-500/15'}`}>
+              <UserRound className="w-3 h-3" />{openLoad.unassigned} unassigned
+            </button>
+          )}
+        </div>
+      )}
 
       {!migrated && (
         <div className="mt-4 flex items-start gap-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
@@ -867,52 +930,45 @@ export default function RequestsClient({
         </div>
       )}
 
-      {/* Tabs (list) / group-by (board) + New Request */}
-      <div className="flex items-center gap-1.5 mt-5 mb-3 overflow-x-auto pb-1">
-        {view === 'list' ? TABS.map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors border ${
-              tab === t.key ? 'gradient-bg text-white border-transparent shadow' : 'bg-secondary text-muted-foreground border-border hover:text-foreground'
-            }`}>
-            {t.label}{counts[t.key] ? ` (${counts[t.key]})` : ''}
-          </button>
-        )) : (
-          <>
-            <span className="text-xs text-muted-foreground mr-1">Group by</span>
+      {/* ── Status tabs (list) / group-by (board) ────────────────────────────
+          Underline tabs with count badges; scrolls sideways only if it must. */}
+      {view === 'list' ? (
+        <div className="mt-5 mb-4 border-b border-border/70 overflow-x-auto hide-scrollbar [mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent)]">
+          {/* The right-edge fade hints there are more tabs when they overflow. */}
+          <div className="flex items-center gap-1 min-w-max pr-6">
+            {TABS.map(t => {
+              const active = tab === t.key
+              return (
+                <button key={t.key} onClick={() => setTab(t.key)}
+                  className={`relative inline-flex items-center gap-1.5 px-2.5 pt-2 pb-2.5 text-[13px] whitespace-nowrap transition-colors ${
+                    active ? 'text-foreground font-semibold' : 'text-muted-foreground hover:text-foreground font-medium'}`}>
+                  {t.label}
+                  {counts[t.key] ? (
+                    <span className={`min-w-[20px] h-[18px] px-1.5 rounded-full text-[10px] font-semibold inline-flex items-center justify-center tabular-nums ${
+                      active ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground'}`}>
+                      {counts[t.key]}
+                    </span>
+                  ) : null}
+                  {active && <span className="absolute left-2 right-2 -bottom-px h-0.5 rounded-full bg-primary" />}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-5 mb-4 flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Group by</span>
+          <div className="inline-flex p-0.5 rounded-lg bg-secondary border border-border/60">
             {(['status', 'client', 'assignee'] as const).map(g => (
               <button key={g} onClick={() => setBoardBy(g)}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-medium capitalize whitespace-nowrap transition-colors border ${
-                  boardBy === g ? 'gradient-bg text-white border-transparent shadow' : 'bg-secondary text-muted-foreground border-border hover:text-foreground'
-                }`}>
+                className={`px-3 py-1 rounded-md text-xs font-medium capitalize transition-all ${
+                  boardBy === g ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                 {g}
               </button>
             ))}
-          </>
-        )}
-        {perms.manage && migrated && (
-          <div className="ml-auto flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={() => { setShowShare(true); setShareClientId(clientFilter || ''); setShareIncludeCompleted(false) }}
-              title="Share a client's request status as an image"
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap bg-secondary border border-border hover:text-foreground text-muted-foreground transition-colors">
-              <Share2 className="w-3.5 h-3.5" /> Share
-            </button>
-            {can('capture.use') && (
-            <button onClick={handleAiCaptureClick}
-              title="Create a new request from clipboard — same as the Cirqle Desktop toolbar's New Request button"
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap bg-secondary border border-border hover:text-foreground text-muted-foreground transition-colors">
-              <Sparkles className="w-3.5 h-3.5" /> AI Capture
-            </button>
-            )}
-            {/* A dropdown anchored here would be clipped by this toolbar's
-                overflow-x-auto, so the type chooser opens as a small modal. */}
-            <button onClick={() => setShowNewMenu(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap gradient-bg text-white hover:opacity-90 transition-opacity">
-              <Plus className="w-3.5 h-3.5" /> New Request <ChevronDown className="w-3 h-3 opacity-80" />
-            </button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* ── New brand setup: one click for the whole checklist ─────────────── */}
       {showOnboard && (
@@ -1018,12 +1074,12 @@ export default function RequestsClient({
         </ModalOverlay>
       )}
 
-      {/* Search + client filter + view toggle */}
-      <div className="flex flex-col lg:flex-row gap-2 mb-4">
-        {/* Row 1: Search */}
-        <div className="w-full lg:flex-1 shrink-0">
-          <TokenizedSearch
-            className="w-full"
+      {/* ── Search + filters ────────────────────────────────────────────────
+          Filters wrap onto a second line instead of scrolling sideways, so
+          none of them is ever clipped. View toggle + Select sit at the end. */}
+      <div className="flex flex-col gap-2 mb-3">
+        <TokenizedSearch
+          className="w-full"
           facets={searchFacets}
           onFacetsChange={setSearchFacets}
           draft={searchDraft}
@@ -1038,20 +1094,18 @@ export default function RequestsClient({
             { key: 'ref', label: 'REQ #', type: 'text' },
           ]}
         />
-        </div>
-        
-        {/* Row 2: Filters & Actions */}
-        <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar pb-1 lg:pb-0 w-full lg:w-auto [&>*]:shrink-0">
+        <div className="flex items-center gap-2 flex-wrap">
           <select value={clientFilter} onChange={e => setClientFilter(e.target.value)}
-            className="bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 sm:w-56">
+            title="Filter by client"
+            className={`${FILTER_SELECT} ${clientFilter ? FILTER_SELECT_ON : ''}`}>
           <option value="">All clients</option>
           {filterClients.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-        </select>
-        {/* Who is carrying it. "Unassigned" comes first and carries a count,
-            because that is the pile which never moves on its own. */}
-        <select value={assigneeFilter} onChange={e => setAssigneeFilter(e.target.value)}
-          title="Filter by who it is assigned to"
-          className="bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 sm:w-52">
+          </select>
+          {/* Who is carrying it. "Unassigned" comes first and carries a count,
+              because that is the pile which never moves on its own. */}
+          <select value={assigneeFilter} onChange={e => setAssigneeFilter(e.target.value)}
+            title="Filter by who it is assigned to"
+            className={`${FILTER_SELECT} ${assigneeFilter ? FILTER_SELECT_ON : ''}`}>
           <option value="">Anyone</option>
           <option value="unassigned">
             {openLoad.unassigned > 0 ? `Unassigned (${openLoad.unassigned})` : 'Unassigned (0)'}
@@ -1064,31 +1118,33 @@ export default function RequestsClient({
                 {dn(e)} ({openLoad.byEmployee.get(e.id) ?? 0} open)
               </option>
             ))}
-        </select>
-        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value as any)}
-          title="Filter by submission type"
-          className="bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 sm:w-44">
+          </select>
+          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value as any)}
+            title="Filter by submission type"
+            className={`${FILTER_SELECT} ${typeFilter !== 'all' ? FILTER_SELECT_ON : ''}`}>
           <option value="all">All types</option>
           <option value="request">Design Requests</option>
           {offerItems.length > 0 && <option value="offer">Offer Campaigns</option>}
           <option value="checklist">Complimentary &amp; setup</option>
-        </select>
-        <div className="flex rounded-xl border border-border overflow-hidden shrink-0">
-          <button onClick={() => setView('list')} title="List view"
-            className={`px-3 py-2 transition-colors ${view === 'list' ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>
-            <List className="w-4 h-4" />
-          </button>
-          <button onClick={() => setView('board')} title="Board view"
-            className={`px-3 py-2 transition-colors ${view === 'board' ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'}`}>
-            <LayoutGrid className="w-4 h-4" />
-          </button>
-        </div>
-        {view === 'list' && perms.manage && (
-          <button onClick={() => { if (batchSel.mode) batchSel.clear(); else batchSel.setMode(true) }}
-            className={`px-3 py-2 rounded-xl text-xs font-medium border transition-colors shrink-0 ${batchSel.mode ? 'gradient-bg text-white border-transparent' : 'bg-secondary border-border text-muted-foreground hover:text-foreground'}`}>
-            {batchSel.mode ? 'Exit Select' : 'Select'}
-          </button>
-        )}
+          </select>
+          <div className="flex items-center gap-2 ml-auto shrink-0">
+            <div className="inline-flex p-0.5 rounded-lg bg-secondary border border-border/60">
+              <button onClick={() => setView('list')} title="List view" aria-pressed={view === 'list'}
+                className={`p-1.5 rounded-md transition-all ${view === 'list' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                <List className="w-4 h-4" />
+              </button>
+              <button onClick={() => setView('board')} title="Board view" aria-pressed={view === 'board'}
+                className={`p-1.5 rounded-md transition-all ${view === 'board' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+            </div>
+            {view === 'list' && perms.manage && (
+              <button onClick={() => { if (batchSel.mode) batchSel.clear(); else batchSel.setMode(true) }}
+                className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-medium border transition-colors ${batchSel.mode ? 'gradient-bg text-white border-transparent' : 'bg-card border-border text-muted-foreground hover:text-foreground hover:bg-secondary'}`}>
+                <ListChecks className="w-3.5 h-3.5" />{batchSel.mode ? 'Done' : 'Select'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1189,14 +1245,25 @@ export default function RequestsClient({
       {view === 'list' && (
       <div className="space-y-2">
         {rows.length === 0 && (
-          <div className="bg-card border border-border rounded-2xl px-6 py-12 text-center text-sm text-muted-foreground">
-            Nothing here yet.
+          <div className="bg-card border border-dashed border-border rounded-2xl px-6 py-14 text-center">
+            <Inbox className="w-8 h-8 mx-auto text-muted-foreground/30" />
+            <p className="text-sm font-medium mt-3">No requests here</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {searchDraft.trim() || activeFacets.length || clientFilter || assigneeFilter || typeFilter !== 'all'
+                ? 'Nothing matches these filters — try clearing one.'
+                : 'New client and agency submissions will appear here.'}
+            </p>
           </div>
         )}
-        {isDraggableTab && rows.length > 1 && (
-          <p className="text-[11px] text-muted-foreground/50 px-1 flex items-center gap-1">
-            <GripVertical className="w-3.5 h-3.5" /> Drag to reorder · tap #N to set manually
-          </p>
+        {rows.length > 0 && (
+          <div className="flex items-center justify-between px-1 pb-0.5 text-[11px] text-muted-foreground">
+            <span>{rows.length} request{rows.length === 1 ? '' : 's'}</span>
+            {isDraggableTab && rows.length > 1 && (
+              <span className="flex items-center gap-1 text-muted-foreground/70">
+                <GripVertical className="w-3.5 h-3.5" /> Drag to set priority · tap #N to type it
+              </span>
+            )}
+          </div>
         )}
         <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={rows.filter(r => r.kind !== 'offer').map(r => r.id)} strategy={verticalListSortingStrategy}>
@@ -1207,9 +1274,9 @@ export default function RequestsClient({
                 return (
                 <SortableListItem key={r.id} id={r.id} disabled={!isDraggableTab}>
                   {(handle) => (
-                    <div className="flex items-center bg-card border border-border rounded-xl hover:border-violet-500/40 transition-colors">
+                    <div className="group flex items-stretch bg-card border border-border/70 rounded-xl hover:border-violet-500/40 hover:shadow-sm transition-all">
                       {isDraggableTab && (
-                        <div className="flex flex-col items-center shrink-0 px-1 py-3 gap-0.5" onClick={e => e.stopPropagation()}>
+                        <div className="flex flex-col items-center justify-center shrink-0 w-10 gap-0.5 border-r border-border/40" onClick={e => e.stopPropagation()}>
                           {handle}
                           <button
                             className="text-[10px] font-bold text-violet-400/50 hover:text-violet-400 transition-colors leading-none"
@@ -1217,24 +1284,20 @@ export default function RequestsClient({
                           >#{idx + 1}</button>
                         </div>
                       )}
-                      <button className="flex-1 min-w-0 text-left px-3 py-3 flex items-center gap-3" onClick={() => openRequest(r)}>
+                      <button className="flex-1 min-w-0 text-left px-4 py-3 flex items-center gap-3" onClick={() => openRequest(r)}>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-amber-500/10 text-amber-600 border border-amber-500/20 dark:text-amber-400">Offer Campaign</span>
-                            <p className="text-sm font-semibold truncate">{r.title}</p>
-                            {r._unacked > 0 && (
-                              <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse" />
-                                {r._unacked} New Update{r._unacked > 1 ? 's' : ''}
-                              </span>
-                            )}
+                          <div className="flex items-center gap-x-2 gap-y-1 min-w-0 flex-wrap">
+                            <p className="text-sm font-semibold truncate max-w-full">{r.title}</p>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold bg-amber-500/10 text-amber-700 border border-amber-500/20 dark:text-amber-400 shrink-0">Offer campaign</span>
+                            {r._unacked > 0 && <UpdatePill label={`${r._unacked} new update${r._unacked > 1 ? 's' : ''}`} />}
                           </div>
-                          <div className="flex items-center gap-2.5 mt-1 text-[11px] text-muted-foreground flex-wrap">
-                            <span className="truncate max-w-[220px]">{r.client?.name || 'Unknown Client'}</span>
-                            <span>{ago(r.created_at)}</span>
-                            {r.service?.name && <span className="text-cyan-700 dark:text-cyan-400/70">{r.service.name}</span>}
+                          <div className="flex items-center gap-x-3 gap-y-0.5 mt-1 text-[11px] text-muted-foreground flex-wrap">
+                            <span className="inline-flex items-center gap-1 min-w-0 text-foreground/75"><Building2 className="w-3 h-3 shrink-0 text-muted-foreground/60" /><span className="truncate max-w-[220px]">{r.client?.name || 'Unknown Client'}</span></span>
+                            {r.service?.name && <span className="inline-flex items-center gap-1 text-cyan-700 dark:text-cyan-400/80"><Tag className="w-3 h-3 shrink-0 opacity-70" />{r.service.name}</span>}
+                            <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3 shrink-0 opacity-60" />{ago(r.created_at)}</span>
                           </div>
                         </div>
+                        <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground shrink-0" />
                       </button>
                     </div>
                   )}
@@ -1246,14 +1309,14 @@ export default function RequestsClient({
               return (
               <SortableListItem key={r.id} id={r.id} disabled={!isDraggableTab}>
                 {(handle) => (
-                  <div className={`flex items-center bg-card border rounded-xl transition-colors ${batchSel.mode && batchSel.isSelected(r.id) ? 'border-violet-500/60 bg-violet-500/[0.04]' : 'border-border hover:border-violet-500/40'}`}>
+                  <div className={`group flex items-stretch bg-card border rounded-xl transition-all ${batchSel.mode && batchSel.isSelected(r.id) ? 'border-violet-500/60 bg-violet-500/[0.04] ring-1 ring-violet-500/20' : 'border-border/70 hover:border-violet-500/40 hover:shadow-sm'}`}>
                     {batchSel.mode && (
                       <label className="flex items-center justify-center shrink-0 w-10 self-stretch cursor-pointer" onClick={e => e.stopPropagation()}>
                         <input type="checkbox" className="accent-violet-500 w-3.5 h-3.5" checked={batchSel.isSelected(r.id)} onChange={() => batchSel.toggle(r.id)} />
                       </label>
                     )}
                     {isDraggableTab && (
-                      <div className="flex flex-col items-center shrink-0 px-1 py-3 gap-0.5" onClick={e => e.stopPropagation()}>
+                      <div className="flex flex-col items-center justify-center shrink-0 w-10 gap-0.5 border-r border-border/40" onClick={e => e.stopPropagation()}>
                         {handle}
                         {editRank !== null && editRank.id === r.id ? (
                           <input
@@ -1277,51 +1340,53 @@ export default function RequestsClient({
                         )}
                       </div>
                     )}
-                    <button className="flex-1 min-w-0 text-left px-3 py-3 flex items-center gap-3" onClick={() => openRequest(r)}>
+                    <button className="flex-1 min-w-0 text-left px-4 py-3 flex items-center gap-3" onClick={() => openRequest(r)}>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[11px] font-mono text-muted-foreground shrink-0">{refLabel(r.ref_no)}</span>
-                          <p className="text-sm font-semibold truncate">{r.title}</p>
-                          {r.is_planned && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-700 border border-blue-500/20 dark:text-blue-400">planned</span>}
+                        {/* Line 1 — what it is, plus anything that needs attention */}
+                        <div className="flex items-center gap-x-2 gap-y-1 min-w-0 flex-wrap">
+                          <p className="text-sm font-semibold truncate max-w-full">{r.title}</p>
+                          {r.priority !== 'normal' && (
+                            <span className={`inline-flex items-center gap-0.5 text-[10px] font-semibold capitalize shrink-0 ${PRIORITY_CHIP[r.priority]}`}>
+                              <Flag className="w-3 h-3" />{r.priority}
+                            </span>
+                          )}
+                          {r.is_planned && <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-blue-500/10 text-blue-700 border border-blue-500/20 dark:text-blue-400 shrink-0">Planned</span>}
                           {isChecklistRequest(r) && (
                             <span title={CHECKLIST_HINT}
-                              className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-700 border border-emerald-500/25 dark:text-emerald-300">
+                              className="text-[10px] px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-700 border border-emerald-500/25 dark:text-emerald-300 shrink-0">
                               {CHECKLIST_LABEL}
                             </span>
                           )}
-                          {hasNewExternal(r) && (
-                            <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse" />
-                              New {r.source === 'agency' ? 'Agency' : 'Client'} Update
-                            </span>
-                          )}
+                          {hasNewExternal(r) && <UpdatePill label={`New ${r.source === 'agency' ? 'agency' : 'client'} update`} />}
                         </div>
-                        <div className="flex items-center gap-2.5 mt-1 text-[11px] text-muted-foreground flex-wrap">
-                          <span className="truncate max-w-[220px]">{requesterOf(r)}</span>
-                          {!isDraggableTab && r.priority_rank != null && !['completed', 'delivered', 'rejected', 'archived'].includes(r.status) && (
-                            <span className="font-bold text-violet-700 dark:text-violet-400" title="Requester's priority order">P#{r.priority_rank}</span>
+                        {/* Line 2 — who, what kind, who's on it, when */}
+                        <div className="flex items-center gap-x-3 gap-y-0.5 mt-1 text-[11px] text-muted-foreground flex-wrap">
+                          <span className="font-mono text-muted-foreground/80">{refLabel(r.ref_no)}</span>
+                          <span className="inline-flex items-center gap-1 min-w-0 text-foreground/75"><Building2 className="w-3 h-3 shrink-0 text-muted-foreground/60" /><span className="truncate max-w-[200px]">{requesterOf(r)}</span></span>
+                          {r.service?.name && <span className="inline-flex items-center gap-1 text-cyan-700 dark:text-cyan-400/80"><Tag className="w-3 h-3 shrink-0 opacity-70" />{r.service.name}</span>}
+                          {r.assigned_employee?.name ? (
+                            <><span className="inline-flex items-center gap-1 text-violet-700 dark:text-violet-300/90"><UserRound className="w-3 h-3" />{dn(r.assigned_employee)}</span></>
+                          ) : OPEN_LOAD_STATUSES.includes(r.status) && (
+                            <><span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400/90"><UserRound className="w-3 h-3" />Unassigned</span></>
                           )}
-                          {r.priority !== 'normal' && <span className={`flex items-center gap-0.5 font-medium ${PRIORITY_CHIP[r.priority]}`}><Flag className="w-3 h-3" />{r.priority}</span>}
-                          {r.due_date && <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />due {fmtDate(r.due_date)}</span>}
-                          <span>{ago(r.created_at)}</span>
-                          {r.service?.name && <span className="text-cyan-700 dark:text-cyan-400/70">{r.service.name}</span>}
-                          {r.assigned_employee?.name && (
-                            <span className="flex items-center gap-1 text-violet-700 dark:text-violet-300/80"><UserRound className="w-3 h-3" />{dn(r.assigned_employee)}</span>
-                          )}
+                          {r.due_date && <><span className="inline-flex items-center gap-1"><CalendarDays className="w-3 h-3" />Due {fmtDate(r.due_date)}</span></>}
                           {r.promoted_task?.task_number != null && (
-                            <span className="font-mono text-green-700 dark:text-green-400/80" title={`Linked task: ${r.promoted_task.title}`}>Task #{r.promoted_task.task_number}</span>
+                            <><span className="font-mono text-green-700 dark:text-green-400/80" title={`Linked task: ${r.promoted_task.title}`}>Task #{r.promoted_task.task_number}</span></>
                           )}
-                          {r.source === 'manual' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary border border-border text-muted-foreground">added by you</span>}
+                          {!isDraggableTab && r.priority_rank != null && !['completed', 'delivered', 'rejected', 'archived'].includes(r.status) && (
+                            <><span className="font-semibold text-violet-700 dark:text-violet-400" title="Requester's priority order">P#{r.priority_rank}</span></>
+                          )}
+                          <span className="inline-flex items-center gap-1" title={`${r.source === 'manual' ? 'Added by your team' : r.source === 'agency' ? 'Submitted by an agency' : 'Submitted by the client'} · ${new Date(r.created_at).toLocaleString('en-IN')}`}><Clock className="w-3 h-3 shrink-0 opacity-60" />{ago(r.created_at)}</span>
                         </div>
                       </div>
-                      <span className={`text-[11px] px-2.5 py-1 rounded-full border shrink-0 ${STATUS_CHIP[r.status] || STATUS_CHIP.submitted}`}>
+                      <span className={`text-[11px] font-medium px-2.5 py-1 rounded-full border shrink-0 whitespace-nowrap ${STATUS_CHIP[r.status] || STATUS_CHIP.submitted}`}>
                         {STATUS_LABEL[r.status] || r.status}
                       </span>
-                      <ChevronRight className="w-4 h-4 text-muted-foreground/40 shrink-0" />
                     </button>
-                    <span className="shrink-0 pr-2">
+                    <span className="shrink-0 flex items-center pr-2 gap-0.5">
                       <DiscussButton entityType="request" entityId={r.id} variant="icon"
                         label="Discuss this request" panelTitle={r.title} />
+                      <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors hidden sm:block" />
                     </span>
                   </div>
                 )}
