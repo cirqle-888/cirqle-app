@@ -8,10 +8,12 @@
  *   void logActivity(...) → createNotification()/notifyAdmins() where relevant.
  *
  * Permission model: recruitment.view (read everything below), recruitment.edit
- * (positions/pipeline/interviews/offers), recruitment.delete (hard delete),
- * recruitment.interview (be assignable + record outcomes — admins/edit holders
- * can already do this; this key exists for a narrower "interviewer only" role),
- * recruitment.admin (superset, mirrors other modules' *.admin conventions).
+ * (positions/pipeline/interviews/offers — including recording interview
+ * outcomes), recruitment.delete (hard delete), recruitment.admin (superset,
+ * mirrors other modules' *.admin conventions). A narrower "interviewer only"
+ * key, recruitment.interview, was catalogued but never enforced and was
+ * removed in 20261003200000; add it back together with its checks if that
+ * role is ever needed.
  *
  * Public submission (no auth) lives in src/app/careers/apply/actions.ts —
  * intentionally a separate file so the public/unauthenticated surface area is

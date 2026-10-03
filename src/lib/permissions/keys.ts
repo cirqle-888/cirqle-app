@@ -48,7 +48,6 @@ export const PERMS = {
   TASKS_EDIT:         'tasks.edit',
   TASKS_DELETE:       'tasks.delete',
   TASKS_ASSIGN:       'tasks.assign',
-  TASKS_EXPORT:       'tasks.export',
   TASKS_WORKLOAD:     'tasks.workload',
   TASKS_TRASH:        'tasks.trash',
   /** See billing_amount / billing_amount_inr / loss_amount / currency / billing_mode on tasks. */
@@ -103,8 +102,6 @@ export const PERMS = {
   BILLING_VIEW_QUOTATIONS:   'billing.view_quotations',
   /** Create / update / delete invoices and their line items. */
   BILLING_EDIT:              'billing.edit',
-  /** Legacy: see billing_amount / commission % on tasks (kept for backwards compat). */
-  BILLING_VIEW_PRICING:      'billing.view_pricing',
   /** Open invoices and change status (sent / paid / reviewed). */
   BILLING_VIEW_WORKFLOW:     'billing.view_workflow',
   /** See ₹ on a SINGLE invoice — its total, what is paid, what is outstanding,
@@ -348,7 +345,6 @@ export const PERMS = {
   RECRUITMENT_VIEW:      'recruitment.view',
   RECRUITMENT_EDIT:      'recruitment.edit',
   RECRUITMENT_DELETE:    'recruitment.delete',
-  RECRUITMENT_INTERVIEW: 'recruitment.interview',
   RECRUITMENT_ADMIN:     'recruitment.admin',
 
   // Performance Scorecards (migration 028)
@@ -409,7 +405,6 @@ export const CRITICAL_PERMS: ReadonlySet<string> = new Set<string>([
   // Client pricing & billing amounts
   PERMS.TASKS_VIEW_PRICING,
   PERMS.BILLING_VIEW_AMOUNTS,
-  PERMS.BILLING_VIEW_PRICING,
   PERMS.BILLING_VIEW_LINE_PRICING,
   // A package's whole point is its agreed price, so there is no field-level
   // split here — seeing the page means seeing what the client pays.
