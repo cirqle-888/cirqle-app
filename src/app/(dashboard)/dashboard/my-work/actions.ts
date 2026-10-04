@@ -100,6 +100,21 @@ const STAGE_TASK_STATUS: Partial<Record<WorkStage, string>> = {
  * cannot see pricing. A wrong number is worse than a late one, so the amount is
  * never guessed here.
  */
+/**
+ * Record the person moving their card as assigned to its task. Tasks made
+ * from My Work used to carry no assignee at all, so the designer was missing
+ * from every assignee view — their own "Mine" list on Contributions, the
+ * dashboard's open-tasks widget — and nothing on the task said who made it.
+ * Idempotent and best-effort: a failure here never undoes the move.
+ */
+async function ensureAssigned(admin: ReturnType<typeof createAdminClient>, taskId: string, employeeId: string): Promise<void> {
+  try {
+    const { data: existing } = await admin.from('task_assignments')
+      .select('id').eq('task_id', taskId).eq('employee_id', employeeId).limit(1)
+    if (!existing?.length) await admin.from('task_assignments').insert({ task_id: taskId, employee_id: employeeId })
+  } catch { /* the move already succeeded */ }
+}
+
 async function ensureTaskForRequest(
   admin: ReturnType<typeof createAdminClient>,
   req: Row,
@@ -122,6 +137,7 @@ async function ensureTaskForRequest(
     quantity: 1,
     billing_amount: 0,
     billing_amount_inr: 0,
+    created_by: employeeId,
   }
   const { data: task, error } = await admin.from('tasks').insert(payload).select('id').single()
   if (error || !task) throw new Error(error?.message || 'Could not create the task.')
@@ -248,6 +264,7 @@ export async function moveMyWork(
   // timeline entry and the milestone email — so there is deliberately no
   // separate notifyRequesterStatus call here; adding one would email twice.
   await syncRequestStatusFromTask(taskId, taskStatus)
+  await ensureAssigned(admin, taskId, guard.employeeId)
 
   const target = STAGE_TARGET_STATUS[toStage]!
 
@@ -322,6 +339,7 @@ async function movePlanItem(
       task_date: it.scheduled_date || todayISO(),
       status: taskStatus,
       quantity: 1, billing_amount: 0, billing_amount_inr: 0,
+      created_by: employeeId,
     }).select('id').single()
     if (tErr || !task) return { ok: false, error: tErr?.message || 'Could not create the task.' }
     taskId = task.id
@@ -351,6 +369,7 @@ async function movePlanItem(
       .eq('id', taskId)
     if (uErr) return { ok: false, error: 'Could not update the task status. Try again.' }
   }
+  await ensureAssigned(admin, taskId, employeeId)
 
   void logActivity({
     actorId: employeeId, entityType: 'task', entityId: taskId,

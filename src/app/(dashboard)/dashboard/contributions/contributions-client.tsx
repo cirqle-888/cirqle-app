@@ -24,8 +24,9 @@ import {
   ChevronLeft, ChevronRight, Minus, Plus, X, Check,
   Search, Filter, PlusCircle, Eye, EyeOff, Clock, CheckCircle2, AlertCircle,
   UserCheck, Users, CalendarDays, Lock, Edit2, ChevronDown, Trash2, Copy, ExternalLink,
-  List, LayoutGrid, MoreVertical, CheckCircle, PlusIcon, FileDownIcon,
+  List, LayoutGrid, MoreVertical, CheckCircle, PlusIcon, FileDownIcon, Sparkles,
 } from 'lucide-react'
+import { buildSuggestion, type ContributionEvidence } from '@/lib/contributions/suggest'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import AppSelect from '@/components/ui/app-select'
@@ -62,6 +63,12 @@ interface VisibilitySettings {
 }
 
 interface Props {
+  /**
+   * Who planned / designed each recent task with no contributions yet — from
+   * Requests, the Social Calendar and My Work (see lib/contributions/evidence).
+   * Turned into a one-click pre-fill; never saved on its own.
+   */
+  suggestionEvidence?: Record<string, ContributionEvidence[]>
   tasks: any[]
   employees: any[]
   groups: any[]
@@ -175,7 +182,7 @@ export default function ContributionsClient({
   scores, clients, services, taskAssignments: taskAssignmentsFromDB,
   contributorRecords, taskToolRecords, pricingMatrix,
   performanceHistory, visibilitySettings,
-  permissionFlags,
+  permissionFlags, suggestionEvidence = {},
 }: Props) {
 
   // ── Toast ───────────────────────────────────────────
@@ -861,7 +868,10 @@ export default function ContributionsClient({
         }
       }
       if (myScope && currentEmployee) {
+        // Evidence counts too: a task made from a My Work card carries no
+        // assignment, so without this its designer could not find it under Mine.
         const isMine = !!contributed?.has(currentEmployee.id) || !!taskAssignmentMap[t.id]?.has(currentEmployee.id)
+          || !!suggestionEvidence[t.id]?.some(e => e.employeeId === currentEmployee.id)
         if (myScope === 'mine' && !isMine) return false
         if (myScope === 'not_mine' && isMine) return false
       }
@@ -875,7 +885,7 @@ export default function ContributionsClient({
       }
       return true
     })
-  }, [localTasks, activeFacets, filterClients, filterServices, filterDate, filterEmployee, filterEmployeeMode, statusFilter, taskScoreMap, taskAssignmentMap, employees, myScope, currentEmployee])
+  }, [localTasks, activeFacets, filterClients, filterServices, filterDate, filterEmployee, filterEmployeeMode, statusFilter, taskScoreMap, taskAssignmentMap, employees, myScope, currentEmployee, suggestionEvidence])
 
   // canSeeFinancials: requires (a) the legacy visibility-settings gate AND
   // (b) the new granular `contributions.view_earnings` permission. Both
@@ -971,6 +981,40 @@ export default function ContributionsClient({
       return { ...g, master, subs, params }
     }).filter(g => g.params.length > 0)
   }, [filteredGroups, filteredParams])
+
+  // ── Suggested contributions ───────────────────────────
+  // Built from the evidence for this task against THIS service's groups, so
+  // the pre-fill always matches the panel underneath it. Shown only while
+  // nothing has been entered; applying fills the form, saving stays manual.
+  const suggestion = useMemo(() => {
+    const ev = selectedTask ? suggestionEvidence[selectedTask.id] : undefined
+    if (!ev?.length) return null
+    return buildSuggestion(
+      groupedParams.map(g => ({ id: g.id, name: g.name, weight: g.weight })),
+      groupedParams.flatMap(g => g.params),
+      ev,
+    )
+  }, [selectedTask, suggestionEvidence, groupedParams])
+  const [dismissedSuggestionFor, setDismissedSuggestionFor] = useState<string | null>(null)
+  const hasEnteredContributions = Object.values(contributions).some(m => Object.values(m).some(v => v > 0))
+  const showSuggestion = !!suggestion && (suggestion.lines.length > 0 || suggestion.notes.length > 0)
+    && !hasEnteredContributions && dismissedSuggestionFor !== selectedTask?.id
+  const nameOfEmployee = (id: string) => {
+    const emp = employees.find(e => e.id === id)
+    return emp ? dn(emp) : 'A teammate'
+  }
+
+  function applySuggestion() {
+    if (!suggestion) return
+    setContributions(suggestion.contributions)
+    setActiveGroups(new Set(suggestion.activeGroups))
+    setActiveSubParams(new Set(suggestion.activeSubParams))
+    setExpandedEmployees(new Set(suggestion.lines.map(l => l.employeeId)))
+    const needsCount = suggestion.lines.some(l => l.value == null)
+    toast.success('Suggestion applied', needsCount
+      ? 'Fill in the counts marked below, check the split, then press Save.'
+      : 'Check the values and the split, then press Save.')
+  }
 
   // ── Auto-calculate commissions (fires on every change) ──
   // Always calculate scores — independent of showFinancials display toggle
@@ -1833,6 +1877,7 @@ export default function ContributionsClient({
                                 </span>
                                 <p className="font-semibold text-sm">{task.title}</p>
                                 <StatusBadge done={doneEmps.length} total={employeesForTask(task).length} />
+                                {doneEmps.length === 0 && (suggestionEvidence[task.id]?.length ?? 0) > 0 && <SuggestedChip />}
                               </div>
                               <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
                                 {task.client?.name && <span className="font-medium text-foreground/70">{task.client.name}{task.client?.code && <span className="ml-1 text-[10px] font-mono text-muted-foreground/50">{task.client.code}</span>}</span>}
@@ -2105,6 +2150,7 @@ export default function ContributionsClient({
                                   >
                                     {taskCode(task)}
                                   </span>
+                                  {contributorIds.length === 0 && (suggestionEvidence[task.id]?.length ?? 0) > 0 && <SuggestedChip />}
                                 </div>
                                 <p className="text-sm font-medium text-foreground leading-tight truncate">{task.title}</p>
                               </div>
@@ -2586,6 +2632,64 @@ export default function ContributionsClient({
 
       {/* ── Scrollable content ── */}
       <div className="p-6 space-y-5 pb-28">
+
+        {/* ── Suggested contributions ── */}
+        {showSuggestion && suggestion && selectedTask && (
+          <div className="rounded-xl border border-violet-500/30 bg-violet-500/[0.06] p-4 space-y-3">
+            <div className="flex items-start gap-2.5">
+              <Sparkles className="w-4 h-4 text-violet-500 mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold">Suggested contributions</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  From how this work moved through Requests, the Social Calendar and My Work. Nothing is saved until you press Save.
+                </p>
+              </div>
+              <button type="button" onClick={() => setDismissedSuggestionFor(selectedTask.id)} aria-label="Dismiss suggestion"
+                className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-foreground/5 transition-colors shrink-0">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <ul className="space-y-1.5 pl-6">
+              {suggestion.lines.map(l => (
+                <li key={`${l.employeeId}:${l.paramId}`} className="text-xs leading-relaxed">
+                  <span className="font-semibold text-foreground">{nameOfEmployee(l.employeeId)}</span>
+                  <span className="text-foreground/80">
+                    {' → '}{l.paramName}{' '}
+                    {l.value == null
+                      ? <span className="text-amber-600 dark:text-amber-400 font-medium">(enter the count)</span>
+                      : <span className="font-medium">{l.inputType === 'percentage' ? `${l.value}%` : `× ${l.value}`}</span>}
+                  </span>
+                  <span className="text-muted-foreground"> · {l.reason}</span>
+                </li>
+              ))}
+              {suggestion.notes.map(n => (
+                <li key={`note:${n.employeeId}:${n.role}`} className="text-xs text-muted-foreground leading-relaxed">
+                  {nameOfEmployee(n.employeeId)} {n.reason} — {n.why}, so no share is suggested.
+                </li>
+              ))}
+            </ul>
+            {suggestion.split.length > 1 && (
+              <p className="pl-6 text-[11px] text-muted-foreground">
+                Share of the pool if applied:{' '}
+                <span className="font-medium text-foreground/80">
+                  {suggestion.split.map(s => `${nameOfEmployee(s.employeeId)} ${s.pct}%`).join(' · ')}
+                </span>
+              </p>
+            )}
+            {suggestion.lines.length > 0 && (
+              <div className="pl-6 flex items-center gap-2">
+                <button type="button" onClick={applySuggestion}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-3 py-1.5 transition-colors">
+                  <Sparkles className="w-3.5 h-3.5" /> Apply suggestion
+                </button>
+                <button type="button" onClick={() => setDismissedSuggestionFor(selectedTask.id)}
+                  className="text-xs text-muted-foreground hover:text-foreground px-2 py-1.5">
+                  Not now
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Commission override panel */}
         {canSeeFinancials && showFinancials && showCommOverride && (
@@ -3159,5 +3263,15 @@ export default function ContributionsClient({
       </div>
 
     </div>
+  )
+}
+
+/** Marks a task whose contributions can be pre-filled from how the work was planned and done. */
+function SuggestedChip() {
+  return (
+    <span title="Contributions can be suggested from Requests, the Social Calendar and My Work — open the task to apply"
+      className="inline-flex items-center gap-1 text-[10px] font-semibold text-violet-600 dark:text-violet-300 bg-violet-500/10 border border-violet-500/25 px-1.5 py-0.5 rounded-full shrink-0">
+      <Sparkles className="w-2.5 h-2.5" /> Suggested
+    </span>
   )
 }

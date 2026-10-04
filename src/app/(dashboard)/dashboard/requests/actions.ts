@@ -518,11 +518,17 @@ export async function createManualRequest(input: {
     client_status: 'submitted',
     // Staff created it — don't let it flag itself as "new external activity".
     last_staff_viewed_at: now,
+    // Who planned it — the planner's half of a contribution suggestion.
+    created_by: guard.employeeId,
   }
   if (input.estimatedValue != null && !isNaN(input.estimatedValue)) payload.estimated_value = input.estimatedValue
   const SELECT_COLS = '*, client:clients(id, name, code), agency:agencies(id, name), service:services(id, name), assigned_employee:employees!task_requests_assigned_employee_id_fkey(id, name), promoted_task:tasks!task_requests_promoted_task_id_fkey(id, task_number, title, status)'
   let { data, error } = await admin.from('task_requests').insert(payload).select(SELECT_COLS).single()
   // Graceful pre-patch fallbacks: columns from later migrations may be missing.
+  if (error && /created_by/i.test(error.message || '')) {
+    delete payload.created_by   // pre-20261004100000: the request still saves
+    ;({ data, error } = await admin.from('task_requests').insert(payload).select(SELECT_COLS).single())
+  }
   if (error && /priority_rank/i.test(error.message || '')) {
     delete payload.priority_rank
     ;({ data, error } = await admin.from('task_requests').insert(payload).select(SELECT_COLS).single())

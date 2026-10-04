@@ -7,6 +7,8 @@ import {
   loadUnitScope, isUnitScoped, scopeRowsByUnitMember, scopeTasksByUnit, unitTaskIdsFrom,
 } from '@/lib/scope/unit-scope'
 import ContributionsClient from './contributions-client'
+import { loadContributionEvidence } from '@/lib/contributions/evidence'
+import type { ContributionEvidence } from '@/lib/contributions/suggest'
 import { redirect } from 'next/navigation'
 import { toISODate } from '@/lib/utils/local-date'
 import { loadServiceScope } from '@/lib/scope/service-scope'
@@ -283,8 +285,28 @@ export default async function ContributionsPage() {
     }, unitTaskIds)
   }
 
+  // ── Suggested contributions ───────────────────────────────────────────────
+  // Who planned / designed each recent task that has no contributions yet,
+  // read from Requests, the Social Calendar and My Work. Suggestions only
+  // pre-fill the panel — nothing is saved until someone presses Save. A viewer
+  // limited to their own work only receives evidence about themselves.
+  const suggestFromDate = new Date()
+  suggestFromDate.setDate(suggestFromDate.getDate() - 180)
+  const suggestFrom = toISODate(suggestFromDate)
+  const contributedTaskIds = new Set(((contributorRecordsRes.data || []) as { task_id: string }[]).map(c => c.task_id))
+  const suggestTaskIds = (outTasks as unknown as { id: string; task_date: string | null }[])
+    .filter(t => !contributedTaskIds.has(t.id) && (t.task_date ?? '') >= suggestFrom)
+    .map(t => t.id as string)
+  let suggestionEvidence: Record<string, ContributionEvidence[]> = await loadContributionEvidence(supabase, suggestTaskIds)
+  if (!viewAll && !viewUnit) {
+    suggestionEvidence = Object.fromEntries(Object.entries(suggestionEvidence)
+      .map(([taskId, list]) => [taskId, list.filter(e => e.employeeId === myEmployeeId)] as const)
+      .filter(([, list]) => list.length > 0))
+  }
+
   return (
     <ContributionsClient
+      suggestionEvidence={suggestionEvidence}
       tasks={outTasks}
       employees={outEmployees}
       groups={groupsRes.data || []}

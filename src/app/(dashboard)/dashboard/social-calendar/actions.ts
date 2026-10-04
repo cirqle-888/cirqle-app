@@ -441,6 +441,8 @@ export async function addCalendarItem(
     caption_canvas: sanitizeCaptionCanvas(input.captionCanvas),
     assigned_employee_id: input.assignedEmployeeId || null,
     links: cleanBriefLinks(input.links),
+    // Who planned it — the planner's half of a contribution suggestion.
+    created_by: guard.employeeId,
   }
   const dropped: string[] = []
   const { data, error } = await withPatchColumnFallback(row, r =>
