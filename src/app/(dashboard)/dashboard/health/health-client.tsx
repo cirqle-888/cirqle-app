@@ -17,7 +17,6 @@ interface Props {
   agingBuckets: Record<'0-30' | '31-60' | '61-90' | '90+', { count: number; amount: number }>
   clientRisk: { clientId: string; clientName: string; strategicScore: number; classification: string }[]
   cronStatus: { name: string; ranAt: string | null; ok: boolean | null; summary: any; error: string | null }[]
-  offerSyncBroken: { count: number; items: { client: string; error: string }[] }
 }
 
 const CRON_LABELS: Record<string, string> = {
@@ -51,7 +50,7 @@ const CLASS_TINT: Record<string, string> = {
   'Watchlist Client': 'text-red-600 dark:text-red-400',
 }
 
-export default function HealthClient({ showAmounts, cash, agingBuckets, clientRisk, cronStatus, offerSyncBroken }: Props) {
+export default function HealthClient({ showAmounts, cash, agingBuckets, clientRisk, cronStatus }: Props) {
   const amt = (n: number) => showAmounts ? fmt(n) : '••••'
   const agingOrder: (keyof typeof agingBuckets)[] = ['0-30', '31-60', '61-90', '90+']
   const maxBucket = Math.max(1, ...agingOrder.map(k => agingBuckets[k].amount))
@@ -139,20 +138,6 @@ export default function HealthClient({ showAmounts, cash, agingBuckets, clientRi
                 <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0"><Clock className="w-3 h-3" /> {relativeTime(c.ranAt)}</span>
               </div>
             ))}
-            <div className="flex items-center justify-between px-4 py-3">
-              <div className="flex items-center gap-2.5">
-                {offerSyncBroken.count === 0
-                  ? <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                  : <XCircle className="w-4 h-4 text-red-500 shrink-0" />}
-                <div>
-                  <p className="text-sm font-medium">Offer → Google Sheet Sync</p>
-                  {offerSyncBroken.count > 0 && (
-                    <p className="text-[11px] text-red-500 mt-0.5">{offerSyncBroken.items.map(i => i.client).join(', ')}</p>
-                  )}
-                </div>
-              </div>
-              <span className="text-xs text-muted-foreground shrink-0">{offerSyncBroken.count === 0 ? 'All synced' : `${offerSyncBroken.count} broken`}</span>
-            </div>
           </div>
           <p className="text-[11px] text-muted-foreground/60 mt-2 flex items-center gap-1.5">
             <TrendingUp className="w-3 h-3" /> Task→Invoice and Payment→Cashbook automations run as database triggers with no separate log — not tracked here yet.

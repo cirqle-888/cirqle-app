@@ -33,7 +33,9 @@ const QUICK_ACTIONS = [
   { label: 'Request / Quick Capture', route: '/dashboard/capture' },
   { label: 'Client', route: '/dashboard/clients' },
   { label: 'Task', route: '/dashboard/tasks' },
-  { label: 'Offer', route: '/dashboard/apps/offer-intake' },
+  // Offers are prepared in Offer Studio, not in Cirqle (the in-app Offer
+  // Intake page was retired in Oct 2026), so this opens the Studio pane.
+  { label: 'Offer', studio: true },
   { label: 'Invoice', route: '/dashboard/invoices' },
   { label: 'Quotation', route: '/dashboard/quotations' },
 ]
@@ -112,7 +114,16 @@ function buildMenu() {
         { label: 'New Request from Clipboard', accelerator: 'CmdOrCtrl+Shift+N', click: deps.sendClipboardToCirqle },
         { label: 'Recent Clipboard', submenu: recent },
         { type: 'separator' },
-        { label: 'New', submenu: QUICK_ACTIONS.map((a) => ({ label: a.label, click: () => deps.navigate(a.route) })) },
+        {
+          label: 'New',
+          submenu: QUICK_ACTIONS.map((a) => ({
+            label: a.label,
+            // Open-only: toggling here would close a Studio pane that is already up.
+            click: () => (a.studio
+              ? (!state.panes.includes('studio') && deps.toggleStudio())
+              : deps.navigate(a.route)),
+          })),
+        },
       ],
     },
     // REQUIRED on macOS: without the Edit menu's roles, Cmd+C / Cmd+V don't work

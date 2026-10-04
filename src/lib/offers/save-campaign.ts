@@ -11,10 +11,14 @@ import 'server-only'
  * Deliberately NOT a server action any more: as one, the browser could call it
  * directly with any client's intake token. A plain server module can only be
  * reached through the authenticated route.
+ *
+ * It no longer writes the client's Google Sheet either. Offer Studio replaced
+ * the sheet as the designer's source, and the settings that pointed the sync
+ * at each client's sheet were retired with the intake page — a sync left
+ * running had nothing to configure it and no one watching its errors.
  */
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { syncCampaignToSheet } from '@/lib/google-sheets/sync'
 import { mirrorProductToGlobalCatalog } from '@/lib/offer-catalog'
 import { logCampaignEvent } from '@/lib/offer-events'
 
@@ -486,9 +490,6 @@ export async function saveCampaign(
       if (oldIds.length) await admin.from('offer_campaign_revisions').delete().in('id', oldIds)
     }
   } catch { /* revisions are a safety net, never a gate */ }
-
-  // ── Sync to Google Sheets (fire and forget — don't block client save) ────
-  void syncCampaignToSheet(admin, campaign.id, client.id).catch(() => {})
 
   // Timeline event (tracking/support; figma saves log their own richer note
   // in /api/figma/campaign). Best-effort, never blocks the save.

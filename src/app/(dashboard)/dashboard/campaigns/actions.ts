@@ -225,7 +225,7 @@ export async function listCampaignRevisions(
  *  1. snapshot the CURRENT campaign state as a new revision
  *     (actor 'restore', "Backup before restoring revision N"), then
  *  2. replay the selected snapshot through saveCampaign, so change logs,
- *     catalog mirroring, sheet sync — and the restored-state revision —
+ *     catalog mirroring — and the restored-state revision —
  *     all fire exactly as a normal save would.
  * The pre-restore state is therefore always the revision immediately before
  * the restore, with zero extra user interaction.

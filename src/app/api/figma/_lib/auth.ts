@@ -112,7 +112,7 @@ export async function verifyFigmaAuth(req: NextRequest): Promise<FigmaAuthResult
     return {
       ok: false,
       response: NextResponse.json(
-        { ok: false, error: 'Unauthorized. Paste the shared secret from Apps → Offer Intake → Shared sync script.' },
+        { ok: false, error: 'Unauthorized — sign out of Cirqle Studio and sign in again.' },
         { status: 401, headers: FIGMA_CORS_HEADERS },
       ),
     }

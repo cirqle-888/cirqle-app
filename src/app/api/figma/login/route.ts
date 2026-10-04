@@ -87,23 +87,38 @@ export async function POST(req: NextRequest) {
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       { auth: { persistSession: false, autoRefreshToken: false } },
     )
-    const { error: signInError } = await auth.auth.signInWithPassword({ email, password })
-    if (signInError) {
+    const { data: signIn, error: signInError } = await auth.auth.signInWithPassword({ email, password })
+    if (signInError || !signIn.user) {
       return NextResponse.json(
         { ok: false, error: 'Wrong email/CQID or password.' },
         { status: 401, headers: CORS_HEADERS },
       )
     }
 
+    // The same rule the web app applies (lib/supabase/middleware.ts): a
+    // sign-in only counts when it belongs to an employee who is not archived.
+    // A correct password alone used to be enough, and this route hands back
+    // the workspace secret that opens every /api/figma route — so a former
+    // employee whose password still worked, or an auth account with no
+    // employee behind it, could collect the key. 401, not 403: Offer Studio
+    // signs its users in through this route and reads only a 401 as "refused";
+    // anything else it reports as Cirqle being unreachable.
+    //
     // CQID, not the person's name: the plugin shows this in a panel that
     // sits open on a shared screen all day, and a staff ID identifies the
     // signed-in user without putting their name on display.
     const { data: employeeRow } = await admin
       .from('employees')
-      .select('id, cqid')
-      .ilike('email', email)
+      .select('id, cqid, is_archived')
+      .eq('auth_id', signIn.user.id)
       .maybeSingle()
-    const employee = employeeRow as { id: string; cqid: string | null } | null
+    const employee = employeeRow as { id: string; cqid: string | null; is_archived: boolean | null } | null
+    if (!employee || employee.is_archived === true) {
+      return NextResponse.json(
+        { ok: false, error: 'This account can’t use Cirqle Studio. Ask an admin if you should have access.' },
+        { status: 401, headers: CORS_HEADERS },
+      )
+    }
 
     const { data: secretRow } = await admin
       .from('company_settings')
@@ -113,7 +128,7 @@ export async function POST(req: NextRequest) {
     const secret = ((secretRow as { value?: string } | null)?.value || '').trim()
     if (!secret) {
       return NextResponse.json(
-        { ok: false, error: 'The workspace has no Offer Intake secret yet — set one in Apps → Offer Intake first.' },
+        { ok: false, error: 'Cirqle Studio isn’t set up for this workspace yet (no API secret). Ask an admin.' },
         { status: 500, headers: CORS_HEADERS },
       )
     }
@@ -122,7 +137,7 @@ export async function POST(req: NextRequest) {
       {
         ok: true,
         token: secret,
-        user: { id: employee?.id || null, cqid: employee?.cqid || null },
+        user: { id: employee.id, cqid: employee.cqid },
       },
       { headers: CORS_HEADERS },
     )

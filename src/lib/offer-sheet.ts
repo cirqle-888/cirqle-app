@@ -238,7 +238,7 @@ export function buildOfferSheetRows({
         // is already written down in money.ts — "fractions always show both
         // digits" — and this was the one path that went round it.
         displayPrice(product.price),
-        product.mrp == null ? '' : String(product.mrp),
+        displayPrice(product.mrp),
         offerText(product),
         (product.badges || []).map(badgeLabel).filter(Boolean).join(', '),
         product.image_url || '',

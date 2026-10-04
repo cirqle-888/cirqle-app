@@ -231,3 +231,28 @@ describe('the Offer Price cell shows money, not a JavaScript number', () => {
     expect([row[5], row[13], row[14]]).toEqual(['6.40', '6', '40'])
   })
 })
+
+describe('the MRP cell follows the same money rule as the Offer Price', () => {
+  /**
+   * MRP went out as String(mrp), so an MRP of 199.50 printed as "199.5" —
+   * the struck-through price beside the offer, on the same flyer, read as
+   * one hundred ninety-nine rupees five paise. Same rule as the Offer Price
+   * cell: whole stays whole, a fraction always shows both digits.
+   */
+  const mrpCell = (mrp: number | null) =>
+    buildOfferSheetRows({ products: [{ name: 'X', display_order: 0, mrp }] })[0][6]
+
+  it('pads a half-rupee MRP to both digits', () => {
+    expect(mrpCell(199.5)).toBe('199.50')
+    expect(mrpCell(6.4)).toBe('6.40')
+  })
+
+  it('keeps two real decimals and leaves a whole MRP whole', () => {
+    expect(mrpCell(129.99)).toBe('129.99')
+    expect(mrpCell(250)).toBe('250')
+  })
+
+  it('is empty when there is no MRP', () => {
+    expect(mrpCell(null)).toBe('')
+  })
+})

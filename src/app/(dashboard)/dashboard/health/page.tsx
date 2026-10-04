@@ -119,20 +119,6 @@ export default async function BusinessHealthPage() {
     cronStatus = KNOWN_CRONS.map(name => ({ name, ranAt: null, ok: null, summary: null, error: null }))
   }
 
-  let offerSyncBroken: { count: number; items: { client: string; error: string }[] } = { count: 0, items: [] }
-  try {
-    const { data: brokenCampaigns } = await admin
-      .from('offer_campaigns')
-      .select('sheet_sync_error, client:clients(name)')
-      .not('sheet_sync_error', 'is', null)
-      .eq('status', 'active')
-    const items = (brokenCampaigns || []).map((c: any) => ({
-      client: Array.isArray(c.client) ? c.client[0]?.name : c.client?.name,
-      error: c.sheet_sync_error,
-    }))
-    offerSyncBroken = { count: items.length, items: items.slice(0, 5) }
-  } catch { /* pre-migration */ }
-
   return (
     <HealthClient
       showAmounts={showAmounts}
@@ -140,7 +126,6 @@ export default async function BusinessHealthPage() {
       agingBuckets={buckets}
       clientRisk={clientScores.map(s => ({ clientId: s.clientId, clientName: s.clientName, strategicScore: s.strategicScore, classification: s.classification }))}
       cronStatus={cronStatus}
-      offerSyncBroken={offerSyncBroken}
     />
   )
 }

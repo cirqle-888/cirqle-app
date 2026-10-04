@@ -17,13 +17,11 @@ import { bumpContribution, diffProducts, parametersForService, resolveFlyerParam
  * surface. The plugin builds from what was saved, so the flyer can always be
  * traced back to a campaign.
  *
- * This route deliberately delegates the whole write to the EXISTING
- * `saveCampaign` server action rather than reimplementing it. That one call
+ * This route deliberately delegates the whole write to `saveCampaign`
+ * (lib/offers/save-campaign) rather than reimplementing it. That one call
  * carries: product upsert, badge join rows, per-field change logs, client and
- * global catalog mirroring, one-active-campaign-per-client enforcement, and
- * the Google Sheet sync trigger — all behaviour the Offer Intake form already
- * relies on. Duplicating any of it here would create a second, divergent
- * write path.
+ * global catalog mirroring, and one-active-campaign-per-client enforcement.
+ * Duplicating any of it here would create a second, divergent write path.
  *
  * Auth + CORS + plugin-version gate: see ../_lib/auth.ts.
  * The client is addressed by `clientId`; its intake token is resolved
@@ -126,9 +124,9 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // saveCampaign is addressed by the client's intake token (it is the shared
-    // entry point for the public form and the staff editor alike). Resolve it
-    // from the id the plugin already holds; the token itself stays server-side.
+    // saveCampaign is addressed by the client's intake token — a holdover from
+    // the retired client offer form, now only an internal key. Resolve it from
+    // the id the plugin already holds; the token itself stays server-side.
     const { data: client, error: clientError } = await admin
       .from('clients')
       .select('id, name, offer_intake_token, is_active')
@@ -144,13 +142,29 @@ export async function POST(req: NextRequest) {
         { status: 404, headers: CORS_HEADERS },
       )
     }
-    if (!client.offer_intake_token) {
+    // The column defaults to a fresh token, so a client without one is rare —
+    // but the screen that used to create it was retired with the intake form,
+    // so a missing token is minted here instead of sending staff to a page
+    // that no longer exists. `is null` keeps two concurrent saves from
+    // minting different tokens; the re-read picks up whichever one won.
+    let offerToken: string | null = client.offer_intake_token
+    if (!offerToken) {
+      await admin
+        .from('clients')
+        .update({ offer_intake_token: crypto.randomUUID().replace(/-/g, '') })
+        .eq('id', client.id)
+        .is('offer_intake_token', null)
+      const { data: minted } = await admin
+        .from('clients')
+        .select('offer_intake_token')
+        .eq('id', client.id)
+        .maybeSingle()
+      offerToken = (minted as { offer_intake_token?: string | null } | null)?.offer_intake_token || null
+    }
+    if (!offerToken) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: `${client.name} has no Offer Intake link yet. Open Apps → Offer Intake in Cirqle and create one for this client, then try again.`,
-        },
-        { status: 409, headers: CORS_HEADERS },
+        { ok: false, error: `Could not prepare ${client.name} for offers. Try again, or tell an admin.` },
+        { status: 500, headers: CORS_HEADERS },
       )
     }
 
@@ -287,7 +301,7 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await saveCampaign(
-      client.offer_intake_token,
+      offerToken,
       {
         title: body?.title?.trim() || undefined,
         date_type: dateType,
@@ -567,8 +581,6 @@ export async function POST(req: NextRequest) {
         // whose user can fix the cause.
         taskWarning,
         scoring,
-        // saveCampaign fires the Google Sheet sync in the background, so a
-        // client still on the sheet pipeline stays in step automatically.
         message: `Saved ${productInputs.length} products to ${client.name} in Cirqle.`,
       },
       { headers: CORS_HEADERS },
