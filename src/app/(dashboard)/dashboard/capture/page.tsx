@@ -11,16 +11,11 @@ export const dynamic = 'force-dynamic'
  * Capture Engine classifies it, detects the client, and prepares a draft for
  * review before it commits to the right module.
  *
- * Offer mode: employees dedicated to offer-flyer work (they hold `offer.prepare`
- * but not the broader `requests.view`) don't juggle invoices/tasks/etc. — their
- * pastes are always offer lists. For them, skip classification and the
- * "Choose a destination" step entirely and parse straight as an Offer.
+ * An offer list is detected but not parsed here: offers are prepared in Offer
+ * Studio, so the review screen sends the user there (lib/capture/adapters/offer).
  */
 export default async function CapturePage() {
   const me = await loadCurrentUser().catch(() => null)
   if (!hasPermission(me, PERMS.CAPTURE_USE)) redirect('/dashboard')
-  const offerMode = !!me && !me.isAdmin
-    && hasPermission(me, PERMS.OFFER_PREPARE)
-    && !hasPermission(me, PERMS.REQUESTS_VIEW)
-  return <CaptureClient offerMode={offerMode} />
+  return <CaptureClient />
 }

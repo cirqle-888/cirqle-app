@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { FIGMA_CORS_HEADERS as CORS_HEADERS, figmaOptions, verifyFigmaAuth, logFigmaEvent } from '../_lib/auth'
-import { saveCampaign, type ProductInput } from '@/app/intake/offer/[token]/actions'
+import { saveCampaign, type ProductInput } from '@/lib/offers/save-campaign'
 import { todayISO } from '@/lib/utils/local-date'
 import { autoLinkTaskPackage } from '@/lib/packages/auto-link'
 import { resolveFlyerService } from '../_lib/flyer-department'

@@ -6,7 +6,7 @@ import type { createAdminClient } from '@/lib/supabase/admin'
  *
  * ONE implementation shared by:
  *  - the client intake form (getOfferPageData in
- *    src/app/intake/offer/[token]/actions.ts), and
+ *    src/lib/offers/save-campaign.ts), and
  *  - the Cirqle Studio plugin's catalog endpoints (/api/figma/catalog).
  *
  * Moving it here (out of the 'use server' actions file) is what lets an API

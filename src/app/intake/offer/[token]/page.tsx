@@ -1,72 +1,26 @@
-import { getOfferPageData } from './actions'
-import { getClientHubData } from '@/app/start/[token]/actions'
-import { intakeKindHref, INTAKE_KIND_META } from '@/lib/services/intake'
-import SimpleIntakeClient from './simple/simple-intake-client'
+/**
+ * Retired client offer-intake link.
+ *
+ * Clients used to type their weekly offer list here. Since Oct 2026 offer
+ * lists are prepared by the Cirqle team in Offer Studio (flyer.cirqle.work),
+ * which pushes them into Cirqle through /api/figma/campaign — so this page no
+ * longer reads or writes anything. It stays as a polite notice rather than a
+ * 404 because these links were shared with clients and may still be
+ * bookmarked or pinned in a WhatsApp chat.
+ */
 
-export const dynamic = 'force-dynamic'
+export const metadata = { title: 'Offer link · Cirqle' }
 
-function InvalidLink({ reason }: { reason: string }) {
+export default function RetiredOfferIntakePage() {
   return (
     <div className="min-h-dvh flex items-center justify-center p-6">
       <div className="text-center max-w-sm">
-        <div className="text-4xl mb-4">🔗</div>
-        <h1 className="text-lg font-semibold mb-2">Link unavailable</h1>
-        <p className="text-sm text-muted-foreground">{reason}</p>
+        <div className="text-4xl mb-4">📋</div>
+        <h1 className="text-lg font-semibold mb-2">This offer link is no longer used</h1>
+        <p className="text-sm text-muted-foreground">
+          Please send your offer list to your Cirqle contact on WhatsApp, as usual. The team prepares the flyer from there.
+        </p>
       </div>
     </div>
-  )
-}
-
-export default async function OfferIntakePage({ params, searchParams }: {
-  params: Promise<{ token: string }>
-  searchParams: Promise<{ hub?: string }>
-}) {
-  const { token } = await params
-  const { hub } = await searchParams
-
-  // Delegates to the same loader the client used to call for refreshes
-  // (getOfferPageData) instead of duplicating the query here — page.tsx had
-  // drifted out of sync with it (still selecting the old single `badge` join
-  // and no catalog image history), so reloading the page silently dropped a
-  // product's badges and "past photos" gallery. One query path now.
-  const res = await getOfferPageData(token)
-  if (!res.ok || !res.data) {
-    return <InvalidLink reason={res.error || 'This link has expired or been revoked. Please ask Cirqle for a new one.'} />
-  }
-
-  const { client, campaign, catalog, badges, groups, sheetManaged, designLocked, logoUrl, logoDarkUrl } = res.data
-
-  // Reached via the client's Hub link with more than one app enabled —
-  // render a tab switcher to the other app(s) instead of leaving the client
-  // stranded on this one form.
-  let switcher: { kind: string; label: string; href: string }[] | undefined
-  if (hub) {
-    const hubRes = await getClientHubData(hub)
-    if (hubRes.ok && hubRes.data && hubRes.data.kinds.length > 1) {
-      switcher = hubRes.data.kinds
-        .map(k => {
-          const href = intakeKindHref(k, hubRes.data!)
-          return href ? { kind: k, label: INTAKE_KIND_META[k]?.short || k, href: `${href}?hub=${hub}` } : null
-        })
-        .filter((o): o is { kind: string; label: string; href: string } => !!o)
-    }
-  }
-
-  // Clients get the SIMPLE mobile-first intake; the full editor still serves
-  // the staff entrance at /dashboard/offer-prepare/[clientId].
-  return (
-    <SimpleIntakeClient
-      token={token}
-      client={client}
-      campaign={campaign}
-      catalog={catalog}
-      badges={badges}
-      groups={groups}
-      sheetManaged={sheetManaged}
-      designLocked={designLocked}
-      logoUrl={logoDarkUrl || logoUrl}
-      switcher={switcher}
-      hub={hub}
-    />
   )
 }

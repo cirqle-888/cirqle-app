@@ -5,7 +5,7 @@
  * adds the vegetables and fruits they sell (name, local name, photo) into the
  * global Product Catalog.
  *
- * Trust model mirrors the offer intake (src/app/intake/offer/[token]/actions.ts):
+ * Trust model mirrors the retired client offer intake (its save path now lives in src/lib/offers/save-campaign.ts):
  * the unguessable token IS the auth — no employee session, admin client only,
  * every action re-resolves the token rather than trusting anything the browser
  * sends. Submissions land as review_status='pending' and are invisible to the

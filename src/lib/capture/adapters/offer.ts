@@ -1,32 +1,28 @@
 /**
- * Offer adapter — a pasted product list. Reuses aiParseOfferProducts (the same
- * parser the Offer Intake bulk-paste uses). Commit goes through saveCampaign.
+ * Offer adapter — a pasted offer list.
+ *
+ * Offer lists are prepared in Offer Studio now (see lib/offers/studio.ts), so
+ * Capture no longer parses the products itself — that was a paid AI call whose
+ * result had nowhere to go once the in-app Offer Prepare form was retired.
+ * The draft just names the client and sends the user to Offer Studio; the
+ * capture screen copies the pasted list to the clipboard on the way.
  */
-import { aiParseOfferProducts, type ParsedOfferProduct } from '@/lib/ai/offer-capture'
-import type { AdapterContext, CaptureDraft, CaptureInput, DetectedClient, ModuleAdapter } from '../types'
+import { OFFER_STUDIO_URL } from '@/lib/offers/studio'
+import type { CaptureDraft, DetectedClient, ModuleAdapter } from '../types'
 
-export function buildOfferDraft(products: ParsedOfferProduct[], client: DetectedClient | null): CaptureDraft {
-  const n = products.length
+export function buildOfferDraft(client: DetectedClient | null): CaptureDraft {
   return {
     type: 'offer',
-    // Land on the INTERNAL offer-preparation form (client preselected when
-    // matched, picker otherwise) — not the settings page, which listed intake
-    // links but couldn't consume the parsed draft.
-    target: client ? `/dashboard/offer-prepare/${client.id}` : '/dashboard/offer-prepare',
-    summary: `${n} product${n === 1 ? '' : 's'}${client ? ` · ${client.name}` : ''}`,
+    target: OFFER_STUDIO_URL,
+    summary: `Offer list${client ? ` · ${client.name}` : ''} — prepare it in Offer Studio`,
     client,
-    fields: {
-      products,
-      clientId: client?.id ?? null,
-      clientName: client?.name ?? null,
-    },
+    fields: { clientName: client?.name ?? null },
   }
 }
 
 export const offerAdapter: ModuleAdapter = {
   type: 'offer',
-  async prepare(input: CaptureInput, _classification, ctx: AdapterContext): Promise<CaptureDraft> {
-    const { products } = await aiParseOfferProducts(input.payload)
-    return buildOfferDraft(products, ctx.client)
+  async prepare(_input, _classification, ctx): Promise<CaptureDraft> {
+    return buildOfferDraft(ctx.client)
   },
 }

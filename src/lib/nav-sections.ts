@@ -244,7 +244,6 @@ export const navSections: NavSection[] = [
       // Offer Flyer editor: FROZEN since the Cirqle Studio Figma plugin became
       // the primary design workflow — adminOnly keeps it off staff nav; the
       // permission is kept so a future unfreeze is a one-line revert.
-      { label: 'Offer Intake',      href: '/dashboard/offer-prepare', icon: BadgePercent, requiredPerm: 'offer.prepare', adminOnly: true, keywords: ['prepare offer', 'weekly offer', 'sheet', 'whatsapp list', 'supermarket'] },
       { label: 'Activity',          href: '/dashboard/activity',   icon: History, requiredPerm: 'timeline.view_all', keywords: ['timeline', 'audit log'] },
       // Bulk Import is strictly admin-only — it can mass-create tasks,
       // contributions, and cashbook entries, so it shouldn't surface to

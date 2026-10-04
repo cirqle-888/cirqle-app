@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { OFFER_STUDIO_URL, isExternalHref } from '@/lib/offers/studio'
 import Header from '@/components/layout/header'
 import {
   Inbox, Tag, Settings as SettingsIcon, ArrowRight,
@@ -207,9 +208,8 @@ function ClientPortalCard({
 // ─── 3. Internal Modules ──────────────────────────────────────────────────────
 
 const INTERNAL_MODULES = [
-  // The staff-side twin of the Offer Campaign Intake portal above: same editor,
-  // reached by client instead of token. Gated at the route by offer.prepare.
-  { label: 'Offer Intake', description: 'Prepare weekly offer sheets — paste a WhatsApp list, review, sync to the designer Google Sheet.', href: '/dashboard/offer-prepare', icon: BadgePercent },
+  // Offer lists are prepared in Offer Studio, a separate app (lib/offers/studio).
+  { label: 'Offer Studio', description: 'Prepare weekly offer lists and flyers. Saved offers flow back into Requests and Tasks.', href: OFFER_STUDIO_URL, icon: BadgePercent },
   { label: 'Advertising ERP', description: 'Internal campaign management, budget tracking, and meta integration.', href: '/dashboard/advertising', icon: BarChart3 },
   { label: 'Internal Operations', description: 'Task routing, billing, and internal project state.', href: '/dashboard/tasks', icon: Briefcase },
   { label: 'Admin Modules', description: 'User management, permissions, and internal configuration.', href: '/dashboard/settings', icon: Shield },
@@ -219,7 +219,7 @@ function InternalModules() {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
       {INTERNAL_MODULES.map(mod => (
-        <Link key={mod.label} href={mod.href} className="group rounded-xl border border-border/60 bg-secondary/20 p-5 hover:bg-secondary/40 transition-colors">
+        <Link key={mod.label} href={mod.href} {...(isExternalHref(mod.href) ? { target: '_blank', rel: 'noopener' } : {})} className="group rounded-xl border border-border/60 bg-secondary/20 p-5 hover:bg-secondary/40 transition-colors">
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2.5 rounded-lg bg-foreground/5 text-foreground group-hover:bg-foreground/10 transition-colors">
               <mod.icon className="w-4 h-4" />
@@ -256,13 +256,6 @@ export default function AppsClient({ clientCounts, multiServiceClients = [] }: {
              <p className="text-sm text-muted-foreground mt-1">Individual secure intake links shared directly with clients.</p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <ClientPortalCard
-               title="Offer Intake"
-               description={INTAKE_KIND_META['offer_intake']?.description || 'Supermarket / retail clients submit their offer lists securely.'}
-               icon={Tag}
-               configHref="/dashboard/apps/offer-intake"
-               count={clientCounts['offer_intake'] || 0}
-            />
             <ClientPortalCard
                title="Design / Task Request"
                description={INTAKE_KIND_META['request_portal']?.description || 'Clients submit design and standard tasks through the portal.'}

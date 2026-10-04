@@ -38,7 +38,7 @@ export default async function ClientHubPage({ params }: { params: Promise<{ toke
     redirect(options[0].href)
   }
 
-  // Multiple apps → go straight to the primary one (Offer Intake first for
+  // Multiple apps → go straight to the primary one (Product Library first for
   // supermarket/retail clients) and pass the hub token along so that form can
   // render a tab switcher to the other app(s), instead of stopping at a menu.
   const primary = options.find(o => o.kind === INTAKE_KIND_PRIORITY[0]) || options[0]

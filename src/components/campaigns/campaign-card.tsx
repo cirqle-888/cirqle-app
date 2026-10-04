@@ -2,7 +2,12 @@
 
 /**
  * CampaignCard — the offer-campaign review card (collapsed summary → expandable
- * detail with change-log, products, sheet sync, and finalise/archive actions).
+ * detail with change-log, products, versions, and finalise/archive actions).
+ *
+ * Offers are prepared in Offer Studio (flyer.cirqle.work) and pushed in through
+ * /api/figma/campaign. The Google Sheet sync and the client's offer-intake link
+ * were retired with the old intake flow (Oct 2026), so the card no longer
+ * offers "Sync now" or "Get client's offer link".
  *
  * Shared so it renders identically on the (legacy) Campaigns page AND inside the
  * unified Requests inbox, where offer-campaign submissions appear as items.
@@ -10,16 +15,12 @@
 
 import { useState } from 'react'
 import {
-  CheckCircle2, AlertCircle, ChevronDown, ChevronUp,
-  RefreshCw, Archive, Flag, Link2, Copy, Check, Loader2,
-  ImageIcon, Tag, Calendar, FileText, FileSpreadsheet, History, Trash2,
+  CheckCircle2, AlertCircle, ChevronDown, ChevronUp, Archive, Flag, Check, Loader2, ImageIcon, Tag, Calendar, FileText, FileSpreadsheet, History, Trash2,
 } from 'lucide-react'
 import {
-  acknowledgeLogs, finaliseCampaign, archiveCampaign, deleteCampaign, resyncSheet, generateOfferLink,
-} from '@/app/(dashboard)/dashboard/campaigns/actions'
-import {
+  acknowledgeLogs, finaliseCampaign, archiveCampaign, deleteCampaign,
   convertSheetCampaign, listCampaignRevisions, restoreCampaignRevision, type RevisionMeta,
-} from '@/app/(dashboard)/dashboard/offer-prepare/actions'
+} from '@/app/(dashboard)/dashboard/campaigns/actions'
 import { formatDate } from '@/lib/utils/format-date'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
@@ -58,24 +59,6 @@ function formatOfferDate(c: any): string {
   return 'No date set'
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  async function handleCopy() {
-    await navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-  return (
-    <button
-      onClick={handleCopy}
-      className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-      title="Copy link"
-    >
-      {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-    </button>
-  )
-}
-
 export function CampaignCard({
   campaign,
   onRefresh,
@@ -95,8 +78,6 @@ export function CampaignCard({
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [busy, setBusy] = useState(false)
-  const [intakeLink, setIntakeLink] = useState<string | null>(null)
-  const [linkLoading, setLinkLoading] = useState(false)
   const [revisions, setRevisions] = useState<RevisionMeta[] | null>(null)
   const [revisionsError, setRevisionsError] = useState('')
   // In-app confirmation. NOT window.confirm: the desktop shell returns false
@@ -133,15 +114,6 @@ export function CampaignCard({
   const acknowledged = logs.filter((l: any) => l.acknowledged)
   const products: any[] = campaign.products || []
   const clientId = campaign.client?.id
-
-  // "Changed since last sync" — the designer pulls the Google Sheet into Figma,
-  // so any edit made after the last sync means the sheet (and the in-progress
-  // artwork) is stale until someone re-syncs. Computed from the two timestamps
-  // that already exist; a small grace window absorbs the write→sync clock skew.
-  const staleSinceSync = !!campaign.sheet_last_synced_at
-    && !campaign.sheet_sync_error
-    && campaign.updated_at
-    && new Date(campaign.updated_at).getTime() - new Date(campaign.sheet_last_synced_at).getTime() > 2000
 
   async function handleAcknowledgeAll() {
     setBusy(true)
@@ -194,26 +166,6 @@ export function CampaignCard({
     onDeleted?.()
     onRefresh()
     setBusy(false)
-  }
-
-  async function handleResync() {
-    setBusy(true)
-    const res = await resyncSheet(campaign.id, clientId)
-    if (!res.ok) alert(res.error || 'Sync failed')
-    onRefresh()
-    setBusy(false)
-  }
-
-  async function handleGetLink() {
-    setLinkLoading(true)
-    const res = await generateOfferLink(clientId)
-    if (res.ok && res.data) {
-      const url = `${window.location.origin}/intake/offer/${res.data.token}`
-      setIntakeLink(url)
-    } else {
-      alert(res.error || 'Could not generate the intake link.')
-    }
-    setLinkLoading(false)
   }
 
   const statusBadge = campaign.status === 'finalised'
@@ -276,11 +228,6 @@ export function CampaignCard({
             {unacknowledged.length > 0 && (
               <span className="flex items-center gap-1 text-amber-400">
                 <AlertCircle className="w-3 h-3" /> {unacknowledged.length} unreviewed change{unacknowledged.length !== 1 ? 's' : ''}
-              </span>
-            )}
-            {staleSinceSync && (
-              <span className="flex items-center gap-1 text-amber-400" title="Edited after the last Google Sheet sync — re-sync so the designer's data matches">
-                <RefreshCw className="w-3 h-3" /> Sheet out of date
               </span>
             )}
             <span>Updated {fmtDateTime(campaign.updated_at)}</span>
@@ -404,52 +351,6 @@ export function CampaignCard({
               </div>
             </details>
           )}
-
-          {/* ── Sheet sync status ── */}
-          <div className="flex items-center gap-3 bg-secondary/30 rounded-xl px-3 py-2.5">
-            <RefreshCw className="w-3.5 h-3.5 text-muted-foreground/50 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-muted-foreground">
-                Google Sheet: {campaign.sheet_last_synced_at
-                  ? `Last synced ${fmtDateTime(campaign.sheet_last_synced_at)}`
-                  : 'Not synced yet'}
-              </p>
-              {staleSinceSync && (
-                <p className="text-[10px] text-amber-400 mt-0.5">⚠ Edited since last sync — re-sync so the designer&apos;s sheet matches.</p>
-              )}
-              {campaign.sheet_sync_error && (
-                <p className="text-[10px] text-red-400 mt-0.5">{campaign.sheet_sync_error}</p>
-              )}
-            </div>
-            <button
-              onClick={handleResync}
-              disabled={busy}
-              className="text-xs px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/70 text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5 disabled:opacity-50 shrink-0"
-            >
-              {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-              Sync now
-            </button>
-          </div>
-
-          {/* ── Intake link ── */}
-          <div>
-            {intakeLink ? (
-              <div className="flex items-center gap-2 bg-secondary/30 rounded-xl px-3 py-2.5">
-                <Link2 className="w-3.5 h-3.5 text-muted-foreground/50 shrink-0" />
-                <p className="text-xs text-muted-foreground truncate flex-1">{intakeLink}</p>
-                <CopyButton text={intakeLink} />
-              </div>
-            ) : (
-              <button
-                onClick={handleGetLink}
-                disabled={linkLoading}
-                className="text-xs flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {linkLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />}
-                Get client&apos;s offer link
-              </button>
-            )}
-          </div>
 
           {/* ── Versions (admin; feature_offer_revisions) ─────────────────
               Loaded lazily on first open; the server action is admin-gated,

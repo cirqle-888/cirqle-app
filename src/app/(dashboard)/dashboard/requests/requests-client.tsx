@@ -17,6 +17,7 @@ import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-sea
 import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { usePrivacy } from '@/contexts/privacy-context'
+import { OFFER_STUDIO_URL, isExternalHref } from '@/lib/offers/studio'
 import { usePermissions } from '@/contexts/permission-context'
 import Combobox from '@/components/ui/combobox'
 import dynamic from 'next/dynamic'
@@ -94,7 +95,8 @@ const NEW_REQUEST_TYPES: {
 }[] = [
   { key: 'design',      label: 'Design Request',       description: 'A poster, post or creative for a client', icon: Inbox,        action: { kind: 'form' } },
   { key: 'onboarding',  label: 'New Brand Setup',      description: 'Facebook, Instagram and Meta setup checklist', icon: ListChecks, action: { kind: 'onboarding' } },
-  { key: 'offer',       label: 'Offer Flyer',          description: 'Weekly offer list for the designer',       icon: BadgePercent, action: { kind: 'href', href: '/dashboard/offer-prepare' } },
+  // Offer lists are prepared in Offer Studio, a separate app — opens in a new tab.
+  { key: 'offer',       label: 'Offer Flyer',          description: 'Opens Offer Studio to prepare the offer list', icon: BadgePercent, action: { kind: 'href', href: OFFER_STUDIO_URL } },
   { key: 'advertising', label: 'Advertising Campaign', description: 'Paid ads brief and budget',                icon: Megaphone,    action: { kind: 'href', href: '/dashboard/advertising/new' } },
   { key: 'calendar',    label: 'Calendar Plan',        description: 'Plan a month of social posts', icon: CalendarDays, action: { kind: 'href', href: '/dashboard/social-calendar' } },
 ]
@@ -1152,6 +1154,7 @@ export default function RequestsClient({
                       setOnboardForm({ clientId: clientFilter || '', assignedEmployeeId: '' })
                       setShowOnboard(true)
                     }
+                    else if (isExternalHref(t.action.href)) window.open(t.action.href, '_blank', 'noopener')
                     else router.push(t.action.href)
                   }}
                   className="group w-full text-left px-3 py-2.5 rounded-xl flex items-center gap-3 hover:bg-secondary/70 transition-colors disabled:opacity-45 disabled:cursor-not-allowed"

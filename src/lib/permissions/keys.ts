@@ -306,8 +306,10 @@ export const PERMS = {
   ADVERTISING_RUN_AI:          'advertising.run_ai',
   ADVERTISING_VIEW_FORECASTS:  'advertising.view_forecasts',
 
-  // Offer Flyer — internal offer preparation (staff paste → designer sheet)
-  /** Open the internal Offer Preparation workspace: pick a client, paste their offer list, review products and generate the designer Google Sheet. */
+  // Offer Flyer — offer lists are prepared in Offer Studio (a separate app) since
+  // Oct 2026; the in-app Offer Prepare workspace was retired. The key is kept
+  // for what it still gates: the offer-flyer product catalog.
+  /** Review and manage the offer-flyer product catalog (/dashboard/catalog). */
   OFFER_PREPARE: 'offer.prepare',
 
   // Product Catalog — staff review of client-submitted products

@@ -14,6 +14,7 @@ import { useRouter } from 'next/navigation'
 import { Sparkles, Loader2, User, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react'
 import { analyzeCapture, analyzeCaptureAs, commitRequestCapture, commitAdvertisingCapture } from './actions'
 import type { CaptureInput, CaptureResult, CaptureType } from '@/lib/capture/types'
+import { isExternalHref } from '@/lib/offers/studio'
 
 const TYPE_META: Record<CaptureType, { label: string; color: string }> = {
   request:   { label: 'Request',   color: 'text-violet-600 bg-violet-500/10' },
@@ -26,7 +27,7 @@ const TYPE_META: Record<CaptureType, { label: string; color: string }> = {
   unknown:   { label: 'Unknown',   color: 'text-muted-foreground bg-muted' },
 }
 
-export default function CaptureClient({ offerMode = false }: { offerMode?: boolean }) {
+export default function CaptureClient() {
   const router = useRouter()
   const [text, setText] = useState('')
   const [phone, setPhone] = useState('')
@@ -45,11 +46,7 @@ export default function CaptureClient({ offerMode = false }: { offerMode?: boole
   async function analyze() {
     if (!text.trim() || busy) return
     setBusy(true); setDone(null); setResult(null)
-    // Offer mode (dedicated flyer designers): every paste IS an offer list —
-    // skip classification and parse straight as an Offer, no destination step.
-    setResult(offerMode
-      ? await analyzeCaptureAs(buildInput(), 'offer')
-      : await analyzeCapture(buildInput()))
+    setResult(await analyzeCapture(buildInput()))
     setBusy(false)
   }
 
@@ -96,6 +93,14 @@ export default function CaptureClient({ offerMode = false }: { offerMode?: boole
         setResult({ ...result!, ok: false, error: res.error })
       }
     } else {
+      if (isExternalHref(draft.target)) {
+        // Offer lists go to Offer Studio, a separate app: put the pasted list
+        // on the clipboard so it can be pasted straight in there.
+        try { await navigator.clipboard.writeText(text) } catch { /* manual copy still works */ }
+        window.open(draft.target, '_blank', 'noopener')
+        setDone('Opened Offer Studio — the list is on your clipboard, paste it there.')
+        return
+      }
       // Hand the prefilled draft to the target module and navigate there.
       try { sessionStorage.setItem('cirqle:capture:draft', JSON.stringify(draft)) } catch {}
       router.push(draft.target || '/dashboard')
@@ -132,9 +137,7 @@ export default function CaptureClient({ offerMode = false }: { offerMode?: boole
           <Sparkles className="h-5 w-5 text-violet-500" /> AI Capture
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          {offerMode
-            ? 'Paste a client’s WhatsApp offer list. Cirqle detects the client and prepares the offer draft — review it, then open it in Prepare Offer.'
-            : 'Paste a WhatsApp message, email, product list, or contact. Cirqle detects what it is and the client, then prepares a draft for you to confirm.'}
+          Paste a WhatsApp message, email, product list, or contact. Cirqle detects what it is and the client, then prepares a draft for you to confirm.
         </p>
       </div>
 
@@ -201,8 +204,7 @@ export default function CaptureClient({ offerMode = false }: { offerMode?: boole
 
           <DraftFields type={draft.type} fields={draft.fields} />
 
-          {/* Offer-mode users never re-route — their pastes are always offers. */}
-          {!offerMode && (
+          {(
             <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
               <span className="text-xs text-muted-foreground">
                 {cls.type === 'unknown' ? 'Choose a destination:' : 'Wrong? Send to:'}
@@ -228,7 +230,7 @@ export default function CaptureClient({ offerMode = false }: { offerMode?: boole
                 className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 hover:bg-violet-700"
               >
                 {committing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                {draft.type === 'request' || draft.type === 'advertising' ? 'Create request' : `Open in ${TYPE_META[draft.type].label}`}
+                {draft.type === 'request' || draft.type === 'advertising' ? 'Create request' : draft.type === 'offer' ? 'Open Offer Studio' : `Open in ${TYPE_META[draft.type].label}`}
               </button>
             </div>
           )}
@@ -254,8 +256,7 @@ function DraftFields({ type, fields }: { type: CaptureType; fields: Record<strin
   } else if (type === 'client') {
     add('Name', fields.name); add('Phone', fields.phone); add('Email', fields.email)
   } else if (type === 'offer') {
-    const products = Array.isArray(fields.products) ? fields.products : []
-    add('Products', products.map((p: any) => p?.name).filter(Boolean).slice(0, 6).join(', ') + (products.length > 6 ? '…' : ''))
+    add('Client', fields.clientName)
   } else if (type === 'invoice' || type === 'quotation') {
     add('Client', fields.clientName)
   }

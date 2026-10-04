@@ -20,7 +20,9 @@ export type IntakeKind = KnownIntakeKind | (string & {})
 export const INTAKE_KIND_META: Record<string, { label: string; short: string; description: string }> = {
   none:           { label: 'None — billing only', short: 'None',         description: 'No client-submittable form. Pure billing / line-item service (e.g. Domain Purchase, Workspace Mail).' },
   request_portal: { label: 'Standard Request',     short: 'Request',      description: 'Design / social-media clients submit work through the standard Request Portal.' },
-  offer_intake:   { label: 'Offer Intake',         short: 'Offer Intake', description: 'Supermarket / retail clients submit their offer lists through the Offer Intake form.' },
+  // Still marks an offer-flyer client (catalog, capability checks), but there is
+  // no client form any more: offer lists are prepared by staff in Offer Studio.
+  offer_intake:   { label: 'Offer Flyer',          short: 'Offer Flyer',  description: 'Supermarket / retail offer-flyer clients. Their offer lists are prepared by the team in Offer Studio — no client form.' },
   product_library:{ label: 'Product Library',       short: 'Products',     description: 'Clients build up their own catalog of vegetables and fruits — name, local name and photo — for staff to review before it goes live.' },
 }
 
@@ -37,9 +39,10 @@ export function deriveIntakeKinds(services: Array<{ intake_kind?: string | null 
   )]
 }
 
-/** Which app a multi-service client lands on first when opening their Hub link
- *  — Offer Intake is the primary workflow for supermarket/retail clients. */
-export const INTAKE_KIND_PRIORITY = ['offer_intake', 'product_library', 'request_portal'] as const
+/** Which app a multi-service client lands on first when opening their Hub link.
+ *  Offer Intake used to lead for supermarket/retail clients; it has no client
+ *  form any more, so their Product Library comes first. */
+export const INTAKE_KIND_PRIORITY = ['product_library', 'request_portal'] as const
 
 /** Route for a given kind, given that client's per-app tokens. Null if the
  *  client doesn't have that app's token (kind not enabled / not provisioned). */
@@ -49,7 +52,9 @@ export function intakeKindHref(kind: string, tokens: {
   libraryToken?: string | null
 }): string | null {
   if (kind === 'request_portal') return tokens.requestToken ? `/intake/${tokens.requestToken}` : null
-  if (kind === 'offer_intake') return tokens.offerToken ? `/intake/offer/${tokens.offerToken}` : null
+  // The client offer form was retired (Oct 2026) — offers are prepared in Offer
+  // Studio — so an offer-flyer client has no form to be sent to.
+  if (kind === 'offer_intake') return null
   if (kind === 'product_library') return tokens.libraryToken ? `/intake/library/${tokens.libraryToken}` : null
   return null
 }

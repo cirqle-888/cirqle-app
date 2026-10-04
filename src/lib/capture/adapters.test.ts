@@ -38,12 +38,13 @@ describe('adapter draft builders (pure)', () => {
     expect(d.fields.title).toBe('Fix server')
   })
 
-  it('offer: summarizes product count + client', () => {
-    const d = buildOfferDraft([{ name: 'Rice', price: 350, mrp: null, weight: '5kg' }], acme)
+  it('offer: names the client and sends the list to Offer Studio', () => {
+    const d = buildOfferDraft(acme)
     expect(d.type).toBe('offer')
-    expect(d.summary).toContain('1 product')
     expect(d.summary).toContain('Acme')
-    expect((d.fields.products as unknown[]).length).toBe(1)
+    expect(d.summary).toContain('Offer Studio')
+    expect(d.target).toMatch(/^https:\/\//)
+    expect(d.fields.clientName).toBe(acme.name)
   })
 
   it('client: prefills new contact, and flags an existing match', () => {
