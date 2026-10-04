@@ -3209,13 +3209,27 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                           )}
                           {showBilling && <BillingChip status={billingStatusOf(task)} reason={task.no_charge_reason} />}
                           {requestRefByTaskId[task.id] && (
-                            <button
-                              title="From a client request — click for the brief (design plan, links)"
-                              onClick={e => { e.stopPropagation(); openRequestBrief(task.id) }}
-                              className="text-[9px] font-mono font-semibold text-violet-400 bg-violet-500/10 border border-violet-500/25 px-1.5 py-0.5 rounded hover:bg-violet-500/20 transition-colors shrink-0"
-                            >
-                              REQ-{String(requestRefByTaskId[task.id].ref_no).padStart(4, '0')}
-                            </button>
+                            // Straight to the original request for anyone who can open
+                            // Requests; the quick-brief popup for everyone else, who
+                            // would only be bounced off that page.
+                            can('requests.view') ? (
+                              <Link
+                                href={`/dashboard/requests?focus=${requestRefByTaskId[task.id].id}`}
+                                title="Open the original request in Requests"
+                                onClick={e => e.stopPropagation()}
+                                className="text-[9px] font-mono font-semibold text-violet-400 bg-violet-500/10 border border-violet-500/25 px-1.5 py-0.5 rounded hover:bg-violet-500/20 transition-colors shrink-0"
+                              >
+                                REQ-{String(requestRefByTaskId[task.id].ref_no).padStart(4, '0')} ↗
+                              </Link>
+                            ) : (
+                              <button
+                                title="From a client request — click for the brief (design plan, links)"
+                                onClick={e => { e.stopPropagation(); openRequestBrief(task.id) }}
+                                className="text-[9px] font-mono font-semibold text-violet-400 bg-violet-500/10 border border-violet-500/25 px-1.5 py-0.5 rounded hover:bg-violet-500/20 transition-colors shrink-0"
+                              >
+                                REQ-{String(requestRefByTaskId[task.id].ref_no).padStart(4, '0')}
+                              </button>
+                            )
                           )}
                         </div>
                         {task.description && <p className="text-xs text-muted-foreground truncate max-w-[200px]">{task.description}</p>}
@@ -3824,13 +3838,24 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                                       {taskCode(task)}
                                     </span>
                                     {requestRefByTaskId[task.id] && (
-                                      <span
-                                        title="From a client request — click for the brief"
-                                        onClick={e => { e.stopPropagation(); openRequestBrief(task.id) }}
-                                        className="text-[9px] font-mono font-semibold text-violet-400 bg-violet-500/10 border border-violet-500/25 px-1 py-0.5 rounded shrink-0 cursor-pointer hover:bg-violet-500/20 transition-colors"
-                                      >
-                                        REQ-{String(requestRefByTaskId[task.id].ref_no).padStart(4, '0')}
-                                      </span>
+                                      can('requests.view') ? (
+                                        <Link
+                                          href={`/dashboard/requests?focus=${requestRefByTaskId[task.id].id}`}
+                                          title="Open the original request in Requests"
+                                          onClick={e => e.stopPropagation()}
+                                          className="text-[9px] font-mono font-semibold text-violet-400 bg-violet-500/10 border border-violet-500/25 px-1 py-0.5 rounded shrink-0 cursor-pointer hover:bg-violet-500/20 transition-colors"
+                                        >
+                                          REQ-{String(requestRefByTaskId[task.id].ref_no).padStart(4, '0')} ↗
+                                        </Link>
+                                      ) : (
+                                        <span
+                                          title="From a client request — click for the brief"
+                                          onClick={e => { e.stopPropagation(); openRequestBrief(task.id) }}
+                                          className="text-[9px] font-mono font-semibold text-violet-400 bg-violet-500/10 border border-violet-500/25 px-1 py-0.5 rounded shrink-0 cursor-pointer hover:bg-violet-500/20 transition-colors"
+                                        >
+                                          REQ-{String(requestRefByTaskId[task.id].ref_no).padStart(4, '0')}
+                                        </span>
+                                      )
                                     )}
                                   </div>
                                   <p className="text-sm font-medium text-foreground leading-tight truncate">{task.title}</p>
