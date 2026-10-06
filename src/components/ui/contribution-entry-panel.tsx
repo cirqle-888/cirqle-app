@@ -109,10 +109,13 @@ export function ContributionEntryPanel({
         supabase.from('tools').select('*').eq('is_active', true).order('name'),
         supabase.from('tool_services').select('tool_id, service_id'),
         supabase.from('task_tools').select('tool_id').eq('task_id', task.id),
+        // Earnings and the client price are only ever shown with showEarnings;
+        // without it they are not fetched at all, so they never reach the
+        // browser (saving recomputes them on the server either way).
         supabase.from('contribution_scores')
-          .select('employee_id, score_percentage, earnings_inr, calculated_at')
+          .select(showEarnings ? 'employee_id, score_percentage, earnings_inr, calculated_at' : 'employee_id, score_percentage, calculated_at')
           .eq('task_id', task.id),
-        task.client_id
+        task.client_id && showEarnings
           ? supabase.from('client_service_pricing')
               .select('commission_percentage, price, currency')
               .eq('client_id', task.client_id)

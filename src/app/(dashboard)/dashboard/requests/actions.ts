@@ -12,7 +12,8 @@ import { normalizeContentBrief, contentBriefToText, type ContentBrief, type Cont
 import { suggestContentType } from '@/lib/social/plan'
 import { getCompanySettings } from '@/lib/settings/company-settings'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission, requireReadPermission, resolveCurrentEmployeeId } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission, resolveCurrentEmployeeId, loadCurrentUser } from '@/lib/permissions/check'
+import { financialVisibility } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
 import {
   setRequestStatus, logRequestActivity, requestStatusFromTask, type RequestStatus,
@@ -565,6 +566,14 @@ export async function createManualRequest(input: {
   })
 
   revalidatePath(REVALIDATE)
+  // Same rule as the page: the value is for people who can see billing amounts.
+  const me = await loadCurrentUser()
+  const canSeeValue = !me || me.isAdmin || financialVisibility(me).billingAmounts
+  if (!canSeeValue) {
+    const { estimated_value: _ev, ...safe } = data as Record<string, unknown>
+    void _ev
+    return { ok: true, data: safe as typeof data }
+  }
   return { ok: true, data }
 }
 

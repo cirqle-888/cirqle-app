@@ -5,6 +5,7 @@ import {
   stripCashbookList,
   stripInvoiceAmounts,
   stripPayrollAmounts,
+  stripTaskPricing,
 } from './strip'
 
 describe('stripCashbookAmounts — salary is a separate axis from cashbook amounts', () => {
@@ -160,5 +161,25 @@ describe('audit 2026-09-04 — the columns that really exist are the ones remove
     expect(stripPayrollAmounts(pay, true)).toEqual(pay)
     const cb = { id: 'c1', amount: 2330, markup_value: 750 }
     expect(stripCashbookAmounts(cb, true)).toEqual(cb)
+  })
+})
+
+describe('stripTaskPricing', () => {
+  const task = {
+    id: 't', title: 'Poster', quantity: 2,
+    billing_amount: 500, billing_amount_inr: 500, currency: 'INR', loss_amount: 0,
+    billing_mode: 'fixed', billing_percent: null, billing_override: false, is_billable: true,
+    honor_contributions: false, billing_snapshot: { lines: [{ price: 250 }] }, billing_exchange_rate: 1,
+    billing_rule: { percent: 30 }, bill_as_extra: false, no_charge_reason: 'package',
+    work_value: 250, work_value_inr: 250, work_value_currency: 'INR',
+  }
+
+  it('removes every money field, including the snapshot and package work value', () => {
+    const out = stripTaskPricing(task, false) as Record<string, unknown>
+    expect(Object.keys(out).sort()).toEqual(['id', 'quantity', 'title'])
+  })
+
+  it('leaves the row untouched for someone who may see prices', () => {
+    expect(stripTaskPricing(task, true)).toBe(task)
   })
 })

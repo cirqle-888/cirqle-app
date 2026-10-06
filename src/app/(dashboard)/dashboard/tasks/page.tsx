@@ -2,6 +2,7 @@ import { createAdminClient, fetchAll, stablePaginationQuery, safeQuery, columnEx
 import { withDraftFlag } from '@/lib/clients/draft'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, stripTaskListPricing, userCanSee } from '@/lib/permissions/strip'
+import { TASK_COLUMNS_NO_PRICING, TASK_JOINS } from '@/lib/tasks/select-columns'
 import { PERMS } from '@/lib/permissions/keys'
 import { resolveTaskVisibilityMode, fetchEmployeeServiceIds, filterTasksByVisibility } from '@/lib/tasks/visibility'
 import { loadUnitScope, scopeTasksByUnit, unitTaskIdsFrom } from '@/lib/scope/unit-scope'
@@ -26,7 +27,7 @@ const ADMIN_TASK_SELECT = `id, task_number, title, description, client_id, servi
 //   billing_amount, billing_amount_inr, currency, loss_amount, billing_mode,
 //   billing_percent, billing_override, is_billable, honor_contributions.
 // Quantity is kept because it represents task count, not money.
-const EMPLOYEE_TASK_SELECT = `id, title, task_number, status, task_date, client_id, service_id, quantity, description, created_at, updated_at, parent_task_id, variant_type, variant_label, completion_pct, is_recurring, recurring_interval, recurring_end_date, recurring_parent_id, cancelled_by, cancellation_notes, client:clients(id, name, code), service:services!service_id(id, name)`
+const EMPLOYEE_TASK_SELECT = `${TASK_COLUMNS_NO_PRICING}, ${TASK_JOINS}`
 
 // Statuses that represent live work. These are ALWAYS loaded in full no matter
 // how old they are — an eighteen-month-old task still sitting in `pending` has

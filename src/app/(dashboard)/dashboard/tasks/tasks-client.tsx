@@ -16,6 +16,7 @@ import { getStatusColor, getStatusLabel } from '@/lib/utils/invoice'
 import {
   Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, Building2, BarChart2, Copy, GripVertical, Settings2, ChevronUp, Inbox, Loader2, CheckSquare, Columns3,
 } from 'lucide-react'
+import { TASK_COLUMNS_NO_PRICING, TASK_JOINS } from '@/lib/tasks/select-columns'
 import { ToolbarSegment, SegmentButton, ScopeToggle, FiltersButton, StatusChip, ToolbarDivider } from '@/components/ui/list-toolbar'
 import { formatCurrency } from '@/lib/calculations/currency'
 import Link from 'next/link'
@@ -435,6 +436,14 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
   // additionally suppresses the column header / cells so the UI doesn't render
   // '—' placeholders for hidden columns.
   const showBilling     = (permissionFlags?.pricing ?? false) && canSee(visibilitySettings?.billing)
+  // Columns for a task row read in the browser. Without the pricing permission
+  // the money columns are never requested, so a price the server fills in on
+  // create cannot ride back into this screen's state.
+  const canSeeTaskPricing = permissionFlags?.pricing ?? false
+  // Typed as the full row so callers keep their Task shape; without pricing the
+  // money fields are simply absent (undefined), exactly as on the server load.
+  const taskRowCols = (canSeeTaskPricing ? `*, ${TASK_JOINS}` : `${TASK_COLUMNS_NO_PRICING}, ${TASK_JOINS}`) as
+    '*, client:clients(id, name, code), service:services!service_id(id, name)'
   const showEmpNames    = canSee(visibilitySettings?.employee_names)
   const [editClientId, setEditClientId] = useState<string | null>(null)
   const [editClientServiceId, setEditClientServiceId] = useState<string | null>(null)
@@ -541,7 +550,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let q: any = supabase
         .from('tasks')
-        .select('*, client:clients(id, name, code), service:services!service_id(id, name)', { count: 'exact' })
+        .select(taskRowCols, { count: 'exact' })
 
       if (hasSoftDelete) q = q.is('deleted_at', null)
 
@@ -1508,10 +1517,11 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
         quantity: task.quantity || 1,
         scope: deriveWorkScope(task.client_id),
       }
-      const { data, error } = await retryWithoutScope(strip =>
+      const { data: inserted, error } = await retryWithoutScope(strip =>
         supabase.from('tasks').insert(strip ? withoutScope(duplicateRow) : duplicateRow)
-          .select('*, client:clients(id,name,code), service:services!service_id(id,name)').single()
+          .select(taskRowCols).single()
       )
+      const data = inserted as unknown as Task | null
       if (data) {
         setTasks(prev => [data as Task, ...prev])
         // Source had no amount (e.g. pricing was hidden or unset when it was
@@ -1642,7 +1652,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       } : {}),
     }
 
-    const selectCols = `*, client:clients(id, name, code), service:services!service_id(id, name)`
+    const selectCols = taskRowCols
     let { data, error } = await supabase
       .from('tasks')
       .insert(billingSnapshot ? { ...insertPayload, billing_snapshot: billingSnapshot } : insertPayload)
@@ -3980,10 +3990,12 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                   <span className="text-muted-foreground">Service</span>
                   <div className="font-medium mt-0.5">{cancelModal.service?.name || '—'}</div>
                 </div>
-                <div className="flex-1">
-                  <span className="text-muted-foreground">Billed Value</span>
-                  <div className="font-medium mt-0.5">{formatCurrency(cancelModal.billing_amount ?? 0, cancelModal.currency as Currency)}</div>
-                </div>
+                {showBilling && (
+                  <div className="flex-1">
+                    <span className="text-muted-foreground">Billed Value</span>
+                    <div className="font-medium mt-0.5">{formatCurrency(cancelModal.billing_amount ?? 0, cancelModal.currency as Currency)}</div>
+                  </div>
+                )}
                 <div className="flex-1">
                   <span className="text-muted-foreground">Current Status</span>
                   <div className={`inline-block px-1.5 py-0.5 rounded mt-0.5 text-[10px] font-semibold ${getStatusColor(cancelModal.status)}`}>
@@ -4075,9 +4087,9 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                       placeholder="e.g. 3500"
                       className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500/30"
                     />
-                    <div className="text-[10px] text-muted-foreground mt-1">
+                    {showBilling && <div className="text-[10px] text-muted-foreground mt-1">
                       Auto-suggested: {formatCurrency((cancelModal.billing_amount_inr ?? 0) * cancelForm.completion_pct / 100, cancelModal.currency as Currency)} ({cancelForm.completion_pct}% of billing value)
-                    </div>
+                    </div>}
                   </div>
                 )}
 
@@ -5161,7 +5173,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                               </div>
                             </div>
                             <div className="text-[11px] text-muted-foreground pb-2">
-                              of {parentTask?.billing_amount_inr ? `₹${parentTask.billing_amount_inr.toLocaleString('en-IN')}` : '—'}
+                              of {showBilling && parentTask?.billing_amount_inr ? `₹${parentTask.billing_amount_inr.toLocaleString('en-IN')}` : 'the parent'}
                             </div>
                           </div>
                         )}
@@ -5359,7 +5371,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                                 })}
 
                                 {/* Total readout */}
-                                {variantParamIds.size > 0 && parentTask?.billing_amount_inr != null && (() => {
+                                {showBilling && variantParamIds.size > 0 && parentTask?.billing_amount_inr != null && (() => {
                                   const totalPct = parseFloat(form.billing_percent || '0')
                                   return (
                                     <div className="bg-violet-500/[0.08] border border-violet-500/30 rounded-lg px-2.5 py-2 text-violet-100">

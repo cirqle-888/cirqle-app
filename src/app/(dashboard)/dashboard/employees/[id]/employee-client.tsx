@@ -13,7 +13,7 @@ import { saveCommissionAgreement } from './actions'
 import { PresenceAvatar, PresenceBadge } from '@/components/ui/presence-dot'
 import { useEmployeePresence } from '@/contexts/presence-context'
 
-export default function EmployeeProfileClient({ employee, agreements: initialAgreements, clients, services, canManageAgreements }: any) {
+export default function EmployeeProfileClient({ employee, agreements: initialAgreements, clients, services, canManageAgreements, canSeePay = false }: any) {
   const [activeTab, setActiveTab] = useState<'details' | 'agreements'>('details')
   const [agreements, setAgreements] = useState<CommissionAgreement[]>(initialAgreements)
   const [showForm, setShowForm] = useState(false)
@@ -163,14 +163,18 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
                 <p className="text-xs text-muted-foreground mb-1">Phone</p>
                 <p className="font-medium text-sm">{employee.phone || '—'}</p>
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">Salary Type</p>
-                <p className="font-medium text-sm">{employee.salary_type || '—'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">Base Salary</p>
-                <p className="font-medium text-sm">₹{employee.base_salary || 0}</p>
-              </div>
+              {canSeePay && (
+                <>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Salary Type</p>
+                    <p className="font-medium text-sm">{employee.salary_type || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Base Salary</p>
+                    <p className="font-medium text-sm">₹{employee.base_salary || 0}</p>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}

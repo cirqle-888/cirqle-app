@@ -67,17 +67,24 @@ export function financialVisibility(user: CurrentUser | null): FinancialVisibili
 // is never mutated; callers can safely pass server query results directly.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Tasks: billing_amount / billing_amount_inr / currency / loss_amount / billing_* */
+/**
+ * Every task column that carries or implies money. `billing_snapshot` holds the
+ * line prices a parameter-driven task was billed at, `work_value*` is the
+ * rupee value of package / complimentary work, and `billing_rule` is the
+ * derived-billing percentage — all three used to slip through.
+ */
+export const TASK_PRICING_FIELDS = [
+  'billing_amount', 'billing_amount_inr', 'currency', 'loss_amount',
+  'billing_mode', 'billing_percent', 'billing_override', 'is_billable', 'honor_contributions',
+  'billing_snapshot', 'billing_exchange_rate', 'billing_rule', 'bill_as_extra', 'no_charge_reason',
+  'work_value', 'work_value_inr', 'work_value_currency',
+] as const
+
+/** Tasks: every field in TASK_PRICING_FIELDS. */
 export function stripTaskPricing<T extends Record<string, any>>(task: T, canView: boolean): T {
   if (canView || task == null) return task
-  const {
-    billing_amount, billing_amount_inr, currency, loss_amount,
-    billing_mode, billing_percent, billing_override, is_billable, honor_contributions,
-    ...rest
-  } = task
-  // Silence unused-binding linter warnings (these names exist only to destructure-out).
-  void billing_amount; void billing_amount_inr; void currency; void loss_amount
-  void billing_mode; void billing_percent; void billing_override; void is_billable; void honor_contributions
+  const rest: Record<string, unknown> = { ...task }
+  for (const k of TASK_PRICING_FIELDS) delete rest[k]
   return rest as T
 }
 export function stripTaskListPricing<T extends Record<string, any>>(tasks: T[], canView: boolean): T[] {
