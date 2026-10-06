@@ -18,7 +18,7 @@ import { requirePermission, requireReadPermission } from '@/lib/permissions/chec
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { isMonthFinalized } from '@/lib/payroll/compute'
-import { persistAwardsForMonth, loadPrograms, loadMembersByDesignation, loadPeriodAggregates } from '@/lib/ownership/engine'
+import { persistAwardsForMonth, loadPrograms, loadMembersByDesignation, loadPeriodAggregates, clientsOf } from '@/lib/ownership/engine'
 import { computeAwards, resolveParticipants, totalProfitSharePercent } from '@/lib/ownership/compute'
 import { periodForBookingMonth, activeForPeriod } from '@/lib/ownership/periods'
 import { PER_PERSON_BASES, PER_PERSON_MONEY_BASES, type OwnershipBasis, type OwnershipPeriodType, type OwnershipScopeKind } from '@/lib/ownership/types'
@@ -171,6 +171,8 @@ export interface RuleInput {
   label?: string | null
   effectiveFrom: string
   effectiveTo?: string | null
+  /** clients_handled programs: which clients this person handles. */
+  clientIds?: string[]
 }
 
 export async function saveRule(input: RuleInput): Promise<ActionResult<{ id: string }>> {
@@ -194,13 +196,11 @@ export async function saveRule(input: RuleInput): Promise<ActionResult<{ id: str
   // basis has to be read before the rule can be judged. On a per-unit basis
   // `fixed_amount_inr` is the rate PER UNIT, and a percentage of a row count
   // is not a thing — caught here rather than paying ₹0 silently every month.
-  {
-    const { data: prog } = await admin
-      .from('ownership_programs').select('basis').eq('id', input.programId).maybeSingle()
-    const b = (prog as { basis?: OwnershipBasis } | null)?.basis
-    if (b && PER_PERSON_BASES.includes(b) && !PER_PERSON_MONEY_BASES.includes(b) && hasPercent) {
-      return { ok: false, error: 'This reward is a rupee rate per item, not a percentage — set the ₹ amount instead.' }
-    }
+  const { data: prog } = await admin
+    .from('ownership_programs').select('basis').eq('id', input.programId).maybeSingle()
+  const b = (prog as { basis?: OwnershipBasis } | null)?.basis
+  if (b && PER_PERSON_BASES.includes(b) && !PER_PERSON_MONEY_BASES.includes(b) && hasPercent) {
+    return { ok: false, error: 'This reward is a rupee rate per item, not a percentage — set the ₹ amount instead.' }
   }
   const row = {
     program_id: input.programId,
@@ -212,6 +212,8 @@ export async function saveRule(input: RuleInput): Promise<ActionResult<{ id: str
     effective_from: input.effectiveFrom,
     effective_to: input.effectiveTo || null,
     updated_at: new Date().toISOString(),
+    // Written only for client-handling rules, so other rules save before 20261006120000.
+    ...(b === 'clients_handled' ? { client_ids: (input.clientIds ?? []).filter(Boolean) } : {}),
   }
 
   if (input.id) {
@@ -274,7 +276,7 @@ export async function previewMonth(month: number, year: number): Promise<ActionR
     const participants = resolveParticipants(live, membersByDesignation)
     if (participants.length === 0) continue
     const agg = await loadPeriodAggregates(
-      admin, program, period, participants.map(p => p.employeeId))
+      admin, program, period, participants.map(p => p.employeeId), clientsOf(participants))
     for (const a of computeAwards(program, participants, agg, period)) {
       rows.push({
         programName: program.name,

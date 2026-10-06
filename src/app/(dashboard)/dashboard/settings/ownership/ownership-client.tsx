@@ -227,6 +227,21 @@ export default function OwnershipClient(p: Props) {
             <h2 className="text-sm font-semibold">If {label} paid today</h2>
             <span className="text-sm font-semibold tabular-nums">{inr(preview.totalInr)}</span>
           </div>
+          {/* Per-person totals first — "what does each person get" — then the lines behind them. */}
+          {preview.rows.length > 0 && (() => {
+            const totals = new Map<string, number>()
+            for (const r of preview.rows) totals.set(r.employeeId, (totals.get(r.employeeId) ?? 0) + r.earnedInr)
+            return (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {[...totals.entries()].sort((a, b) => b[1] - a[1]).map(([id, t]) => (
+                  <div key={id} className="rounded-lg border border-border bg-secondary/30 px-3 py-1.5">
+                    <p className="text-[11px] text-muted-foreground">{employeeLabel(id)}</p>
+                    <p className="text-sm font-semibold tabular-nums">{inr(t)}</p>
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
           {preview.rows.length === 0 ? (
             <p className="mt-2 text-xs text-muted-foreground">No program pays in {label}.</p>
           ) : (
@@ -380,6 +395,12 @@ export default function OwnershipClient(p: Props) {
                         </span>
                         {r.employeeId && <span className="ml-1.5 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">override</span>}
                         {r.label && <span className="ml-1.5 text-xs text-muted-foreground">· {r.label}</span>}
+                        {prog.basis === 'clients_handled' && (
+                          <span className="ml-1.5 text-xs text-muted-foreground"
+                            title={(r.clientIds ?? []).map(id => p.clients.find(c => c.id === id)?.name ?? '').join(', ')}>
+                            · {r.clientIds?.length ? `${r.clientIds.length} client${r.clientIds.length === 1 ? '' : 's'}` : 'clients from the handler list'}
+                          </span>
+                        )}
                         <span className="ml-2 text-xs text-muted-foreground">
                           {r.percent != null ? `${r.percent}%` : inr(r.fixedAmountInr ?? 0)}
                         </span>
@@ -427,7 +448,7 @@ export default function OwnershipClient(p: Props) {
         <RuleModal
           programId={ruleModal.programId} initial={ruleModal.rule}
           basis={p.programs.find(x => x.id === ruleModal.programId)?.basis ?? 'billing'}
-          employees={p.employees} designations={p.designations}
+          employees={p.employees} designations={p.designations} clients={p.clients}
           onClose={() => setRuleModal(null)}
           onSaved={() => { setRuleModal(null); success('Rule saved'); refresh() }}
           onError={(m) => toastError('Could not save', m)}
@@ -640,17 +661,20 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, onClos
 
 // ── Rule form ────────────────────────────────────────────────────────────────
 
-function RuleModal({ programId, basis, initial, employees, designations, onClose, onSaved, onError }: {
+function RuleModal({ programId, basis, initial, employees, designations, clients, onClose, onSaved, onError }: {
   programId: string
   /** The parent program's basis — it decides what a rule's amount MEANS. */
   basis: OwnershipBasis
   initial: OwnershipRule | null
   employees: { id: string; cqid: string }[]
   designations: { id: string; name: string }[]
+  clients: { id: string; name: string }[]
   onClose: () => void
   onSaved: () => void
   onError: (m?: string) => void
 }) {
+  const [clientIds, setClientIds] = useState<string[]>(initial?.clientIds ?? [])
+  const [clientSearch, setClientSearch] = useState('')
   const [target, setTarget] = useState<'designation' | 'employee'>(initial?.employeeId ? 'employee' : 'designation')
   const [employeeId, setEmployeeId] = useState(initial?.employeeId ?? '')
   const [designationId, setDesignationId] = useState(initial?.designationId ?? '')
@@ -676,6 +700,7 @@ function RuleModal({ programId, basis, initial, employees, designations, onClose
       fixedAmountInr: mode === 'fixed' ? Number(fixed) || 0 : null,
       label: label || null,
       effectiveFrom,
+      clientIds: basis === 'clients_handled' ? clientIds : undefined,
     })
     setSaving(false)
     if (!res.ok) { onError(res.error); return }
@@ -745,6 +770,33 @@ function RuleModal({ programId, basis, initial, employees, designations, onClose
               </div>
             )}
           </div>
+
+          {/* Several people may handle one client: each rule lists its own clients. */}
+          {basis === 'clients_handled' && (
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                Clients they handle <span className="text-muted-foreground/60">
+                  · {clientIds.length ? `${clientIds.length} selected` : 'none — uses “Who handles each client”'}</span>
+              </label>
+              <input value={clientSearch} onChange={e => setClientSearch(e.target.value)} placeholder="Search clients…"
+                className={`${field} mb-1.5`} />
+              <div className="max-h-44 overflow-y-auto rounded-lg border border-border divide-y divide-border">
+                {clients
+                  .filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase()))
+                  .sort((a, b) => Number(clientIds.includes(b.id)) - Number(clientIds.includes(a.id)))
+                  .map(c => (
+                    <label key={c.id} className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-secondary/40">
+                      <input type="checkbox" checked={clientIds.includes(c.id)}
+                        onChange={e => setClientIds(prev => e.target.checked ? [...prev, c.id] : prev.filter(x => x !== c.id))} />
+                      {c.name}
+                    </label>
+                  ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground/70 mt-1.5">
+                Another person can list the same client — each earns on it.
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1.5">

@@ -67,19 +67,31 @@ export function handlerOn(handlers: HandlerRow[], clientId: string, date: string
 /** Clients handled: billing of each task goes to that client's handler on the task date. */
 export function attributeClientHandling(
   tasks: TaskRow[], handlers: HandlerRow[], clientNames: Map<string, string>, employeeIds: string[],
+  /**
+   * Clients chosen on each person's RULE. A person with a list is measured on
+   * exactly those clients — and several people may list the same client, each
+   * earning on it. A person with no list falls back to the handler table.
+   */
+  clientsByEmployee: Record<string, string[]> = {},
 ): Record<string, PersonMeasure> {
   const out = empty(employeeIds)
   const perClient = new Map<string, { employeeId: string; clientId: string; amount: number; worked: boolean; first: string }>()
+  const listed = Object.fromEntries(Object.entries(clientsByEmployee).filter(([, l]) => l.length).map(([e, l]) => [e, new Set(l)]))
   for (const t of tasks) {
     if (!t.client_id) continue
-    const who = handlerOn(handlers, t.client_id, t.task_date)
-    if (!who || !out[who]) continue
+    const whoes = new Set<string>()
+    for (const [e, set] of Object.entries(listed)) if (set.has(t.client_id)) whoes.add(e)
+    const fromTable = handlerOn(handlers, t.client_id, t.task_date)
+    if (fromTable && !listed[fromTable]) whoes.add(fromTable)
+    for (const who of whoes) {
+    if (!out[who]) continue
     const key = `${who}|${t.client_id}`
     const c = perClient.get(key) ?? { employeeId: who, clientId: t.client_id, amount: 0, worked: false, first: t.task_date }
     c.amount += Number(t.billing_amount_inr || 0)
     if (t.status !== 'cancelled') c.worked = true
     if (t.task_date < c.first) c.first = t.task_date
     perClient.set(key, c)
+    }
   }
   for (const c of perClient.values()) {
     const m = out[c.employeeId]
@@ -132,7 +144,7 @@ async function tasksInPeriod(admin: Admin, period: OwnershipPeriod): Promise<Tas
   return (data ?? []) as TaskRow[]
 }
 
-export async function loadClientHandling(admin: Admin, period: OwnershipPeriod, employeeIds: string[]): Promise<Record<string, PersonMeasure>> {
+export async function loadClientHandling(admin: Admin, period: OwnershipPeriod, employeeIds: string[], clientsByEmployee: Record<string, string[]> = {}): Promise<Record<string, PersonMeasure>> {
   if (!employeeIds.length) return {}
   try {
     const [{ data: handlers }, tasks, { data: clients }] = await Promise.all([
@@ -142,7 +154,7 @@ export async function loadClientHandling(admin: Admin, period: OwnershipPeriod, 
       admin.from('clients').select('id, name'),
     ])
     const names = new Map(((clients ?? []) as { id: string; name: string }[]).map(c => [c.id, c.name]))
-    return attributeClientHandling(tasks, (handlers ?? []) as HandlerRow[], names, employeeIds)
+    return attributeClientHandling(tasks, (handlers ?? []) as HandlerRow[], names, employeeIds, clientsByEmployee)
   } catch { return empty(employeeIds) }
 }
 

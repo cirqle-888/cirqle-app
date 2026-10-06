@@ -73,3 +73,22 @@ describe('paying a per-person basis', () => {
     expect(a.breakdown.items).toEqual(agg.itemsByEmployee!.A)
   })
 })
+
+describe('several people handling the same client', () => {
+  const names = new Map([['seastar', 'Sea Star'], ['hiba', 'Hiba']])
+  const tasks = [task('t1', 'seastar', '2026-10-03', 1000), task('t2', 'hiba', '2026-10-05', 500)]
+
+  it('each person who lists a client on their rule earns on it', () => {
+    const m = attributeClientHandling(tasks, [], names, ['A', 'B'], { A: ['seastar', 'hiba'], B: ['seastar'] })
+    expect(m.A).toMatchObject({ units: 2, amountInr: 1500 })
+    expect(m.B).toMatchObject({ units: 1, amountInr: 1000 })
+  })
+
+  it('a person with no list uses the handler table; a listed person ignores it', () => {
+    const handlers: HandlerRow[] = [{ client_id: 'hiba', employee_id: 'C', effective_from: '2026-01-01', effective_to: null },
+      { client_id: 'seastar', employee_id: 'A', effective_from: '2026-01-01', effective_to: null }]
+    const m = attributeClientHandling(tasks, handlers, names, ['A', 'C'], { A: ['hiba'] })
+    expect(m.A).toMatchObject({ units: 1, amountInr: 500 })   // only its list, not Sea Star from the table
+    expect(m.C).toMatchObject({ units: 1, amountInr: 500 })   // from the table
+  })
+})

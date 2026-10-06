@@ -74,6 +74,8 @@ export interface OwnershipRule {
   /** Exactly one of these is set. */
   percent: number | null
   fixedAmountInr: number | null
+  /** clients_handled only: the clients this rule's person handles. Empty = use the handler table. */
+  clientIds?: string[]
   /** The participant's "hat" for this program — Team Lead, Ops Manager, HR. */
   label: string | null
   effectiveFrom: string

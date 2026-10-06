@@ -81,6 +81,7 @@ function mapRule(r: Record<string, unknown>): OwnershipRule {
     percent: r.percent == null ? null : Number(r.percent),
     fixedAmountInr: r.fixed_amount_inr == null ? null : Number(r.fixed_amount_inr),
     label: (r.label as string) ?? null,
+    clientIds: Array.isArray(r.client_ids) ? (r.client_ids as string[]) : [],
     effectiveFrom: r.effective_from as string,
     effectiveTo: (r.effective_to as string) ?? null,
     isActive: r.is_active !== false,
@@ -124,6 +125,8 @@ export async function loadPeriodAggregates(
   period: OwnershipPeriod,
   /** Participants, for a basis measured per person rather than program-wide. */
   employeeIds: string[] = [],
+  /** clients_handled: each participant's chosen clients (from their rule). */
+  clientsByEmployee: Record<string, string[]> = {},
 ): Promise<PeriodAggregates> {
   let billingInr = 0
   let collectedInr = 0
@@ -158,7 +161,7 @@ export async function loadPeriodAggregates(
 
   // The other per-person bases: each person's count, money and items.
   const perPerson: Record<string, PersonMeasure> | null =
-    program.basis === 'clients_handled' ? await loadClientHandling(admin, period, employeeIds)
+    program.basis === 'clients_handled' ? await loadClientHandling(admin, period, employeeIds, clientsByEmployee)
     : program.basis === 'planned' ? await loadPlanned(admin, period, employeeIds)
     : program.basis === 'activities' ? await loadActivities(admin, period, employeeIds, program.activityKinds ?? [])
     : null
@@ -177,6 +180,10 @@ export async function loadPeriodAggregates(
     itemsByEmployee,
   }
 }
+
+/** Each participant's rule-chosen clients, for a clients_handled program. */
+export const clientsOf = (participants: { employeeId: string; rule: OwnershipRule }[]) =>
+  Object.fromEntries(participants.map(p => [p.employeeId, p.rule.clientIds ?? []]))
 
 const itemsOf = (m: Record<string, PersonMeasure>) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v.items]))
 
@@ -339,7 +346,7 @@ export async function computeAwardsForMonth(
     if (participants.length === 0) continue
 
     const agg = await loadPeriodAggregates(
-      admin, program, period, participants.map(p => p.employeeId))
+      admin, program, period, participants.map(p => p.employeeId), clientsOf(participants))
     out.push(...computeAwards(program, participants, agg, period))
   }
   return out
