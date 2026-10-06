@@ -89,4 +89,17 @@ describe('allocateOwnership', () => {
     const sumA = [...byTaskEmployee.values()].reduce((t, m) => t + (m.get('A') ?? 0), 0)
     expect(sumA).toBeCloseTo(100, 10)
   })
+
+  it('records which program and rule each share came from', () => {
+    const { sources } = allocateOwnership([
+      award({ employeeId: 'A', programName: 'Operations', ruleLabel: 'Operation Manager', earnedInr: 100 }),
+      award({ employeeId: 'A', programName: 'Operations', ruleLabel: 'Invoicing', earnedInr: 20 }),
+      award({ employeeId: 'A', programName: 'Client Managing', ruleLabel: 'Client Managing', basis: 'clients_handled', earnedInr: 40, items: [{ label: 'x', refId: 'seastar', amountInr: 4000 }] }),
+    ], tasks, ctx)
+    expect(sources.get('t1')!.get('A')).toEqual([
+      { program: 'Operations', rule: 'Operation Manager', basis: 'billing', amountInr: 30 },
+      { program: 'Operations', rule: 'Invoicing', basis: 'billing', amountInr: 6 },
+      { program: 'Client Managing', rule: null, basis: 'clients_handled', amountInr: 30 },   // rule = program name → not repeated
+    ])
+  })
 })

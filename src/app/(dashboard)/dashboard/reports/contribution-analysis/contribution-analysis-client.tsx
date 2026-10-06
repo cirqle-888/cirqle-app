@@ -10,7 +10,7 @@ import { usePrivacy } from '@/contexts/privacy-context'
 import {
   applyFilters, sortRows, computeSummary, toMatrix, toMatrixGrouped, matrixToCSV, empShare,
   groupRows, GROUP_OPTIONS,
-  EMPTY_FILTERS, EMP_SUBCOLS, buildFilterContext, type Filters, type AnalysisRow, type EmployeeColumn,
+  EMPTY_FILTERS, EMP_SUBCOLS, OWNERSHIP_BASIS_LABEL, ownershipSourceLabel, buildFilterContext, type Filters, type AnalysisRow, type EmployeeColumn,
   type SortKey, type SortDir, type GroupKey, type RowGroup, type Summary,
 } from '@/lib/reports/contribution-analysis'
 import { ORG_UNIT_TYPE_LABEL, type OrgUnit, type OrgUnitScopeRow } from '@/lib/org/units'
@@ -110,6 +110,59 @@ const fmt = (n: number, dp = 2) =>
 const inr = (n: number, dp = 0) => '₹' + fmt(n, dp)
 const pct = (n: number) => `${n.toFixed(1)}%`
 
+/**
+ * An ownership amount that explains itself on hover: which program and rule
+ * it came from (and, on the task column, who earned it). Portaled to <body>
+ * so the scrolling grid never clips the card.
+ */
+function OwnershipHover({ amount, dp, lines }: {
+  amount: number
+  dp: number
+  lines: { who?: string; label: string; basis: string; amount: number }[]
+}) {
+  const [anchor, setAnchor] = useState<DOMRect | null>(null)
+  if (!lines.length) return <>{inr(amount, dp)}</>
+  const below = anchor ? anchor.bottom + 220 < window.innerHeight : true
+  return (
+    <span
+      onMouseEnter={e => setAnchor(e.currentTarget.getBoundingClientRect())}
+      onMouseLeave={() => setAnchor(null)}
+      className="cursor-help underline decoration-dotted decoration-muted-foreground/50 underline-offset-[3px]"
+    >
+      {inr(amount, dp)}
+      {anchor && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            left: Math.max(8, Math.min(anchor.right - 320, window.innerWidth - 328)),
+            ...(below ? { top: anchor.bottom + 6 } : { bottom: window.innerHeight - anchor.top + 6 }),
+          }}
+          className="z-[200] w-[320px] rounded-lg border border-border bg-popover p-2.5 text-left shadow-xl pointer-events-none"
+        >
+          <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Ownership from</div>
+          <div className="space-y-1">
+            {lines.map((l, i) => (
+              <div key={i} className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs leading-snug text-foreground break-words">
+                    {l.who && <span className="mr-1 font-medium text-sky-600 dark:text-sky-400">{l.who}</span>}
+                    {l.label}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground">{l.basis}</div>
+                </div>
+                <span className="shrink-0 text-xs tabular-nums text-foreground">{inr(l.amount, dp)}</span>
+              </div>
+            ))}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </span>
+  )
+}
+
+const basisText = (b: string) => OWNERSHIP_BASIS_LABEL[b] ?? b
+
 // ── Column definitions ────────────────────────────────────────────────────────
 type Align = 'left' | 'right' | 'center'
 // 'core' columns are always shown. The other 3 are toggleable column groups.
@@ -142,6 +195,7 @@ const TB_ICON = 'inline-flex items-center justify-center w-7 h-7 rounded-md text
 const TB_ICON_ON = 'bg-card text-purple-600 dark:text-purple-300 shadow-sm'
 
 function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
+  const empName = new Map(employees.map(e => [e.id, e.name]))
   const fixed: Col[] = [
     { key: 'task_number', label: 'Task #', width: 76, align: 'left', group: 'core', sticky: true, render: r => r.task_number ?? '—' },
     { key: 'title', label: 'Title', width: 200, align: 'left', group: 'core', render: r => r.title },
@@ -171,7 +225,11 @@ function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
     // Ownership rewards apportioned to the task, and what is left after them.
     {
       key: 'ownership_inr', label: 'Ownership ₹', width: 104, align: 'right', group: 'profit',
-      render: r => r.ownership_inr ? inr(r.ownership_inr, dp) : <span className="text-muted-foreground/40">—</span>,
+      render: r => r.ownership_inr
+        ? <OwnershipHover amount={r.ownership_inr} dp={dp} lines={(r.ownership_by ?? []).map(x => ({
+            who: empName.get(x.employeeId) ?? 'Employee', label: ownershipSourceLabel(x), basis: basisText(x.basis), amount: x.amountInr,
+          }))} />
+        : <span className="text-muted-foreground/40">—</span>,
     },
     {
       key: 'net_profit', label: 'Net Profit ₹', width: 110, align: 'right', group: 'profit', render: r => inr(r.net_profit, dp),
@@ -225,7 +283,14 @@ function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
     })
     emp.push({
       key: `emp:${e.id}:own`, label: 'Ownership ₹', width: 92, align: 'right', group: 'employees', empId: e.id,
-      render: r => { const o = r.emp[e.id]?.own ?? 0; return o > 0 ? inr(o, dp) : <span className="text-muted-foreground/40">—</span> },
+      render: r => {
+        const c = r.emp[e.id]
+        const o = c?.own ?? 0
+        if (o <= 0) return <span className="text-muted-foreground/40">—</span>
+        return <OwnershipHover amount={o} dp={dp} lines={(c?.ownBy ?? []).map(x => ({
+          label: ownershipSourceLabel(x), basis: basisText(x.basis), amount: x.amountInr,
+        }))} />
+      },
     })
     emp.push({
       key: `emp:${e.id}:share`, label: '% of Bill', width: 80, align: 'right', group: 'employees', empId: e.id,
@@ -918,6 +983,18 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     [groupSet, displayEmployees],
   )
 
+  // Ownership on the filtered tasks, by program · rule (for the card's tooltip).
+  const ownershipByProgram = useMemo(() => {
+    const only = filters.employeeIds.length ? new Set(filters.employeeIds) : null
+    const m = new Map<string, number>()
+    for (const r of filtered) for (const x of r.ownership_by ?? []) {
+      if (only && !only.has(x.employeeId)) continue
+      const k = ownershipSourceLabel(x)
+      m.set(k, (m.get(k) ?? 0) + x.amountInr)
+    }
+    return [...m].sort((a, b) => b[1] - a[1])
+  }, [filtered, filters.employeeIds])
+
   // Narrowed to the filtered employees, so their card shows only their overhead.
   const unallocatedShown = useMemo(
     () => filters.employeeIds.length
@@ -1005,7 +1082,8 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                 label: summary.filteredOwnership !== undefined ? 'Filtered Emp Ownership' : 'Ownership on Tasks',
                 value: inr(summary.filteredOwnership ?? summary.totalOwnership, decimals ? 2 : 0),
                 sub: unallocatedTotal ? `+ ${inr(unallocatedTotal, 0)} not tied to tasks` : undefined,
-                tip: 'Ownership rewards apportioned to these tasks: billing/collection shares by each task’s billing in the period, client handling to the handled client’s tasks, planning to the planned task.'
+                tip: (ownershipByProgram.length ? `By program: ${ownershipByProgram.map(([k, v]) => `${k} ₹${Math.round(v).toLocaleString('en-IN')}`).join('; ')}. ` : '')
+                  + 'Hover any Ownership ₹ amount in the table to see where it came from. Apportioned: billing/collection shares by each task’s billing in the period, client handling to the handled client’s tasks, planning to the planned task.'
                   + (unallocatedTotal ? ` Not on any task (whole loaded period, unfiltered): ${unallocatedShown.map(u => `${u.programName} ₹${Math.round(u.amountInr).toLocaleString('en-IN')} — ${u.reason}`).join('; ')}.` : ''),
               },
               { label: 'Net Profit', value: inr(summary.totalNetProfit, decimals ? 2 : 0), accent: summary.totalNetProfit < 0 ? 'text-red-400' : 'text-emerald-400', sub: `Net margin ${pct(summary.netMarginPct)}`, tip: 'Expected profit after ownership: Billing − Employee Earnings − Ownership on Tasks. Margin is billing-weighted.' },

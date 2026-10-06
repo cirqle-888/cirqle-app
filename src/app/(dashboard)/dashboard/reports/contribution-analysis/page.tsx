@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { createAdminClient, fetchAll } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { loadOrgGraph, loadOrgMembers } from '@/lib/org/units'
-import { allocateOwnership, type AllocAward, type AllocTask, type UnallocatedLine } from '@/lib/reports/ownership-allocation'
+import { allocateOwnership, type AllocAward, type AllocTask, type UnallocatedLine, type OwnershipSource } from '@/lib/reports/ownership-allocation'
 import { resolveScope } from '@/lib/org/units'
 import {
   buildAnalysisRows, applyOwnershipAndDepartment,
@@ -190,6 +190,7 @@ export default async function ContributionAnalysisPage({
   let unallocatedOwnership: UnallocatedLine[] = []
   let ownershipByTask = new Map<string, number>()
   let ownershipByTaskEmployee = new Map<string, Map<string, number>>()
+  let ownershipSources = new Map<string, Map<string, OwnershipSource[]>>()
   try {
     let aq = supabase.from('ownership_awards')
       .select('employee_id, period_start, period_end, basis, percent, earned_inr, breakdown, program:ownership_programs(name, scope_kind, scope_id)')
@@ -198,12 +199,13 @@ export default async function ContributionAnalysisPage({
     const { data: awardRows } = await fetchAll(aq.order('id', { ascending: true }))
     type AwardRow = {
       employee_id: string; period_start: string; period_end: string; basis: string; percent: number | null; earned_inr: number
-      breakdown: { items?: AllocAward['items'] } | null
+      breakdown: { items?: AllocAward['items']; ruleLabel?: string | null } | null
       program: { name: string; scope_kind: string; scope_id: string | null } | null
     }
     const awards: AllocAward[] = ((awardRows || []) as unknown as AwardRow[]).map(a => ({
       employeeId: a.employee_id,
       programName: a.program?.name ?? 'Ownership',
+      ruleLabel: a.breakdown?.ruleLabel ?? null,
       basis: a.basis,
       scopeKind: a.program?.scope_kind ?? 'company',
       scopeId: a.program?.scope_id ?? null,
@@ -234,6 +236,7 @@ export default async function ContributionAnalysisPage({
       })
       ownershipByTask = result.byTask
       ownershipByTaskEmployee = result.byTaskEmployee
+      ownershipSources = result.sources
       unallocatedOwnership = result.unallocated
     }
   } catch {
@@ -242,7 +245,7 @@ export default async function ContributionAnalysisPage({
   applyOwnershipAndDepartment(rows, ownershipByTask, r => {
     const id = r.service_id ? categoryOfService[r.service_id] : null
     return id ? { id, name: categoryName.get(id) ?? '—' } : null
-  }, ownershipByTaskEmployee)
+  }, ownershipByTaskEmployee, ownershipSources)
 
   // ── Saved layouts (personal + system default) ──────────────────────────────
   // Priority at load time (handled client-side): personal → system → hardcoded.

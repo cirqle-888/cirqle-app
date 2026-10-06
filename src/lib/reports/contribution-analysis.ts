@@ -1,5 +1,6 @@
 import { resolveEarning, CommissionAgreement } from '@/lib/agreements/resolve-earning'
 import { resolveScope, matchesScope, descendantUnitIds, type OrgUnit, type OrgUnitScopeRow } from '@/lib/org/units'
+import type { OwnershipSource } from '@/lib/reports/ownership-allocation'
 /**
  * Contribution Analysis Report — shared types + pure helpers.
  *
@@ -28,6 +29,8 @@ export interface EmpCell {
   earn: number
   /** This employee's ownership rewards apportioned to the task (0/absent = none). */
   own?: number
+  /** Which programs / rules `own` came from. */
+  ownBy?: OwnershipSource[]
   /** how `earn` was derived: contribution (normal) | manual_override */
   source?: EarningSource
 }
@@ -79,6 +82,8 @@ export interface AnalysisRow {
   department_name: string
   /** Ownership rewards apportioned to this task (see ownership-allocation.ts). */
   ownership_inr: number
+  /** Who earned it, from which program / rule. */
+  ownership_by?: (OwnershipSource & { employeeId: string })[]
   /** Expected profit after ownership: profit − ownership_inr. */
   net_profit: number
   /** net_profit / billing_inr × 100 (0 when billing_inr = 0). */
@@ -95,12 +100,19 @@ export function applyOwnershipAndDepartment(
   department: (row: AnalysisRow) => { id: string; name: string } | null,
   /** task id → employee id → that employee's share of the ownership. */
   ownershipByTaskEmployee: Map<string, Map<string, number>> = new Map(),
+  /** task id → employee id → the programs / rules behind that share. */
+  ownershipSources: Map<string, Map<string, OwnershipSource[]>> = new Map(),
 ): void {
   for (const r of rows) {
     // An employee can earn ownership on a task they did not contribute to
     // (client handling, a billing share) — give them a cell with 0 contribution.
+    const srcByEmp = ownershipSources.get(r.task_id)
     for (const [empId, own] of ownershipByTaskEmployee.get(r.task_id) ?? []) {
-      r.emp[empId] = { ...(r.emp[empId] ?? { pct: 0, earn: 0 }), own: r2(own) }
+      const ownBy = srcByEmp?.get(empId)
+      r.emp[empId] = { ...(r.emp[empId] ?? { pct: 0, earn: 0 }), own: r2(own), ...(ownBy ? { ownBy } : {}) }
+    }
+    if (srcByEmp) {
+      r.ownership_by = [...srcByEmp].flatMap(([employeeId, list]) => list.map(x => ({ ...x, employeeId })))
     }
     const d = department(r)
     r.department_id = d?.id ?? ''
@@ -513,11 +525,11 @@ export const MATRIX_COL = {
   billing_inr: 8, commission_pool: 10, total_earnings: 11,
   company_received: 12, exp_profit: 13, exp_profit_pct: 14, actual_received: 15,
   fx_gain_loss: 16, actual_profit: 17, actual_profit_pct: 18, contributors: 19,
-  department: 20, ownership: 21, net_profit: 22, net_profit_pct: 23,
+  department: 20, ownership: 21, net_profit: 22, net_profit_pct: 23, ownership_detail: 24,
 } as const
 
 /** Fixed (non-employee) column count in the export matrix. Each employee adds EMP_SUBCOLS. */
-export const MATRIX_FIXED_COLS = 24
+export const MATRIX_FIXED_COLS = 25
 
 /** Columns per employee: Contribution %, Earnings ₹, Ownership ₹, Earnings % of Billing. */
 export const EMP_SUBCOLS = 4
@@ -533,6 +545,7 @@ export function matrixHeader(employees: EmployeeColumn[]): string[] {
     'Actual Received (INR)', 'FX Gain/Loss (INR)', 'Actual Profit (INR)', 'Actual Profit %',
     'Total Contributors',
     'Department', 'Ownership (INR)', 'Net Profit after Ownership (INR)', 'Net Margin %',
+    'Ownership Breakdown',
   ]
   for (const e of employees) {
     // Callers pass `displayEmployees`, already masked with dn(), so the CSV carries CQIDs when locked.
@@ -540,6 +553,28 @@ export function matrixHeader(employees: EmployeeColumn[]): string[] {
     header.push(`${e.name} Contribution %`, `${e.name} Earnings ₹`, `${e.name} Ownership ₹`, `${e.name} Earnings % of Billing`)
   }
   return header
+}
+
+/** Short reading of an ownership basis: "% of billing", "client handling". */
+export const OWNERSHIP_BASIS_LABEL: Record<string, string> = {
+  billing: 'share of billing',
+  collected: 'share of collections',
+  profit: 'share of profit',
+  clients_handled: 'client handling',
+  planned: 'content planning',
+}
+
+/** "Operations · Operation Manager" — the rule is left out when it repeats the program. */
+export function ownershipSourceLabel(s: OwnershipSource): string {
+  return s.rule ? `${s.program} · ${s.rule}` : s.program
+}
+
+/** "CQID001 Operations · Operation Manager ₹30; …" for one task (export column). */
+function ownershipDetailText(r: AnalysisRow, employees: EmployeeColumn[]): string {
+  const name = new Map(employees.map(e => [e.id, e.name]))
+  return (r.ownership_by ?? [])
+    .map(x => `${name.get(x.employeeId) ?? 'Employee'} ${ownershipSourceLabel(x)} ₹${x.amountInr}`)
+    .join('; ')
 }
 
 export function rowToLine(r: AnalysisRow, employees: EmployeeColumn[]): (string | number)[] {
@@ -551,6 +586,7 @@ export function rowToLine(r: AnalysisRow, employees: EmployeeColumn[]): (string 
     blankNum(r.actual_received), blankNum(r.fx_gain_loss), blankNum(r.actual_profit), blankNum(r.actual_profit_pct),
     r.contributors,
     r.department_name, r.ownership_inr, r.net_profit, r.net_profit_pct,
+    ownershipDetailText(r, employees),
   ]
   for (const e of employees) {
     const cell = r.emp[e.id]

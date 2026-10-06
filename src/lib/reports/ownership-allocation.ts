@@ -38,6 +38,8 @@ export interface AllocAward {
   /** Who the award pays. */
   employeeId?: string
   programName: string
+  /** The rule's label ("Operation Manager", "Invoicing"), when it has one. */
+  ruleLabel?: string | null
   basis: string
   scopeKind: string
   scopeId: string | null
@@ -59,11 +61,21 @@ export interface UnallocatedLine {
   reason: string
 }
 
+/** One source of an employee's ownership on a task. */
+export interface OwnershipSource {
+  program: string
+  rule: string | null
+  basis: string
+  amountInr: number
+}
+
 export interface OwnershipAllocation {
   /** task id → ownership attributed to it. */
   byTask: Map<string, number>
   /** task id → employee id → that employee's ownership on the task. */
   byTaskEmployee: Map<string, Map<string, number>>
+  /** task id → employee id → which program / rule it came from. */
+  sources: Map<string, Map<string, OwnershipSource[]>>
   /** Awards (or parts) with no task behind them. */
   unallocated: UnallocatedLine[]
 }
@@ -101,6 +113,7 @@ export function allocateOwnership(
 ): OwnershipAllocation {
   const byTask = new Map<string, number>()
   const byTaskEmployee = new Map<string, Map<string, number>>()
+  const sources = new Map<string, Map<string, OwnershipSource[]>>()
   const unallocated: UnallocatedLine[] = []
   let current: AllocAward | null = null
   const add = (id: string, amt: number) => {
@@ -111,6 +124,16 @@ export function allocateOwnership(
     const m = byTaskEmployee.get(id) ?? new Map<string, number>()
     m.set(who, r2((m.get(who) ?? 0) + amt))
     byTaskEmployee.set(id, m)
+    // Same program + rule from several months (a quarter, say) merge into one line.
+    const a = current!
+    const rule = a.ruleLabel && a.ruleLabel !== a.programName ? a.ruleLabel : null
+    const byEmp = sources.get(id) ?? new Map<string, OwnershipSource[]>()
+    const list = byEmp.get(who) ?? []
+    const line = list.find(x => x.program === a.programName && x.rule === rule && x.basis === a.basis)
+    if (line) line.amountInr = r2(line.amountInr + amt)
+    else list.push({ program: a.programName, rule, basis: a.basis, amountInr: r2(amt) })
+    byEmp.set(who, list)
+    sources.set(id, byEmp)
   }
   const miss = (a: AllocAward, amountInr: number, reason: string) => {
     if (amountInr) unallocated.push({ employeeId: a.employeeId, programName: a.programName, basis: a.basis, amountInr: r2(amountInr), reason })
@@ -175,5 +198,5 @@ export function allocateOwnership(
     spread(a, earned, pool, 'No tasks in the program’s scope for the period')
   }
 
-  return { byTask, byTaskEmployee, unallocated }
+  return { byTask, byTaskEmployee, sources, unallocated }
 }
