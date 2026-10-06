@@ -97,3 +97,15 @@ describe('periodWindow', () => {
     expect(oct.toIso).toBe('2026-11-01T00:00:00+05:30')
   })
 })
+
+describe('invoice payments are not entries', () => {
+  const base = { created_by: 'E', created_at: '2026-10-01T10:00:00+05:30', type: 'inflow', transfer_ref: null, deleted_at: null }
+  it('skips a receipt linked to an invoice, or allocated to invoices; counts the rest', () => {
+    const r = countByEmployee([
+      { ...base, invoice_id: 'inv1' },
+      { ...base, allocated: true },
+      { ...base, type: 'outflow' },
+    ], ['E'], '2026-10-01T00:00:00+05:30', '2026-11-01T00:00:00+05:30')
+    expect(r.unitsByEmployee.E).toBe(1)
+  })
+})

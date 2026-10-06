@@ -22,7 +22,7 @@
 
 import type { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAll } from '@/lib/supabase/server'
-import { periodWindow } from './entry-count'
+import { periodWindow, allocatedEntryIds, isInvoicePayment } from './entry-count'
 import type { OwnershipPeriod } from './types'
 
 type Admin = ReturnType<typeof createAdminClient>
@@ -201,10 +201,14 @@ export async function loadActivities(
     try {
       if (kind === 'cashbook_entry') {
         const { data } = await fetchAll(admin.from('cashbook_entries')
-          .select('created_by, created_at, type, amount_inr, description, entry_date')
+          .select('id, created_by, created_at, type, amount_inr, description, entry_date, invoice_id')
           .is('deleted_at', null).is('transfer_ref', null).in('created_by', employeeIds)
           .gte('created_at', fromIso).lt('created_at', toIso).order('created_at', { ascending: true }))
-        for (const r of (data ?? []) as Record<string, string | number>[]) {
+        const rows = (data ?? []) as Record<string, string | number>[]
+        const allocated = await allocatedEntryIds(admin, rows.filter(r => !r.invoice_id).map(r => String(r.id)))
+        for (const r of rows) {
+          // Invoice payments are rewarded as collections, not as entries.
+          if (isInvoicePayment({ invoice_id: r.invoice_id as string | null, allocated: allocated.has(String(r.id)) })) continue
           push(r.created_by as string, `${r.type === 'inflow' ? 'In' : 'Out'} ${inr(Number(r.amount_inr || 0))} · ${String(r.description ?? '').slice(0, 60)}`, r.created_at as string)
         }
       } else if (kind === 'invoice_followup') {

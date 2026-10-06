@@ -750,7 +750,7 @@ function RuleModal({ programId, basis, initial, employees, designations, clients
                 </div>
                 <p className="text-[11px] text-muted-foreground/70 mt-1.5">
                   {basis === 'entries'
-                    ? 'Counts cash-book rows this person typed by hand. Rows created by imports, recurring postings or recorded payments do not count.'
+                    ? 'Counts cash-book rows this person typed by hand. Invoice payments do not count (a % of collections program rewards those), nor do imports or recurring postings.'
                     : 'Counts each item this person recorded, once — the program’s chosen activities.'}
                 </p>
               </>

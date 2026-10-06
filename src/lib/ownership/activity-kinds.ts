@@ -6,7 +6,7 @@
  * (imports, Bulk Generate), so "per item" would pay for one click.
  */
 export const ACTIVITY_KINDS = {
-  cashbook_entry:   { label: 'Cash-book entries', singular: 'cash-book entry' },
+  cashbook_entry:   { label: 'Cash-book entries (not invoice payments)', singular: 'cash-book entry' },
   invoice_followup: { label: 'Invoice follow-ups logged', singular: 'follow-up' },
   request_created:  { label: 'Requests created', singular: 'request' },
   plan_item:        { label: 'Calendar items planned', singular: 'plan item' },

@@ -21,7 +21,18 @@ export interface CountableEntry {
   type: string | null
   transfer_ref: string | null
   deleted_at: string | null
+  /** Set on a receipt recorded against one invoice. */
+  invoice_id?: string | null
+  /** True when the row is allocated to one or more invoices (split receipts). */
+  allocated?: boolean
 }
+
+/**
+ * An invoice payment is collections work, already rewarded by a "% of
+ * collections" program — counting it as an entry too would pay twice for one
+ * receipt. Linked directly (invoice_id) or through allocations (a split).
+ */
+export const isInvoicePayment = (r: Pick<CountableEntry, 'invoice_id' | 'allocated'>) => !!r.invoice_id || !!r.allocated
 
 export interface EntryCountResult {
   /** employeeId → number of entries recorded. */
@@ -84,6 +95,7 @@ export function countByEmployee(
     if (row.deleted_at) continue
     if (!row.created_by || !wanted.has(row.created_by)) continue
     if (row.transfer_ref) continue
+    if (isInvoicePayment(row)) continue
 
     const at = Date.parse(row.created_at)
     if (!Number.isFinite(at) || at < from || at >= to) continue
@@ -122,7 +134,7 @@ export async function loadEntryCounts(
   const { data } = await fetchAll(
     admin
       .from('cashbook_entries')
-      .select('created_by, created_at, type, transfer_ref, deleted_at')
+      .select('id, created_by, created_at, type, transfer_ref, deleted_at, invoice_id')
       .is('deleted_at', null)
       .is('transfer_ref', null)
       .in('created_by', employeeIds)
@@ -131,5 +143,18 @@ export async function loadEntryCounts(
       .order('created_at', { ascending: true })
   )
 
-  return countByEmployee((data ?? []) as CountableEntry[], employeeIds, fromIso, toIso)
+  const rows = (data ?? []) as (CountableEntry & { id: string })[]
+  const allocated = await allocatedEntryIds(admin, rows.filter(r => !r.invoice_id).map(r => r.id))
+  return countByEmployee(rows.map(r => ({ ...r, allocated: allocated.has(r.id) })), employeeIds, fromIso, toIso)
+}
+
+/** Which of these cash-book rows are allocated to an invoice (live allocations only). */
+export async function allocatedEntryIds(admin: ReturnType<typeof createAdminClient>, ids: string[]): Promise<Set<string>> {
+  const out = new Set<string>()
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data } = await admin.from('cashbook_invoice_allocations')
+      .select('cashbook_entry_id').in('cashbook_entry_id', ids.slice(i, i + 200)).is('deleted_at', null)
+    for (const r of (data ?? []) as { cashbook_entry_id: string }[]) out.add(r.cashbook_entry_id)
+  }
+  return out
 }
