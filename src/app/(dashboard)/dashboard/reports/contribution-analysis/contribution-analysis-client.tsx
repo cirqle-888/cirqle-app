@@ -19,6 +19,7 @@ import {
   Download, Printer, FileSpreadsheet, SlidersHorizontal, X, ArrowUp, ArrowDown,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Layers, Pin, GripVertical,
   Save, RotateCcw, Building2, Check, Search, Eye, EyeOff,
+  Columns3, ArrowUpDown, ChevronsDownUp, ChevronsUpDown,
 } from 'lucide-react'
 import { savePersonalReportLayout, saveSystemReportLayout } from './actions'
 import { readSortData, trackUsage, type SortEntry } from '@/lib/hooks/use-smart-sort'
@@ -131,6 +132,14 @@ type DisplayItem =
   | { kind: 'data'; h: number; row: AnalysisRow; z: number }
   | { kind: 'group'; h: number; group: RowGroup }
   | { kind: 'subtotal'; h: number; group: RowGroup }
+
+// Toolbar styles — one height (h-8), one radius, one quiet "on" state.
+const TB_BTN = 'inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-medium border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors'
+const TB_BTN_ON = 'bg-purple-500/10 border-purple-500/30 text-purple-700 dark:text-purple-300'
+const TB_SELECT = 'h-8 pl-8 pr-7 rounded-lg text-xs font-medium border border-border bg-card text-muted-foreground hover:text-foreground appearance-none cursor-pointer focus:outline-none focus:border-purple-500/50 transition-colors'
+const TB_SEGMENT = 'flex items-center gap-0.5 p-0.5 rounded-lg border border-border bg-secondary/40'
+const TB_ICON = 'inline-flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-card transition-colors'
+const TB_ICON_ON = 'bg-card text-purple-600 dark:text-purple-300 shadow-sm'
 
 function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
   const fixed: Col[] = [
@@ -480,6 +489,16 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   })
   const [showFreezePanel, setShowFreezePanel] = useState(false)
   const freezePanelRef = useRef<HTMLDivElement>(null)
+  const [showExportMenu, setShowExportMenu] = useState(false)
+  const exportMenuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!showExportMenu) return
+    const h = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) setShowExportMenu(false)
+    }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [showExportMenu])
 
   // Persist frozen set whenever it changes.
   useEffect(() => {
@@ -1006,133 +1025,120 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
           </div>
         )}
 
-        {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setShowFilters(s => !s)}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-              showFilters || activeFilterCount ? 'gradient-bg text-white border-transparent' : 'bg-card border-border text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <SlidersHorizontal className="w-4 h-4" />
-            Filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
-          </button>
-          {activeFilterCount > 0 && (
-            <button onClick={() => { setDateExplicitAll(true); setFilters(EMPTY_FILTERS) }} className="flex items-center gap-1 px-2.5 py-2 rounded-lg text-sm text-red-400 hover:bg-secondary">
-              <X className="w-3.5 h-3.5" /> Clear
-            </button>
-          )}
-          <div className="flex-1" />
-          <button
-            onClick={() => setShowSummary(s => !s)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-border bg-card text-muted-foreground hover:text-foreground transition-colors"
-          >
-            {showSummary ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            {showSummary ? 'Hide Summary' : 'Show Summary'}
-          </button>
-
-          {/* Search */}
-          <div className="flex items-center gap-1.5 bg-secondary border border-border rounded-lg px-2.5 h-[34px] min-w-[160px] max-w-[220px] flex-1 sm:flex-none">
-            <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-            <input
-              value={searchQ}
-              onChange={e => setSearchQ(e.target.value)}
-              placeholder="Search title, client…"
-              className="bg-transparent text-xs outline-none flex-1 placeholder:text-muted-foreground/50"
-            />
-            {searchQ && <button onClick={() => setSearchQ('')} className="text-muted-foreground hover:text-foreground shrink-0"><X className="w-3 h-3" /></button>}
-          </div>
-
-          {/* Quick sort */}
-          <div className="relative flex items-center">
-            <select
-              value={quickSort}
-              onChange={e => setQuickSort(e.target.value as typeof quickSort)}
-              className={`h-[34px] pl-2.5 pr-6 rounded-lg text-xs font-medium border appearance-none cursor-pointer transition-colors focus:outline-none ${
-                quickSort ? 'bg-violet-500/15 border-violet-500/40 text-violet-700 dark:text-violet-300' : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <option value="">Sort by</option>
-              <option value="date_desc">Newest first</option>
-              <option value="date_asc">Oldest first</option>
-              <option value="amount_desc">Amount ↓</option>
-              <option value="client">Client A→Z</option>
-            </select>
-            <ChevronDown className="w-3 h-3 absolute right-2 pointer-events-none text-muted-foreground" />
-            {quickSort && (
-              <button onClick={() => setQuickSort('')} className="ml-1 text-violet-400 hover:text-violet-700 dark:text-violet-300">
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          <div className="text-sm text-muted-foreground ml-1">
-            <span className="font-semibold text-foreground">{fmt(sorted.length, 0)}</span> of {fmt(rows.length, 0)} tasks
-          </div>
-
-          {/* Column group toggles — show/hide whole blocks of columns */}
-          <div className="flex flex-wrap items-center gap-1 ml-1 pl-2 border-l border-border">
-            <span className="text-[11px] text-muted-foreground mr-0.5">Columns:</span>
-            {ALL_GROUPS.map(gp => {
-              const on = groupSet.has(gp)
-              return (
-                <button
-                  key={gp}
-                  onClick={() => setGroups(prev => prev.includes(gp) ? prev.filter(x => x !== gp) : [...prev, gp])}
-                  className={`px-2 py-1 rounded-md text-[11px] font-medium border transition-colors ${
-                    on ? 'gradient-bg text-white border-transparent' : 'bg-card border-border text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {GROUP_LABELS[gp]}
+        {/* Toolbar — row 1: find · filter · arrange · view · export; row 2: column blocks */}
+        <div className="bg-card border border-border rounded-xl">
+          <div className="flex flex-wrap items-center gap-2 p-2">
+            {/* Search */}
+            <div className="flex items-center gap-2 h-8 px-2.5 flex-1 min-w-[180px] max-w-xs rounded-lg bg-secondary/60 border border-border focus-within:border-purple-500/50 transition-colors">
+              <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              <input
+                value={searchQ}
+                onChange={e => setSearchQ(e.target.value)}
+                placeholder="Search title or client"
+                className="bg-transparent text-xs outline-none flex-1 min-w-0 placeholder:text-muted-foreground/60"
+              />
+              {searchQ && (
+                <button onClick={() => setSearchQ('')} aria-label="Clear search" className="text-muted-foreground hover:text-foreground shrink-0">
+                  <X className="w-3 h-3" />
                 </button>
-              )
-            })}
-          </div>
+              )}
+            </div>
 
-          {/* Group by — partition rows into collapsible, subtotaled sections */}
-          <div className="flex items-center gap-1 ml-1 pl-2 border-l border-border">
-            <Layers className="w-3.5 h-3.5 text-muted-foreground" />
-            <span className="text-[11px] text-muted-foreground">Group:</span>
-            <select
-              value={groupKey}
-              onChange={e => { setGroupKey(e.target.value as GroupKey); setCollapsed(new Set()) }}
-              className="bg-secondary border border-border rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-purple-500"
-            >
-              {GROUP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-            {groupKey !== 'none' && (
-              <>
-                <button onClick={collapseAll} title="Collapse all groups" className="px-1.5 py-1 rounded-md text-[11px] leading-none border border-border text-muted-foreground hover:text-foreground">−</button>
-                <button onClick={expandAll} title="Expand all groups" className="px-1.5 py-1 rounded-md text-[11px] leading-none border border-border text-muted-foreground hover:text-foreground">+</button>
-              </>
-            )}
-          </div>
-
-          <div className="ml-auto flex items-center gap-2">
+            {/* Filters */}
             <button
-              onClick={() => setDecimals(d => !d)}
-              title={decimals ? 'Showing 2 decimals — click for whole numbers' : 'Showing whole numbers — click for 2 decimals'}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                decimals ? 'gradient-bg text-white border-transparent' : 'bg-card border-border text-muted-foreground hover:text-foreground'
-              }`}
+              onClick={() => setShowFilters(s => !s)}
+              className={`${TB_BTN} ${showFilters || activeFilterCount ? TB_BTN_ON : ''}`}
             >
-              <span className="tabular-nums text-xs">.00</span> Decimals
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              Filters
+              {activeFilterCount > 0 && (
+                <span className="min-w-[16px] h-4 px-1 rounded-full bg-purple-500 text-white text-[10px] font-semibold leading-4 text-center">{activeFilterCount}</span>
+              )}
             </button>
-
-            {/* ── Column order panel ── */}
-            <div className="relative" ref={colOrderPanelRef}>
+            {activeFilterCount > 0 && (
               <button
-                onClick={() => setShowColOrderPanel(v => !v)}
-                title="Reorder columns"
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                  showColOrderPanel
-                    ? 'bg-foreground/10 border-foreground/20 text-foreground'
-                    : 'bg-card border-border text-muted-foreground hover:text-foreground'
-                }`}
+                onClick={() => { setDateExplicitAll(true); setFilters(EMPTY_FILTERS) }}
+                className="h-8 px-2 rounded-lg text-xs text-muted-foreground hover:text-red-500 transition-colors"
               >
-                <GripVertical className="w-4 h-4" />
-                Columns
+                Clear all
               </button>
+            )}
+
+            <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap px-1">
+              <span className="font-semibold text-foreground">{fmt(sorted.length, 0)}</span> of {fmt(rows.length, 0)} tasks
+            </span>
+
+            <div className="flex-1" />
+
+            {/* Group by */}
+            <div className="relative flex items-center">
+              <Layers className="w-3.5 h-3.5 absolute left-2.5 pointer-events-none text-muted-foreground" />
+              <select
+                value={groupKey}
+                onChange={e => { setGroupKey(e.target.value as GroupKey); setCollapsed(new Set()) }}
+                aria-label="Group rows"
+                className={`${TB_SELECT} ${groupKey !== 'none' ? TB_BTN_ON : ''}`}
+              >
+                {GROUP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.value === 'none' ? 'No grouping' : `Group: ${o.label}`}</option>)}
+              </select>
+              <ChevronDown className="w-3 h-3 absolute right-2 pointer-events-none text-muted-foreground" />
+            </div>
+            {groupKey !== 'none' && (
+              <div className={TB_SEGMENT}>
+                <button onClick={collapseAll} title="Collapse all groups" aria-label="Collapse all groups" className={TB_ICON}><ChevronsDownUp className="w-3.5 h-3.5" /></button>
+                <button onClick={expandAll} title="Expand all groups" aria-label="Expand all groups" className={TB_ICON}><ChevronsUpDown className="w-3.5 h-3.5" /></button>
+              </div>
+            )}
+
+            {/* Quick sort */}
+            <div className="relative flex items-center">
+              <ArrowUpDown className="w-3.5 h-3.5 absolute left-2.5 pointer-events-none text-muted-foreground" />
+              <select
+                value={quickSort}
+                onChange={e => setQuickSort(e.target.value as typeof quickSort)}
+                aria-label="Sort rows"
+                className={`${TB_SELECT} ${quickSort ? TB_BTN_ON : ''}`}
+              >
+                <option value="">Sort: Default</option>
+                <option value="date_desc">Sort: Newest first</option>
+                <option value="date_asc">Sort: Oldest first</option>
+                <option value="amount_desc">Sort: Amount ↓</option>
+                <option value="client">Sort: Client A→Z</option>
+              </select>
+              <ChevronDown className="w-3 h-3 absolute right-2 pointer-events-none text-muted-foreground" />
+            </div>
+
+            <div className="hidden sm:block h-5 w-px bg-border mx-0.5" />
+
+            {/* View controls */}
+            <div className={TB_SEGMENT}>
+              <button
+                onClick={() => setShowSummary(s => !s)}
+                title={showSummary ? 'Hide summary cards' : 'Show summary cards'}
+                aria-label={showSummary ? 'Hide summary cards' : 'Show summary cards'}
+                className={TB_ICON}
+              >
+                {showSummary ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+              </button>
+              <button
+                onClick={() => setDecimals(d => !d)}
+                title={decimals ? 'Showing 2 decimals — click for whole numbers' : 'Showing whole numbers — click for 2 decimals'}
+                aria-label="Toggle decimals"
+                className={`${TB_ICON} ${decimals ? TB_ICON_ON : ''}`}
+              >
+                <span className="text-[11px] font-semibold tabular-nums leading-none">.00</span>
+              </button>
+
+              {/* ── Column order panel ── */}
+              <div className="relative" ref={colOrderPanelRef}>
+                <button
+                  onClick={() => setShowColOrderPanel(v => !v)}
+                  title="Column order & saved layouts"
+                  aria-label="Column order and saved layouts"
+                  className={`${TB_ICON} ${showColOrderPanel ? TB_ICON_ON : ''}`}
+                >
+                  <Columns3 className="w-3.5 h-3.5" />
+                </button>
               {showColOrderPanel && (
                 <div className="absolute top-full right-0 mt-1.5 z-50 bg-card border border-border rounded-xl shadow-2xl p-3 min-w-[240px]">
                   <div className="flex items-center justify-between mb-2 px-1">
@@ -1249,22 +1255,19 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                   </div>
                 </div>
               )}
-            </div>
+              </div>
 
-            {/* ── Freeze columns panel ── */}
-            <div className="relative" ref={freezePanelRef}>
-              <button
-                onClick={() => setShowFreezePanel(v => !v)}
-                title="Manage frozen columns"
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                  frozenCols.size > 0
-                    ? 'gradient-bg text-white border-transparent'
-                    : 'bg-card border-border text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <Pin className="w-4 h-4" />
-                Freeze{frozenCols.size > 0 ? ` (${frozenCols.size})` : ''}
-              </button>
+              {/* ── Freeze columns panel ── */}
+              <div className="relative" ref={freezePanelRef}>
+                <button
+                  onClick={() => setShowFreezePanel(v => !v)}
+                  title={frozenCols.size ? `${frozenCols.size} frozen column${frozenCols.size === 1 ? '' : 's'}` : 'Freeze columns'}
+                  aria-label="Freeze columns"
+                  className={`${TB_ICON} w-auto px-2 gap-1 ${showFreezePanel ? TB_ICON_ON : ''}`}
+                >
+                  <Pin className="w-3.5 h-3.5" />
+                  {frozenCols.size > 0 && <span className="text-[11px] tabular-nums leading-none">{frozenCols.size}</span>}
+                </button>
               {showFreezePanel && (
                 <div className="absolute top-full right-0 mt-1.5 z-50 bg-card border border-border rounded-xl shadow-2xl p-3 min-w-[220px]">
                   <div className="flex items-center justify-between mb-2 px-1">
@@ -1309,17 +1312,62 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                   </p>
                 </div>
               )}
+              </div>
             </div>
 
-            <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm bg-card border border-border text-muted-foreground hover:text-foreground" title="Export CSV">
-              <Download className="w-4 h-4" /> CSV
-            </button>
-            <button onClick={exportXLSX} disabled={exporting} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm bg-card border border-border text-muted-foreground hover:text-foreground disabled:opacity-50" title="Export Excel">
-              <FileSpreadsheet className="w-4 h-4" /> {exporting ? '…' : 'Excel'}
-            </button>
-            <button onClick={printView} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm bg-card border border-border text-muted-foreground hover:text-foreground" title="Print">
-              <Printer className="w-4 h-4" /> Print
-            </button>
+            {/* Export */}
+            <div className="relative" ref={exportMenuRef}>
+              <button onClick={() => setShowExportMenu(v => !v)} className={`${TB_BTN} ${showExportMenu ? TB_BTN_ON : ''}`}>
+                <Download className="w-3.5 h-3.5" />
+                {exporting ? 'Exporting…' : 'Export'}
+                <ChevronDown className="w-3 h-3 opacity-60" />
+              </button>
+              {showExportMenu && (
+                <div className="absolute top-full right-0 mt-1.5 z-50 w-48 bg-card border border-border rounded-xl shadow-2xl p-1">
+                  {([
+                    { label: 'Excel (.xlsx)', icon: FileSpreadsheet, run: exportXLSX, disabled: exporting },
+                    { label: 'CSV', icon: Download, run: exportCSV, disabled: false },
+                    { label: 'Print', icon: Printer, run: printView, disabled: false },
+                  ] as const).map(item => (
+                    <button
+                      key={item.label}
+                      disabled={item.disabled}
+                      onClick={() => { setShowExportMenu(false); item.run() }}
+                      className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs text-left hover:bg-secondary/70 disabled:opacity-50 transition-colors"
+                    >
+                      <item.icon className="w-3.5 h-3.5 text-muted-foreground" />
+                      {item.label}
+                    </button>
+                  ))}
+                  <p className="px-2.5 pt-1.5 pb-1 mt-1 border-t border-border text-[10px] text-muted-foreground/70">
+                    Exports what is on screen — filters, sort and grouping applied.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Column blocks */}
+          <div className="flex flex-wrap items-center gap-1 px-3 py-2 border-t border-border">
+            <span className="text-[11px] font-medium text-muted-foreground mr-1.5">Columns</span>
+            {ALL_GROUPS.map(gp => {
+              const on = groupSet.has(gp)
+              return (
+                <button
+                  key={gp}
+                  onClick={() => setGroups(prev => prev.includes(gp) ? prev.filter(x => x !== gp) : [...prev, gp])}
+                  aria-pressed={on}
+                  className={`inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-medium border transition-colors ${
+                    on
+                      ? 'bg-purple-500/10 border-purple-500/30 text-purple-700 dark:text-purple-300'
+                      : 'border-transparent text-muted-foreground hover:bg-secondary hover:text-foreground'
+                  }`}
+                >
+                  {on && <Check className="w-3 h-3" />}
+                  {GROUP_LABELS[gp]}
+                </button>
+              )
+            })}
           </div>
         </div>
 
