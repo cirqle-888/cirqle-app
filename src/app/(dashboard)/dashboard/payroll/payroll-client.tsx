@@ -2153,9 +2153,15 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                           const b = a.breakdown as {
                             paidCommissionInr?: number; currentEarningsInr?: number
                             removedTasks?: { taskNumber: number | null; title: string | null; taskDate: string | null; earningsInr: number; deletedAt?: string | null }[]
+                            changedTasks?: { taskNumber: number | null; title: string | null; taskDate: string | null; fromInr: number; toInr: number; changedByCqid: string | null; changedAt: string }[]
                             unexplainedInr?: number
                           }
                           const removed = b.removedTasks ?? []
+                          // Tasks whose share or price changed after the month was
+                          // paid, read from the audit trail. Staff-only: the page
+                          // withholds this from the employee it is about.
+                          const changed = b.changedTasks ?? []
+                          const changedNet = Math.round(changed.reduce((sum, c) => sum + (c.toInr - c.fromInr), 0) * 100) / 100
                           // Older rows predate lineage capture. Say that
                           // plainly rather than rendering an empty "why".
                           const hasLineage = 'unexplainedInr' in b
@@ -2197,17 +2203,46 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                                     ))}
                                   </>
                                 )}
+                                {changed.length > 0 && (
+                                  <>
+                                    <p className="text-[10px] uppercase text-muted-foreground/70 pt-1.5">Tasks edited after that month was paid</p>
+                                    {changed.map((c, i) => {
+                                      const d = c.toInr - c.fromInr
+                                      return (
+                                        <div key={i} className="text-[11px]">
+                                          <div className="flex items-start gap-2">
+                                            <span className="text-muted-foreground/60 tabular-nums shrink-0">{c.taskNumber != null ? `#${c.taskNumber}` : '—'}</span>
+                                            <span className="flex-1 min-w-0 truncate">{c.title || 'Untitled task'}</span>
+                                            <span className="text-muted-foreground tabular-nums shrink-0">{money(c.fromInr)} → {money(c.toInr)}</span>
+                                            <span className={`tabular-nums shrink-0 w-14 text-right ${d < 0 ? 'text-red-400/80' : 'text-green-400/80'}`}>{d < 0 ? '−' : '+'}{money(d)}</span>
+                                          </div>
+                                          <p className="text-[10px] text-muted-foreground/60 pl-7">
+                                            {c.taskDate ?? ''}{c.taskDate ? ' · ' : ''}contributions edited{c.changedByCqid ? ` by ${c.changedByCqid}` : ''} on {c.changedAt.slice(0, 10)}
+                                          </p>
+                                        </div>
+                                      )
+                                    })}
+                                  </>
+                                )}
                                 {!hasLineage ? (
-                                  <p className="text-[11px] text-muted-foreground/70 pt-1.5">
-                                    This correction predates task-level tracing, so the tasks behind it were not recorded.
-                                  </p>
+                                  changed.length > 0 ? (
+                                    <p className="text-[11px] text-muted-foreground/70 pt-1.5">
+                                      {Math.abs(changedNet - a.amount_inr) < 1
+                                        ? `These edits account for the full ${money(a.amount_inr)}.`
+                                        : `These edits account for ${money(changedNet)} of ${money(a.amount_inr)}; the rest was not recorded.`}
+                                    </p>
+                                  ) : (
+                                    <p className="text-[11px] text-muted-foreground/70 pt-1.5">
+                                      This correction predates task-level tracing, so the tasks behind it were not recorded.
+                                    </p>
+                                  )
                                 ) : Math.abs(unexplained) >= 1 && (
                                   <p className="text-[11px] text-amber-400/80 pt-1.5">
                                     {money(unexplained)} is not explained by a removed task — most often a task that was
                                     deleted permanently (which erases its score) or one that was re-priced or re-scored.
                                   </p>
                                 )}
-                                {hasLineage && removed.length === 0 && Math.abs(unexplained) < 1 && (
+                                {hasLineage && removed.length === 0 && changed.length === 0 && Math.abs(unexplained) < 1 && (
                                   <p className="text-[11px] text-muted-foreground/70 pt-1.5">
                                     No removed tasks recorded — the month&rsquo;s earnings changed by re-pricing or re-scoring.
                                   </p>

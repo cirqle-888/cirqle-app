@@ -34,6 +34,7 @@ import { monthBounds } from '@/lib/finance/profit'
 
 // Canonical money rounding — a local Math.round(n * 100) / 100 disagrees at
 // the .xx5 midpoints (1.005 -> 1.00 instead of 1.01). See currency.ts round2.
+import { loadAdjustmentChanges, netEffect, type AdjustmentChange } from './adjustment-changes'
 import { round2 as r2 } from '@/lib/calculations/currency'
 
 /** Ignore sub-rupee drift — rounding noise is not an adjustment. */
@@ -270,6 +271,20 @@ export async function recordAdjustments(
     (settled || []).map((r: { employee_id: string }) => r.employee_id),
   )
 
+  // Which contribution edits caused each correction, from the audit trail —
+  // only edits made after that month's payslip was paid count. Best-effort:
+  // a failure here leaves the adjustment recorded, just without this detail.
+  const { data: paidRows } = await admin
+    .from('payroll').select('employee_id, paid_date')
+    .eq('month', month).eq('year', year).eq('status', 'paid')
+  const paidOn = new Map((paidRows || []).map((r: { employee_id: string; paid_date: string | null }) => [r.employee_id, r.paid_date]))
+  const changesBy = new Map<string, AdjustmentChange[]>()
+  for (const d of detected) {
+    if (settledEmployees.has(d.employeeId)) continue
+    const since = paidOn.get(d.employeeId)
+    changesBy.set(d.employeeId, await loadAdjustmentChanges(admin, d.employeeId, month, year, since ? `${since}T00:00:00Z` : undefined))
+  }
+
   const rows = detected
     .filter(d => !settledEmployees.has(d.employeeId))
     .map(d => ({
@@ -286,8 +301,11 @@ export async function recordAdjustments(
         ...(d.lineage ? {
           tasks: d.lineage.tasks,
           removedTasks: d.lineage.removedTasks,
-          unexplainedInr: d.lineage.unexplainedInr,
+          // Edits to contributions explain part of the difference; what is
+          // left is what nothing recorded accounts for.
+          unexplainedInr: Math.round((d.lineage.unexplainedInr - netEffect(changesBy.get(d.employeeId) ?? [])) * 100) / 100,
         } : {}),
+        changedTasks: changesBy.get(d.employeeId) ?? [],
       },
       detected_at: new Date().toISOString(),
     }))

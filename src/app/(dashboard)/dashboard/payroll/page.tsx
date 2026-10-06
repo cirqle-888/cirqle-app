@@ -7,6 +7,7 @@ import {
   stripScoreListEarnings,
 } from '@/lib/permissions/strip'
 import PayrollClient from './payroll-client'
+import { loadAdjustmentChanges, forViewer, type AdjustmentChange } from '@/lib/payroll/adjustment-changes'
 
 export const dynamic = 'force-dynamic'
 
@@ -160,6 +161,24 @@ export default async function PayrollPage() {
 
   // Adjustments are payroll money, so they follow the same rule as awards: a
   // viewer without payroll.view_amounts gets none rather than a stripped shell.
+  // Task-level "which edits caused this" — read from the audit trail for every
+  // correction, including ones recorded before it was captured. Admin/payroll
+  // eyes only: the employee a correction is about never receives it.
+  const paidDates = new Map((payrollRes.data || []).map((p: { employee_id: string; month: number; year: number; status: string; paid_date: string | null }) =>
+    [`${p.employee_id}|${p.month}|${p.year}`, p.status === 'paid' ? p.paid_date : null]))
+  const changesByAdj = new Map<string, AdjustmentChange[]>()
+  if (vis.payrollAmounts) {
+    for (const a of (adjustmentsRes.data || []) as Record<string, unknown>[]) {
+      const stored = (a.breakdown as { changedTasks?: AdjustmentChange[] } | null)?.changedTasks
+      const found = stored ?? await loadAdjustmentChanges(
+        supabase, String(a.employee_id), Number(a.source_month), Number(a.source_year),
+        (() => { const d = paidDates.get(`${a.employee_id}|${a.source_month}|${a.source_year}`); return d ? `${d}T00:00:00Z` : undefined })(),
+      )
+      changesByAdj.set(String(a.id), forViewer(found, {
+        viewerEmployeeId: me?.employeeId ?? null, subjectEmployeeId: String(a.employee_id), viewerIsAdmin: me?.isAdmin ?? false,
+      }))
+    }
+  }
   const payrollAdjustments = vis.payrollAmounts
     ? (adjustmentsRes.data || []).map((a: Record<string, unknown>) => ({
         id:            a.id as string,
@@ -172,7 +191,7 @@ export default async function PayrollPage() {
         settled_month: a.settled_month == null ? null : Number(a.settled_month),
         settled_year:  a.settled_year == null ? null : Number(a.settled_year),
         settled_at:    (a.settled_at as string) ?? null,
-        breakdown:     (a.breakdown as Record<string, unknown>) ?? {},
+        breakdown:     { ...((a.breakdown as Record<string, unknown>) ?? {}), changedTasks: changesByAdj.get(String(a.id)) ?? [] },
       }))
     : []
 
