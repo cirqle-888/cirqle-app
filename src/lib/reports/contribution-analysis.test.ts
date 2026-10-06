@@ -9,8 +9,10 @@
 import { describe, it, expect } from 'vitest'
 import {
   groupRows, subtotalLine, toMatrixGrouped, matrixHeader, MATRIX_COL, MATRIX_FIXED_COLS,
+  applyFilters, buildFilterContext, EMPTY_FILTERS,
   type AnalysisRow, type EmployeeColumn,
 } from './contribution-analysis'
+import type { OrgUnit } from '@/lib/org/units'
 
 const EMPLOYEES: EmployeeColumn[] = [
   { id: 'e1', name: 'Alice', cqid: 'CQID001' },
@@ -156,5 +158,42 @@ describe('toMatrixGrouped', () => {
     expect(m[5][0]).toBe('▸ Beta')
     expect(String(m[7][0])).toBe('Subtotal — Beta (1)')
     expect(m[7][MATRIX_COL.billing_inr]).toBe(500)
+  })
+})
+
+
+describe('department and team/region filters', () => {
+  const unit = (id: string, type: OrgUnit['type'], parentId: string | null = null): OrgUnit =>
+    ({ id, name: id, type, parentId, isActive: true })
+  const rows = [
+    mkRow({ task_id: 't1', client_id: 'kochi-client', service_id: 'logo' }),
+    mkRow({ task_id: 't2', client_id: 'other', service_id: 'video' }),
+    mkRow({ task_id: 't3', client_id: 'other', service_id: 'logo', emp: { e2: { pct: 50, earn: 10 } } }),
+  ]
+  const ctx = buildFilterContext({
+    categoryOfService: { logo: 'design', video: 'film' },
+    units: [unit('region', 'region'), unit('team', 'team', 'region'), unit('empty', 'team')],
+    scopes: [{ unitId: 'region', clientId: 'kochi-client', serviceCategoryId: null, serviceId: null }],
+    members: [{ unitId: 'team', employeeId: 'e2' }],
+  })
+  const ids = (f: Partial<typeof EMPTY_FILTERS>) => applyFilters(rows, { ...EMPTY_FILTERS, ...f }, ctx).map(r => r.task_id)
+
+  it('department filters by the task’s service category', () => {
+    expect(ids({ categoryIds: ['design'] })).toEqual(['t1', 't3'])
+    expect(ids({ categoryIds: ['film'] })).toEqual(['t2'])
+    expect(ids({ categoryIds: ['design', 'film'] })).toEqual(['t1', 't2', 't3'])
+  })
+
+  it('a unit owns its mapped revenue and what its members worked on', () => {
+    expect(ids({ unitIds: ['region'] })).toEqual(['t1', 't3'])   // client scope + member e2 via the sub-team
+    expect(ids({ unitIds: ['team'] })).toEqual(['t3'])           // only e2's task
+  })
+
+  it('an unmapped, memberless unit matches nothing — never everything', () => {
+    expect(ids({ unitIds: ['empty'] })).toEqual([])
+  })
+
+  it('no selection leaves every task in', () => {
+    expect(ids({})).toEqual(['t1', 't2', 't3'])
   })
 })

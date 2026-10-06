@@ -1,4 +1,5 @@
 import { resolveEarning, CommissionAgreement } from '@/lib/agreements/resolve-earning'
+import { resolveScope, matchesScope, descendantUnitIds, type OrgUnit, type OrgUnitScopeRow } from '@/lib/org/units'
 /**
  * Contribution Analysis Report — shared types + pure helpers.
  *
@@ -240,14 +241,63 @@ export interface Filters {
   serviceIds: string[]
   employeeIds: string[]
   statuses: string[]
+  /** Departments — the service category (discipline) a task was sold under. */
+  categoryIds: string[]
+  /** Org units (team, region, branch, department, client group). */
+  unitIds: string[]
 }
 
 export const EMPTY_FILTERS: Filters = {
   date: null,
   clientIds: [], serviceIds: [], employeeIds: [], statuses: [],
+  categoryIds: [], unitIds: [],
 }
 
-export function applyFilters(rows: AnalysisRow[], f: Filters): AnalysisRow[] {
+/**
+ * What the department and team/region filters need beyond the row itself.
+ * Built once per page load (buildFilterContext) and passed to applyFilters.
+ */
+export interface FilterContext {
+  /** serviceId → service category id (the "department"). */
+  categoryOfService: Record<string, string | null>
+  /** unitId → does this task belong to the unit. */
+  unitMatchers: Record<string, (row: AnalysisRow) => boolean>
+}
+
+/**
+ * A task belongs to an org unit when its revenue is in the unit's scope
+ * (client / service / category mappings, sub-units included — the same rule
+ * ownership programs use) OR someone in the unit, or in a sub-unit,
+ * contributed to it. The second arm is what makes a team that has people but
+ * no revenue mapping still filterable; an unmapped, memberless unit matches
+ * nothing, never everything.
+ */
+export function buildFilterContext(input: {
+  categoryOfService: Record<string, string | null>
+  units: OrgUnit[]
+  scopes: OrgUnitScopeRow[]
+  members: { unitId: string; employeeId: string }[]
+}): FilterContext {
+  const unitMatchers: FilterContext['unitMatchers'] = {}
+  for (const unit of input.units) {
+    const scope = resolveScope(input.units, input.scopes, unit.id)
+    const within = descendantUnitIds(input.units, unit.id)
+    const memberIds = [...new Set(input.members.filter(m => within.has(m.unitId)).map(m => m.employeeId))]
+    unitMatchers[unit.id] = row =>
+      matchesScope(scope, {
+        clientId: row.client_id || null,
+        serviceId: row.service_id || null,
+        serviceCategoryId: input.categoryOfService[row.service_id] ?? null,
+      }) || memberIds.some(id => (row.emp[id]?.pct ?? 0) > 0)
+  }
+  return { categoryOfService: input.categoryOfService, unitMatchers }
+}
+
+export function applyFilters(rows: AnalysisRow[], f: Filters, ctx?: FilterContext): AnalysisRow[] {
+  const categorySet = f.categoryIds.length ? new Set(f.categoryIds) : null
+  const unitMatchers = ctx && f.unitIds.length
+    ? f.unitIds.map(id => ctx.unitMatchers[id]).filter(Boolean)
+    : null
   const clientSet = f.clientIds.length ? new Set(f.clientIds) : null
   const serviceSet = f.serviceIds.length ? new Set(f.serviceIds) : null
   const statusSet = f.statuses.length ? new Set(f.statuses) : null
@@ -256,6 +306,11 @@ export function applyFilters(rows: AnalysisRow[], f: Filters): AnalysisRow[] {
     if (clientSet && !clientSet.has(row.client_id)) return false
     if (serviceSet && !serviceSet.has(row.service_id)) return false
     if (statusSet && !statusSet.has(row.status)) return false
+    if (categorySet) {
+      const cat = ctx?.categoryOfService[row.service_id]
+      if (!cat || !categorySet.has(cat)) return false
+    }
+    if (unitMatchers && !unitMatchers.some(match => match(row))) return false
     if (f.employeeIds && f.employeeIds.length > 0) {
       if (!f.employeeIds.some(empId => row.emp[empId]?.pct > 0)) return false
     }

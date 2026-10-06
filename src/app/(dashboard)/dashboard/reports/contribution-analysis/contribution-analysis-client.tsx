@@ -10,9 +10,10 @@ import { usePrivacy } from '@/contexts/privacy-context'
 import {
   applyFilters, sortRows, computeSummary, toMatrix, toMatrixGrouped, matrixToCSV, empShare,
   groupRows, GROUP_OPTIONS,
-  EMPTY_FILTERS, type Filters, type AnalysisRow, type EmployeeColumn,
+  EMPTY_FILTERS, buildFilterContext, type Filters, type AnalysisRow, type EmployeeColumn,
   type SortKey, type SortDir, type GroupKey, type RowGroup, type Summary,
 } from '@/lib/reports/contribution-analysis'
+import { ORG_UNIT_TYPE_LABEL, type OrgUnit, type OrgUnitScopeRow } from '@/lib/org/units'
 import {
   Download, Printer, FileSpreadsheet, SlidersHorizontal, X, ArrowUp, ArrowDown,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Layers, Pin, GripVertical,
@@ -39,6 +40,13 @@ interface Props {
   employees: EmployeeColumn[]
   clients: { id: string; name: string }[]
   services: { id: string; name: string }[]
+  /** Departments: service categories. */
+  categories: { id: string; name: string }[]
+  categoryOfService: Record<string, string | null>
+  /** Teams, regions, branches… and what they own / who is in them. */
+  orgUnits: OrgUnit[]
+  orgUnitScopes: OrgUnitScopeRow[]
+  orgUnitMembers: { unitId: string; employeeId: string }[]
   isAdmin: boolean
   personalLayout: LayoutConfig | null
   systemLayout: LayoutConfig | null
@@ -389,6 +397,7 @@ function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: Sort
       date: (function() { const d = g('date'); try { return d ? JSON.parse(d) : null } catch { return null } })(),
       clientIds: arr('clients'), serviceIds: arr('services'),
       employeeIds: arr('emp'), statuses: arr('status'),
+      categoryIds: arr('dept'), unitIds: arr('unit'),
     },
     sortKey: (g('sort') || 'task_date') as SortKey,
     sortDir: (g('dir') === 'asc' ? 'asc' : 'desc'),
@@ -400,7 +409,7 @@ function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: Sort
   }
 }
 
-export default function ContributionAnalysisClient({ rows, employees, clients, services, isAdmin, personalLayout, systemLayout, dataWindowLabel = null }: Props) {
+export default function ContributionAnalysisClient({ rows, employees, clients, services, categories, categoryOfService, orgUnits, orgUnitScopes, orgUnitMembers, isAdmin, personalLayout, systemLayout, dataWindowLabel = null }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -662,6 +671,8 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     if (f.serviceIds.length) p.set('services', f.serviceIds.join(','))
     if (f.employeeIds.length) p.set('emp', f.employeeIds.join(','))
     if (f.statuses.length) p.set('status', f.statuses.join(','))
+    if (f.categoryIds.length) p.set('dept', f.categoryIds.join(','))
+    if (f.unitIds.length) p.set('unit', f.unitIds.join(','))
     if (sortKey !== 'task_date') p.set('sort', sortKey)
     if (sortDir !== 'desc') p.set('dir', sortDir)
     if (pageSize !== 100) p.set('size', String(pageSize))
@@ -673,12 +684,18 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     if (qs !== searchParams.toString()) router.replace(`${pathname}${qs ? '?' + qs : ''}`, { scroll: false })
   }, [filters, dateExplicitAll, sortKey, sortDir, pageSize, decimals, groups, groupKey, pathname, router, searchParams])
 
+  // Department (service category) and team/region (org unit) membership.
+  const filterCtx = useMemo(() => buildFilterContext({
+    categoryOfService, units: orgUnits, scopes: orgUnitScopes, members: orgUnitMembers,
+  }), [categoryOfService, orgUnits, orgUnitScopes, orgUnitMembers])
+  const unitOptions = useMemo(() => orgUnits.map(u => ({ id: u.id, name: `${u.name} · ${ORG_UNIT_TYPE_LABEL[u.type]}` })), [orgUnits])
+
   // ── Pipeline: filter → sort ───────────────────────────────────────────────────
   const filtered = useMemo(() => {
-    const f = applyFilters(rows, filters)
+    const f = applyFilters(rows, filters, filterCtx)
     if (filters.date) return f.filter(r => matchesDateFilter(r.task_date, filters.date))
     return f
-  }, [rows, filters])
+  }, [rows, filters, filterCtx])
   const baseSort = useMemo(() => sortRows(filtered, sortKey, sortDir), [filtered, sortKey, sortDir])
   const sorted = useMemo(() => {
     let s = baseSort
@@ -784,6 +801,8 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     if (f.serviceIds.length) n++
     if (f.employeeIds?.length > 0) n++
     if (f.statuses.length) n++
+    if (f.categoryIds.length) n++
+    if (f.unitIds.length) n++
     return n
   }, [filters])
 
@@ -1268,6 +1287,15 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
               </div>
               <MultiSelect label="Clients" options={scopedClients} selected={filters.clientIds} onChange={ids => setFilters(f => ({ ...f, clientIds: ids }))} sortKey="clients" />
               <MultiSelect label="Services" options={scopedServices} selected={filters.serviceIds} onChange={ids => setFilters(f => ({ ...f, serviceIds: ids }))} sortKey="services" />
+              <MultiSelect label="Department" options={categories} selected={filters.categoryIds} onChange={ids => setFilters(f => ({ ...f, categoryIds: ids }))} />
+              <div>
+                <MultiSelect label="Team / Region" options={unitOptions} selected={filters.unitIds} onChange={ids => setFilters(f => ({ ...f, unitIds: ids }))} />
+                <p className="mt-1 text-[10px] text-muted-foreground/70">
+                  {orgUnits.length === 0
+                    ? 'No teams or regions yet — create them in Settings → Organization.'
+                    : 'A unit’s mapped clients and services, plus work its members contributed to.'}
+                </p>
+              </div>
               <MultiSelect label="Has contributor" options={scopedContribEmployees} selected={filters.employeeIds || []} onChange={ids => setFilters(f => ({ ...f, employeeIds: ids }))} />
               <MultiSelect label="Status" options={STATUSES.map(s => ({ id: s, name: s }))} selected={filters.statuses} onChange={ids => setFilters(f => ({ ...f, statuses: ids }))} />
             </div>

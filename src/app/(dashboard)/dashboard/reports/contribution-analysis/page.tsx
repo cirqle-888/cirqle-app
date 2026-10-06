@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createAdminClient, fetchAll } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
+import { loadOrgGraph, loadOrgMembers } from '@/lib/org/units'
 import {
   buildAnalysisRows,
   type RawTask, type RawScore, type RawPricing, type EmployeeColumn,
@@ -38,11 +39,19 @@ export default async function ContributionAnalysisPage({
 
   const supabase = createAdminClient()
 
+  const [{ units, scopes: unitScopes }, unitMembers, categoriesRes] = await Promise.all([
+    loadOrgGraph(supabase),
+    loadOrgMembers(supabase),
+    // Departments = service categories (the same reading the department P&L
+    // uses). Absent pre-migration, so errors degrade to "no departments".
+    supabase.from('service_categories').select('id, name').eq('is_active', true).order('display_order'),
+  ])
+
   const [employeesRes, clientsRes, servicesRes, pricingRes, tasksRes, scoresRes, invoiceItemsRes, invoicesRes, ratingsRes, taskToolsRes, toolsRes, agreementsRes, ratesRes] = await Promise.all([
     // Active employees define the dynamic columns (ordered by CQID for stability).
     supabase.from('employees').select('id, cqid, name').eq('is_active', true).order('cqid'),
     supabase.from('clients').select('id, name').order('name'),
-    supabase.from('services').select('id, name').order('name'),
+    supabase.from('services').select('id, name, category_id').order('name'),
     fetchAll(supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage').order('id', { ascending: true })),
     fetchAll(
       (() => {
@@ -86,7 +95,10 @@ export default async function ContributionAnalysisPage({
 
   const employees: EmployeeColumn[] = (employeesRes.data || []) as EmployeeColumn[]
   const clients = (clientsRes.data || []) as { id: string; name: string }[]
-  const services = (servicesRes.data || []) as { id: string; name: string }[]
+  const serviceRows = (servicesRes.data || []) as { id: string; name: string; category_id?: string | null }[]
+  const services = serviceRows.map(s => ({ id: s.id, name: s.name }))
+  const categoryOfService = Object.fromEntries(serviceRows.map(s => [s.id, s.category_id ?? null]))
+  const categories = ((categoriesRes.data || []) as { id: string; name: string }[])
 
   const clientName = new Map(clients.map(c => [c.id, c.name]))
   const serviceName = new Map(services.map(s => [s.id, s.name]))
@@ -193,6 +205,11 @@ export default async function ContributionAnalysisPage({
       employees={employees}
       clients={clients}
       services={services}
+      categories={categories}
+      categoryOfService={categoryOfService}
+      orgUnits={units.filter(u => u.isActive)}
+      orgUnitScopes={unitScopes}
+      orgUnitMembers={unitMembers.map(m => ({ unitId: m.unitId, employeeId: m.employeeId }))}
       isAdmin={isAdmin}
       personalLayout={personalLayout}
       systemLayout={systemLayout}
