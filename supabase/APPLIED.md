@@ -40,12 +40,12 @@ disaster-recovery path from migrations. That needs a baseline dump — see
 | 2026-10-04 | `20261004100000_record_planner_and_designer` | applied | Run by hand in the SQL editor: "Success. No rows returned". Verified by query: `task_requests.created_by` and `social_calendar_items.created_by` present; `task_assignments` 3 → 22 (19 backfilled from request / calendar-item assignees). |
 | (before 2026-10-01) | `20260906120000_ownership_entries_basis` | applied | Confirmed 2026-10-06: the "Accounts Entries" program with basis `entries` exists in production (the old CHECK would have refused it) and paid October awards. Exact apply date not recorded. |
 | 2026-10-06 | `20261006100000_ownership_work_bases` | applied | Run by hand in the SQL editor: "Success. No rows returned". Verified: `client_handlers` table and `ownership_programs.activity_kinds` present. |
+| 2026-10-06 | `20261006120000_ownership_rule_clients` | applied | Run by hand in the SQL editor: "Success. No rows returned". Verified: `ownership_rules.client_ids` readable via PostgREST (200). |
 
 ## Waiting to be applied
 
 | Migration | What it adds | Until it is applied |
 |---|---|---|
-| `20261006120000_ownership_rule_clients` | `ownership_rules.client_ids` — the clients a client-handling rule's person handles (several people may share a client). | Safe in either order. Until it runs, saving a client-handling rule fails with a run-the-migration message; other rules are unaffected. |
 | `20261004120000_retire_offer_intake` | Relabels `offer.prepare` to "Manage offer product catalog" (all it still gates) and takes `capture.use` back from designations that only had it for AI Capture's retired offer mode — today, Flyer Designer. No data deleted. | Safe in any order. Until it runs, the Designations screen still describes `offer.prepare` as the old Offer Preparation workspace, and Flyer Designer still sees AI Capture (which now just points offer lists to Offer Studio). |
 ### Follow-up: Realtime is not delivering for `employee_presence`
 
