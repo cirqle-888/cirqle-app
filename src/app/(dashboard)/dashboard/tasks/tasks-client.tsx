@@ -13,7 +13,10 @@ import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { getStatusColor, getStatusLabel } from '@/lib/utils/invoice'
-import { Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, MoreVertical, Building2, BarChart2, Copy, GripVertical, Settings2, ChevronUp, Inbox, Loader2 } from 'lucide-react'
+import {
+  Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, Building2, BarChart2, Copy, GripVertical, Settings2, ChevronUp, Inbox, Loader2, CheckSquare, Columns3,
+} from 'lucide-react'
+import { ToolbarSegment, SegmentButton, ScopeToggle, FiltersButton, StatusChip, ToolbarDivider } from '@/components/ui/list-toolbar'
 import { formatCurrency } from '@/lib/calculations/currency'
 import Link from 'next/link'
 import Combobox from '@/components/ui/combobox'
@@ -2166,6 +2169,8 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     : visibleTasks.slice(0, mobileLimit)
 
   const hasActiveFilters = !!(filterStatus || filterBilling || filterClient || filterService || searchQ || sortBy !== 'today_first' || !!filterAssignee || !!filterDate || !!myScope)
+  // What the mobile Filters panel holds — its button shows this count.
+  const mobileFilterCount = [filterDate, filterClient, filterService, filterAssignee, filterBilling, sortBy !== 'today_first'].filter(Boolean).length
   const activeFilterCount = [filterClient, filterService, filterBilling, filterAssignee, sortBy !== 'today_first' ? 'sort' : '', myScope || ''].filter(Boolean).length
 
   // Status counts — computed from tasks before status filter is applied so all
@@ -2568,181 +2573,57 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
             thead measures against, so there's no transparent strip below. */}
         <div ref={toolbarRef} className="sticky z-20 bg-background py-2 sm:py-3 space-y-1.5 sm:space-y-2 w-full" style={{ top: headerHeight }}>
 
-          {/* Row 1: [Select | Edit] · [Search flex-1] · [View segment] · [⚙ board]
-              On mobile (<sm) the row wraps; Search jumps to the top via order-first
-              and takes full width so it's actually usable. Select/Edit and the View
-              toggle drop below on the second wrap-line. Tighter gap on mobile. */}
-          <div className="flex flex-col lg:flex-row lg:items-center gap-1.5 lg:gap-2 w-full">
-            {/* Left group: Select + Inline Edit — solid action-mode toggles */}
-            {(role !== 'employee' || bulkMode) && (
-              <div className="flex items-center gap-1.5 shrink-0 order-2 sm:order-none hidden sm:flex">
-                <button
-                  onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
-                  className={`h-[34px] px-3 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
-                    bulkMode
-                      ? 'bg-violet-500 text-white shadow-violet-500/30'
-                      : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
-                  }`}>
-                  {bulkMode ? <><X size={12} /> Exit Select</> : <>Select</>}
-                </button>
-                {viewMode === 'table' && (
-                  <button
-                    onClick={() => setInlineEditMode(m => !m)}
-                    title="Toggle inline edit"
-                    className={`hidden sm:flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer ${
-                      inlineEditMode
-                        ? 'bg-blue-500 text-white shadow-blue-500/30'
-                        : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
-                    }`}
-                  >
-                    <Pencil className="w-3.5 h-3.5" />
-                    {inlineEditMode ? 'Editing' : 'Edit'}
-                  </button>
-                )}
+          {/* Row 1 — search first (the most used control). Desktop adds whose
+              tasks, the view and the tools, labels collapsing to icons below xl.
+              On mobile the Filters button shares this row, so the whole
+              toolbar stays two lines tall. */}
+          <div className="flex items-center gap-1.5 sm:gap-2 w-full">
+            <div className="flex-1 min-w-0">
+                <TokenizedSearch
+                  className="w-full"
+                  facets={searchFacets}
+                  onFacetsChange={setSearchFacets}
+                  draft={searchDraft}
+                  onDraftChange={setSearchDraft}
+                  placeholder="Search title, client, service, #number…"
+                  resultCount={filteredTasks.length}
+                  resultNoun="task"
+                  fields={[
+                    { key: 'title', label: 'Title', type: 'text' },
+                    { key: 'client', label: 'Client', type: 'text' },
+                    { key: 'service', label: 'Service', type: 'text' },
+                    { key: 'task', label: 'Task #', type: 'number' },
+                    ...(showBilling ? [{ key: 'amount', label: 'Amount ₹', type: 'number' as const }] : []),
+                  ]}
+                />
+            </div>
+
+            <div className="sm:hidden">
+              <FiltersButton open={showMobileFilters} count={mobileFilterCount} onClick={() => setShowMobileFilters(f => !f)} />
+            </div>
+
+            {/* Whose tasks — anyone with an employee record (admins can be
+                assignees/contributors too). */}
+            {currentEmployee && (
+              <div className="hidden sm:block">
+                <ScopeToggle value={myScope} onChange={setMyScope} />
               </div>
             )}
 
-            <div className="w-full lg:w-auto lg:flex-1 shrink-0">
-              <TokenizedSearch
-                className="w-full"
-                facets={searchFacets}
-                onFacetsChange={setSearchFacets}
-                draft={searchDraft}
-                onDraftChange={setSearchDraft}
-                placeholder="Search title, client, service, #number…"
-                resultCount={filteredTasks.length}
-                resultNoun="task"
-                fields={[
-                  { key: 'title', label: 'Title', type: 'text' },
-                  { key: 'client', label: 'Client', type: 'text' },
-                  { key: 'service', label: 'Service', type: 'text' },
-                  { key: 'task', label: 'Task #', type: 'number' },
-                  ...(showBilling ? [{ key: 'amount', label: 'Amount ₹', type: 'number' as const }] : []),
-                ]}
-              />
-            </div>
-
-            {/* Filters Row (Mobile focused horizontally scrollable) */}
-            <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar w-full lg:w-auto shrink-0 pb-1 lg:pb-0 [&>*]:shrink-0">
-              {/* My Tasks / Not Assigned to Me — available to anyone with an employee
-                  record (admins can be assignees/contributors too, not just employees). */}
-              {currentEmployee && (
-                <>
-                  <button
-                    onClick={() => setMyScope(s => s === 'mine' ? null : 'mine')}
-                    title="Tasks assigned to or contributed by me"
-                    className={`h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
-                      myScope === 'mine'
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
-                    }`}
-                  >
-                    My Tasks
-                  </button>
-                  <button
-                    onClick={() => setMyScope(s => s === 'not_mine' ? null : 'not_mine')}
-                    title="Tasks I'm not assigned to or haven't contributed to — see what's not mine"
-                    className={`h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
-                      myScope === 'not_mine'
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
-                    }`}
-                  >
-                    Not Assigned to Me
-                  </button>
-                </>
-              )}
-
-              {/* Mobile Filters Toggle */}
-              <button
-                onClick={() => setShowMobileFilters(f => !f)}
-                className={`sm:hidden h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer flex items-center gap-1.5 ${
-                  showMobileFilters || hasActiveFilters
-                    ? 'bg-foreground/10 border-foreground/20 text-foreground'
-                    : 'bg-secondary border-foreground/15 text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <MoreVertical size={14} /> Filters
-              </button>
-            </div>
-
-            {/* View segment (Hidden on mobile for employees) */}
-            <div ref={viewRef} className={`relative shrink-0 order-3 sm:order-none flex items-center gap-1.5 ${role === 'employee' ? 'hidden sm:flex' : ''}`}>
-              {/* Desktop View Buttons */}
-              <div className="hidden sm:flex items-center bg-secondary border border-foreground/15 rounded-xl p-1 gap-0.5">
+            {/* View */}
+            <div ref={viewRef} className="relative hidden sm:block">
+              <ToolbarSegment>
                 {([
                   { key: 'table',    Icon: List,         label: 'Table' },
                   { key: 'board',    Icon: LayoutGrid,   label: 'Board' },
                   { key: 'calendar', Icon: CalendarDays, label: 'Calendar' },
                 ] as const).map(({ key, Icon, label }) => (
-                  <span key={key} className="flex items-center">
-                    <button
-                      onClick={() => setViewMode(key)}
-                      className={`cursor-pointer px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                        viewMode === key
-                          ? 'bg-foreground/10 text-foreground'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      <Icon className="w-3.5 h-3.5" />
-                      {label}
-                    </button>
-                    {/* Board settings ⚙ — sits immediately after the Board button, only visible when Board is active */}
-                    {key === 'board' && viewMode === 'board' && (
-                      <button
-                        onClick={() => setViewOpen(v => !v)}
-                        title="Board settings"
-                        className={`ml-0.5 px-2 py-1.5 rounded-lg flex items-center justify-center transition-colors ${
-                          viewOpen
-                            ? 'bg-foreground/10 text-foreground'
-                            : 'text-muted-foreground hover:text-foreground hover:bg-foreground/[0.04]'
-                        }`}
-                      >
-                        <MoreVertical className="w-4 h-4" />
-                      </button>
-                    )}
-                  </span>
+                  <SegmentButton key={key} icon={Icon} label={label} active={viewMode === key} onClick={() => setViewMode(key)} />
                 ))}
-              </div>
-
-              {/* Columns button — inline with Table/Board/Calendar, table view only */}
-              {viewMode === 'table' && (
-                <div ref={colPanelRef} className="relative">
-                  <button
-                    onClick={() => setShowColPanel(v => !v)}
-                    title="Reorder columns"
-                    className={`h-[34px] px-2.5 rounded-xl text-xs font-medium flex items-center gap-1.5 border transition-colors cursor-pointer ${
-                      showColPanel
-                        ? 'bg-foreground/10 border-foreground/20 text-foreground'
-                        : 'bg-secondary border-foreground/15 text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    <Settings2 className="w-3.5 h-3.5" />
-                    Columns
-                  </button>
-                  {showColPanel && (
-                    <div className="absolute right-0 top-full mt-1.5 z-50 bg-card border border-border rounded-xl shadow-2xl p-3 min-w-[180px]">
-                      <div className="flex items-center justify-between mb-2 px-1">
-                        <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Column order</span>
-                        <button onClick={() => setColOrder([...DEFAULT_COL_ORDER])} className="text-[10px] text-muted-foreground hover:text-foreground transition-colors">Reset</button>
-                      </div>
-                      <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleColPanelDragEnd}>
-                        <SortableContext items={visibleCols} strategy={verticalListSortingStrategy}>
-                          {visibleCols.map((key, i) => (
-                            <SortablePanelRow key={key} id={key} label={COL_LABELS[key]}
-                              isFirst={i === 0} isLast={i === visibleCols.length - 1}
-                              onUp={() => setColOrder(prev => arrayMove(prev, prev.indexOf(key), prev.indexOf(key) - 1))}
-                              onDown={() => setColOrder(prev => arrayMove(prev, prev.indexOf(key), prev.indexOf(key) + 1))}
-                            />
-                          ))}
-                        </SortableContext>
-                      </DndContext>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Group By popover */}
+                {viewMode === 'board' && (
+                  <SegmentButton icon={Settings2} label="Board settings" labelFrom="xl" active={viewOpen} onClick={() => setViewOpen(v => !v)} />
+                )}
+              </ToolbarSegment>
               {viewMode === 'board' && viewOpen && (
                 <div className="absolute right-0 top-full mt-1.5 z-50 bg-secondary border border-foreground/15 rounded-xl shadow-2xl p-3 min-w-[220px] space-y-3">
                   <div>
@@ -2770,12 +2651,86 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
               )}
             </div>
 
+            {/* Tools — occasional actions, kept to icons until there is room */}
+            <div className="hidden sm:block">
+              <ToolbarSegment>
+                {(role !== 'employee' || bulkMode) && (
+                  <SegmentButton
+                    icon={bulkMode ? X : CheckSquare}
+                    label={bulkMode ? 'Exit select' : 'Select'}
+                    title={bulkMode ? 'Exit selection' : 'Select tasks for bulk actions'}
+                    active={bulkMode}
+                    onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
+                  />
+                )}
+                {(role !== 'employee' || bulkMode) && viewMode === 'table' && (
+                  <SegmentButton
+                    icon={Pencil}
+                    label={inlineEditMode ? 'Editing' : 'Edit'}
+                    title="Edit cells directly in the table"
+                    active={inlineEditMode}
+                    onClick={() => setInlineEditMode(m => !m)}
+                  />
+                )}
+                {viewMode === 'table' && (
+                  <div ref={colPanelRef} className="relative">
+                    <SegmentButton icon={Columns3} label="Columns" title="Reorder columns" active={showColPanel} onClick={() => setShowColPanel(v => !v)} />
+                    {showColPanel && (
+                      <div className="absolute right-0 top-full mt-1.5 z-50 bg-card border border-border rounded-xl shadow-2xl p-3 min-w-[180px]">
+                        <div className="flex items-center justify-between mb-2 px-1">
+                          <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Column order</span>
+                          <button onClick={() => setColOrder([...DEFAULT_COL_ORDER])} className="text-[10px] text-muted-foreground hover:text-foreground transition-colors">Reset</button>
+                        </div>
+                        <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleColPanelDragEnd}>
+                          <SortableContext items={visibleCols} strategy={verticalListSortingStrategy}>
+                            {visibleCols.map((key, i) => (
+                              <SortablePanelRow key={key} id={key} label={COL_LABELS[key]}
+                                isFirst={i === 0} isLast={i === visibleCols.length - 1}
+                                onUp={() => setColOrder(prev => arrayMove(prev, prev.indexOf(key), prev.indexOf(key) - 1))}
+                                onDown={() => setColOrder(prev => arrayMove(prev, prev.indexOf(key), prev.indexOf(key) + 1))}
+                              />
+                            ))}
+                          </SortableContext>
+                        </DndContext>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </ToolbarSegment>
+            </div>
           </div>
 
-          {/* Advanced Filters Container (Collapsible on mobile) */}
-          <div className={`${showMobileFilters ? 'flex flex-col gap-2 pt-2' : 'hidden'} sm:flex sm:flex-col sm:gap-2 sm:pt-0 w-full`}>
-            {/* Row 2: Filters + Status chips + Pagination (compact, no wrap) */}
-            <div className="flex items-center gap-1 flex-wrap">
+          {/* Row 2 — status first (one tap), then filters, then paging.
+              Mobile: status chips scroll on one line; the filters open as a
+              panel under them from the Filters button. */}
+          <div className="flex flex-wrap items-center gap-1.5 w-full">
+            <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto hide-scrollbar sm:overflow-visible [&>*]:shrink-0">
+              {currentEmployee && (
+                <div className="sm:hidden">
+                  <ScopeToggle size="sm" value={myScope} onChange={setMyScope} />
+                </div>
+              )}
+              {([
+                { key: '', label: 'All' },
+                ...STATUSES.filter(s => CORE_STATUSES.includes(s) || (statusCounts[s] ?? 0) > 0)
+                  .map(s => ({ key: s, label: getStatusLabel(s) })),
+              ]).map(({ key, label }) => {
+                const count = key === '' ? statusCounts.all : (statusCounts[key] ?? 0)
+                return (
+                  <StatusChip
+                    key={key}
+                    label={label}
+                    count={fmtStatusCount(key, count)}
+                    active={filterStatus === key}
+                    onClick={() => setFilterStatus(key)}
+                    title={partialCountTitle(key, label, count)}
+                  />
+                )
+              })}
+            </div>
+
+            <div className={`${showMobileFilters ? 'flex' : 'hidden'} sm:flex flex-wrap items-center gap-1.5 w-full sm:w-auto`}>
+              <ToolbarDivider />
               <DateFilter compact value={filterDate} onChange={setFilterDate} />
               <FilterDropdown compact options={scopedClientOptions} value={filterClient} onChange={setFilterClient} placeholder="Client" sortKey="clients" maxLabelWidth="max-w-[90px]" />
               <FilterDropdown compact options={scopedServiceOptions} value={filterService} onChange={setFilterService} placeholder="Service" sortKey="services" maxLabelWidth="max-w-[90px]" />
@@ -2793,40 +2748,6 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                 placeholder="Sort by"
                 maxLabelWidth="max-w-[72px]"
               />
-
-              {/* thin separator */}
-              <span className="hidden sm:block w-px h-4 bg-foreground/10 shrink-0 mx-0.5" />
-
-              {/* Status chips — compact */}
-              <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-                className="sm:hidden h-[30px] px-2 rounded-xl text-xs font-medium bg-secondary border border-border text-foreground focus:outline-none cursor-pointer w-full">
-                <option value="">All ({fmtStatusCount('', statusCounts.all)})</option>
-                {STATUSES.filter(s => CORE_STATUSES.includes(s) || (statusCounts[s] ?? 0) > 0).map(s => <option key={s} value={s}>{getStatusLabel(s)} ({fmtStatusCount(s, statusCounts[s] ?? 0)})</option>)}
-              </select>
-              {([
-                { key: '', label: 'All' },
-                ...STATUSES.filter(s => CORE_STATUSES.includes(s) || (statusCounts[s] ?? 0) > 0)
-                  .map(s => ({ key: s, label: getStatusLabel(s) })),
-              ]).map(({ key, label }) => {
-                const count = key === '' ? statusCounts.all : (statusCounts[key] ?? 0)
-                const active = filterStatus === key
-                return (
-                  <button key={key} onClick={() => setFilterStatus(key)}
-                    title={partialCountTitle(key, label, count)}
-                    className={`hidden sm:flex h-[30px] px-2.5 rounded-xl text-xs font-medium transition-colors cursor-pointer items-center gap-1 shrink-0 ${
-                      active ? 'gradient-bg text-white' : 'bg-secondary text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {label}
-                    <span className={`text-[10px] font-semibold px-1 py-0.5 rounded ${
-                      active ? 'bg-foreground/20 text-white' : 'bg-border/50 opacity-60'
-                    }`}>{fmtStatusCount(key, count)}</span>
-                  </button>
-                )
-              })}
-              {/* Billing filter — "what is the client actually paying for?" and,
-                  read the other way, "how much did we give away?". Only for
-                  viewers who can see billing at all. */}
               {showBilling && (
                 <select value={filterBilling} onChange={e => setFilterBilling(e.target.value as '' | TaskBillingStatus)}
                   title="Filter by how the client is charged"
@@ -2845,11 +2766,54 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                   <X size={11} /> Clear
                 </button>
               )}
+            </div>
 
+            <div className={`${showMobileFilters ? 'flex' : 'hidden'} sm:flex items-center gap-1.5 sm:ml-auto`}>
+              {/* ── Search Database / Load full history ──
+                  Shown when the in-memory set is smaller than the DB (either the
+                  12-month task window, or visibility scoping trimming the list).
+                  Admins get the browser DB search; employees get the server-side
+                  full-history reload, because DB search cannot honour their
+                  scoping. Hidden entirely once everything is loaded. */}
+              {(() => {
+                const allLoaded = dbTaskTotal != null && dbTaskTotal <= tasks.length
+                if (!canDbSearch) {
+                  if (fullHistory || allLoaded) return null
+                  return (
+                    <Link
+                      href="/dashboard/tasks?history=all"
+                      title="Load every task, including settled ones older than the default window"
+                      className="flex items-center gap-1.5 h-[30px] px-2.5 rounded-xl text-xs font-medium border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors shrink-0"
+                    >
+                      <Clock size={12} /><span className="sm:hidden 2xl:inline">Load full history</span>
+                    </Link>
+                  )
+                }
+                if (allLoaded && !dbMode) return null
+                return !dbMode ? (
+                  <button
+                    onClick={() => runDbSearch(0)}
+                    disabled={dbModeLoading}
+                    title="Search all tasks directly in the database — bypasses the in-memory loaded set"
+                    className="flex items-center gap-1.5 h-[30px] px-2.5 rounded-xl text-xs font-medium border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors disabled:opacity-50 shrink-0"
+                  >
+                    {dbModeLoading
+                      ? <><RefreshCw size={12} className="animate-spin" /> Searching…</>
+                      : <><Search size={12} /><span className="sm:hidden 2xl:inline">Search DB</span></>}
+                  </button>
+                ) : (
+                  <button
+                    onClick={exitDbMode}
+                    title="Exit database search mode — go back to in-memory loaded tasks"
+                    className="flex items-center gap-1.5 h-[30px] px-2.5 rounded-xl text-xs font-medium border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors shrink-0"
+                  >
+                    <X size={12} /><span className="sm:hidden 2xl:inline">Exit DB mode</span>
+                  </button>
+                )
+              })()}
               {/* Compact pagination — ml-auto pushes to the right */}
               {viewMode === 'table' && totalPages > 1 && (
-                <div className="hidden sm:flex items-center gap-0.5 shrink-0 ml-auto">
-                  <span className="w-px h-4 bg-foreground/10 mx-1" />
+                <div className="hidden sm:flex items-center gap-0.5 shrink-0">
                   <button onClick={() => dbMode ? runDbSearch(Math.max(0, dbModePage - 1)) : setTablePage(p => Math.max(0, p - 1))} disabled={dbMode ? dbModePage === 0 : tablePage === 0} title="Previous page"
                     className="h-[28px] w-[28px] flex items-center justify-center rounded-lg border border-border/50 text-muted-foreground disabled:opacity-30 hover:bg-foreground/5 hover:text-foreground transition-colors text-sm font-mono">‹</button>
                   <div className="flex items-center gap-0.5 px-2 h-[28px] rounded-lg border border-border/50 bg-background text-xs text-muted-foreground">
@@ -2868,52 +2832,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                   )}
                 </div>
               )}
-
-              {/* ── Search Database / Load full history ──
-                  Shown when the in-memory set is smaller than the DB (either the
-                  12-month task window, or visibility scoping trimming the list).
-                  Admins get the browser DB search; employees get the server-side
-                  full-history reload, because DB search cannot honour their
-                  scoping. Hidden entirely once everything is loaded. */}
-              {(() => {
-                const allLoaded = dbTaskTotal != null && dbTaskTotal <= tasks.length
-                if (!canDbSearch) {
-                  if (fullHistory || allLoaded) return null
-                  return (
-                    <Link
-                      href="/dashboard/tasks?history=all"
-                      title="Load every task, including settled ones older than the default window"
-                      className="flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-medium border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors shrink-0"
-                    >
-                      <Clock size={12} /> Load full history
-                    </Link>
-                  )
-                }
-                if (allLoaded && !dbMode) return null
-                return !dbMode ? (
-                  <button
-                    onClick={() => runDbSearch(0)}
-                    disabled={dbModeLoading}
-                    title="Search all tasks directly in the database — bypasses the in-memory loaded set"
-                    className="flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-medium border border-violet-500/30 bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors disabled:opacity-50 shrink-0"
-                  >
-                    {dbModeLoading
-                      ? <><RefreshCw size={12} className="animate-spin" /> Searching…</>
-                      : <><Search size={12} /> Search DB</>}
-                  </button>
-                ) : (
-                  <button
-                    onClick={exitDbMode}
-                    title="Exit database search mode — go back to in-memory loaded tasks"
-                    className="flex items-center gap-1.5 h-[34px] px-3 rounded-xl text-xs font-medium border border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors shrink-0"
-                  >
-                    <X size={12} /> Exit DB mode
-                  </button>
-                )
-              })()}
-
             </div>
-
           </div>
 
           {/* ── Active filter chips (tokenized filters, ERPNext-style) ── */}

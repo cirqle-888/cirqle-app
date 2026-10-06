@@ -21,11 +21,9 @@ import { TokenizedSearch, type SearchFacet, type FacetOp } from '@/components/ui
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
 import type { DateFilterValue } from '@/components/ui/date-filter'
 import {
-  ChevronLeft, ChevronRight, Minus, Plus, X, Check,
-  Search, Filter, PlusCircle, Eye, EyeOff, Clock, CheckCircle2, AlertCircle,
-  UserCheck, Users, CalendarDays, Lock, Edit2, ChevronDown, Trash2, Copy, ExternalLink,
-  List, LayoutGrid, MoreVertical, CheckCircle, PlusIcon, FileDownIcon, Sparkles,
+  ChevronLeft, ChevronRight, Minus, Plus, X, Check, Search, Filter, PlusCircle, Eye, EyeOff, Clock, CheckCircle2, AlertCircle, UserCheck, Users, CalendarDays, Lock, Edit2, ChevronDown, Trash2, Copy, ExternalLink, List, LayoutGrid, CheckCircle, PlusIcon, FileDownIcon, Sparkles, CheckSquare, Settings2,
 } from 'lucide-react'
+import { ToolbarSegment, SegmentButton, ScopeToggle, FiltersButton, StatusChip, ToolbarDivider } from '@/components/ui/list-toolbar'
 import { buildSuggestion, type ContributionEvidence } from '@/lib/contributions/suggest'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -1407,6 +1405,8 @@ export default function ContributionsClient({
       (filterEmployee ? 1 : 0) +
       (myScope ? 1 : 0)
     const hasAnyFilter = activeFilterCount > 0 || hasSearch || statusFilter !== 'all'
+    // What the mobile Filters panel holds (scope and status sit outside it).
+    const mobileFilterCount = filterClients.length + filterServices.length + (filterDate ? 1 : 0) + (filterEmployee ? 1 : 0) + (sortBy !== 'today_first' ? 1 : 0)
 
     const headerActions = (
       <>
@@ -1450,143 +1450,54 @@ export default function ContributionsClient({
           />
 
           <StickyToolbar>
-          {/* Row 1: [Select] · [Search flex-1] · [List|Board|Calendar] · [⚙ board-only] */}
-          <div className="flex flex-col lg:flex-row lg:items-center gap-1.5 lg:gap-2 w-full">
-            {/* Left group: Select */}
-            {canSeeFinancials && (
-              <div className="flex items-center gap-1.5 shrink-0 order-2 sm:order-none hidden sm:flex">
-                <button
-                  onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
-                  className={`h-[34px] px-3 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
-                    bulkMode
-                      ? 'bg-violet-500 text-white shadow-violet-500/30'
-                      : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
-                  }`}>
-                  <CheckCircle className="w-3 h-3" /> Select
-                </button>
-                {bulkMode && (() => {
-                  const allSelected = myVisibleTasks.length > 0 && myVisibleTasks.every(t => selectedTasks.has(t.id))
-                  return (
-                    <button
-                      onClick={() => {
-                        if (allSelected) setSelectedTasks(new Set())
-                        else setSelectedTasks(new Set(myVisibleTasks.map(t => t.id)))
-                      }}
-                      title={allSelected ? 'Deselect all visible tasks' : 'Select all visible tasks'}
-                      className={`h-[34px] px-3 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm cursor-pointer ${
-                        allSelected
-                          ? 'bg-violet-500/20 border border-violet-500/40 text-violet-700 dark:text-violet-200'
-                          : 'bg-secondary border border-border text-foreground hover:bg-secondary/60'
-                      }`}
-                    >
-                      {allSelected ? <Check className="w-3 h-3" /> : <span className="w-3 h-3 rounded-sm border border-current opacity-60" />}
-                      All ({myVisibleTasks.length})
-                    </button>
-                  )
-                })()}
+          {/* Row 1 — search first (the most used control). Desktop adds whose
+              tasks, the view and Select, labels collapsing to icons below xl.
+              On mobile the Filters button shares this row. */}
+          <div className="flex items-center gap-1.5 sm:gap-2 w-full">
+            <div className="flex-1 min-w-0">
+                <TokenizedSearch
+                  className="w-full"
+                  facets={searchFacets}
+                  onFacetsChange={setSearchFacets}
+                  draft={searchDraft}
+                  onDraftChange={setSearchDraft}
+                  placeholder="Search tasks, clients, services, code…"
+                  resultCount={filteredTasks.length}
+                  resultNoun="task"
+                  fields={[
+                    { key: 'title', label: 'Title', type: 'text' },
+                    { key: 'client', label: 'Client', type: 'text' },
+                    { key: 'service', label: 'Service', type: 'text' },
+                    { key: 'task', label: 'Task #', type: 'number' },
+                    ...(showBilling ? [{ key: 'amount', label: 'Amount ₹', type: 'number' as const }] : []),
+                  ]}
+                />
+            </div>
+
+            <div className="sm:hidden">
+              <FiltersButton open={showMobileFilters} count={mobileFilterCount} onClick={() => setShowMobileFilters(f => !f)} />
+            </div>
+
+            {currentEmployee && (
+              <div className="hidden sm:block">
+                <ScopeToggle value={myScope} onChange={setMyScope} />
               </div>
             )}
 
-            <div className="w-full lg:w-auto lg:flex-1 shrink-0">
-              <TokenizedSearch
-                className="w-full"
-                facets={searchFacets}
-                onFacetsChange={setSearchFacets}
-                draft={searchDraft}
-                onDraftChange={setSearchDraft}
-                placeholder="Search tasks, clients, services, code…"
-                resultCount={filteredTasks.length}
-                resultNoun="task"
-                fields={[
-                  { key: 'title', label: 'Title', type: 'text' },
-                  { key: 'client', label: 'Client', type: 'text' },
-                  { key: 'service', label: 'Service', type: 'text' },
-                  { key: 'task', label: 'Task #', type: 'number' },
-                  ...(showBilling ? [{ key: 'amount', label: 'Amount ₹', type: 'number' as const }] : []),
-                ]}
-              />
-            </div>
-
-            {/* Filters Row (Mobile focused horizontally scrollable) */}
-            <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar w-full lg:w-auto shrink-0 pb-1 lg:pb-0 [&>*]:shrink-0">
-              {/* My Tasks / Not Assigned to Me — available to anyone with an employee
-                  record (admins can be assignees/contributors too, not just employees). */}
-              {currentEmployee && (
-                <>
-                  <button
-                    onClick={() => setMyScope(s => s === 'mine' ? null : 'mine')}
-                    title="Tasks assigned to or contributed by me"
-                    className={`h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
-                      myScope === 'mine'
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
-                    }`}
-                  >
-                    My Tasks
-                  </button>
-                  <button
-                    onClick={() => setMyScope(s => s === 'not_mine' ? null : 'not_mine')}
-                    title="Tasks I'm not assigned to or haven't contributed to — see what's not mine"
-                    className={`h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
-                      myScope === 'not_mine'
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground hover:bg-foreground/5'
-                    }`}
-                  >
-                    Not Assigned to Me
-                  </button>
-                </>
-              )}
-
-              {/* Mobile Filters Toggle */}
-              <button
-                onClick={() => setShowMobileFilters(f => !f)}
-                className={`sm:hidden h-[34px] px-3 rounded-xl text-xs font-medium border transition-colors cursor-pointer flex items-center gap-1.5 ${
-                  showMobileFilters || hasAnyFilter
-                    ? 'bg-foreground/10 border-foreground/20 text-foreground'
-                    : 'bg-secondary border-foreground/15 text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <MoreVertical size={14} /> Filters
-              </button>
-            </div>
-
-            {/* View segment */}
-            <div ref={boardSettingsRef} className={`relative shrink-0 order-3 sm:order-none ${role === 'employee' ? 'hidden sm:block' : ''}`}>
-              <div className="hidden sm:flex items-center bg-secondary border border-foreground/15 rounded-xl p-1 gap-0.5">
+            {/* View */}
+            <div ref={boardSettingsRef} className="relative hidden sm:block">
+              <ToolbarSegment>
                 {([
-                  { key: 'list',     Icon: List,         label: 'List',     hideOnMobile: false },
-                  { key: 'board',    Icon: LayoutGrid,   label: 'Board',    hideOnMobile: false },
-                  { key: 'calendar', Icon: CalendarDays, label: 'Calendar', hideOnMobile: true  },
-                ] as const).map(({ key, Icon, label, hideOnMobile }) => (
-                  <span key={key} className={`flex items-center ${hideOnMobile ? 'hidden sm:flex' : ''}`}>
-                    <button
-                      onClick={() => setListViewMode(key)}
-                      className={`cursor-pointer px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                        listViewMode === key
-                          ? 'bg-foreground/10 text-foreground'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      <Icon className="w-3.5 h-3.5" />
-                      {label}
-                    </button>
-                    {key === 'board' && listViewMode === 'board' && (
-                      <button
-                        onClick={() => setShowBoardSettings(v => !v)}
-                        title="Board settings"
-                        className={`ml-0.5 px-2 py-1.5 rounded-lg flex items-center justify-center transition-colors ${
-                          showBoardSettings
-                            ? 'bg-foreground/10 text-foreground'
-                            : 'text-muted-foreground hover:text-foreground hover:bg-foreground/[0.04]'
-                        }`}
-                      >
-                        <MoreVertical className="w-4 h-4" />
-                      </button>
-                    )}
-                  </span>
+                  { key: 'list',     Icon: List,         label: 'List' },
+                  { key: 'board',    Icon: LayoutGrid,   label: 'Board' },
+                  { key: 'calendar', Icon: CalendarDays, label: 'Calendar' },
+                ] as const).map(({ key, Icon, label }) => (
+                  <SegmentButton key={key} icon={Icon} label={label} active={listViewMode === key} onClick={() => setListViewMode(key)} />
                 ))}
-              </div>
+                {listViewMode === 'board' && (
+                  <SegmentButton icon={Settings2} label="Board settings" active={showBoardSettings} onClick={() => setShowBoardSettings(v => !v)} />
+                )}
+              </ToolbarSegment>
               {listViewMode === 'board' && showBoardSettings && (
                 <div className="absolute right-0 top-full mt-1.5 z-50 bg-secondary border border-foreground/15 rounded-xl shadow-2xl p-3 min-w-[220px] space-y-3">
                   <div>
@@ -1613,15 +1524,76 @@ export default function ContributionsClient({
                 </div>
               )}
             </div>
+
+            {/* Select — bulk scoring / actions */}
+            {canSeeFinancials && (
+              <div className="hidden sm:block">
+                <ToolbarSegment>
+                  <SegmentButton
+                    icon={bulkMode ? X : CheckSquare}
+                    label={bulkMode ? 'Exit select' : 'Select'}
+                    title={bulkMode ? 'Exit selection' : 'Select tasks for bulk actions'}
+                    active={bulkMode}
+                    onClick={() => { setBulkMode(m => !m); setSelectedTasks(new Set()) }}
+                  />
+                {bulkMode && (() => {
+                  const allSelected = myVisibleTasks.length > 0 && myVisibleTasks.every(t => selectedTasks.has(t.id))
+                  return (
+                    <button
+                      onClick={() => {
+                        if (allSelected) setSelectedTasks(new Set())
+                        else setSelectedTasks(new Set(myVisibleTasks.map(t => t.id)))
+                      }}
+                      title={allSelected ? 'Deselect all visible tasks' : 'Select all visible tasks'}
+                      className={`h-8 px-2.5 rounded-[10px] text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
+                        allSelected
+                          ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-foreground/[0.05]'
+                      }`}
+                    >
+                      {allSelected ? <Check className="w-3 h-3" /> : <span className="w-3 h-3 rounded-sm border border-current opacity-60" />}
+                      All ({myVisibleTasks.length})
+                    </button>
+                  )
+                })()}
+                </ToolbarSegment>
+              </div>
+            )}
           </div>
 
-          {/* Advanced Filters Container (Collapsible on mobile) */}
-          <div className={`${showMobileFilters ? 'flex flex-col gap-2 pt-2' : 'hidden'} sm:flex sm:flex-col sm:gap-2 sm:pt-0 w-full`}>
-            {/* Row 2: Dropdowns */}
-            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-              <DateFilter value={filterDate} onChange={setFilterDate} />
+          {/* Row 2 — status first (one tap, "Missing" flagged), then filters.
+              Mobile: chips scroll on one line; filters open from the button. */}
+          <div className="flex flex-wrap items-center gap-1.5 w-full">
+            <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto hide-scrollbar sm:overflow-visible [&>*]:shrink-0">
+              {currentEmployee && (
+                <div className="sm:hidden">
+                  <ScopeToggle size="sm" value={myScope} onChange={setMyScope} />
+                </div>
+              )}
+              {([
+                { key: 'all',     label: 'All',     count: localTasks.length },
+                { key: 'pending', label: 'Pending', count: pendingCount     },
+                { key: 'done',    label: 'Scored',  count: doneCount        },
+                { key: 'missing', label: 'Missing', count: missingCount     },
+              ] as const).map(({ key, label, count }) => (
+                <StatusChip
+                  key={key}
+                  label={label}
+                  count={count}
+                  active={statusFilter === key}
+                  tone={key === 'missing' ? 'orange' : 'violet'}
+                  dot={key === 'missing' && count > 0}
+                  onClick={() => setStatusFilter(key as typeof statusFilter)}
+                />
+              ))}
+            </div>
+
+            <div className={`${showMobileFilters ? 'flex' : 'hidden'} sm:flex flex-wrap items-center gap-1.5 w-full sm:w-auto`}>
+              <ToolbarDivider />
+              <DateFilter compact value={filterDate} onChange={setFilterDate} />
               
               <FilterDropdown
+                compact
                 options={scopedEmployeeOptions}
                 value={filterEmployee}
                 onChange={v => { setFilterEmployee(v); setFilterEmployeeMode('worked') }}
@@ -1656,6 +1628,7 @@ export default function ContributionsClient({
                 </div>
               )}
               <FilterDropdown
+                compact
                 multiple
                 options={scopedClientOptions}
                 value=""
@@ -1667,6 +1640,7 @@ export default function ContributionsClient({
                 sortKey="clients"
               />
               <FilterDropdown
+                compact
                 multiple
                 options={scopedServiceOptions}
                 value=""
@@ -1678,6 +1652,7 @@ export default function ContributionsClient({
                 sortKey="services"
               />
               <FilterDropdown
+                compact
                 options={[
                   { value: 'today_first', label: 'Today First' },
                   { value: 'date_desc',   label: 'Newest' },
@@ -1689,45 +1664,6 @@ export default function ContributionsClient({
                 onChange={v => setSortBy((v || 'today_first') as typeof sortBy)}
                 placeholder="Sort by"
               />
-
-              {/* thin separator between filter dropdowns and status chips */}
-              <span className="hidden sm:block w-px h-5 bg-foreground/10 shrink-0" />
-
-              {/* Status chips — merged from former Row 3 */}
-              <select
-                value={statusFilter}
-                onChange={e => setStatusFilter(e.target.value as any)}
-                className="sm:hidden h-[34px] px-2 rounded-xl text-xs font-medium bg-secondary border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer w-full"
-              >
-                <option value="all">All ({localTasks.length})</option>
-                <option value="pending">Pending ({pendingCount})</option>
-                <option value="done">Scored ({doneCount})</option>
-                <option value="missing">Missing ({missingCount})</option>
-              </select>
-              {([
-                { key: 'all',     label: 'All',     count: localTasks.length },
-                { key: 'pending', label: 'Pending', count: pendingCount     },
-                { key: 'done',    label: 'Scored',  count: doneCount        },
-                { key: 'missing', label: 'Missing', count: missingCount     },
-              ] as const).map(({ key, label, count }) => (
-                <button key={key} onClick={() => setStatusFilter(key as any)}
-                  className={`hidden sm:flex h-[34px] px-3 rounded-xl text-xs font-medium transition-colors items-center gap-1.5 cursor-pointer shrink-0 ${
-                    statusFilter === key
-                      ? key === 'missing'
-                        ? 'bg-orange-500/20 text-orange-700 dark:text-orange-300 border border-orange-500/30'
-                        : 'gradient-bg text-white'
-                      : 'bg-secondary text-muted-foreground hover:text-foreground'
-                  }`}>
-                  {label}
-                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${
-                    statusFilter === key && key === 'missing' ? 'bg-orange-500/30 text-orange-700 dark:text-orange-300' :
-                    statusFilter === key ? 'bg-foreground/20 text-white' : 'bg-border/50 opacity-60'
-                  }`}>{count}</span>
-                  {key === 'missing' && count > 0 && statusFilter !== 'missing' && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-orange-400 shrink-0" />
-                  )}
-                </button>
-              ))}
               {hasAnyFilter && (
                 <button
                   onClick={() => { setSearchFacets([]); setSearchDraft(''); setFilterClients([]); setFilterServices([]); setFilterEmployee(''); setFilterEmployeeMode('worked'); setFilterDate(null); setStatusFilter('all'); setMyScope(null) }}
