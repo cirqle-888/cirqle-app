@@ -389,10 +389,6 @@ function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: Sort
       date: (function() { const d = g('date'); try { return d ? JSON.parse(d) : null } catch { return null } })(),
       clientIds: arr('clients'), serviceIds: arr('services'),
       employeeIds: arr('emp'), statuses: arr('status'),
-      billingMin: g('bmin'), billingMax: g('bmax'),
-      profitMin: g('pmin'), profitMax: g('pmax'),
-      profitPctMin: g('ppmin'), profitPctMax: g('ppmax'),
-      earnMin: g('emin'), earnMax: g('emax'),
     },
     sortKey: (g('sort') || 'task_date') as SortKey,
     sortDir: (g('dir') === 'asc' ? 'asc' : 'desc'),
@@ -666,14 +662,6 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     if (f.serviceIds.length) p.set('services', f.serviceIds.join(','))
     if (f.employeeIds.length) p.set('emp', f.employeeIds.join(','))
     if (f.statuses.length) p.set('status', f.statuses.join(','))
-    if (f.billingMin) p.set('bmin', f.billingMin)
-    if (f.billingMax) p.set('bmax', f.billingMax)
-    if (f.profitMin) p.set('pmin', f.profitMin)
-    if (f.profitMax) p.set('pmax', f.profitMax)
-    if (f.profitPctMin) p.set('ppmin', f.profitPctMin)
-    if (f.profitPctMax) p.set('ppmax', f.profitPctMax)
-    if (f.earnMin) p.set('emin', f.earnMin)
-    if (f.earnMax) p.set('emax', f.earnMax)
     if (sortKey !== 'task_date') p.set('sort', sortKey)
     if (sortDir !== 'desc') p.set('dir', sortDir)
     if (pageSize !== 100) p.set('size', String(pageSize))
@@ -796,10 +784,6 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     if (f.serviceIds.length) n++
     if (f.employeeIds?.length > 0) n++
     if (f.statuses.length) n++
-    if (f.billingMin || f.billingMax) n++
-    if (f.profitMin || f.profitMax) n++
-    if (f.profitPctMin || f.profitPctMax) n++
-    if (f.earnMin || f.earnMax) n++
     return n
   }, [filters])
 
@@ -1286,25 +1270,6 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
               <MultiSelect label="Services" options={scopedServices} selected={filters.serviceIds} onChange={ids => setFilters(f => ({ ...f, serviceIds: ids }))} sortKey="services" />
               <MultiSelect label="Has contributor" options={scopedContribEmployees} selected={filters.employeeIds || []} onChange={ids => setFilters(f => ({ ...f, employeeIds: ids }))} />
               <MultiSelect label="Status" options={STATUSES.map(s => ({ id: s, name: s }))} selected={filters.statuses} onChange={ids => setFilters(f => ({ ...f, statuses: ids }))} />
-            </div>
-
-            {/* Numeric ranges */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-1 border-t border-border">
-              {([
-                ['Billing ₹', 'billingMin', 'billingMax'],
-                ['Profit ₹', 'profitMin', 'profitMax'],
-                ['Profit %', 'profitPctMin', 'profitPctMax'],
-                ['Emp Earnings ₹', 'earnMin', 'earnMax'],
-              ] as const).map(([label, minK, maxK]) => (
-                <div key={label}>
-                  <label className="block text-[11px] font-medium text-muted-foreground mb-1 mt-2">{label} range</label>
-                  <div className="flex items-center gap-1">
-                    <input type="number" placeholder="min" value={filters[minK]} onChange={e => setFilters(f => ({ ...f, [minK]: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2 py-1.5 text-xs" />
-                    <span className="text-muted-foreground text-xs">–</span>
-                    <input type="number" placeholder="max" value={filters[maxK]} onChange={e => setFilters(f => ({ ...f, [maxK]: e.target.value }))} className="w-full bg-secondary border border-border rounded-lg px-2 py-1.5 text-xs" />
-                  </div>
-                </div>
-              ))}
             </div>
           </div>
         )}

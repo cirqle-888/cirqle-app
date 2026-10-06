@@ -240,36 +240,17 @@ export interface Filters {
   serviceIds: string[]
   employeeIds: string[]
   statuses: string[]
-  billingMin: string
-  billingMax: string
-  profitMin: string
-  profitMax: string
-  profitPctMin: string
-  profitPctMax: string
-  earnMin: string
-  earnMax: string
 }
 
 export const EMPTY_FILTERS: Filters = {
   date: null,
   clientIds: [], serviceIds: [], employeeIds: [], statuses: [],
-  billingMin: '', billingMax: '', profitMin: '', profitMax: '',
-  profitPctMin: '', profitPctMax: '', earnMin: '', earnMax: '',
-}
-
-const numOr = (s: string, fallback: number) => {
-  const n = parseFloat(s)
-  return isNaN(n) ? fallback : n
 }
 
 export function applyFilters(rows: AnalysisRow[], f: Filters): AnalysisRow[] {
   const clientSet = f.clientIds.length ? new Set(f.clientIds) : null
   const serviceSet = f.serviceIds.length ? new Set(f.serviceIds) : null
   const statusSet = f.statuses.length ? new Set(f.statuses) : null
-  const bMin = numOr(f.billingMin, -Infinity), bMax = numOr(f.billingMax, Infinity)
-  const pMin = numOr(f.profitMin, -Infinity), pMax = numOr(f.profitMax, Infinity)
-  const ppMin = numOr(f.profitPctMin, -Infinity), ppMax = numOr(f.profitPctMax, Infinity)
-  const eMin = numOr(f.earnMin, -Infinity), eMax = numOr(f.earnMax, Infinity)
 
   return rows.filter(row => {
     if (clientSet && !clientSet.has(row.client_id)) return false
@@ -278,10 +259,6 @@ export function applyFilters(rows: AnalysisRow[], f: Filters): AnalysisRow[] {
     if (f.employeeIds && f.employeeIds.length > 0) {
       if (!f.employeeIds.some(empId => row.emp[empId]?.pct > 0)) return false
     }
-    if (row.billing_inr < bMin || row.billing_inr > bMax) return false
-    if (row.profit < pMin || row.profit > pMax) return false
-    if (row.profit_pct < ppMin || row.profit_pct > ppMax) return false
-    if (row.total_earnings < eMin || row.total_earnings > eMax) return false
     return true
   })
 }
