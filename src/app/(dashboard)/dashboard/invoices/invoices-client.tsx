@@ -1838,7 +1838,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     // Fetch done AND invoiced tasks in range (so we can warn about already-invoiced ones)
     const { data: rawTasks } = await supabase
       .from('tasks')
-      .select('id, title, task_date, billing_amount, billing_amount_inr, currency, status, quantity, unit_price, service:services!service_id(name)')
+      .select('id, title, task_date, billing_amount, billing_amount_inr, currency, status, quantity, service:services!service_id(name)')
       .eq('client_id', genForm.client_id)
       // Waived work is delivered and paid for internally, but never charged —
       // see lib/tasks/billable.ts. `not.is.false` keeps the pre-flag rows.
@@ -1945,14 +1945,13 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
         await supabase.from('invoices').update({
           billing_period_start: billingPeriod.billing_period_start,
           billing_period_end: billingPeriod.billing_period_end,
-          billing_period_label: billingPeriod.billing_period_label,
           tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
           invoice_sequence_month: sequenceMonth,
           exchange_rate: creationRate(invCurrency), paid_amount_inr: 0,
         }).eq('id', invId)
       }
 
-      await supabase.from('invoice_items').insert(
+      const { error: itemsErr } = await supabase.from('invoice_items').insert(
         selected.map((t, idx) => {
           const qty = Number(t.quantity ?? 1)
           const total = taskAmt(t)
@@ -1965,6 +1964,13 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
           }
         })
       )
+      if (itemsErr) {
+        // Never leave a freshly created invoice empty — it blocks the month
+        // for the next attempt without billing anything.
+        if (!existingDraft) await supabase.from('invoices').delete().eq('id', invId)
+        toastError(`Could not add the tasks: ${itemsErr.message}`)
+        return
+      }
 
       // Recompute totals from the actual rows now on the invoice (correct whether
       // this was a fresh invoice or an existing draft we just appended to).
@@ -2205,25 +2211,35 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
           if (error || !created) { errorCount++; continue }
           invId = created.id
 
-          // Extended columns (ignore if not migrated)
-          await supabase.from('invoices').update({
+          const { error: periodErr } = await supabase.from('invoices').update({
             billing_period_start: billingPeriod.billing_period_start,
             billing_period_end: billingPeriod.billing_period_end,
-            billing_period_label: billingPeriod.billing_period_label,
             invoice_sequence_month: sequenceMonth,
             tax_rate: 0, tax_amount: 0, discount_amount: 0, previous_balance: 0,
             exchange_rate: creationRate(invCurrency), paid_amount_inr: 0,
           }).eq('id', invId)
+          if (periodErr) {
+            await supabase.from('invoices').delete().eq('id', invId)
+            throw periodErr
+          }
         }
 
-        // Fetch task details for items
-        const { data: taskDetails } = await supabase
+        // Fetch task details for items. A failed read or insert used to be
+        // ignored, leaving a ₹0 invoice with no lines and no billing period
+        // (Sea Star Supermarket INV-2610-015) — now it fails the group and
+        // removes the invoice it just created.
+        const createdHere = !(existingDraft && existingDraft.currency === invCurrency)
+        const { data: taskDetails, error: taskErr } = await supabase
           .from('tasks')
-          .select('id, title, billing_amount, billing_amount_inr, currency, quantity, unit_price')
+          .select('id, title, billing_amount, billing_amount_inr, currency, quantity')
           .in('id', group.taskIds)
+        if (taskErr || !taskDetails?.length) {
+          if (createdHere) await supabase.from('invoices').delete().eq('id', invId)
+          throw taskErr ?? new Error('No tasks found for this group')
+        }
 
-        if (taskDetails?.length) {
-          await supabase.from('invoice_items').insert(
+        {
+          const { error: itemsErr } = await supabase.from('invoice_items').insert(
             taskDetails.map((t: any, idx: number) => {
               const qty = Number(t.quantity ?? 1)
               const amt = t.billing_amount ?? t.billing_amount_inr ?? 0
@@ -2236,6 +2252,10 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
               }
             })
           )
+          if (itemsErr) {
+            if (createdHere) await supabase.from('invoices').delete().eq('id', invId)
+            throw itemsErr
+          }
         }
         // Auto-add unbilled client expense outflows for the same task month
         const [taskYr, taskMo] = group.month.split('-').map(Number)
