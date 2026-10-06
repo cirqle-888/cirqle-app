@@ -214,6 +214,31 @@ export async function loadActivities(
           if (isInvoicePayment({ invoice_id: r.invoice_id as string | null, allocated: allocated.has(String(r.id)) })) continue
           push(r.created_by as string, `${r.type === 'inflow' ? 'In' : 'Out'} ${inr(Number(r.amount_inr || 0))} · ${String(r.description ?? '').slice(0, 60)}`, r.created_at as string)
         }
+      } else if (kind === 'task_created') {
+        // "Task created" events name who entered the task. The log can be
+        // written from the browser, so each task counts ONCE (first logger),
+        // only while it still exists, and only when the event is within
+        // 15 minutes of the task's own creation — re-logging an old task, or
+        // logging someone else's, earns nothing.
+        const { data: events } = await fetchAll(admin.from('activity_logs')
+          .select('actor_id, entity_id, created_at')
+          .eq('entity_type', 'task').eq('action', 'created').in('actor_id', employeeIds)
+          .gte('created_at', fromIso).lt('created_at', toIso).order('created_at', { ascending: true }))
+        const evs = (events ?? []) as { actor_id: string; entity_id: string | null; created_at: string }[]
+        const ids = [...new Set(evs.map(e => e.entity_id).filter((x): x is string => !!x))]
+        const tasks = new Map<string, { task_number: number | null; title: string | null; created_at: string; deleted_at: string | null }>()
+        for (let i = 0; i < ids.length; i += 200) {
+          const { data } = await admin.from('tasks').select('id, task_number, title, created_at, deleted_at').in('id', ids.slice(i, i + 200))
+          for (const t of (data ?? []) as { id: string; task_number: number | null; title: string | null; created_at: string; deleted_at: string | null }[]) tasks.set(t.id, t)
+        }
+        const counted = new Set<string>()
+        for (const e of evs) {
+          const t = e.entity_id ? tasks.get(e.entity_id) : undefined
+          if (!t || t.deleted_at || counted.has(e.entity_id!)) continue
+          if (Math.abs(new Date(e.created_at).getTime() - new Date(t.created_at).getTime()) > 15 * 60_000) continue
+          counted.add(e.entity_id!)
+          push(e.actor_id, `#${t.task_number ?? '—'} ${t.title ?? ''}`.trim(), e.created_at)
+        }
       } else if (kind === 'invoice_followup') {
         const { data } = await admin.from('invoice_followups')
           .select('created_by, created_at, note, outcome, invoice:invoices(invoice_number, client:clients(name))')

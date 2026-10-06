@@ -1529,6 +1529,8 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
         if (!(data as Task).billing_amount_inr && data.service_id) {
           void serverFillTaskBilling(data.id, data.client_id || null, data.service_id, data.quantity || 1)
         }
+        // Duplicating is entering a task — logged like Add Task (ownership counts it).
+        void logTaskCreated(data.id, data.title, data.task_number ?? null)
         success(`Task duplicated as ${taskCode(data as Task)}`)
       } else if (error) {
         toastError('Failed to duplicate', error.message)
