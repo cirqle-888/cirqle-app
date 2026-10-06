@@ -26,6 +26,8 @@ export interface EmpCell {
   pct: number
   /** stored contribution_scores.earnings_inr */
   earn: number
+  /** This employee's ownership rewards apportioned to the task (0/absent = none). */
+  own?: number
   /** how `earn` was derived: contribution (normal) | manual_override */
   source?: EarningSource
 }
@@ -91,8 +93,15 @@ export function applyOwnershipAndDepartment(
   rows: AnalysisRow[],
   ownershipByTask: Map<string, number>,
   department: (row: AnalysisRow) => { id: string; name: string } | null,
+  /** task id → employee id → that employee's share of the ownership. */
+  ownershipByTaskEmployee: Map<string, Map<string, number>> = new Map(),
 ): void {
   for (const r of rows) {
+    // An employee can earn ownership on a task they did not contribute to
+    // (client handling, a billing share) — give them a cell with 0 contribution.
+    for (const [empId, own] of ownershipByTaskEmployee.get(r.task_id) ?? []) {
+      r.emp[empId] = { ...(r.emp[empId] ?? { pct: 0, earn: 0 }), own: r2(own) }
+    }
     const d = department(r)
     r.department_id = d?.id ?? ''
     r.department_name = d?.name ?? '—'
@@ -372,6 +381,7 @@ function sortValue(row: AnalysisRow, key: SortKey): number | string {
     const [, id, field] = key.split(':')
     const cell = row.emp[id]
     if (field === 'earn') return cell?.earn ?? 0
+    if (field === 'own') return cell?.own ?? 0
     if (field === 'share') return empShare(row, id)
     return cell?.pct ?? 0
   }
@@ -417,6 +427,8 @@ export interface Summary {
   // ── Filtered Employee Specific ──
   filteredEarnings?: number
   filteredAvgContrib?: number
+  /** Σ ownership of the filtered employees. */
+  filteredOwnership?: number
 }
 
 export function computeSummary(rows: AnalysisRow[], employeeFilterIds?: string[]): Summary {
@@ -427,6 +439,7 @@ export function computeSummary(rows: AnalysisRow[], employeeFilterIds?: string[]
   let totalOwnership = 0, totalNetProfit = 0
   
   let filteredEarnings = 0
+  let filteredOwnership = 0
   let filteredContribSum = 0, filteredContribCount = 0
 
   const hasEmpFilter = employeeFilterIds && employeeFilterIds.length > 0
@@ -451,6 +464,7 @@ export function computeSummary(rows: AnalysisRow[], employeeFilterIds?: string[]
       for (const id of employeeFilterIds) {
         if (r.emp[id]) {
           filteredEarnings += r.emp[id].earn
+          filteredOwnership += r.emp[id].own ?? 0
           const pct = r.emp[id].pct
           if (pct > 0) { filteredContribSum += pct; filteredContribCount++ }
         }
@@ -480,6 +494,7 @@ export function computeSummary(rows: AnalysisRow[], employeeFilterIds?: string[]
     netMarginPct: totalBilling > 0 ? r2(totalNetProfit / totalBilling * 100) : 0,
     ...(hasEmpFilter ? {
       filteredEarnings: r2(filteredEarnings),
+      filteredOwnership: r2(filteredOwnership),
       filteredAvgContrib: filteredContribCount ? r2(filteredContribSum / filteredContribCount) : 0
     } : {})
   }
@@ -501,8 +516,11 @@ export const MATRIX_COL = {
   department: 20, ownership: 21, net_profit: 22, net_profit_pct: 23,
 } as const
 
-/** Fixed (non-employee) column count in the export matrix. Each employee adds 3. */
+/** Fixed (non-employee) column count in the export matrix. Each employee adds EMP_SUBCOLS. */
 export const MATRIX_FIXED_COLS = 24
+
+/** Columns per employee: Contribution %, Earnings ₹, Ownership ₹, Earnings % of Billing. */
+export const EMP_SUBCOLS = 4
 
 const blankNum = (n: number | null) => (n === null ? '' : n)
 
@@ -519,7 +537,7 @@ export function matrixHeader(employees: EmployeeColumn[]): string[] {
   for (const e of employees) {
     // Callers pass `displayEmployees`, already masked with dn(), so the CSV carries CQIDs when locked.
     // eslint-disable-next-line no-restricted-syntax -- pre-masked by the caller (see above)
-    header.push(`${e.name} Contribution %`, `${e.name} Earnings ₹`, `${e.name} Earnings % of Billing`)
+    header.push(`${e.name} Contribution %`, `${e.name} Earnings ₹`, `${e.name} Ownership ₹`, `${e.name} Earnings % of Billing`)
   }
   return header
 }
@@ -536,7 +554,7 @@ export function rowToLine(r: AnalysisRow, employees: EmployeeColumn[]): (string 
   ]
   for (const e of employees) {
     const cell = r.emp[e.id]
-    line.push(cell?.pct ?? 0, cell?.earn ?? 0, empShare(r, e.id))
+    line.push(cell?.pct ?? 0, cell?.earn ?? 0, cell?.own ?? 0, empShare(r, e.id))
   }
   return line
 }
@@ -579,6 +597,8 @@ export interface RowGroup {
   summary: Summary
   /** Σ stored earnings_inr per employee within the group (for emp sub-columns) */
   empEarn: Record<string, number>
+  /** Σ ownership per employee within the group */
+  empOwn: Record<string, number>
 }
 
 const MON_SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -623,17 +643,21 @@ export function groupRows(rows: AnalysisRow[], key: GroupKey): RowGroup[] {
   return order.map(k => {
     const groupRowsArr = buckets.get(k)!
     const empEarn: Record<string, number> = {}
+    const empOwn: Record<string, number> = {}
     for (const r of groupRowsArr) {
-      for (const id in r.emp) empEarn[id] = r2((empEarn[id] || 0) + r.emp[id].earn)
+      for (const id in r.emp) {
+        empEarn[id] = r2((empEarn[id] || 0) + r.emp[id].earn)
+        if (r.emp[id].own) empOwn[id] = r2((empOwn[id] || 0) + (r.emp[id].own ?? 0))
+      }
     }
-    return { key: k, label: labels.get(k)!, rows: groupRowsArr, summary: computeSummary(groupRowsArr), empEarn }
+    return { key: k, label: labels.get(k)!, rows: groupRowsArr, summary: computeSummary(groupRowsArr), empEarn, empOwn }
   })
 }
 
 /** A subtotal matrix line for one group — values placed under the right columns
  *  via MATRIX_COL. Width matches matrixHeader(employees). */
 export function subtotalLine(g: RowGroup, employees: EmployeeColumn[]): (string | number)[] {
-  const width = MATRIX_FIXED_COLS + employees.length * 3
+  const width = MATRIX_FIXED_COLS + employees.length * EMP_SUBCOLS
   const line: (string | number)[] = new Array(width).fill('')
   const s = g.summary
   line[MATRIX_COL.label] = `Subtotal — ${g.label} (${s.totalTasks})`
@@ -652,8 +676,11 @@ export function subtotalLine(g: RowGroup, employees: EmployeeColumn[]): (string 
   line[MATRIX_COL.ownership] = s.totalOwnership
   line[MATRIX_COL.net_profit] = s.totalNetProfit
   line[MATRIX_COL.net_profit_pct] = s.netMarginPct
-  // employee earnings sub-column (pct / share are left blank for a subtotal)
-  employees.forEach((e, i) => { line[MATRIX_FIXED_COLS + i * 3 + 1] = g.empEarn[e.id] ?? 0 })
+  // employee earnings + ownership sub-columns (pct / share are left blank for a subtotal)
+  employees.forEach((e, i) => {
+    line[MATRIX_FIXED_COLS + i * EMP_SUBCOLS + 1] = g.empEarn[e.id] ?? 0
+    line[MATRIX_FIXED_COLS + i * EMP_SUBCOLS + 2] = g.empOwn[e.id] ?? 0
+  })
   return line
 }
 

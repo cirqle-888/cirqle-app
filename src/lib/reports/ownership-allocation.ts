@@ -35,6 +35,8 @@ export interface AllocTask {
 }
 
 export interface AllocAward {
+  /** Who the award pays. */
+  employeeId?: string
   programName: string
   basis: string
   scopeKind: string
@@ -50,6 +52,7 @@ export interface AllocAward {
 }
 
 export interface UnallocatedLine {
+  employeeId?: string
   programName: string
   basis: string
   amountInr: number
@@ -59,6 +62,8 @@ export interface UnallocatedLine {
 export interface OwnershipAllocation {
   /** task id → ownership attributed to it. */
   byTask: Map<string, number>
+  /** task id → employee id → that employee's ownership on the task. */
+  byTaskEmployee: Map<string, Map<string, number>>
   /** Awards (or parts) with no task behind them. */
   unallocated: UnallocatedLine[]
 }
@@ -95,10 +100,20 @@ export function allocateOwnership(
   },
 ): OwnershipAllocation {
   const byTask = new Map<string, number>()
+  const byTaskEmployee = new Map<string, Map<string, number>>()
   const unallocated: UnallocatedLine[] = []
-  const add = (id: string, amt: number) => { if (amt) byTask.set(id, r2((byTask.get(id) ?? 0) + amt)) }
+  let current: AllocAward | null = null
+  const add = (id: string, amt: number) => {
+    if (!amt) return
+    byTask.set(id, r2((byTask.get(id) ?? 0) + amt))
+    const who = current?.employeeId
+    if (!who) return
+    const m = byTaskEmployee.get(id) ?? new Map<string, number>()
+    m.set(who, r2((m.get(who) ?? 0) + amt))
+    byTaskEmployee.set(id, m)
+  }
   const miss = (a: AllocAward, amountInr: number, reason: string) => {
-    if (amountInr) unallocated.push({ programName: a.programName, basis: a.basis, amountInr: r2(amountInr), reason })
+    if (amountInr) unallocated.push({ employeeId: a.employeeId, programName: a.programName, basis: a.basis, amountInr: r2(amountInr), reason })
   }
   /** Spread over tasks by billing; equally when none of them bill. */
   const spread = (a: AllocAward, amount: number, pool: AllocTask[], reason: string) => {
@@ -110,6 +125,7 @@ export function allocateOwnership(
   }
 
   for (const a of awards) {
+    current = a
     const earned = r2(a.earnedInr || 0)
     if (!earned) continue
     const inPeriod = tasks.filter(t => t.date >= a.periodStart && t.date <= a.periodEnd)
@@ -159,5 +175,5 @@ export function allocateOwnership(
     spread(a, earned, pool, 'No tasks in the program’s scope for the period')
   }
 
-  return { byTask, unallocated }
+  return { byTask, byTaskEmployee, unallocated }
 }

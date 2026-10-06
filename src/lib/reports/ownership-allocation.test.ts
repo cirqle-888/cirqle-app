@@ -78,4 +78,15 @@ describe('allocateOwnership', () => {
     expect(Math.round(out * 100) / 100).toBe(871.5 + 645 + 189 + 5)
     expect(unallocated.find(u => u.basis === 'clients_handled')?.reason).toMatch(/not found/)
   })
+
+  it('keeps each employee’s share, so per-person ownership adds up to their award', () => {
+    const { byTaskEmployee } = allocateOwnership([
+      award({ employeeId: 'A', earnedInr: 100 }),
+      award({ employeeId: 'B', basis: 'clients_handled', earnedInr: 40, items: [{ label: 'x', refId: 'seastar', amountInr: 4000 }] }),
+    ], tasks, ctx)
+    expect(Object.fromEntries(byTaskEmployee.get('t1')!)).toEqual({ A: 30, B: 30 })
+    expect(Object.fromEntries(byTaskEmployee.get('t3')!)).toEqual({ A: 60 })
+    const sumA = [...byTaskEmployee.values()].reduce((t, m) => t + (m.get('A') ?? 0), 0)
+    expect(sumA).toBeCloseTo(100, 10)
+  })
 })

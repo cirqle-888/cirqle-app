@@ -189,18 +189,20 @@ export default async function ContributionAnalysisPage({
   // Best-effort: the report renders without ownership if anything is missing.
   let unallocatedOwnership: UnallocatedLine[] = []
   let ownershipByTask = new Map<string, number>()
+  let ownershipByTaskEmployee = new Map<string, Map<string, number>>()
   try {
     let aq = supabase.from('ownership_awards')
-      .select('period_start, period_end, basis, percent, earned_inr, breakdown, program:ownership_programs(name, scope_kind, scope_id)')
+      .select('employee_id, period_start, period_end, basis, percent, earned_inr, breakdown, program:ownership_programs(name, scope_kind, scope_id)')
     if (win.from) aq = aq.gte('period_end', win.from)
     if (win.to) aq = aq.lte('period_start', win.to)
     const { data: awardRows } = await fetchAll(aq.order('id', { ascending: true }))
     type AwardRow = {
-      period_start: string; period_end: string; basis: string; percent: number | null; earned_inr: number
+      employee_id: string; period_start: string; period_end: string; basis: string; percent: number | null; earned_inr: number
       breakdown: { items?: AllocAward['items'] } | null
       program: { name: string; scope_kind: string; scope_id: string | null } | null
     }
     const awards: AllocAward[] = ((awardRows || []) as unknown as AwardRow[]).map(a => ({
+      employeeId: a.employee_id,
       programName: a.program?.name ?? 'Ownership',
       basis: a.basis,
       scopeKind: a.program?.scope_kind ?? 'company',
@@ -231,6 +233,7 @@ export default async function ContributionAnalysisPage({
         unitScopes,
       })
       ownershipByTask = result.byTask
+      ownershipByTaskEmployee = result.byTaskEmployee
       unallocatedOwnership = result.unallocated
     }
   } catch {
@@ -239,7 +242,7 @@ export default async function ContributionAnalysisPage({
   applyOwnershipAndDepartment(rows, ownershipByTask, r => {
     const id = r.service_id ? categoryOfService[r.service_id] : null
     return id ? { id, name: categoryName.get(id) ?? '—' } : null
-  })
+  }, ownershipByTaskEmployee)
 
   // ── Saved layouts (personal + system default) ──────────────────────────────
   // Priority at load time (handled client-side): personal → system → hardcoded.

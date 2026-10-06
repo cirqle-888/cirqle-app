@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
-  groupRows, subtotalLine, toMatrixGrouped, matrixHeader, MATRIX_COL, MATRIX_FIXED_COLS,
+  groupRows, subtotalLine, toMatrixGrouped, matrixHeader, MATRIX_COL, MATRIX_FIXED_COLS, EMP_SUBCOLS,
   applyFilters, buildFilterContext, EMPTY_FILTERS,
   type AnalysisRow, type EmployeeColumn,
 } from './contribution-analysis'
@@ -115,7 +115,7 @@ describe('subtotalLine — MATRIX_COL alignment', () => {
 
   it('matches header width (alignment invariant)', () => {
     expect(line.length).toBe(matrixHeader(EMPLOYEES).length)
-    expect(line.length).toBe(MATRIX_FIXED_COLS + EMPLOYEES.length * 3)
+    expect(line.length).toBe(MATRIX_FIXED_COLS + EMPLOYEES.length * EMP_SUBCOLS)
   })
 
   it('places each metric under its header column', () => {
@@ -134,11 +134,11 @@ describe('subtotalLine — MATRIX_COL alignment', () => {
 
   it('puts per-employee earnings under the employee earnings sub-column', () => {
     // employee i's three sub-cols start at FIXED + i*3; earnings is offset +1.
-    expect(line[MATRIX_FIXED_COLS + 0 * 3 + 1]).toBe(800) // Alice
-    expect(line[MATRIX_FIXED_COLS + 1 * 3 + 1]).toBe(400) // Bob
+    expect(line[MATRIX_FIXED_COLS + 0 * EMP_SUBCOLS + 1]).toBe(800) // Alice
+    expect(line[MATRIX_FIXED_COLS + 1 * EMP_SUBCOLS + 1]).toBe(400) // Bob
     // contributor pct / share columns stay blank in a subtotal.
-    expect(line[MATRIX_FIXED_COLS + 0 * 3 + 0]).toBe('')
-    expect(line[MATRIX_FIXED_COLS + 0 * 3 + 2]).toBe('')
+    expect(line[MATRIX_FIXED_COLS + 0 * EMP_SUBCOLS + 0]).toBe('')
+    expect(line[MATRIX_FIXED_COLS + 0 * EMP_SUBCOLS + 3]).toBe('')
   })
 
   it('leaves actual columns blank when no task in the group is paid', () => {

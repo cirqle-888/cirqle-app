@@ -10,7 +10,7 @@ import { usePrivacy } from '@/contexts/privacy-context'
 import {
   applyFilters, sortRows, computeSummary, toMatrix, toMatrixGrouped, matrixToCSV, empShare,
   groupRows, GROUP_OPTIONS,
-  EMPTY_FILTERS, buildFilterContext, type Filters, type AnalysisRow, type EmployeeColumn,
+  EMPTY_FILTERS, EMP_SUBCOLS, buildFilterContext, type Filters, type AnalysisRow, type EmployeeColumn,
   type SortKey, type SortDir, type GroupKey, type RowGroup, type Summary,
 } from '@/lib/reports/contribution-analysis'
 import { ORG_UNIT_TYPE_LABEL, type OrgUnit, type OrgUnitScopeRow } from '@/lib/org/units'
@@ -213,6 +213,10 @@ function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
           </span>
         )
       },
+    })
+    emp.push({
+      key: `emp:${e.id}:own`, label: 'Ownership ₹', width: 92, align: 'right', group: 'employees', empId: e.id,
+      render: r => { const o = r.emp[e.id]?.own ?? 0; return o > 0 ? inr(o, dp) : <span className="text-muted-foreground/40">—</span> },
     })
     emp.push({
       key: `emp:${e.id}:share`, label: '% of Bill', width: 80, align: 'right', group: 'employees', empId: e.id,
@@ -740,6 +744,13 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     }
     return out
   }, [filtered])
+  const empOwnTotals = useMemo(() => {
+    const out: Record<string, number> = {}
+    for (const r of filtered) {
+      for (const id in r.emp) if (r.emp[id].own) out[id] = (out[id] || 0) + (r.emp[id].own ?? 0)
+    }
+    return out
+  }, [filtered])
   // Grouped view: partition the full sorted set (pagination is bypassed when grouping).
   const grouped = useMemo(
     () => (groupKey === 'none' ? [] : groupRows(sorted, groupKey)),
@@ -877,17 +888,26 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   }, [buildExportMatrix, sorted])
 
   const gridTemplate = columns.map(c => `${c.width}px`).join(' ')
-  // Fixed (non-employee) columns come first; each visible employee owns 3.
-  const fixedCount = columns.filter(c => c.group !== 'employees').length
+  // Fixed (non-employee) columns come first; each visible employee owns EMP_SUBCOLS.
+  // Counted by empId, not group: "Total Emp Earn ₹" is in the employees group
+  // but belongs to no one, and counting it as an employee column shifted every
+  // person's header one column left of their figures.
+  const fixedCount = columns.filter(c => !c.empId).length
   // Employee groups currently visible, in display order (for the grouped header).
   const visibleEmpGroups = useMemo(
     () => (groupSet.has('employees') ? displayEmployees : []),
     [groupSet, displayEmployees],
   )
 
+  // Narrowed to the filtered employees, so their card shows only their overhead.
+  const unallocatedShown = useMemo(
+    () => filters.employeeIds.length
+      ? unallocatedOwnership.filter(u => u.employeeId && filters.employeeIds.includes(u.employeeId))
+      : unallocatedOwnership,
+    [unallocatedOwnership, filters.employeeIds])
   const unallocatedTotal = useMemo(
-    () => Math.round(unallocatedOwnership.reduce((t, u) => t + u.amountInr, 0) * 100) / 100,
-    [unallocatedOwnership])
+    () => Math.round(unallocatedShown.reduce((t, u) => t + u.amountInr, 0) * 100) / 100,
+    [unallocatedShown])
 
   // Value shown in a subtotal cell under each visible column.
   const dp = decimals ? 2 : 0
@@ -912,6 +932,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
         return s.actualTasks && s.totalActualReceived ? pct(s.totalActualProfit / s.totalActualReceived * 100) : '—'
       default:
         if (c.empId && c.key.endsWith(':earn')) return inr(g.empEarn[c.empId] ?? 0, dp)
+        if (c.empId && c.key.endsWith(':own')) return inr(g.empOwn[c.empId] ?? 0, dp)
         return ''
     }
   }
@@ -939,6 +960,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
         return s.actualTasks && s.totalActualReceived ? pct(s.totalActualProfit / s.totalActualReceived * 100) : '—'
       default:
         if (c.empId && c.key.endsWith(':earn')) return inr(empEarnTotals[c.empId] ?? 0, dp)
+        if (c.empId && c.key.endsWith(':own')) return inr(empOwnTotals[c.empId] ?? 0, dp)
         return ''
     }
   }
@@ -961,10 +983,11 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
               { label: 'Expected Profit', value: inr(summary.totalProfit, decimals ? 2 : 0), accent: summary.totalProfit < 0 ? 'text-red-400' : 'text-emerald-400', tip: 'The profit CirQle expects to make after paying out ALL employee commissions on these tasks (Total Billing - Commission Pool).' },
               { label: 'Avg Expected Profit %', value: pct(summary.avgProfitPct), accent: summary.avgProfitPct < 0 ? 'text-red-400' : 'text-emerald-400', tip: 'The average profit margin percentage.' },
               {
-                label: 'Ownership on Tasks', value: inr(summary.totalOwnership, decimals ? 2 : 0),
+                label: summary.filteredOwnership !== undefined ? 'Filtered Emp Ownership' : 'Ownership on Tasks',
+                value: inr(summary.filteredOwnership ?? summary.totalOwnership, decimals ? 2 : 0),
                 sub: unallocatedTotal ? `+ ${inr(unallocatedTotal, 0)} not tied to tasks` : undefined,
                 tip: 'Ownership rewards apportioned to these tasks: billing/collection shares by each task’s billing in the period, client handling to the handled client’s tasks, planning to the planned task.'
-                  + (unallocatedTotal ? ` Not on any task (whole loaded period, unfiltered): ${unallocatedOwnership.map(u => `${u.programName} ₹${Math.round(u.amountInr).toLocaleString('en-IN')} — ${u.reason}`).join('; ')}.` : ''),
+                  + (unallocatedTotal ? ` Not on any task (whole loaded period, unfiltered): ${unallocatedShown.map(u => `${u.programName} ₹${Math.round(u.amountInr).toLocaleString('en-IN')} — ${u.reason}`).join('; ')}.` : ''),
               },
               { label: 'Net Profit', value: inr(summary.totalNetProfit, decimals ? 2 : 0), accent: summary.totalNetProfit < 0 ? 'text-red-400' : 'text-emerald-400', sub: `Net margin ${pct(summary.netMarginPct)}`, tip: 'Expected profit after ownership: Billing − Employee Earnings − Ownership on Tasks. Margin is billing-weighted.' },
               { label: 'Actual Received', value: inr(summary.totalActualReceived, decimals ? 2 : 0), sub: `${fmt(summary.actualTasks, 0)} paid tasks`, tip: 'The actual amount of money received from clients for these tasks (only counts fully paid tasks).' },
@@ -1384,14 +1407,14 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                     </button>
                   )
                 })}
-                {/* Employee groups — name on top row, 3 sub-headers below */}
+                {/* Employee groups — name on top row, EMP_SUBCOLS sub-headers below */}
                 {visibleEmpGroups.map((e, k) => {
-                  const base = fixedCount + 3 * k + 1   // 1-based grid line of this group
-                  const subCols = columns.slice(fixedCount + 3 * k, fixedCount + 3 * k + 3)
+                  const base = fixedCount + EMP_SUBCOLS * k + 1   // 1-based grid line of this group
+                  const subCols = columns.slice(fixedCount + EMP_SUBCOLS * k, fixedCount + EMP_SUBCOLS * k + EMP_SUBCOLS)
                   return (
                     <Fragment key={e.id}>
                       <div
-                        style={{ gridColumn: `${base} / ${base + 3}`, gridRow: '1 / 2' }}
+                        style={{ gridColumn: `${base} / ${base + EMP_SUBCOLS}`, gridRow: '1 / 2' }}
                         className="flex items-center justify-center px-2 py-1 text-[11px] font-semibold text-sky-400 truncate border-l border-border"
                         title={e.name}
                       >
@@ -1475,7 +1498,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                           style={{ top: topPx, height: it.h, gridTemplateColumns: gridTemplate }}
                         >
                           {columns.map((c, ci) => {
-                            const groupStart = ci >= fixedCount && (ci - fixedCount) % 3 === 0
+                            const groupStart = ci >= fixedCount && (ci - fixedCount) % EMP_SUBCOLS === 0
                             const isFrozen = frozenCols.has(c.key)
                             const isLast = c.key === lastFrozenKey
                             const frozenLeft = frozenLeftMap.get(c.key) ?? 0
@@ -1505,7 +1528,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
                         style={{ top: topPx, height: ROW_H, gridTemplateColumns: gridTemplate }}
                       >
                         {columns.map((c, ci) => {
-                          const groupStart = ci >= fixedCount && (ci - fixedCount) % 3 === 0
+                          const groupStart = ci >= fixedCount && (ci - fixedCount) % EMP_SUBCOLS === 0
                           const isFrozen = frozenCols.has(c.key)
                           const isLast = c.key === lastFrozenKey
                           const frozenLeft = frozenLeftMap.get(c.key) ?? 0
