@@ -2215,7 +2215,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
         const monthEnd = lastDayOfMonthISO(taskYr, taskMo)
         const { data: expEntries } = await supabase
           .from('cashbook_entries')
-          .select('id, amount_inr, description, currency, amount')
+          .select('id, amount_inr, description, currency, amount, markup_type, markup_value')
           .eq('client_id', group.client_id)
           .eq('type', 'outflow')
           .is('deleted_at', null)
@@ -2235,18 +2235,24 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
             const invRate = creationRate(invCur)
             const expRows = toAddExp.map((e: any) => {
               const amtInInvCur = invCur === 'INR' ? e.amount_inr : round2(e.amount_inr / (invRate || 1))
+              // The cushion chosen on the entry. A flat one is in the entry's
+              // currency, so it is converted alongside the cost it sits on.
+              const type = (e.markup_type as MarkupType) || 'none'
+              const raw = Number(e.markup_value) || 0
+              const value = type === 'fixed' && e.amount ? round2(raw * amtInInvCur / e.amount) : raw
+              const marked = computeMarkup(amtInInvCur, type, value)
               return {
                 invoice_id: invId,
                 cashbook_entry_id: e.id,
                 description: e.description || 'Expense',
-                amount: amtInInvCur,
-                amount_inr: e.amount_inr,
+                amount: marked.billed,
+                amount_inr: invCur === 'INR' ? marked.billed : round2(marked.billed * (invRate || 1)),
                 currency: invCur,
                 original_amount: amtInInvCur,
                 original_amount_inr: e.amount_inr,
-                markup_type: 'none',
-                markup_value: 0,
-                markup_amount: 0,
+                markup_type: type,
+                markup_value: value,
+                markup_amount: marked.markupAmount,
               }
             })
             await supabase.from('invoice_expense_items').insert(expRows)

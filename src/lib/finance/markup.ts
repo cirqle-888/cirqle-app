@@ -73,3 +73,30 @@ export function markupLabel(
   if (markupType === 'fixed' && value !== 0) return `${currencySymbol}${value.toLocaleString('en-IN')}`
   return null
 }
+
+export interface Cushion { type: MarkupType | string | null | undefined; value: number | null | undefined }
+
+/**
+ * Which cushion an invoice expense line should carry after its Cash Book
+ * entry is saved again.
+ *
+ *   · the cushion was EDITED on the entry       → the entry's, even back to 'none'
+ *   · the line has none, the entry has one      → the entry's (it was never applied)
+ *   · otherwise                                  → the line's own, set on the invoice
+ *
+ * So a cushion chosen on the invoice survives unrelated entry edits (a typo in
+ * the description), while a cushion chosen on the entry always reaches the
+ * draft — the line no longer stays at cost because it was copied first.
+ */
+export function cushionForLine(
+  line: Cushion,
+  entry: Cushion,
+  entryCushionEdited: boolean,
+): { source: 'entry' | 'line'; type: MarkupType; value: number } {
+  const norm = (c: Cushion) => ({ type: isMarkupType(c.type) ? c.type : 'none' as MarkupType, value: Number(c.value) || 0 })
+  const l = norm(line), e = norm(entry)
+  const lineHas = l.type !== 'none' && l.value !== 0
+  const entryHas = e.type !== 'none' && e.value !== 0
+  if (entryCushionEdited || (!lineHas && entryHas)) return { source: 'entry', ...e }
+  return { source: 'line', ...l }
+}

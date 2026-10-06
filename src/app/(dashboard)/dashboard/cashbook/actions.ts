@@ -462,6 +462,16 @@ export async function updateCashbookEntry(
   // the per-entry ownership basis; setting it on an edit would let the long
   // backlog of unattributed rows be claimed retroactively by touching them.
   const { tags: entryTags, employee_split_ids: splitEmployeeIds, ...tableFields } = changes
+
+  // Was the rebill cushion itself changed? Then it replaces whatever cushion
+  // the entry's draft-invoice line carries; any other edit leaves that alone.
+  const { data: before } = await admin.from('cashbook_entries')
+    .select('markup_type, markup_value').eq('id', id).maybeSingle()
+  const prev = before as { markup_type?: string; markup_value?: number } | null
+  const cushionEdited = !!prev && (
+    (changes.markup_type !== undefined && changes.markup_type !== (prev.markup_type ?? 'none')) ||
+    (changes.markup_value !== undefined && Number(changes.markup_value) !== Number(prev.markup_value ?? 0)))
+
   const { error } = await retryWithoutMissingColumns(omit =>
     admin
       .from('cashbook_entries')
@@ -478,7 +488,7 @@ export async function updateCashbookEntry(
   }
 
   // Sync potential expense changes to draft invoice
-  await syncDraftInvoiceExpenses(id)
+  await syncDraftInvoiceExpenses(id, { cushionEdited })
 
   revalidatePath(REVALIDATE)
   return { ok: true }

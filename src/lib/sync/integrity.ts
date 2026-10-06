@@ -11,7 +11,7 @@ import { round2 as r2 } from '@/lib/calculations/currency'
 import { syncInvoicePackageLines } from '@/lib/packages/sync-invoice'
 import { resolveEarning, CommissionAgreement } from '@/lib/agreements/resolve-earning'
 import { isBillableTask } from '@/lib/tasks/billable'
-import { computeMarkup } from '@/lib/finance/markup'
+import { computeMarkup, cushionForLine } from '@/lib/finance/markup'
 
 /**
  * Fallback refresh for tasks that have contribution SCORES but no raw
@@ -465,7 +465,12 @@ export async function syncDraftInvoices(taskId: string) {
   return { success: true, updatedInvoices: invoiceIdsToRecalculate.size }
 }
 
-export async function syncDraftInvoiceExpenses(entryId: string) {
+/**
+ * Keep the entry's line on its client's draft invoice in step with the entry.
+ * `cushionEdited` says the rebill cushion itself was changed on this save, so
+ * it replaces whatever cushion the line carries (see cushionForLine).
+ */
+export async function syncDraftInvoiceExpenses(entryId: string, opts: { cushionEdited?: boolean } = {}) {
   const supabase = createTypedAdminClient()
 
   // 1. Get the entry
@@ -486,7 +491,7 @@ export async function syncDraftInvoiceExpenses(entryId: string) {
 
   // 2. Check if this entry is already an expense item
   const { data: existingExp } = await supabase.from('invoice_expense_items')
-    .select('id, invoice_id, amount, amount_inr, currency, original_amount, original_amount_inr, markup_type')
+    .select('id, invoice_id, amount, amount_inr, currency, original_amount, original_amount_inr, markup_type, markup_value')
     .eq('cashbook_entry_id', entryId)
     .maybeSingle()
 
@@ -501,28 +506,32 @@ export async function syncDraftInvoiceExpenses(entryId: string) {
   } else if (existingExp) {
     const { data: inv } = await supabase.from('invoices').select('status, currency, exchange_rate').eq('id', existingExp.invoice_id).single()
     if (inv && inv.status === 'draft') {
-      let newBilling = entry.amount
-      let newBillingInr = entry.amount_inr
-      
-      // If markup was none, we update the billing amount to match the new original amount.
-      // But we need to ensure it's in the invoice currency.
-      if (entry.currency !== inv.currency) {
-          const invRate = inv.exchange_rate || 1
-          newBilling = r2(entry.amount_inr / invRate)
-      }
+      let billing = entry.amount
+      if (entry.currency !== inv.currency) billing = r2(entry.amount_inr / (inv.exchange_rate || 1))
 
-      if (existingExp.markup_type !== 'none') {
-          // If it had a markup, we don't recalculate the billing amount automatically here
-          // to avoid overwriting a custom manual markup value. Just update the original costs.
-          newBilling = existingExp.amount
-          newBillingInr = existingExp.amount_inr
-      }
-      
+      // The cushion is always re-applied to the CURRENT cost, so a corrected
+      // cost carries its cushion with it instead of leaving a stale total.
+      const c = cushionForLine(
+        { type: existingExp.markup_type, value: existingExp.markup_value },
+        { type: entryMarkupType, value: entryMarkupValue },
+        opts.cushionEdited ?? false,
+      )
+      // A flat cushion is an amount in its own currency — the entry's, or the
+      // invoice's for one set on the line — converted alongside the cost.
+      const base = c.source === 'entry' ? entry.amount : billing
+      const flatIn = (to: number) => c.type === 'fixed' && base !== 0 ? r2(c.value * (to / base)) : c.value
+      const valueInInvoiceCcy = flatIn(billing)
+      const marked    = computeMarkup(billing,          c.type, valueInInvoiceCcy)
+      const markedInr = computeMarkup(entry.amount_inr, c.type, flatIn(entry.amount_inr))
+
       await supabase.from('invoice_expense_items').update({
         original_amount: entry.amount,
         original_amount_inr: entry.amount_inr,
-        amount: newBilling,
-        amount_inr: newBillingInr,
+        amount: marked.billed,
+        amount_inr: markedInr.billed,
+        markup_type: c.type,
+        markup_value: valueInInvoiceCcy,
+        markup_amount: marked.markupAmount,
         description: entry.description || ''
       }).eq('id', existingExp.id)
 
@@ -590,15 +599,16 @@ export async function syncDraftInvoiceExpenses(entryId: string) {
   for (const invId of invoiceIdsToRecalculate) {
     const { data: allItems } = await supabase.from('invoice_items').select('total').eq('invoice_id', invId)
     const { data: allExps } = await supabase.from('invoice_expense_items').select('amount').eq('invoice_id', invId)
-    const { data: inv } = await supabase.from('invoices').select('discount_amount, tax_amount').eq('id', invId).single()
+    const { data: inv } = await supabase.from('invoices').select('discount_amount, tax_amount, previous_balance').eq('id', invId).single()
     
     const taskTotal = (allItems || []).reduce((sum, it) => sum + (it.total || 0), 0)
     const expTotal = (allExps || []).reduce((sum, e) => sum + (e.amount || 0), 0)
     const discount = inv?.discount_amount || 0
     const tax = inv?.tax_amount || 0
+    const prevBal = inv?.previous_balance || 0
     
     const subtotal = r2(taskTotal + expTotal)
-    const total_amount = r2(subtotal - discount + tax)
+    const total_amount = r2(subtotal - discount + tax + prevBal)
     
     await supabase.from('invoices').update({ subtotal, total_amount }).eq('id', invId)
   }

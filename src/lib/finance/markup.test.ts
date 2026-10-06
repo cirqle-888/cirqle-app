@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeMarkup, markupLabel, isMarkupType } from './markup'
+import { computeMarkup, markupLabel, isMarkupType, cushionForLine } from './markup'
 
 describe('computeMarkup', () => {
   it('leaves the cost untouched when no cushion is set', () => {
@@ -63,5 +63,25 @@ describe('isMarkupType', () => {
     expect(isMarkupType('fixed')).toBe(true)
     expect(isMarkupType('percent')).toBe(false)
     expect(isMarkupType(null)).toBe(false)
+  })
+})
+
+describe('cushionForLine', () => {
+  const none = { type: 'none', value: 0 }
+  const flat750 = { type: 'fixed', value: 750 }
+  const pct10 = { type: 'percentage', value: 10 }
+
+  it('applies a cushion added on the entry after the line was copied at cost', () => {
+    expect(cushionForLine(none, flat750, false)).toEqual({ source: 'entry', type: 'fixed', value: 750 })
+  })
+
+  it('keeps a cushion set on the invoice when the entry edit did not touch the cushion', () => {
+    expect(cushionForLine(pct10, flat750, false)).toEqual({ source: 'line', type: 'percentage', value: 10 })
+    expect(cushionForLine(pct10, none, false)).toEqual({ source: 'line', type: 'percentage', value: 10 })
+  })
+
+  it('an edited entry cushion wins, including being cleared', () => {
+    expect(cushionForLine(pct10, flat750, true)).toEqual({ source: 'entry', type: 'fixed', value: 750 })
+    expect(cushionForLine(pct10, none, true)).toEqual({ source: 'entry', type: 'none', value: 0 })
   })
 })
