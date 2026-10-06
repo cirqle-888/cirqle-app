@@ -1207,6 +1207,32 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     setDiscountLoading(false)
   }
 
+  /**
+   * Keep an invoice's discount log in step with its discount. The invoice
+   * holds ONE discount — applying a new one replaces it — so it has one log
+   * row: re-applying updates that row instead of adding another, which made
+   * analytics count ₹200 then ₹250 as ₹450 given. 0 removes the row.
+   */
+  async function writeDiscountLog(invoiceId: string, clientId: string, amt: number, sub: number, invoiceTotal: number | undefined, reason?: string) {
+    const { data: existing } = await supabase.from('discount_logs')
+      .select('id').eq('invoice_id', invoiceId).order('created_at', { ascending: false })
+    const [keep, ...stale] = existing || []
+    if (stale.length) await supabase.from('discount_logs').delete().in('id', stale.map(r => r.id))
+    if (amt <= 0) {
+      if (keep) await supabase.from('discount_logs').delete().eq('id', keep.id)
+      return
+    }
+    const row = {
+      discount_amount: amt,
+      discount_percentage: sub > 0 ? (amt / sub) * 100 : 0,
+      invoice_total: invoiceTotal ?? null,
+      ...(reason !== undefined ? { reason } : {}),
+    }
+    if (keep) await supabase.from('discount_logs').update(row).eq('id', keep.id)
+    else await supabase.from('discount_logs').insert({ invoice_id: invoiceId, client_id: clientId, reason: 'No reason provided', ...row })
+    setDiscAnalyticsLoaded(false)
+  }
+
   async function applyDiscount(invoiceId: string, clientId: string) {
     const amt = parseFloat(manualDiscount)
     if (!amt || amt <= 0) { toastError('Enter a discount amount'); return }
@@ -1218,12 +1244,8 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     const newTotal = Math.max(0, sub + taxAmt - amt + (inv.previous_balance || 0))
 
     await supabase.from('invoices').update({ discount_amount: amt, total_amount: newTotal }).eq('id', invoiceId)
-    // Log discount (reason optional)
-    await supabase.from('discount_logs').insert({
-      invoice_id: invoiceId, client_id: clientId, discount_amount: amt,
-      discount_percentage: sub > 0 ? (amt / sub) * 100 : 0,
-      invoice_total: inv.total_amount, reason: discountReason || 'No reason provided',
-    })
+    // Log discount (reason optional) — replaces this invoice's earlier log.
+    await writeDiscountLog(invoiceId, clientId, amt, sub, inv.total_amount, discountReason || 'No reason provided')
     setInvoices(prev => prev.map(i => i.id === invoiceId
       ? { ...i, discount_amount: amt, total_amount: newTotal, total_amount_inr: round2(newTotal * (i.exchange_rate || 1)) }
       : i
@@ -1270,6 +1292,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     await supabase.from('invoices').update({
       discount_amount: discount, total_amount: total, updated_at: new Date().toISOString(),
     }).eq('id', invoiceId)
+    if (discount !== (inv.discount_amount || 0)) await writeDiscountLog(invoiceId, inv.client_id, discount, sub, inv.total_amount)
     setInvoices(prev => prev.map(i => i.id === invoiceId
       ? { ...i, discount_amount: discount, total_amount: total, total_amount_inr: round2(total * (i.exchange_rate || 1)) }
       : i
@@ -1278,16 +1301,21 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
 
   async function removeDiscountLog(logId: string, invoiceId: string) {
     await supabase.from('discount_logs').delete().eq('id', logId)
+    // The invoice keeps whatever discount its remaining log records — removing
+    // a stale duplicate must not wipe the discount that is actually applied.
+    const { data: rest } = await supabase.from('discount_logs')
+      .select('discount_amount').eq('invoice_id', invoiceId).order('created_at', { ascending: false }).limit(1)
+    const remaining = Number(rest?.[0]?.discount_amount) || 0
     const inv = invoices.find(i => i.id === invoiceId)
-    if (inv) {
+    if (inv && remaining !== (inv.discount_amount || 0)) {
       const sub = inv.subtotal || 0
       const taxAmt = sub * (inv.tax_rate || 0) / 100
-      const newTotal = Math.max(0, sub + taxAmt + (inv.previous_balance || 0))
+      const newTotal = Math.max(0, sub + taxAmt - remaining + (inv.previous_balance || 0))
       await supabase.from('invoices')
-        .update({ discount_amount: 0, total_amount: newTotal, updated_at: new Date().toISOString() })
+        .update({ discount_amount: remaining, total_amount: newTotal, updated_at: new Date().toISOString() })
         .eq('id', invoiceId)
       setInvoices(prev => prev.map(i => i.id === invoiceId
-        ? { ...i, discount_amount: 0, total_amount: newTotal, total_amount_inr: round2(newTotal * (i.exchange_rate || 1)) }
+        ? { ...i, discount_amount: remaining, total_amount: newTotal, total_amount_inr: round2(newTotal * (i.exchange_rate || 1)) }
         : i
       ))
     }

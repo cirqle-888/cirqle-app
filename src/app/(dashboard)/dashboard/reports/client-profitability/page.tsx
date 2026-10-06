@@ -55,9 +55,9 @@ export default async function ClientProfitabilityPage() {
         .neq('status', 'cancelled'),
     ),
 
-    // Discount history. This — not `invoices.discount_amount` — is authoritative:
-    // the invoice column is overwritten by each new discount, so an invoice
-    // discounted twice reports only the last one.
+    // Discount history: one row per discounted invoice, kept in step with
+    // `invoices.discount_amount` (re-applying a discount updates the row —
+    // it replaces the discount, it does not add a second one).
     fetchAll(
       admin.from('discount_logs')
         .select('invoice_id, discount_amount')
