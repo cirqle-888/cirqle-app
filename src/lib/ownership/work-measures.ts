@@ -34,6 +34,9 @@ export interface MeasureItem {
   date: string
   /** Money attributed through this item, when the basis measures money. */
   amountInr?: number
+  /** The client (client handling) or task (planning) it was — lets reports
+   *  put the reward back on that work. */
+  refId?: string
 }
 
 export interface PersonMeasure {
@@ -97,7 +100,7 @@ export function attributeClientHandling(
     const m = out[c.employeeId]
     if (c.worked) m.units += 1
     m.amountInr += c.amount
-    m.items.push({ label: clientNames.get(c.clientId) ?? 'Client', date: c.first, amountInr: r2(c.amount) })
+    m.items.push({ label: clientNames.get(c.clientId) ?? 'Client', date: c.first, amountInr: r2(c.amount), refId: c.clientId })
   }
   for (const m of Object.values(out)) { m.amountInr = r2(m.amountInr); m.items.sort((a, b) => (b.amountInr ?? 0) - (a.amountInr ?? 0)) }
   return out
@@ -128,7 +131,7 @@ export function attributePlanned(
     const amt = Number(t.billing_amount_inr || 0)
     out[who].units += 1
     out[who].amountInr += amt
-    out[who].items.push({ label: `#${t.task_number ?? '—'} ${t.title ?? ''}`.trim(), date: t.task_date, amountInr: r2(amt) })
+    out[who].items.push({ label: `#${t.task_number ?? '—'} ${t.title ?? ''}`.trim(), date: t.task_date, amountInr: r2(amt), refId: t.id })
   }
   for (const m of Object.values(out)) { m.amountInr = r2(m.amountInr); m.items.sort((a, b) => a.date.localeCompare(b.date)) }
   return out

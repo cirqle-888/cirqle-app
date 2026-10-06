@@ -71,6 +71,35 @@ export interface AnalysisRow {
   contributors: number
   /** employeeId → { pct, earn } */
   emp: Record<string, EmpCell>
+  // ── Department + ownership ──
+  /** Service category the task was sold under ('' when none). */
+  department_id: string
+  department_name: string
+  /** Ownership rewards apportioned to this task (see ownership-allocation.ts). */
+  ownership_inr: number
+  /** Expected profit after ownership: profit − ownership_inr. */
+  net_profit: number
+  /** net_profit / billing_inr × 100 (0 when billing_inr = 0). */
+  net_profit_pct: number
+}
+
+/**
+ * Put each task's apportioned ownership (and its department) on the rows.
+ * Rows not in the maps keep ownership 0 and net = expected profit.
+ */
+export function applyOwnershipAndDepartment(
+  rows: AnalysisRow[],
+  ownershipByTask: Map<string, number>,
+  department: (row: AnalysisRow) => { id: string; name: string } | null,
+): void {
+  for (const r of rows) {
+    const d = department(r)
+    r.department_id = d?.id ?? ''
+    r.department_name = d?.name ?? '—'
+    r.ownership_inr = r2(ownershipByTask.get(r.task_id) ?? 0)
+    r.net_profit = r2(r.profit - r.ownership_inr)
+    r.net_profit_pct = r.billing_inr > 0 ? r2(r.net_profit / r.billing_inr * 100) : 0
+  }
 }
 
 // ─── Raw inputs from the DB (server-side) ─────────────────────────────────────
@@ -228,6 +257,11 @@ export function buildAnalysisRows(
       actual_profit_pct,
       contributors,
       emp,
+      department_id: '',
+      department_name: '—',
+      ownership_inr: 0,
+      net_profit: profit,
+      net_profit_pct: profit_pct,
     })
   }
   return rows
@@ -373,6 +407,13 @@ export interface Summary {
   totalActualReceived: number
   totalFxGainLoss: number
   totalActualProfit: number
+  // ── Ownership ──
+  /** Σ ownership apportioned to these tasks. */
+  totalOwnership: number
+  /** Σ expected profit after ownership. */
+  totalNetProfit: number
+  /** totalNetProfit / totalBilling × 100 — billing-weighted margin. */
+  netMarginPct: number
   // ── Filtered Employee Specific ──
   filteredEarnings?: number
   filteredAvgContrib?: number
@@ -383,6 +424,7 @@ export function computeSummary(rows: AnalysisRow[], employeeFilterIds?: string[]
   let profitPctSum = 0, profitPctCount = 0
   let contribPctSum = 0, contribPctCount = 0
   let actualTasks = 0, totalActualReceived = 0, totalFxGainLoss = 0, totalActualProfit = 0
+  let totalOwnership = 0, totalNetProfit = 0
   
   let filteredEarnings = 0
   let filteredContribSum = 0, filteredContribCount = 0
@@ -394,6 +436,8 @@ export function computeSummary(rows: AnalysisRow[], employeeFilterIds?: string[]
     totalPool += r.commission_pool
     totalEarnings += r.total_earnings
     totalProfit += r.profit
+    totalOwnership += r.ownership_inr || 0
+    totalNetProfit += r.net_profit ?? r.profit
     if (r.billing_inr > 0) { profitPctSum += r.profit_pct; profitPctCount++ }
     if (r.actual_received !== null) {
       actualTasks++
@@ -431,6 +475,9 @@ export function computeSummary(rows: AnalysisRow[], employeeFilterIds?: string[]
     totalActualReceived: r2(totalActualReceived),
     totalFxGainLoss: r2(totalFxGainLoss),
     totalActualProfit: r2(totalActualProfit),
+    totalOwnership: r2(totalOwnership),
+    totalNetProfit: r2(totalNetProfit),
+    netMarginPct: totalBilling > 0 ? r2(totalNetProfit / totalBilling * 100) : 0,
     ...(hasEmpFilter ? {
       filteredEarnings: r2(filteredEarnings),
       filteredAvgContrib: filteredContribCount ? r2(filteredContribSum / filteredContribCount) : 0
@@ -451,10 +498,11 @@ export const MATRIX_COL = {
   billing_inr: 8, commission_pool: 10, total_earnings: 11,
   company_received: 12, exp_profit: 13, exp_profit_pct: 14, actual_received: 15,
   fx_gain_loss: 16, actual_profit: 17, actual_profit_pct: 18, contributors: 19,
+  department: 20, ownership: 21, net_profit: 22, net_profit_pct: 23,
 } as const
 
 /** Fixed (non-employee) column count in the export matrix. Each employee adds 3. */
-export const MATRIX_FIXED_COLS = 20
+export const MATRIX_FIXED_COLS = 24
 
 const blankNum = (n: number | null) => (n === null ? '' : n)
 
@@ -466,6 +514,7 @@ export function matrixHeader(employees: EmployeeColumn[]): string[] {
     'Company Received (INR)', 'Expected Profit (INR)', 'Expected Profit %',
     'Actual Received (INR)', 'FX Gain/Loss (INR)', 'Actual Profit (INR)', 'Actual Profit %',
     'Total Contributors',
+    'Department', 'Ownership (INR)', 'Net Profit after Ownership (INR)', 'Net Margin %',
   ]
   for (const e of employees) {
     // Callers pass `displayEmployees`, already masked with dn(), so the CSV carries CQIDs when locked.
@@ -483,6 +532,7 @@ export function rowToLine(r: AnalysisRow, employees: EmployeeColumn[]): (string 
     r.company_received, r.profit, r.profit_pct,
     blankNum(r.actual_received), blankNum(r.fx_gain_loss), blankNum(r.actual_profit), blankNum(r.actual_profit_pct),
     r.contributors,
+    r.department_name, r.ownership_inr, r.net_profit, r.net_profit_pct,
   ]
   for (const e of employees) {
     const cell = r.emp[e.id]
@@ -507,11 +557,12 @@ export function matrixToCSV(matrix: (string | number)[][]): string {
 
 // ─── Grouping (subtotaled views) ──────────────────────────────────────────────
 
-export type GroupKey = 'none' | 'client' | 'service' | 'status' | 'month' | 'year'
+export type GroupKey = 'none' | 'client' | 'department' | 'service' | 'status' | 'month' | 'year'
 
 export const GROUP_OPTIONS: { value: GroupKey; label: string }[] = [
   { value: 'none', label: 'No grouping' },
   { value: 'client', label: 'Client' },
+  { value: 'department', label: 'Department' },
   { value: 'service', label: 'Service' },
   { value: 'status', label: 'Status' },
   { value: 'month', label: 'Month' },
@@ -536,6 +587,7 @@ const MON_SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', '
 function groupBucket(r: AnalysisRow, key: GroupKey): [string, string] {
   switch (key) {
     case 'client':  return [r.client_id || '∅', r.client_name || '—']
+    case 'department': return [r.department_id || '∅', r.department_name || '—']
     case 'service': return [r.service_id || '∅', r.service_name || '—']
     case 'status':  return [r.status || '∅', r.status || '—']
     case 'month': {
@@ -597,6 +649,9 @@ export function subtotalLine(g: RowGroup, employees: EmployeeColumn[]): (string 
     line[MATRIX_COL.actual_profit] = s.totalActualProfit
     line[MATRIX_COL.actual_profit_pct] = s.totalActualReceived > 0 ? r2(s.totalActualProfit / s.totalActualReceived * 100) : 0
   }
+  line[MATRIX_COL.ownership] = s.totalOwnership
+  line[MATRIX_COL.net_profit] = s.totalNetProfit
+  line[MATRIX_COL.net_profit_pct] = s.netMarginPct
   // employee earnings sub-column (pct / share are left blank for a subtotal)
   employees.forEach((e, i) => { line[MATRIX_FIXED_COLS + i * 3 + 1] = g.empEarn[e.id] ?? 0 })
   return line

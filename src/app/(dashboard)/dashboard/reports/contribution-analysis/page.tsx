@@ -2,8 +2,10 @@ import { redirect } from 'next/navigation'
 import { createAdminClient, fetchAll } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { loadOrgGraph, loadOrgMembers } from '@/lib/org/units'
+import { allocateOwnership, type AllocAward, type AllocTask, type UnallocatedLine } from '@/lib/reports/ownership-allocation'
+import { resolveScope } from '@/lib/org/units'
 import {
-  buildAnalysisRows,
+  buildAnalysisRows, applyOwnershipAndDepartment,
   type RawTask, type RawScore, type RawPricing, type EmployeeColumn,
 } from '@/lib/reports/contribution-analysis'
 import type { CommissionAgreement } from '@/lib/agreements/resolve-earning'
@@ -39,12 +41,12 @@ export default async function ContributionAnalysisPage({
 
   const supabase = createAdminClient()
 
-  const [{ units, scopes: unitScopes }, unitMembers, categoriesRes] = await Promise.all([
+  const [{ units, scopes: orgScopes }, unitMembers, categoriesRes] = await Promise.all([
     loadOrgGraph(supabase),
     loadOrgMembers(supabase),
     // Departments = service categories (the same reading the department P&L
     // uses). Absent pre-migration, so errors degrade to "no departments".
-    supabase.from('service_categories').select('id, name').eq('is_active', true).order('display_order'),
+    supabase.from('service_categories').select('id, name, is_active').order('display_order'),
   ])
 
   const [employeesRes, clientsRes, servicesRes, pricingRes, tasksRes, scoresRes, invoiceItemsRes, invoicesRes, ratingsRes, taskToolsRes, toolsRes, agreementsRes, ratesRes] = await Promise.all([
@@ -98,7 +100,9 @@ export default async function ContributionAnalysisPage({
   const serviceRows = (servicesRes.data || []) as { id: string; name: string; category_id?: string | null }[]
   const services = serviceRows.map(s => ({ id: s.id, name: s.name }))
   const categoryOfService = Object.fromEntries(serviceRows.map(s => [s.id, s.category_id ?? null]))
-  const categories = ((categoriesRes.data || []) as { id: string; name: string }[])
+  const allCategories = (categoriesRes.data || []) as { id: string; name: string; is_active: boolean | null }[]
+  const categories = allCategories.filter(c => c.is_active !== false).map(c => ({ id: c.id, name: c.name }))
+  const categoryName = new Map(allCategories.map(c => [c.id, c.name]))
 
   const clientName = new Map(clients.map(c => [c.id, c.name]))
   const serviceName = new Map(services.map(s => [s.id, s.name]))
@@ -178,6 +182,65 @@ export default async function ContributionAnalysisPage({
     rates
   )
 
+  // ── Ownership, apportioned to tasks ────────────────────────────────────────
+  // Awards whose period overlaps the window. Their weights come from EVERY task
+  // in each award's period (not just the window's), so a window that starts
+  // mid-month cannot pile a whole month's award onto the few tasks it shows.
+  // Best-effort: the report renders without ownership if anything is missing.
+  let unallocatedOwnership: UnallocatedLine[] = []
+  let ownershipByTask = new Map<string, number>()
+  try {
+    let aq = supabase.from('ownership_awards')
+      .select('period_start, period_end, basis, percent, earned_inr, breakdown, program:ownership_programs(name, scope_kind, scope_id)')
+    if (win.from) aq = aq.gte('period_end', win.from)
+    if (win.to) aq = aq.lte('period_start', win.to)
+    const { data: awardRows } = await fetchAll(aq.order('id', { ascending: true }))
+    type AwardRow = {
+      period_start: string; period_end: string; basis: string; percent: number | null; earned_inr: number
+      breakdown: { items?: AllocAward['items'] } | null
+      program: { name: string; scope_kind: string; scope_id: string | null } | null
+    }
+    const awards: AllocAward[] = ((awardRows || []) as unknown as AwardRow[]).map(a => ({
+      programName: a.program?.name ?? 'Ownership',
+      basis: a.basis,
+      scopeKind: a.program?.scope_kind ?? 'company',
+      scopeId: a.program?.scope_id ?? null,
+      periodStart: a.period_start,
+      periodEnd: a.period_end,
+      percent: a.percent,
+      earnedInr: Number(a.earned_inr) || 0,
+      items: a.breakdown?.items,
+    }))
+    if (awards.length) {
+      const from = awards.reduce((m, a) => (a.periodStart < m ? a.periodStart : m), awards[0].periodStart)
+      const to = awards.reduce((m, a) => (a.periodEnd > m ? a.periodEnd : m), awards[0].periodEnd)
+      const { data: weightRows } = await fetchAll(supabase.from('tasks')
+        .select('id, task_number, task_date, client_id, service_id, billing_amount_inr')
+        .is('deleted_at', null).gte('task_date', from).lte('task_date', to)
+        .order('id', { ascending: true }))
+      const allocTasks: AllocTask[] = ((weightRows || []) as { id: string; task_number: number | null; task_date: string; client_id: string | null; service_id: string | null; billing_amount_inr: number | null }[])
+        .map(t => ({
+          id: t.id, taskNumber: t.task_number, date: t.task_date,
+          clientId: t.client_id, serviceId: t.service_id,
+          categoryId: t.service_id ? categoryOfService[t.service_id] ?? null : null,
+          billingInr: Number(t.billing_amount_inr) || 0,
+        }))
+      const unitScopes = new Map(units.map(u => [u.id, resolveScope(units, orgScopes, u.id)]))
+      const result = allocateOwnership(awards, allocTasks, {
+        clientIdByName: new Map(clients.map(c => [c.name.trim().toLowerCase(), c.id])),
+        unitScopes,
+      })
+      ownershipByTask = result.byTask
+      unallocatedOwnership = result.unallocated
+    }
+  } catch {
+    // ownership tables absent or unreadable — report without ownership
+  }
+  applyOwnershipAndDepartment(rows, ownershipByTask, r => {
+    const id = r.service_id ? categoryOfService[r.service_id] : null
+    return id ? { id, name: categoryName.get(id) ?? '—' } : null
+  })
+
   // ── Saved layouts (personal + system default) ──────────────────────────────
   // Priority at load time (handled client-side): personal → system → hardcoded.
   // Wrapped defensively so the page still renders pre-migration (table missing).
@@ -208,12 +271,13 @@ export default async function ContributionAnalysisPage({
       categories={categories}
       categoryOfService={categoryOfService}
       orgUnits={units.filter(u => u.isActive)}
-      orgUnitScopes={unitScopes}
+      orgUnitScopes={orgScopes}
       orgUnitMembers={unitMembers.map(m => ({ unitId: m.unitId, employeeId: m.employeeId }))}
       isAdmin={isAdmin}
       personalLayout={personalLayout}
       systemLayout={systemLayout}
       dataWindowLabel={win.label}
+      unallocatedOwnership={unallocatedOwnership}
     />
   )
 }

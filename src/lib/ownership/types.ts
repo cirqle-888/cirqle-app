@@ -123,7 +123,7 @@ export interface PeriodAggregates {
   /** Per-person money (clients' billing, planned billing) — what a % rule takes a share of. */
   amountByEmployee?: Record<string, number>
   /** The items behind each person's number, for showing exactly what was counted. */
-  itemsByEmployee?: Record<string, { label: string; date: string; amountInr?: number }[]>
+  itemsByEmployee?: Record<string, { label: string; date: string; amountInr?: number; refId?: string }[]>
 }
 
 /**

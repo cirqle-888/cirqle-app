@@ -44,6 +44,11 @@ function mkRow(o: Partial<AnalysisRow> & Pick<AnalysisRow, 'task_id'>): Analysis
     actual_profit_pct: o.actual_profit_pct ?? null,
     contributors: o.contributors ?? 0,
     emp: o.emp ?? {},
+    department_id: o.department_id ?? '',
+    department_name: o.department_name ?? '—',
+    ownership_inr: o.ownership_inr ?? 0,
+    net_profit: o.net_profit ?? (o.profit ?? 0),
+    net_profit_pct: o.net_profit_pct ?? (o.profit_pct ?? 0),
   }
 }
 

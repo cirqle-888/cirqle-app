@@ -14,6 +14,7 @@ import {
   type SortKey, type SortDir, type GroupKey, type RowGroup, type Summary,
 } from '@/lib/reports/contribution-analysis'
 import { ORG_UNIT_TYPE_LABEL, type OrgUnit, type OrgUnitScopeRow } from '@/lib/org/units'
+import type { UnallocatedLine } from '@/lib/reports/ownership-allocation'
 import {
   Download, Printer, FileSpreadsheet, SlidersHorizontal, X, ArrowUp, ArrowDown,
   ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Layers, Pin, GripVertical,
@@ -56,6 +57,8 @@ interface Props {
    * window named in the URL — see resolveFetchWindow in the page.
    */
   dataWindowLabel?: string | null
+  /** Ownership with no task behind it (per-entry, fixed…) for the loaded window. */
+  unallocatedOwnership?: UnallocatedLine[]
 }
 
 const REPORT_NAME = 'contribution_analysis'
@@ -136,6 +139,7 @@ function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
     { key: 'task_date', label: 'Date', width: 96, align: 'left', group: 'core', render: r => r.task_date },
     { key: 'client_name', label: 'Client', width: 150, align: 'left', group: 'core', render: r => r.client_name },
     { key: 'service_name', label: 'Service', width: 140, align: 'left', group: 'core', render: r => r.service_name },
+    { key: 'department_name', label: 'Department', width: 130, align: 'left', group: 'core', render: r => r.department_name },
     { key: 'status', label: 'Status', width: 96, align: 'center', group: 'core', render: r => r.status },
     { key: 'currency', label: 'Cur', width: 56, align: 'center', group: 'billing', render: r => r.currency },
     { key: 'billing', label: 'Billing', width: 100, align: 'right', group: 'billing', render: r => fmt(r.billing, dp) },
@@ -154,6 +158,19 @@ function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
     {
       key: 'profit_pct', label: 'Exp Profit %', width: 92, align: 'right', group: 'profit', render: r => pct(r.profit_pct),
       cls: r => (r.profit_pct < 0 ? 'text-red-400' : 'text-emerald-400'),
+    },
+    // Ownership rewards apportioned to the task, and what is left after them.
+    {
+      key: 'ownership_inr', label: 'Ownership ₹', width: 104, align: 'right', group: 'profit',
+      render: r => r.ownership_inr ? inr(r.ownership_inr, dp) : <span className="text-muted-foreground/40">—</span>,
+    },
+    {
+      key: 'net_profit', label: 'Net Profit ₹', width: 110, align: 'right', group: 'profit', render: r => inr(r.net_profit, dp),
+      cls: r => (r.net_profit < 0 ? 'text-red-400' : 'text-emerald-400'),
+    },
+    {
+      key: 'net_profit_pct', label: 'Net Margin %', width: 92, align: 'right', group: 'profit', render: r => pct(r.net_profit_pct),
+      cls: r => (r.net_profit_pct < 0 ? 'text-red-400' : 'text-emerald-400'),
     },
     {
       key: 'actual_received', label: 'Actual Recv ₹', width: 116, align: 'right', group: 'actual_received',
@@ -379,7 +396,7 @@ function MultiSelect({ label, options, selected, onChange, sortKey }: {
 const ALL_GROUPS: ColGroup[] = ['billing', 'profit', 'actual_received', 'fx_gain_loss', 'actual_profit', 'actual_profit_pct', 'contributors', 'employees']
 const GROUP_LABELS: Record<string, string> = { 
   billing: 'Billing', 
-  profit: 'Exp Profit', 
+  profit: 'Profit & Ownership', 
   actual_received: 'Actual Recv',
   fx_gain_loss: 'FX',
   actual_profit: 'Actual Profit ₹',
@@ -409,7 +426,7 @@ function parseFromParams(sp: URLSearchParams): { filters: Filters; sortKey: Sort
   }
 }
 
-export default function ContributionAnalysisClient({ rows, employees, clients, services, categories, categoryOfService, orgUnits, orgUnitScopes, orgUnitMembers, isAdmin, personalLayout, systemLayout, dataWindowLabel = null }: Props) {
+export default function ContributionAnalysisClient({ rows, employees, clients, services, categories, categoryOfService, orgUnits, orgUnitScopes, orgUnitMembers, isAdmin, personalLayout, systemLayout, dataWindowLabel = null, unallocatedOwnership = [] }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -868,6 +885,10 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     [groupSet, displayEmployees],
   )
 
+  const unallocatedTotal = useMemo(
+    () => Math.round(unallocatedOwnership.reduce((t, u) => t + u.amountInr, 0) * 100) / 100,
+    [unallocatedOwnership])
+
   // Value shown in a subtotal cell under each visible column.
   const dp = decimals ? 2 : 0
   const subtotalCell = (c: Col, g: RowGroup): React.ReactNode => {
@@ -881,6 +902,9 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
       case 'total_earnings': return inr(s.totalEarnings, dp)
       case 'profit': return inr(s.totalProfit, dp)
       case 'profit_pct': return pct(s.avgProfitPct)
+      case 'ownership_inr': return inr(s.totalOwnership, dp)
+      case 'net_profit': return inr(s.totalNetProfit, dp)
+      case 'net_profit_pct': return pct(s.netMarginPct)
       case 'actual_received': return s.actualTasks ? inr(s.totalActualReceived, dp) : '—'
       case 'fx_gain_loss': return s.actualTasks ? inr(s.totalFxGainLoss, dp) : '—'
       case 'actual_profit': return s.actualTasks ? inr(s.totalActualProfit, dp) : '—'
@@ -905,6 +929,9 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
       case 'total_earnings': return inr(s.totalEarnings, dp)
       case 'profit': return inr(s.totalProfit, dp)
       case 'profit_pct': return pct(s.avgProfitPct)
+      case 'ownership_inr': return inr(s.totalOwnership, dp)
+      case 'net_profit': return inr(s.totalNetProfit, dp)
+      case 'net_profit_pct': return pct(s.netMarginPct)
       case 'actual_received': return s.actualTasks ? inr(s.totalActualReceived, dp) : '—'
       case 'fx_gain_loss': return s.actualTasks ? inr(s.totalFxGainLoss, dp) : '—'
       case 'actual_profit': return s.actualTasks ? inr(s.totalActualProfit, dp) : '—'
@@ -933,6 +960,13 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
               { label: summary.filteredAvgContrib !== undefined ? 'Filtered Avg Contrib %' : 'Avg Contribution %', value: pct(summary.filteredAvgContrib ?? summary.avgContributionPct), tip: summary.filteredAvgContrib !== undefined ? 'The average contribution percentage among the filtered employees.' : 'The average employee contribution percentage across these tasks.' },
               { label: 'Expected Profit', value: inr(summary.totalProfit, decimals ? 2 : 0), accent: summary.totalProfit < 0 ? 'text-red-400' : 'text-emerald-400', tip: 'The profit CirQle expects to make after paying out ALL employee commissions on these tasks (Total Billing - Commission Pool).' },
               { label: 'Avg Expected Profit %', value: pct(summary.avgProfitPct), accent: summary.avgProfitPct < 0 ? 'text-red-400' : 'text-emerald-400', tip: 'The average profit margin percentage.' },
+              {
+                label: 'Ownership on Tasks', value: inr(summary.totalOwnership, decimals ? 2 : 0),
+                sub: unallocatedTotal ? `+ ${inr(unallocatedTotal, 0)} not tied to tasks` : undefined,
+                tip: 'Ownership rewards apportioned to these tasks: billing/collection shares by each task’s billing in the period, client handling to the handled client’s tasks, planning to the planned task.'
+                  + (unallocatedTotal ? ` Not on any task (whole loaded period, unfiltered): ${unallocatedOwnership.map(u => `${u.programName} ₹${Math.round(u.amountInr).toLocaleString('en-IN')} — ${u.reason}`).join('; ')}.` : ''),
+              },
+              { label: 'Net Profit', value: inr(summary.totalNetProfit, decimals ? 2 : 0), accent: summary.totalNetProfit < 0 ? 'text-red-400' : 'text-emerald-400', sub: `Net margin ${pct(summary.netMarginPct)}`, tip: 'Expected profit after ownership: Billing − Employee Earnings − Ownership on Tasks. Margin is billing-weighted.' },
               { label: 'Actual Received', value: inr(summary.totalActualReceived, decimals ? 2 : 0), sub: `${fmt(summary.actualTasks, 0)} paid tasks`, tip: 'The actual amount of money received from clients for these tasks (only counts fully paid tasks).' },
               { label: 'FX Gain / Loss', value: inr(summary.totalFxGainLoss, decimals ? 2 : 0), accent: summary.totalFxGainLoss < 0 ? 'text-red-400' : summary.totalFxGainLoss > 0 ? 'text-emerald-400' : '', tip: 'The difference between the expected Total Billing and the Actual Received amount (caused by currency fluctuations or short-pays).' },
               { label: 'Actual Profit', value: inr(summary.totalActualProfit, decimals ? 2 : 0), accent: summary.totalActualProfit < 0 ? 'text-red-400' : 'text-emerald-400', tip: 'The real profit made (Actual Received - Commission Pool), which accounts for FX differences.' },
