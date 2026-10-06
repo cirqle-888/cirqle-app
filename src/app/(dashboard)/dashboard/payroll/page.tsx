@@ -66,7 +66,7 @@ export default async function PayrollPage() {
     fetchAll(stablePaginationQuery(
       supabase
         .from('contribution_scores')
-        .select('task_id, employee_id, earnings_inr, score_percentage, is_manual_override, earning_source, calculated_at, task:tasks(id, task_date, title, status)')
+        .select('task_id, employee_id, earnings_inr, score_percentage, is_manual_override, earning_source, calculated_at, task:tasks(id, task_date, title, status, deleted_at)')
         .gte('calculated_at', scoresWindowFromStr)
         .order('calculated_at', { ascending: false })
     )),

@@ -115,7 +115,7 @@ export interface RecalculateMonthInput {
 
 export async function recalculatePayrollForMonth(
   input: RecalculateMonthInput,
-): Promise<ActionResult<{ updated: number; updates: any[] }>> {
+): Promise<ActionResult<{ updated: number; checked: number; updates: any[] }>> {
   const guard = await requirePermission(PERMS.PAYROLL_EDIT)
   if (!guard.ok) return { ok: false, error: guard.error }
 
@@ -148,7 +148,7 @@ export async function recalculatePayrollForMonth(
 
   if (payrollErr) return { ok: false, error: payrollErr.message }
   if (!payroll || payroll.length === 0) {
-    return { ok: true, data: { updated: 0, updates: [] } }
+    return { ok: true, data: { updated: 0, checked: 0, updates: [] } }
   }
 
   // Track all updates for logging
@@ -229,7 +229,7 @@ export async function recalculatePayrollForMonth(
   }
 
   revalidatePath(REVALIDATE)
-  return { ok: true, data: { updated, updates } }
+  return { ok: true, data: { updated, checked: payroll.length, updates } }
 }
 
 // ─── Batch Recalculate Payroll for Multiple Months ────────────────────────────

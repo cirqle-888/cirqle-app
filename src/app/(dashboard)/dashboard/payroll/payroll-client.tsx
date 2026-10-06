@@ -244,6 +244,11 @@ function storedExtras(record: { adjustment_earned?: number | null; ownership_ear
   return (Number(record.adjustment_earned) || 0) + (Number(record.ownership_earned) || 0)
 }
 
+/** Scores whose task is in the trash — kept for history, never paid. */
+function withoutTrashedTasks<T extends { task?: unknown }>(rows: T[]): T[] {
+  return rows.filter(r => !(r.task as { deleted_at?: string | null } | null)?.deleted_at)
+}
+
 export default function PayrollClient({
   bankAccounts = [],
   employees, payrollRecords, advances, credits, deductions, contributionScores, allTasks,
@@ -294,7 +299,10 @@ export default function PayrollClient({
   const [recordsFilterStatus, setRecordsFilterStatus] = useState('all')
 
   // ── Live scores state (starts from server data, updated by realtime + refresh) ──
-  const [liveScores, setLiveScores]   = useState(contributionScores)
+  // A trashed task's scores stay in the table but are not paid — payroll
+  // (computeMonthlyCommissions) skips them, so the cards must too, or a card
+  // shows commission the payslip will never carry (CQID004 Sep: ₹5,267 vs ₹5,057).
+  const [liveScores, setLiveScores]   = useState(() => withoutTrashedTasks(contributionScores))
   const [refreshing, setRefreshing]   = useState(false)
   const [lastRefresh, setLastRefresh] = useState<Date>(now)
 
@@ -342,13 +350,13 @@ export default function PayrollClient({
     windowFrom.setMonth(windowFrom.getMonth() - 24)
     const query = supabase
       .from('contribution_scores')
-      .select('task_id, employee_id, earnings_inr, calculated_at, task:tasks(id, task_date, title, status)')
+      .select('task_id, employee_id, earnings_inr, calculated_at, task:tasks(id, task_date, title, status, deleted_at)')
       .gte('calculated_at', windowFrom.toISOString())
       .order('calculated_at', { ascending: false })
       .order('id', { ascending: true })
     const { data } = await safeFetchAll(query)
     if (data) {
-      setLiveScores(data as any)
+      setLiveScores(withoutTrashedTasks(data as any))
       setLastRefresh(new Date())
     }
     setRefreshing(false)
@@ -970,6 +978,9 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                       body: `Re-reads contribution earnings and ownership awards, then updates commission and net on every PENDING payslip for this month. Already-paid payslips are never changed.`,
                       confirmLabel: 'Recalculate month',
                       onConfirm: async () => {
+                        // Close first — left open, the dialog hid the result
+                        // toast and read as a button that did nothing.
+                        setConfirmModal(null)
                         setRefreshing(true)
                         const result = await recalculatePayrollForMonth({
                           month: viewMonth,
@@ -978,13 +989,22 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                         })
                         setRefreshing(false)
                         if (result.ok) {
+                          // Task and contribution edits already recalculate the
+                          // month, so "nothing to change" is the usual outcome —
+                          // say what was checked so it doesn't read as a dead click.
                           const n = result.data?.updated ?? 0
-                          toastSuccess(
-                            `${MONTHS[viewMonth - 1]} payroll recalculated`,
-                            n > 0
-                              ? `${n} payslip${n !== 1 ? 's' : ''} updated`
-                              : 'Every pending payslip already matched — nothing changed.',
-                          )
+                          const checked = result.data?.checked ?? 0
+                          const label = `${MONTHS[viewMonth - 1]} ${viewYear}`
+                          if (checked === 0) {
+                            toastSuccess(`${label}: no pending payslips`, 'Only pending payslips are recalculated. Generate payroll first, or this month is already paid.')
+                          } else {
+                            toastSuccess(
+                              n > 0 ? `${label} payroll recalculated` : `${label} payroll is up to date`,
+                              n > 0
+                                ? `${n} of ${checked} pending payslip${checked !== 1 ? 's' : ''} updated.`
+                                : `Checked ${checked} pending payslip${checked !== 1 ? 's' : ''} — commission, ownership and adjustments already match.`,
+                            )
+                          }
                           router.refresh()
                         } else {
                           toastError('Payroll refresh failed', result.error)
