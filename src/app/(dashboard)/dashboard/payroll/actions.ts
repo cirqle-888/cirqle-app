@@ -287,6 +287,40 @@ export interface PayrollInsertRow {
   status: 'pending'
 }
 
+/**
+ * A new payslip carries this month's ownership awards and any unsettled
+ * prior-period adjustments from the start — the same figures Recalculate
+ * writes. Without this they stayed at 0 until something else recalculated
+ * the month, so a payslip created and paid straight away lost them.
+ * Best-effort: on failure the rows are returned as inserted.
+ */
+async function withComputedExtras<T extends {
+  id: string; employee_id: string; month: number; year: number
+  base_salary?: number | null; commission_earned?: number | null
+  advances_deducted?: number | null; other_deductions?: number | null
+}>(admin: ReturnType<typeof createAdminClient>, rows: T[]): Promise<T[]> {
+  try {
+    const adjustments = await pendingAdjustmentTotals(admin)
+    const ownershipByMonth = new Map<string, Record<string, number> | null>()
+    const out: T[] = []
+    for (const row of rows) {
+      const key = `${row.year}-${row.month}`
+      if (!ownershipByMonth.has(key)) ownershipByMonth.set(key, await computeMonthlyOwnership(admin, row.month, row.year))
+      const ownership = Math.round(ownershipByMonth.get(key)?.[row.employee_id] || 0)
+      const adjustment = Math.round(adjustments[row.employee_id] || 0)
+      if (!ownership && !adjustment) { out.push(row); continue }
+      const net = Math.max(0, (row.base_salary || 0) + (row.commission_earned || 0) + ownership + adjustment
+        - (row.advances_deducted || 0) - (row.other_deductions || 0))
+      const patch = { ownership_earned: ownership, adjustment_earned: adjustment, net_salary: net }
+      const { error } = await admin.from('payroll').update(patch).eq('id', row.id)
+      out.push(error ? row : { ...row, ...patch })
+    }
+    return out
+  } catch {
+    return rows
+  }
+}
+
 export async function bulkGeneratePayroll(
   records: PayrollInsertRow[],
 ): Promise<ActionResult<{ rows: any[] }>> {
@@ -295,11 +329,12 @@ export async function bulkGeneratePayroll(
   if (!records.length) return { ok: false, error: 'No records to generate.' }
 
   const admin = createAdminClient()
-  const { data, error } = await admin
+  const { data: inserted, error } = await admin
     .from('payroll')
     .insert(records)
     .select('*, employee:employees(id, cqid, name)')
   if (error) return { ok: false, error: error.message }
+  const data = await withComputedExtras(admin, inserted ?? [])
 
   // Mark advances as repaid for employees who had deductions
   const employeesWithDeductions = records.filter(r => r.advances_deducted > 0).map(r => r.employee_id)
@@ -335,12 +370,13 @@ export async function createPayrollRecord(
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()
-  const { data, error } = await admin
+  const { data: inserted, error } = await admin
     .from('payroll')
     .insert({ ...input, status: 'pending' })
     .select('*, employee:employees(id, cqid, name)')
     .single()
   if (error) return { ok: false, error: error.message }
+  const [data] = await withComputedExtras(admin, [inserted])
 
   if (input.advances_deducted > 0) {
     await admin

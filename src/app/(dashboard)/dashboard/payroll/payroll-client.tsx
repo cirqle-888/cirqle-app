@@ -490,6 +490,11 @@ export default function PayrollClient({
       .sort((a, b) => b.earned_inr - a.earned_inr)
   }
 
+  /** Ownership this month before a payslip exists — the awards it will carry. */
+  function monthOwnership(empId: string) {
+    return Math.round(getEmpOwnershipAwards(empId).reduce((t, a) => t + (Number(a.earned_inr) || 0), 0))
+  }
+
   /**
    * The adjustments landing on THIS month's payslip for one employee.
    *
@@ -539,8 +544,9 @@ export default function PayrollClient({
       const pendingAdvances = advList
         .filter((a: any) => a.employee_id === emp.id && a.status === 'pending')
         .reduce((sum: number, a: any) => sum + (a.amount || 0), 0)
-      const net = Math.max(0, (emp.base_salary || 0) + commission - pendingAdvances)
-      return { employee: emp, base_salary: emp.base_salary || 0, commission_earned: commission, advances_deducted: pendingAdvances, other_deductions: 0, net_salary: net }
+      const ownership       = monthOwnership(emp.id)
+      const net = Math.max(0, (emp.base_salary || 0) + commission + ownership - pendingAdvances)
+      return { employee: emp, base_salary: emp.base_salary || 0, commission_earned: commission, ownership_earned: ownership, advances_deducted: pendingAdvances, other_deductions: 0, net_salary: net }
     })
     setGeneratePreview(preview)
   }
@@ -1101,7 +1107,10 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 const commission = monthCommissions[emp.id] || 0
                 const record         = monthPayroll.find(r => r.employee_id === emp.id)
                 const workedDays     = attendanceByEmp[emp.id]?.size || 0
-                const netEst         = (emp.base_salary || 0) + commission
+                // Before a payslip exists, ownership comes from this month's
+                // awards — generating the payslip writes the same amount.
+                const ownership      = record ? Number(record.ownership_earned) || 0 : monthOwnership(emp.id)
+                const netEst         = (emp.base_salary || 0) + commission + ownership
                 const nextPayDate    = getNextSalaryDate(emp.salary_day || 1)
                 const daysToPayday   = daysUntil(nextPayDate)
                 const isCurrentMonth = viewMonth === now.getMonth() + 1 && viewYear === now.getFullYear()
@@ -1125,7 +1134,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                         ? record.status === 'paid'
                           ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">Paid</span>
                           : <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 shrink-0">Pending</span>
-                        : commission > 0
+                        : commission > 0 || ownership > 0
                           ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 shrink-0">Ready</span>
                           : <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-secondary text-muted-foreground border border-border/50 shrink-0">No data</span>
                       }
@@ -1153,11 +1162,11 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                           the record this page fetches — they were simply never
                           rendered. Shown only when non-zero, so an ordinary
                           commission-only card stays as short as it is now. */}
-                      {record && (record.ownership_earned || 0) !== 0 && (
+                      {ownership !== 0 && (
                         <div className="flex justify-between items-center">
                           <span className="text-muted-foreground">Ownership</span>
                           <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                            +₹{Number(record.ownership_earned).toLocaleString('en-IN')}
+                            +₹{ownership.toLocaleString('en-IN')}
                           </span>
                         </div>
                       )}
@@ -1888,6 +1897,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
         const empTasks   = getEmpMonthTasks(emp.id)
         const record     = monthPayroll.find(r => r.employee_id === emp.id)
         const commission = monthCommissions[emp.id] || 0
+        const empOwnership = record ? Number(record.ownership_earned) || 0 : monthOwnership(emp.id)
         const allRecords = payroll.filter(r => r.employee_id === emp.id)
         const totalPaid  = allRecords.filter(r => r.status === 'paid').reduce((s, r) => s + (r.net_salary || 0), 0)
 
@@ -1924,8 +1934,8 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     // Net Payable sit side by side disagreeing, and the only
                     // way to reconcile them was to open the payslip. Each tile
                     // appears only when it carries a figure.
-                    ...((record?.ownership_earned || 0) !== 0
-                      ? [{ label: 'Ownership', value: `+₹${Number(record!.ownership_earned).toLocaleString('en-IN')}`, cls: 'text-green-400' }]
+                    ...(empOwnership !== 0
+                      ? [{ label: 'Ownership', value: `+₹${empOwnership.toLocaleString('en-IN')}`, cls: 'text-green-400' }]
                       : []),
                     ...((record?.adjustment_earned || 0) !== 0
                       ? [{
@@ -1943,7 +1953,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     ...((record?.other_deductions || 0) !== 0
                       ? [{ label: 'Other Deductions', value: `−₹${Number(record!.other_deductions).toLocaleString('en-IN')}`, cls: 'text-red-400' }]
                       : []),
-                    { label: 'Net Payable',  value: `₹${(record?.net_salary ?? (emp.base_salary || 0) + commission).toLocaleString('en-IN')}`, cls: 'font-semibold' },
+                    { label: 'Net Payable',  value: `₹${(record?.net_salary ?? (emp.base_salary || 0) + commission + empOwnership).toLocaleString('en-IN')}`, cls: 'font-semibold' },
                     { label: 'Active Days',  value: `${workedDays.size} / ${daysInMon}`, cls: 'text-blue-400' },
                   ].map(item => (
                     <div key={item.label} className="bg-foreground/[0.03] border border-foreground/[0.06] rounded-xl p-3">
@@ -2445,7 +2455,12 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                         <p className="text-[10px] text-muted-foreground">{p.employee.cqid}</p>
                       </td>
                       <td className="py-2.5 text-right text-xs text-muted-foreground">₹{p.base_salary.toLocaleString('en-IN')}</td>
-                      <td className="py-2.5 text-right text-xs text-green-400">+₹{p.commission_earned.toLocaleString('en-IN')}</td>
+                      <td className="py-2.5 text-right text-xs text-green-400">
+                        +₹{p.commission_earned.toLocaleString('en-IN')}
+                        {p.ownership_earned > 0 && (
+                          <span className="block text-[10px] text-muted-foreground">+₹{p.ownership_earned.toLocaleString('en-IN')} ownership</span>
+                        )}
+                      </td>
                       <td className="py-2.5 text-right text-xs text-red-400">
                         {p.advances_deducted > 0 ? `-₹${p.advances_deducted.toLocaleString('en-IN')}` : '—'}
                       </td>
@@ -2465,7 +2480,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
               </table>
               </div>
               <p className="text-xs text-muted-foreground mb-4">
-                Commission from contribution scores · Advances auto-deducted from pending salary advances · All records created as <span className="text-amber-400">Pending</span>
+                Commission from contribution scores · Ownership from this month’s awards · Advances auto-deducted from pending salary advances · All records created as <span className="text-amber-400">Pending</span>
               </p>
               <div className="flex gap-2">
                 <button onClick={() => setGeneratePreview(null)}
