@@ -21,6 +21,7 @@ import { fetchJournalLines } from '@/lib/finance/journal'
 import { loadOrgGraph, resolveScope, matchesScope } from '@/lib/org/units'
 import { computeAwards, resolveParticipants } from './compute'
 import { loadEntryCounts } from './entry-count'
+import { loadClientHandling, loadPlanned, loadActivities, type PersonMeasure } from './work-measures'
 import { monthsInPeriod, periodForBookingMonth, activeForPeriod } from './periods'
 import type {
   BasisLine, OwnershipAward, OwnershipPeriod, OwnershipProgram, OwnershipRule, PeriodAggregates,
@@ -67,6 +68,7 @@ function mapProgram(r: Record<string, unknown>): OwnershipProgram {
     effectiveFrom: r.effective_from as string,
     effectiveTo: (r.effective_to as string) ?? null,
     isActive: r.is_active !== false,
+    activityKinds: Array.isArray(r.activity_kinds) ? (r.activity_kinds as string[]) : [],
   }
 }
 
@@ -127,6 +129,8 @@ export async function loadPeriodAggregates(
   let collectedInr = 0
   let profitInr = 0
   let unitsByEmployee: Record<string, number> | undefined
+  let amountByEmployee: Record<string, number> | undefined
+  let itemsByEmployee: PeriodAggregates['itemsByEmployee']
 
   // Profit is company-wide by definition (enforced by a CHECK on the table).
   if (program.basis === 'profit') {
@@ -148,6 +152,20 @@ export async function loadPeriodAggregates(
   // above it needs to know who is taking part.
   if (program.basis === 'entries') {
     unitsByEmployee = (await loadEntryCounts(admin, period, employeeIds)).unitsByEmployee
+    // The same rows, itemised, so a preview can show WHICH entries were counted.
+    itemsByEmployee = itemsOf(await loadActivities(admin, period, employeeIds, ['cashbook_entry']))
+  }
+
+  // The other per-person bases: each person's count, money and items.
+  const perPerson: Record<string, PersonMeasure> | null =
+    program.basis === 'clients_handled' ? await loadClientHandling(admin, period, employeeIds)
+    : program.basis === 'planned' ? await loadPlanned(admin, period, employeeIds)
+    : program.basis === 'activities' ? await loadActivities(admin, period, employeeIds, program.activityKinds ?? [])
+    : null
+  if (perPerson) {
+    unitsByEmployee = Object.fromEntries(Object.entries(perPerson).map(([k, v]) => [k, v.units]))
+    amountByEmployee = Object.fromEntries(Object.entries(perPerson).map(([k, v]) => [k, v.amountInr]))
+    itemsByEmployee = itemsOf(perPerson)
   }
 
   return {
@@ -155,8 +173,12 @@ export async function loadPeriodAggregates(
     collectedInr: r2(collectedInr),
     profitInr: r2(profitInr),
     unitsByEmployee,
+    amountByEmployee,
+    itemsByEmployee,
   }
 }
+
+const itemsOf = (m: Record<string, PersonMeasure>) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v.items]))
 
 const sumLines = (lines: BasisLine[]) => lines.reduce((s, l) => s + l.amountInr, 0)
 

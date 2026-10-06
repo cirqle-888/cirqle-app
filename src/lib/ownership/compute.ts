@@ -20,6 +20,7 @@
  *     accounting improvement.
  */
 
+import { PER_PERSON_BASES, PER_PERSON_MONEY_BASES } from './types'
 import type {
   OwnershipAward, OwnershipBasis, OwnershipPeriod, OwnershipProgram, OwnershipRule,
   PeriodAggregates,
@@ -79,6 +80,9 @@ export function basisAmount(basis: OwnershipBasis, agg: PeriodAggregates): numbe
     case 'profit':    return agg.profitInr
     case 'fixed':     return 0
     case 'entries':   return 0     // per participant; see measuredFor
+    case 'clients_handled':
+    case 'planned':
+    case 'activities': return 0    // per participant; see measuredFor
   }
 }
 
@@ -93,8 +97,13 @@ export function measuredFor(
   basis: OwnershipBasis,
   agg: PeriodAggregates,
   employeeId: string,
+  /** A per-person % rule is measured on the person's MONEY; a ₹ rule on their COUNT. */
+  rule?: Pick<OwnershipRule, 'percent' | 'fixedAmountInr'>,
 ): number {
-  if (basis === 'entries') return agg.unitsByEmployee?.[employeeId] ?? 0
+  if (PER_PERSON_BASES.includes(basis)) {
+    if (rule && rule.fixedAmountInr == null && rule.percent != null) return agg.amountByEmployee?.[employeeId] ?? 0
+    return agg.unitsByEmployee?.[employeeId] ?? 0
+  }
   return basisAmount(basis, agg)
 }
 
@@ -114,8 +123,13 @@ export function earningFor(
   // A per-unit basis reads `fixedAmountInr` as the RATE PER UNIT. This branch
   // must precede the flat-amount short-circuit below, or a ₹5-per-entry rule
   // would pay ₹5 once instead of ₹5 × the count.
-  if (basis === 'entries') {
-    return r2(Math.max(0, (rule.fixedAmountInr ?? 0) * Math.max(0, measured)))
+  if (PER_PERSON_BASES.includes(basis)) {
+    // ₹ rule: a rate per unit. % rule: a share of the person's own money
+    // (measuredFor hands over the money for a % rule, the count for a ₹ rule).
+    if (rule.fixedAmountInr != null) return r2(Math.max(0, rule.fixedAmountInr * Math.max(0, measured)))
+    // A % of a COUNT means nothing — only bases that measure the person's money take one.
+    if (rule.percent == null || !PER_PERSON_MONEY_BASES.includes(basis)) return 0
+    return r2(Math.max(0, measured * (rule.percent / 100)))
   }
   if (rule.fixedAmountInr != null) return r2(Math.max(0, rule.fixedAmountInr))
   if (rule.percent == null || basis === 'fixed') return 0
@@ -132,8 +146,9 @@ export function computeAwards(
   // Measured INSIDE the map: a per-participant basis gives each person their
   // own number, and hoisting it would silently pay everyone the first one.
   return participants.map(({ employeeId, rule }) => {
-    const measured = measuredFor(program.basis, agg, employeeId)
-    const perUnit = program.basis === 'entries'
+    const measured = measuredFor(program.basis, agg, employeeId, rule)
+    const perPerson = PER_PERSON_BASES.includes(program.basis)
+    const perUnit = perPerson && rule.fixedAmountInr != null
     return {
       programId: program.id,
       ruleId: rule.id,
@@ -168,6 +183,14 @@ export function computeAwards(
           units: measured,
           ratePerUnitInr: rule.fixedAmountInr ?? 0,
           countedOn: 'created_at',
+        } : {}),
+        // Per-person: both numbers and the items behind them, so an award can
+        // say exactly what it counted. (`unit*` above stays for old readers.)
+        ...(perPerson ? {
+          units: agg.unitsByEmployee?.[employeeId] ?? 0,
+          personAmountInr: agg.amountByEmployee?.[employeeId] ?? 0,
+          items: agg.itemsByEmployee?.[employeeId] ?? [],
+          ...(program.activityKinds?.length ? { activityKinds: program.activityKinds } : {}),
         } : {}),
       },
     }

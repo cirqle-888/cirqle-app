@@ -18,8 +18,10 @@ import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import AppSelect from '@/components/ui/app-select'
 import type { OwnershipProgram, OwnershipRule, OwnershipBasis, OwnershipPeriodType, OwnershipScopeKind } from '@/lib/ownership/types'
-import { saveProgram, setProgramActive, deleteProgram, saveRule, deleteRule, previewMonth, runAwardsForMonth } from './actions'
-import { rateLabel, BASIS_CHOICE_LABEL as BASIS_LABEL, PER_UNIT_BASES } from '@/lib/ownership/format'
+import { saveProgram, setProgramActive, deleteProgram, saveRule, deleteRule, previewMonth, runAwardsForMonth, setClientHandler } from './actions'
+import { rateLabel, BASIS_CHOICE_LABEL as BASIS_LABEL, PER_UNIT_BASES, PER_PERSON_UNIT } from '@/lib/ownership/format'
+import { PER_PERSON_BASES } from '@/lib/ownership/types'
+import { ACTIVITY_KINDS, type ActivityKind } from '@/lib/ownership/activity-kinds'
 
 const PERIOD_LABEL: Record<OwnershipPeriodType, string> = {
   monthly: 'Monthly', quarterly: 'Quarterly', yearly: 'Yearly', one_time: 'One-time',
@@ -60,6 +62,8 @@ interface Props {
   services: { id: string; name: string }[]
   categories: { id: string; name: string }[]
   orgUnits: { id: string; name: string; type: string }[]
+  /** clientId → current handler. */
+  handlers: Record<string, { employeeId: string; from: string }>
   currentMonth: number
   currentYear: number
 }
@@ -84,6 +88,8 @@ export default function OwnershipClient(p: Props) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [preview, setPreview] = useState<Awaited<ReturnType<typeof previewMonth>>['data'] | null>(null)
   const [runConfirm, setRunConfirm] = useState(false)
+  const [openRow, setOpenRow] = useState<number | null>(null)
+  const [handlerFrom, setHandlerFrom] = useState(`${p.currentYear}-${pad2(p.currentMonth)}-01`)
 
   // Which month Preview and Run act on. Defaults to today, so the common case
   // is unchanged — but an unpaid earlier month is reachable, which it was not
@@ -226,8 +232,11 @@ export default function OwnershipClient(p: Props) {
           ) : (
             <div className="mt-2 divide-y divide-border text-xs">
               {preview.rows.map((r, i) => (
-                <div key={i} className="flex items-center justify-between py-1.5">
+                <div key={i} className="py-1.5">
+                <button type="button" disabled={!r.items.length} onClick={() => setOpenRow(openRow === i ? null : i)}
+                  className="w-full flex items-center justify-between text-left disabled:cursor-default">
                   <span className="min-w-0 truncate">
+                    {r.items.length > 0 && <ChevronDown className={`inline h-3 w-3 mr-1 text-muted-foreground transition-transform ${openRow === i ? '' : '-rotate-90'}`} />}
                     {employeeLabel(r.employeeId)} · {r.programName}
                     {r.label ? <span className="text-muted-foreground"> · {r.label}</span> : null}
                     {/* The rate in words — this is the sanity check before a run,
@@ -235,6 +244,19 @@ export default function OwnershipClient(p: Props) {
                     <span className="text-muted-foreground/70"> · {rateLabel(r)}</span>
                   </span>
                   <span className="tabular-nums font-medium">{inr(r.earnedInr)}</span>
+                </button>
+                {/* What was counted — every entry, client or planned task behind the number. */}
+                {openRow === i && r.items.length > 0 && (
+                  <div className="mt-1.5 ml-4 max-h-64 overflow-y-auto rounded-md border border-border bg-secondary/20 divide-y divide-border">
+                    {r.items.map((it, j) => (
+                      <div key={j} className="flex items-center gap-3 px-2.5 py-1 text-[11px]">
+                        <span className="text-muted-foreground tabular-nums shrink-0">{it.date}</span>
+                        <span className="flex-1 min-w-0 truncate">{it.label}</span>
+                        {it.amountInr != null && <span className="tabular-nums text-muted-foreground shrink-0">{inr(it.amountInr)}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 </div>
               ))}
             </div>
@@ -254,6 +276,47 @@ export default function OwnershipClient(p: Props) {
           </p>
         </div>
       )}
+
+      {/* Who handles each client — what "Client handling" programs measure. */}
+      <details className="group rounded-xl border border-border bg-card">
+        <summary className="flex items-center justify-between gap-2 px-4 py-3 cursor-pointer select-none list-none">
+          <span className="text-sm font-semibold">Who handles each client
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              {Object.keys(p.handlers).length} of {p.clients.length} assigned · used by Client handling programs
+            </span>
+          </span>
+          <ChevronDown className="w-4 h-4 text-muted-foreground group-open:rotate-180 transition-transform" />
+        </summary>
+        <div className="px-4 pb-4 space-y-2">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            Changes apply from
+            <input type="date" value={handlerFrom} onChange={e => setHandlerFrom(e.target.value)}
+              className="rounded-md border border-border bg-background px-2 py-1 text-xs" />
+            <span>— earlier work stays with the previous handler.</span>
+          </div>
+          <div className="divide-y divide-border rounded-lg border border-border">
+            {p.clients.map(c => (
+              <div key={c.id} className="flex items-center justify-between gap-3 px-3 py-1.5 text-sm">
+                <span className="min-w-0 truncate">{c.name}
+                  {p.handlers[c.id] && <span className="ml-2 text-[11px] text-muted-foreground">since {p.handlers[c.id].from}</span>}
+                </span>
+                <div className="w-36 shrink-0">
+                  <AppSelect value={p.handlers[c.id]?.employeeId ?? ''} disabled={busy === `h:${c.id}`} onChange={async e => {
+                    setBusy(`h:${c.id}`)
+                    const res = await setClientHandler(c.id, e.target.value || null, handlerFrom)
+                    setBusy(null)
+                    if (!res.ok) { toastError('Could not save', res.error); return }
+                    refresh()
+                  }}>
+                    <option value="">— nobody —</option>
+                    {p.employees.map(e => <option key={e.id} value={e.id}>{e.cqid}</option>)}
+                  </AppSelect>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </details>
 
       <div className="space-y-3">
         {p.programs.map(prog => {
@@ -421,13 +484,15 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, onClos
   const [periodStart, setPeriodStart] = useState(initial?.periodStart ?? today())
   const [periodEnd, setPeriodEnd] = useState(initial?.periodEnd ?? today())
   const [effectiveFrom, setEffectiveFrom] = useState(initial?.effectiveFrom ?? today())
+  const [kinds, setKinds] = useState<string[]>(initial?.activityKinds?.length ? initial.activityKinds : ['cashbook_entry'])
   const [saving, setSaving] = useState(false)
+  const perPerson = PER_PERSON_BASES.includes(basis)
 
   // Profit is company-wide; collections have no service dimension. Mirroring
   // the DB constraints here means the operator never meets a Postgres error.
   // A per-entry count has no client or service dimension at all.
   const scopeOptions: OwnershipScopeKind[] =
-    basis === 'profit' || basis === 'entries' ? ['company']
+    basis === 'profit' || perPerson ? ['company']
     : basis === 'collected' ? ['company', 'client', 'org_unit']
     : ['company', 'client', 'service', 'service_category', 'org_unit']
 
@@ -442,7 +507,8 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, onClos
     setSaving(true)
     const res = await saveProgram({
       id: initial?.id, name,
-      programType: basis === 'entries' ? 'entry_rate' : basis === 'fixed' ? 'bonus' : 'revenue_share',
+      programType: perPerson ? 'work_rate' : basis === 'fixed' ? 'bonus' : 'revenue_share',
+      activityKinds: basis === 'activities' ? kinds : undefined,
       basis, periodType,
       scopeKind: scopeOptions.includes(scopeKind) ? scopeKind : 'company',
       scopeId: scopeKind === 'company' ? null : scopeId,
@@ -496,7 +562,22 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, onClos
               wants. Limiting a program to one client/service/team is real
               power but rarely needed, so it opens on demand — and opens itself
               when an existing program already uses it. */}
-          {basis !== 'fixed' && basis !== 'entries' && (
+          {basis === 'activities' && (
+            <div className="rounded-lg border border-border bg-secondary/20 p-3">
+              <p className="text-xs font-medium mb-2">Count these activities <span className="text-muted-foreground font-normal">· each item once, by who recorded it</span></p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(Object.keys(ACTIVITY_KINDS) as ActivityKind[]).map(k => (
+                  <label key={k} className="flex items-center gap-2 text-xs">
+                    <input type="checkbox" checked={kinds.includes(k)}
+                      onChange={e => setKinds(prev => e.target.checked ? [...prev, k] : prev.filter(x => x !== k))} />
+                    {ACTIVITY_KINDS[k].label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {basis !== 'fixed' && !perPerson && (
             <details open={scopeKind !== 'company'} className="group rounded-lg border border-border bg-secondary/20">
               <summary className="flex items-center justify-between gap-2 px-3 py-2 cursor-pointer select-none list-none">
                 <span className="text-xs font-medium">
@@ -576,6 +657,7 @@ function RuleModal({ programId, basis, initial, employees, designations, onClose
   // On a per-unit basis the amount is a rate per unit, so there is no choice
   // to offer: a percentage of a row count would mean nothing.
   const perUnit = PER_UNIT_BASES.includes(basis)
+  const unit = PER_PERSON_UNIT[basis]
   const [mode, setMode] = useState<'percent' | 'fixed'>(
     perUnit || initial?.fixedAmountInr != null ? 'fixed' : 'percent')
   const [percent, setPercent] = useState(initial?.percent != null ? String(initial.percent) : '')
@@ -639,18 +721,19 @@ function RuleModal({ programId, basis, initial, employees, designations, onClose
                   <span className="shrink-0 text-sm text-muted-foreground">₹</span>
                   <input type="number" step="0.5" min="0" value={fixed} onChange={e => setFixed(e.target.value)}
                     className={field} placeholder="5" />
-                  <span className="shrink-0 text-sm text-muted-foreground whitespace-nowrap">per entry</span>
+                  <span className="shrink-0 text-sm text-muted-foreground whitespace-nowrap">per {unit?.one ?? 'entry'}</span>
                 </div>
                 <p className="text-[11px] text-muted-foreground/70 mt-1.5">
-                  Counts cash-book rows this person typed by hand. Rows created by
-                  imports, recurring postings or recorded payments do not count.
+                  {basis === 'entries'
+                    ? 'Counts cash-book rows this person typed by hand. Rows created by imports, recurring postings or recorded payments do not count.'
+                    : 'Counts each item this person recorded, once — the program’s chosen activities.'}
                 </p>
               </>
             ) : (
               <div className="flex gap-2">
                 <AppSelect value={mode} onChange={e => setMode(e.target.value as 'percent' | 'fixed')}>
-                  <option value="percent">Percentage</option>
-                  <option value="fixed">Fixed ₹</option>
+                  <option value="percent">{unit?.money ? `% of ${unit.money}` : 'Percentage'}</option>
+                  <option value="fixed">{unit ? `₹ per ${unit.one}` : 'Fixed ₹'}</option>
                 </AppSelect>
                 {mode === 'percent' ? (
                   <input type="number" step="0.01" min="0" value={percent} onChange={e => setPercent(e.target.value)}

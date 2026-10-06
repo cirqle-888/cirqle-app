@@ -38,13 +38,14 @@ disaster-recovery path from migrations. That needs a baseline dump — see
 | 2026-10-03 | `20261003200000_prune_inert_permissions` | applied | Run by hand in the SQL editor: "Success. No rows returned". Verified by query: the five inert switches (`tasks.export`, `billing.view_pricing`, `workspace.access`, `chat.client_conversations`, `recruitment.interview`) are gone with no grants left behind; `advertising.manage_providers` (Manage Ad Connections) exists and is held by Admin. Permission rows: 128 → 125. |
 | 2026-10-04 | `20261003210000_remove_offer_manage_groups` | applied | Run by hand in the SQL editor: "Success. No rows returned". Verified by query: no `offer.manage_groups` row remains. |
 | 2026-10-04 | `20261004100000_record_planner_and_designer` | applied | Run by hand in the SQL editor: "Success. No rows returned". Verified by query: `task_requests.created_by` and `social_calendar_items.created_by` present; `task_assignments` 3 → 22 (19 backfilled from request / calendar-item assignees). |
+| (before 2026-10-01) | `20260906120000_ownership_entries_basis` | applied | Confirmed 2026-10-06: the "Accounts Entries" program with basis `entries` exists in production (the old CHECK would have refused it) and paid October awards. Exact apply date not recorded. |
 
 ## Waiting to be applied
 
 | Migration | What it adds | Until it is applied |
 |---|---|---|
+| `20261006100000_ownership_work_bases` | Ownership bases `clients_handled`, `planned`, `activities` (+ `ownership_programs.activity_kinds`), and the dated `client_handlers` table. | Safe in either order. Until it runs, the new program types and "Who handles each client" fail to save with a run-the-migration message; existing programs are unaffected. |
 | `20261004120000_retire_offer_intake` | Relabels `offer.prepare` to "Manage offer product catalog" (all it still gates) and takes `capture.use` back from designations that only had it for AI Capture's retired offer mode — today, Flyer Designer. No data deleted. | Safe in any order. Until it runs, the Designations screen still describes `offer.prepare` as the old Offer Preparation workspace, and Flyer Designer still sees AI Capture (which now just points offer lists to Offer Studio). |
-| `20260906120000_ownership_entries_basis` | Adds `'entries'` to the `ownership_programs.basis` CHECK — a per-participant COUNT basis that pays a rupee rate per hand-typed cash-book row. Also a partial index on `cashbook_entries (created_by, created_at)` and column comments recording that `ownership_awards.basis_amount_inr` holds a COUNT on this basis, and `ownership_rules.fixed_amount_inr` a rate PER UNIT. | Everything else keeps working — the basis is inert until a program uses it. Choosing **₹ per cash-book entry** in Settings → Ownership and saving is rejected by the old CHECK; `friendly()` turns that into a run-the-migration sentence rather than a raw Postgres error. |
 ### Follow-up: Realtime is not delivering for `employee_presence`
 
 The migration runs `ALTER PUBLICATION supabase_realtime ADD TABLE

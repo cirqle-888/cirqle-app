@@ -29,6 +29,17 @@ export type OwnershipBasis =
    * and the only one where a rule's `fixedAmountInr` is a rate PER UNIT.
    */
   | 'entries'
+  /** Clients the participant handles (client_handlers): ₹ per client, or % of those clients' billing. */
+  | 'clients_handled'
+  /** Tasks the participant planned: ₹ per planned task, or % of their billing. */
+  | 'planned'
+  /** Recorded work of chosen kinds (program.activityKinds): ₹ per item. */
+  | 'activities'
+
+/** Bases measured per participant rather than program-wide. */
+export const PER_PERSON_BASES: readonly OwnershipBasis[] = ['entries', 'clients_handled', 'planned', 'activities']
+/** Per-person bases that also measure money, so a % rule means something. */
+export const PER_PERSON_MONEY_BASES: readonly OwnershipBasis[] = ['clients_handled', 'planned']
 
 export type OwnershipPeriodType = 'monthly' | 'quarterly' | 'yearly' | 'one_time'
 
@@ -50,6 +61,8 @@ export interface OwnershipProgram {
   effectiveFrom: string
   effectiveTo: string | null
   isActive: boolean
+  /** `activities` basis only — which kinds of recorded work count. */
+  activityKinds?: string[]
 }
 
 export interface OwnershipRule {
@@ -105,6 +118,10 @@ export interface PeriodAggregates {
    * stays valid.
    */
   unitsByEmployee?: Record<string, number>
+  /** Per-person money (clients' billing, planned billing) — what a % rule takes a share of. */
+  amountByEmployee?: Record<string, number>
+  /** The items behind each person's number, for showing exactly what was counted. */
+  itemsByEmployee?: Record<string, { label: string; date: string; amountInr?: number }[]>
 }
 
 /**

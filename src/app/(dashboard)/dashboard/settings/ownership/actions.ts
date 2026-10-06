@@ -21,7 +21,8 @@ import { isMonthFinalized } from '@/lib/payroll/compute'
 import { persistAwardsForMonth, loadPrograms, loadMembersByDesignation, loadPeriodAggregates } from '@/lib/ownership/engine'
 import { computeAwards, resolveParticipants, totalProfitSharePercent } from '@/lib/ownership/compute'
 import { periodForBookingMonth, activeForPeriod } from '@/lib/ownership/periods'
-import type { OwnershipBasis, OwnershipPeriodType, OwnershipScopeKind } from '@/lib/ownership/types'
+import { PER_PERSON_BASES, PER_PERSON_MONEY_BASES, type OwnershipBasis, type OwnershipPeriodType, type OwnershipScopeKind } from '@/lib/ownership/types'
+import { isActivityKind } from '@/lib/ownership/work-measures'
 
 const REVALIDATE = '/dashboard/settings/ownership'
 const MIGRATION = 'supabase/migrations/20260807100000_ownership_platform.sql'
@@ -53,6 +54,8 @@ export interface ProgramInput {
   periodEnd?: string | null
   effectiveFrom: string
   effectiveTo?: string | null
+  /** `activities` basis only. */
+  activityKinds?: string[]
 }
 
 export async function saveProgram(input: ProgramInput): Promise<ActionResult<{ id: string }>> {
@@ -70,8 +73,12 @@ export async function saveProgram(input: ProgramInput): Promise<ActionResult<{ i
   if (input.basis === 'collected' && !['company', 'client', 'org_unit'].includes(input.scopeKind)) {
     return { ok: false, error: 'Collections are recorded per client, not per service — use a company, client or unit scope.' }
   }
-  if (input.basis === 'entries' && input.scopeKind !== 'company') {
-    return { ok: false, error: 'A per-entry reward counts cash-book rows, which have no client or service dimension — use the company scope.' }
+  if (PER_PERSON_BASES.includes(input.basis) && input.scopeKind !== 'company') {
+    return { ok: false, error: 'This reward measures each person’s own work, so it is company-wide — remove the client/service limit.' }
+  }
+  const activityKinds = (input.activityKinds ?? []).filter(isActivityKind)
+  if (input.basis === 'activities' && activityKinds.length === 0) {
+    return { ok: false, error: 'Pick at least one kind of activity to count.' }
   }
   if (input.scopeKind !== 'company' && !input.scopeId) {
     return { ok: false, error: 'Pick what this program is scoped to.' }
@@ -93,6 +100,8 @@ export async function saveProgram(input: ProgramInput): Promise<ActionResult<{ i
     effective_from: input.effectiveFrom,
     effective_to: input.effectiveTo || null,
     updated_at: new Date().toISOString(),
+    // Only written when used, so programs keep saving before 20261006100000 runs.
+    ...(input.basis === 'activities' ? { activity_kinds: activityKinds } : {}),
   }
 
   if (input.id) {
@@ -188,11 +197,9 @@ export async function saveRule(input: RuleInput): Promise<ActionResult<{ id: str
   {
     const { data: prog } = await admin
       .from('ownership_programs').select('basis').eq('id', input.programId).maybeSingle()
-    if ((prog as { basis?: string } | null)?.basis === 'entries' && hasPercent) {
-      return {
-        ok: false,
-        error: 'A per-entry reward is a rupee rate per entry, not a percentage — set the ₹ amount instead.',
-      }
+    const b = (prog as { basis?: OwnershipBasis } | null)?.basis
+    if (b && PER_PERSON_BASES.includes(b) && !PER_PERSON_MONEY_BASES.includes(b) && hasPercent) {
+      return { ok: false, error: 'This reward is a rupee rate per item, not a percentage — set the ₹ amount instead.' }
     }
   }
   const row = {
@@ -230,6 +237,13 @@ export async function deleteRule(id: string): Promise<ActionResult> {
   return { ok: true }
 }
 
+export interface PreviewRow {
+  programName: string; employeeId: string; label: string | null; basis: string
+  basisAmountInr: number; percent: number | null; fixedAmountInr: number | null; earnedInr: number
+  /** What was counted — the entries, clients or planned tasks behind the number. */
+  items: { label: string; date: string; amountInr?: number }[]
+}
+
 /**
  * "What would this pay right now?" — computed live, never stored.
  *
@@ -239,7 +253,7 @@ export async function deleteRule(id: string): Promise<ActionResult> {
  * payday.
  */
 export async function previewMonth(month: number, year: number): Promise<ActionResult<{
-  rows: { programName: string; employeeId: string; label: string | null; basis: string; basisAmountInr: number; percent: number | null; fixedAmountInr: number | null; earnedInr: number }[]
+  rows: PreviewRow[]
   totalInr: number
   profitSharePercent: number
 }>> {
@@ -250,7 +264,7 @@ export async function previewMonth(month: number, year: number): Promise<ActionR
   const { programs, rules } = await loadPrograms(admin)
   const membersByDesignation = await loadMembersByDesignation(admin)
 
-  const rows: { programName: string; employeeId: string; label: string | null; basis: string; basisAmountInr: number; percent: number | null; fixedAmountInr: number | null; earnedInr: number }[] = []
+  const rows: PreviewRow[] = []
   for (const program of programs) {
     if (!program.isActive) continue
     const period = periodForBookingMonth(program.periodType, month, year, { start: program.periodStart, end: program.periodEnd })
@@ -271,6 +285,7 @@ export async function previewMonth(month: number, year: number): Promise<ActionR
         percent: a.percent,
         fixedAmountInr: a.fixedAmountInr,
         earnedInr: a.earnedInr,
+        items: (a.breakdown.items as PreviewRow['items']) ?? [],
       })
     }
   }
@@ -298,4 +313,40 @@ export async function runAwardsForMonth(month: number, year: number): Promise<Ac
   } catch (e) {
     return { ok: false, error: friendly(e instanceof Error ? e.message : 'Could not compute awards.') }
   }
+}
+
+// ── Who handles each client ──────────────────────────────────────────────────
+
+/**
+ * Set (or clear) the employee who handles a client, from a date. The previous
+ * handler's row is closed the day before, so earlier work stays credited to
+ * them — a handover never moves past months. Pay-bearing, so gated like the
+ * rest of Ownership.
+ */
+export async function setClientHandler(clientId: string, employeeId: string | null, fromDate: string): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.PAYROLL_MANAGE_OWNERSHIP)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) return { ok: false, error: 'Pick a valid start date.' }
+  const admin = createAdminClient()
+  const { data: open, error: readErr } = await admin.from('client_handlers')
+    .select('id, employee_id, effective_from').eq('client_id', clientId).is('effective_to', null).maybeSingle()
+  if (readErr) return { ok: false, error: friendly(readErr.message) }
+  const cur = open as { id: string; employee_id: string; effective_from: string } | null
+  if (cur?.employee_id === employeeId) return { ok: true }
+  if (cur) {
+    if (cur.effective_from >= fromDate) {
+      // Replaced before it ever applied — drop it rather than leave an empty range.
+      await admin.from('client_handlers').delete().eq('id', cur.id)
+    } else {
+      const d = new Date(`${fromDate}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - 1)
+      await admin.from('client_handlers').update({ effective_to: d.toISOString().slice(0, 10) }).eq('id', cur.id)
+    }
+  }
+  if (employeeId) {
+    const { error } = await admin.from('client_handlers')
+      .insert({ client_id: clientId, employee_id: employeeId, effective_from: fromDate, created_by: guard.employeeId })
+    if (error) return { ok: false, error: friendly(error.message) }
+  }
+  revalidatePath(REVALIDATE)
+  return { ok: true }
 }

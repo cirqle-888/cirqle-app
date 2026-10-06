@@ -34,6 +34,12 @@ export default async function OwnershipSettingsPage() {
     admin.from('org_units').select('id, name, type').eq('is_active', true).order('name'),
   ])
 
+  // Current handler per client — empty before 20261006100000 runs.
+  const { data: handlerRows } = await admin.from('client_handlers')
+    .select('client_id, employee_id, effective_from').is('effective_to', null)
+  const handlers = Object.fromEntries(((handlerRows ?? []) as { client_id: string; employee_id: string; effective_from: string }[])
+    .map(h => [h.client_id, { employeeId: h.employee_id, from: h.effective_from }]))
+
   const now = new Date()
 
   return (
@@ -47,6 +53,7 @@ export default async function OwnershipSettingsPage() {
       categories={(catRes.data ?? []) as { id: string; name: string }[]}
       // Absent pre-migration — the unit scope option simply won't be offered.
       orgUnits={(unitRes.data ?? []) as { id: string; name: string; type: string }[]}
+      handlers={handlers}
       currentMonth={now.getMonth() + 1}
       currentYear={now.getFullYear()}
     />
