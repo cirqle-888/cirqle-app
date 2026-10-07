@@ -78,6 +78,7 @@ function mapRule(r: Record<string, unknown>): OwnershipRule {
     programId: r.program_id as string,
     employeeId: (r.employee_id as string) ?? null,
     designationId: (r.designation_id as string) ?? null,
+    employeeIds: Array.isArray(r.employee_ids) ? (r.employee_ids as string[]) : [],
     percent: r.percent == null ? null : Number(r.percent),
     fixedAmountInr: r.fixed_amount_inr == null ? null : Number(r.fixed_amount_inr),
     label: (r.label as string) ?? null,

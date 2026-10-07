@@ -101,3 +101,24 @@ describe('tasks entered', () => {
     expect(isAutoCreatedTaskEvent(null)).toBe(false)
   })
 })
+
+describe('one rule for several employees', () => {
+  it('each listed person is a participant, earning on their own count', async () => {
+    const { resolveParticipants, measuredFor, earningFor } = await import('./compute')
+    const r = { id: 'r', programId: 'p', employeeId: null, employeeIds: ['A', 'B'], designationId: null, percent: null, fixedAmountInr: 5, label: null, effectiveFrom: '2026-01-01', effectiveTo: null, isActive: true }
+    const parts = resolveParticipants([r], new Map())
+    expect(parts.map(x => x.employeeId)).toEqual(['A', 'B'])
+    const agg = { billingInr: 0, collectedInr: 0, profitInr: 0, unitsByEmployee: { A: 45, B: 2 } }
+    expect(parts.map(x => earningFor('activities', measuredFor('activities', agg, x.employeeId, r), r))).toEqual([225, 10])
+  })
+
+  it('listing someone overrides their designation rule, like a one-person rule', async () => {
+    const { resolveParticipants } = await import('./compute')
+    const base = { programId: 'p', percent: null, fixedAmountInr: 5, label: null, effectiveFrom: '2026-01-01', effectiveTo: null, isActive: true }
+    const parts = resolveParticipants([
+      { ...base, id: 'list', employeeId: null, employeeIds: ['A'], designationId: null },
+      { ...base, id: 'desig', employeeId: null, designationId: 'D' },
+    ], new Map([['D', ['A', 'C']]]))
+    expect(parts.map(x => `${x.employeeId}:${x.rule.id}`)).toEqual(['A:list', 'C:desig'])
+  })
+})

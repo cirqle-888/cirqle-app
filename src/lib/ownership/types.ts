@@ -68,9 +68,11 @@ export interface OwnershipProgram {
 export interface OwnershipRule {
   id: string
   programId: string
-  /** Exactly one of these is set. */
+  /** Exactly one target is set: one employee, several (employeeIds), or a designation. */
   employeeId: string | null
   designationId: string | null
+  /** Several named employees — each paid on their own work, as if each had this rule. */
+  employeeIds?: string[]
   /** Exactly one of these is set. */
   percent: number | null
   fixedAmountInr: number | null
@@ -143,4 +145,10 @@ export interface BasisLine {
   /** task_date for billing, entry_date for collections. */
   date: string
   amountInr: number
+}
+
+/** The employees a rule names directly (one, several, or none for a designation rule). */
+export function ruleEmployees(rule: Pick<OwnershipRule, 'employeeId' | 'employeeIds'>): string[] {
+  if (rule.employeeId) return [rule.employeeId]
+  return [...new Set(rule.employeeIds ?? [])]
 }

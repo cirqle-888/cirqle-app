@@ -46,6 +46,7 @@ disaster-recovery path from migrations. That needs a baseline dump — see
 
 | Migration | What it adds | Until it is applied |
 |---|---|---|
+| `20261007100000_ownership_rule_employee_ids` | `ownership_rules.employee_ids` — one rule can name several employees, each paid on their own work; the one-target CHECK now allows employee / employees / designation. | Safe in either order. Until it runs, saving a rule with two or more employees fails with a run-the-migration message; one-person and designation rules are unaffected. |
 | `20261004120000_retire_offer_intake` | Relabels `offer.prepare` to "Manage offer product catalog" (all it still gates) and takes `capture.use` back from designations that only had it for AI Capture's retired offer mode — today, Flyer Designer. No data deleted. | Safe in any order. Until it runs, the Designations screen still describes `offer.prepare` as the old Offer Preparation workspace, and Flyer Designer still sees AI Capture (which now just points offer lists to Offer Studio). |
 ### Follow-up: Realtime is not delivering for `employee_presence`
 

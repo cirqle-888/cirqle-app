@@ -31,6 +31,9 @@ interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
 /** Turn a raw PostgREST "relation missing" into something actionable. */
 function friendly(message: string): string {
+  if (/employee_ids/i.test(message)) {
+    return 'One rule for several employees needs a database migration. Run supabase/migrations/20261007100000_ownership_rule_employee_ids.sql in the Supabase SQL editor, then try again.'
+  }
   if (/does not exist|PGRST205|schema cache/i.test(message)) {
     return `The Ownership Platform needs a database migration. Run ${MIGRATION} in the Supabase SQL editor, then try again.`
   }
@@ -165,6 +168,8 @@ export interface RuleInput {
   id?: string
   programId: string
   employeeId?: string | null
+  /** Several employees on one rule — each paid on their own work. */
+  employeeIds?: string[]
   designationId?: string | null
   percent?: number | null
   fixedAmountInr?: number | null
@@ -179,10 +184,13 @@ export async function saveRule(input: RuleInput): Promise<ActionResult<{ id: str
   const guard = await requirePermission(PERMS.PAYROLL_MANAGE_OWNERSHIP)
   if (!guard.ok) return { ok: false, error: guard.error }
 
-  const hasEmployee = !!input.employeeId
+  // One person is stored as employee_id (works before 20261007100000); two or
+  // more go in employee_ids.
+  const people = [...new Set([...(input.employeeIds ?? []), ...(input.employeeId ? [input.employeeId] : [])].filter(Boolean))]
+  const hasEmployee = people.length > 0
   const hasDesignation = !!input.designationId
   if (hasEmployee === hasDesignation) {
-    return { ok: false, error: 'Target either one employee or one designation — not both, not neither.' }
+    return { ok: false, error: 'Pick employees or a designation — not both, not neither.' }
   }
   const hasPercent = input.percent != null && input.percent !== undefined
   const hasFixed = input.fixedAmountInr != null && input.fixedAmountInr !== undefined
@@ -204,8 +212,11 @@ export async function saveRule(input: RuleInput): Promise<ActionResult<{ id: str
   }
   const row = {
     program_id: input.programId,
-    employee_id: input.employeeId || null,
-    designation_id: input.designationId || null,
+    employee_id: people.length === 1 ? people[0] : null,
+    designation_id: hasDesignation ? input.designationId : null,
+    // Only written when it holds a list (or clears one on edit), so one-person
+    // and designation rules keep saving before the migration runs.
+    ...(people.length > 1 ? { employee_ids: people } : input.id ? { employee_ids: null } : {}),
     percent: hasPercent ? input.percent : null,
     fixed_amount_inr: hasFixed ? input.fixedAmountInr : null,
     label: input.label || null,
@@ -217,7 +228,13 @@ export async function saveRule(input: RuleInput): Promise<ActionResult<{ id: str
   }
 
   if (input.id) {
-    const { error } = await admin.from('ownership_rules').update(row).eq('id', input.id)
+    let { error } = await admin.from('ownership_rules').update(row).eq('id', input.id)
+    // Pre-migration: clearing a list that cannot exist yet — retry without it.
+    if (error && /employee_ids/i.test(error.message) && people.length <= 1) {
+      const { employee_ids: _drop, ...rest } = row as Record<string, unknown>
+      void _drop
+      ;({ error } = await admin.from('ownership_rules').update(rest).eq('id', input.id))
+    }
     if (error) return { ok: false, error: friendly(error.message) }
     revalidatePath(REVALIDATE)
     return { ok: true, data: { id: input.id } }

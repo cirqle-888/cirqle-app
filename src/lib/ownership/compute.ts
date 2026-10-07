@@ -20,7 +20,7 @@
  *     accounting improvement.
  */
 
-import { PER_PERSON_BASES, PER_PERSON_MONEY_BASES } from './types'
+import { PER_PERSON_BASES, PER_PERSON_MONEY_BASES, ruleEmployees } from './types'
 import type {
   OwnershipAward, OwnershipBasis, OwnershipPeriod, OwnershipProgram, OwnershipRule,
   PeriodAggregates,
@@ -51,9 +51,10 @@ export function resolveParticipants(
   const overridden = new Set<string>()
   const out: Participant[] = []
   for (const rule of live) {
-    if (!rule.employeeId) continue
-    overridden.add(rule.employeeId)
-    out.push({ employeeId: rule.employeeId, rule })
+    for (const employeeId of ruleEmployees(rule)) {
+      overridden.add(employeeId)
+      out.push({ employeeId, rule })
+    }
   }
 
   for (const rule of live) {
@@ -171,7 +172,7 @@ export function computeAwards(
         periodEnd: period.end,
         scopeKind: program.scopeKind,
         scopeId: program.scopeId,
-        ruleSource: rule.employeeId ? 'employee' : 'designation',
+        ruleSource: ruleEmployees(rule).length ? 'employee' : 'designation',
         ruleLabel: rule.label,
         measuredInr: r2(measured),
         clampedAtZero: measured < 0,

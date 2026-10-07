@@ -20,7 +20,7 @@ import AppSelect from '@/components/ui/app-select'
 import type { OwnershipProgram, OwnershipRule, OwnershipBasis, OwnershipPeriodType, OwnershipScopeKind } from '@/lib/ownership/types'
 import { saveProgram, setProgramActive, deleteProgram, saveRule, deleteRule, previewMonth, runAwardsForMonth, setClientHandler } from './actions'
 import { rateLabel, BASIS_CHOICE_LABEL as BASIS_LABEL, PER_UNIT_BASES, PER_PERSON_UNIT } from '@/lib/ownership/format'
-import { PER_PERSON_BASES } from '@/lib/ownership/types'
+import { PER_PERSON_BASES, ruleEmployees } from '@/lib/ownership/types'
 import { ACTIVITY_KINDS, type ActivityKind } from '@/lib/ownership/activity-kinds'
 
 const PERIOD_LABEL: Record<OwnershipPeriodType, string> = {
@@ -103,6 +103,11 @@ export default function OwnershipClient(p: Props) {
 
   const employeeLabel = (id: string) => p.employees.find(e => e.id === id)?.cqid ?? '—'
   const designationLabel = (id: string) => p.designations.find(d => d.id === id)?.name ?? '—'
+  /** "CQID002, CQID003" for a rule naming people, else the designation. */
+  const ruleTarget = (r: OwnershipRule) => {
+    const people = ruleEmployees(r)
+    return people.length ? people.map(employeeLabel).join(', ') : designationLabel(r.designationId!)
+  }
 
   function scopeLabel(prog: OwnershipProgram): string {
     if (prog.scopeKind === 'company') return 'Whole company'
@@ -391,9 +396,9 @@ export default function OwnershipClient(p: Props) {
                     <div key={r.id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-sm">
                       <div className="min-w-0">
                         <span className="font-medium">
-                          {r.employeeId ? employeeLabel(r.employeeId) : designationLabel(r.designationId!)}
+                          {ruleTarget(r)}
                         </span>
-                        {r.employeeId && <span className="ml-1.5 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">override</span>}
+                        {ruleEmployees(r).length > 0 && <span className="ml-1.5 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">override</span>}
                         {r.label && <span className="ml-1.5 text-xs text-muted-foreground">· {r.label}</span>}
                         {prog.basis === 'clients_handled' && (
                           <span className="ml-1.5 text-xs text-muted-foreground"
@@ -410,7 +415,7 @@ export default function OwnershipClient(p: Props) {
                           className="rounded-lg border border-border px-2 py-1 text-xs hover:bg-secondary">Edit</button>
                         <button onClick={() => setConfirmPrompt({
                           title: 'Delete this rule?',
-                          body: `${r.employeeId ? employeeLabel(r.employeeId) : designationLabel(r.designationId!)} stops earning ${r.percent != null ? `${r.percent}%` : inr(r.fixedAmountInr ?? 0)} from "${prog.name}". Awards already on past payslips stay as they are.`,
+                          body: `${ruleTarget(r)} stop${ruleEmployees(r).length > 1 ? '' : 's'} earning ${r.percent != null ? `${r.percent}%` : inr(r.fixedAmountInr ?? 0)} from "${prog.name}". Awards already on past payslips stay as they are.`,
                           confirmLabel: 'Delete rule',
                           danger: true,
                           onConfirm: async () => {
@@ -675,8 +680,9 @@ function RuleModal({ programId, basis, initial, employees, designations, clients
 }) {
   const [clientIds, setClientIds] = useState<string[]>(initial?.clientIds ?? [])
   const [clientSearch, setClientSearch] = useState('')
-  const [target, setTarget] = useState<'designation' | 'employee'>(initial?.employeeId ? 'employee' : 'designation')
-  const [employeeId, setEmployeeId] = useState(initial?.employeeId ?? '')
+  const initialPeople = initial ? ruleEmployees(initial) : []
+  const [target, setTarget] = useState<'designation' | 'employee'>(initialPeople.length ? 'employee' : 'designation')
+  const [employeeIds, setEmployeeIds] = useState<string[]>(initialPeople)
   const [designationId, setDesignationId] = useState(initial?.designationId ?? '')
   // On a per-unit basis the amount is a rate per unit, so there is no choice
   // to offer: a percentage of a row count would mean nothing.
@@ -694,7 +700,7 @@ function RuleModal({ programId, basis, initial, employees, designations, clients
     setSaving(true)
     const res = await saveRule({
       id: initial?.id, programId,
-      employeeId: target === 'employee' ? employeeId : null,
+      employeeIds: target === 'employee' ? employeeIds : [],
       designationId: target === 'designation' ? designationId : null,
       percent: mode === 'percent' ? Number(percent) || 0 : null,
       fixedAmountInr: mode === 'fixed' ? Number(fixed) || 0 : null,
@@ -723,7 +729,7 @@ function RuleModal({ programId, basis, initial, employees, designations, clients
             <label className="block text-xs font-medium text-muted-foreground mb-1.5">Applies to</label>
             <AppSelect value={target} onChange={e => setTarget(e.target.value as 'designation' | 'employee')}>
               <option value="designation">Everyone with a designation</option>
-              <option value="employee">One employee (override)</option>
+              <option value="employee">Specific employees (override)</option>
             </AppSelect>
           </div>
           {target === 'designation' ? (
@@ -732,10 +738,26 @@ function RuleModal({ programId, basis, initial, employees, designations, clients
               {designations.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
             </AppSelect>
           ) : (
-            <AppSelect value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
-              <option value="">— select employee —</option>
-              {employees.map(e => <option key={e.id} value={e.id}>{e.cqid}</option>)}
-            </AppSelect>
+            <div className="rounded-lg border border-border">
+              <div className="flex items-center justify-between px-3 py-2 border-b border-border text-[11px] text-muted-foreground">
+                <span>{employeeIds.length ? `${employeeIds.length} selected · each earns on their own work` : 'Pick one or more'}</span>
+                {employeeIds.length > 0 && (
+                  <button type="button" onClick={() => setEmployeeIds([])} className="hover:text-foreground">Clear</button>
+                )}
+              </div>
+              <div className="max-h-44 overflow-y-auto p-1 grid grid-cols-2 gap-0.5">
+                {employees.map(e => {
+                  const on = employeeIds.includes(e.id)
+                  return (
+                    <label key={e.id} className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-sm cursor-pointer select-none ${on ? 'bg-primary/10 text-foreground' : 'hover:bg-secondary/60 text-muted-foreground'}`}>
+                      <input type="checkbox" checked={on} className="accent-primary"
+                        onChange={() => setEmployeeIds(ids => on ? ids.filter(x => x !== e.id) : [...ids, e.id])} />
+                      {e.cqid}
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
           )}
 
           <div>
