@@ -179,3 +179,82 @@ export function groupByPerson(awards: AwardLine[]): PersonGroup[] {
 export function totalEarned(awards: AwardLine[]): number {
   return r2(awards.reduce((s, a) => s + a.earnedInr, 0))
 }
+
+// ── The report's period ─────────────────────────────────────────────────────
+
+export const ROLE_RANGES = [
+  { key: 'this', label: 'This month' },
+  { key: 'last', label: 'Last month' },
+  { key: '3m', label: '3 months' },
+  { key: 'ytd', label: 'This year' },
+  { key: '12m', label: '12 months' },
+] as const
+export type RoleRangeKey = (typeof ROLE_RANGES)[number]['key']
+
+export interface RoleWindow {
+  /** Payroll months the report covers, oldest first. */
+  months: { month: number; year: number }[]
+  /** 'month' when one month was picked with the arrows, else the range key. */
+  key: RoleRangeKey | 'month'
+  /** "September 2026", "Last 3 months · Aug–Oct 2026". */
+  label: string
+  /** The month the ‹ › arrows step from (the single month, or the range's end). */
+  anchor: { month: number; year: number }
+}
+
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * Which payroll months to show. `month=YYYY-MM` (the arrows) wins; otherwise a
+ * range key; the old `months=N` links still work. Never reaches past today.
+ */
+export function resolveRoleWindow(
+  params: { month?: string; range?: string; months?: string },
+  today: Date,
+): RoleWindow {
+  const cur = { month: today.getMonth() + 1, year: today.getFullYear() }
+  const back = (n: number) => {
+    const d = new Date(cur.year, cur.month - 1 - n, 1)
+    return { month: d.getMonth() + 1, year: d.getFullYear() }
+  }
+  const lastN = (n: number) => Array.from({ length: n }, (_, i) => back(n - 1 - i))
+  const span = (ms: { month: number; year: number }[]) => {
+    const a = ms[0], b = ms[ms.length - 1]
+    return a.year === b.year
+      ? `${MON[a.month - 1]}–${MON[b.month - 1]} ${b.year}`
+      : `${MON[a.month - 1]} ${a.year} – ${MON[b.month - 1]} ${b.year}`
+  }
+
+  const m = /^(\d{4})-(\d{2})$/.exec(params.month ?? '')
+  if (m) {
+    const year = Number(m[1]), month = Number(m[2])
+    const future = year > cur.year || (year === cur.year && month > cur.month)
+    if (month >= 1 && month <= 12 && !future) {
+      return { months: [{ month, year }], key: 'month', label: monthPeriod(year, month).label, anchor: { month, year } }
+    }
+  }
+
+  const legacy = Number(params.months)
+  const range = (params.range ?? (legacy ? '' : '12m')) as RoleRangeKey
+  switch (range) {
+    case 'this': return { months: [cur], key: 'this', label: `This month · ${monthPeriod(cur.year, cur.month).label}`, anchor: cur }
+    case 'last': {
+      const p = back(1)
+      return { months: [p], key: 'last', label: `Last month · ${monthPeriod(p.year, p.month).label}`, anchor: p }
+    }
+    case '3m': { const ms = lastN(3); return { months: ms, key: '3m', label: `Last 3 months · ${span(ms)}`, anchor: cur } }
+    case 'ytd': { const ms = lastN(cur.month); return { months: ms, key: 'ytd', label: `This year · ${span(ms)}`, anchor: cur } }
+    default: {
+      const n = legacy ? Math.min(24, Math.max(1, legacy)) : 12
+      const ms = lastN(n)
+      return { months: ms, key: '12m', label: `Last ${n} months · ${span(ms)}`, anchor: cur }
+    }
+  }
+}
+
+/** The month before / after, for the ‹ › arrows; null when it would be in the future. */
+export function stepMonth(at: { month: number; year: number }, by: -1 | 1, today: Date): string | null {
+  const d = new Date(at.year, at.month - 1 + by, 1)
+  if (d > new Date(today.getFullYear(), today.getMonth(), 1)) return null
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}

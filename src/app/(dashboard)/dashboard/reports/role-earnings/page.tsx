@@ -4,17 +4,19 @@ import { createAdminClient, fetchAll } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility } from '@/lib/permissions/strip'
 import Header from '@/components/layout/header'
-import { groupByRole, groupByPerson, totalEarned, type AwardLine } from '@/lib/ownership/role-earnings'
+import { groupByRole, groupByPerson, totalEarned, roleKeyOf, resolveRoleWindow, stepMonth, ROLE_RANGES, type AwardLine } from '@/lib/ownership/role-earnings'
 import { buildComposition, singleRate } from '@/lib/ownership/composition'
 import { loadPrograms, loadPeriodComposition } from '@/lib/ownership/engine'
 import type { OwnershipPeriod } from '@/lib/ownership/types'
-import { rateLabel, BASIS_NOUN } from '@/lib/ownership/format'
-import { HardHat, Users, Lock, ArrowUpRight, ChevronDown, Receipt } from 'lucide-react'
+import { rateLabel, explainAward, BASIS_NOUN } from '@/lib/ownership/format'
+import { HardHat, Users, Lock, ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, Receipt, Calculator } from 'lucide-react'
 
 // Awards are recomputed whenever payroll runs — never serve a cached figure.
 export const dynamic = 'force-dynamic'
 
 const inr = (n: number) => '₹' + Math.round(n || 0).toLocaleString('en-IN')
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const BASE = '/dashboard/reports/role-earnings'
 
 
 /**
@@ -50,18 +52,21 @@ export default async function RoleEarningsPage({
   const myEmployeeId = me?.employeeId ?? null
 
   const sp = searchParams ? await searchParams : undefined
-  const windowMonths = Math.min(24, Math.max(1, parseInt(String(sp?.months ?? '12'), 10) || 12))
+  const one = (k: string) => { const v = sp?.[k]; return Array.isArray(v) ? v[0] : v }
 
   // Awards are keyed on the payroll month they BOOK into, so the window is a
   // list of (month, year) pairs rather than a date range. Filtering by year in
   // SQL and by month in memory keeps the query on the booked_year index while
   // still respecting a window that straddles a year boundary.
   const now = new Date()
-  const monthsWindow: { month: number; year: number }[] = []
-  for (let i = windowMonths - 1; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    monthsWindow.push({ month: d.getMonth() + 1, year: d.getFullYear() })
-  }
+  const win = resolveRoleWindow({ month: one('month'), range: one('range'), months: one('months') }, now)
+  const monthsWindow = win.months
+  const prevMonth = stepMonth(win.anchor, -1, now)
+  const nextMonth = stepMonth(win.anchor, 1, now)
+  /** The current period, kept on links that change something else. */
+  const periodQuery = win.key === 'month'
+    ? `month=${win.anchor.year}-${String(win.anchor.month).padStart(2, '0')}`
+    : `range=${win.key}`
   const years = [...new Set(monthsWindow.map(m => m.year))]
   const inWindow = new Set(monthsWindow.map(m => `${m.year}-${m.month}`))
 
@@ -187,20 +192,33 @@ export default async function RoleEarningsPage({
       />
       <div className="p-4 md:p-6 space-y-6">
 
+        {/* Period — step month by month, or pick a range */}
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground">Window:</span>
-            {[3, 6, 12, 24].map(m => (
-              <a
-                key={m}
-                href={`/dashboard/reports/role-earnings?months=${m}`}
-                className={`rounded-lg border px-2.5 py-1 ${m === windowMonths
-                  ? 'border-primary/40 bg-primary/10 text-primary font-medium'
-                  : 'border-border text-muted-foreground hover:text-foreground'}`}
-              >
-                {m} months
-              </a>
-            ))}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center rounded-xl border border-border bg-card">
+              {prevMonth ? (
+                <a href={`${BASE}?month=${prevMonth}`} aria-label="Previous month" className="p-2 text-muted-foreground hover:text-foreground"><ChevronLeft className="h-4 w-4" /></a>
+              ) : <span className="p-2 text-muted-foreground/30"><ChevronLeft className="h-4 w-4" /></span>}
+              <span className="px-2 text-sm font-medium tabular-nums min-w-[8.5rem] text-center">
+                {win.key === 'month' ? `${MON[win.anchor.month - 1]} ${win.anchor.year}` : ROLE_RANGES.find(r => r.key === win.key)?.label}
+              </span>
+              {nextMonth ? (
+                <a href={`${BASE}?month=${nextMonth}`} aria-label="Next month" className="p-2 text-muted-foreground hover:text-foreground"><ChevronRight className="h-4 w-4" /></a>
+              ) : <span className="p-2 text-muted-foreground/30"><ChevronRight className="h-4 w-4" /></span>}
+            </div>
+            <div className="flex flex-wrap items-center gap-1 rounded-xl border border-border bg-card p-0.5">
+              {ROLE_RANGES.map(r => (
+                <a
+                  key={r.key}
+                  href={`${BASE}?range=${r.key}`}
+                  className={`rounded-[10px] px-2.5 py-1.5 text-xs font-medium ${r.key === win.key
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {r.label}
+                </a>
+              ))}
+            </div>
           </div>
           <Link
             href="/dashboard/settings/ownership"
@@ -226,7 +244,7 @@ export default async function RoleEarningsPage({
               {seeEveryone ? 'Total ownership earnings' : 'Your total ownership earnings'}
             </h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Last {windowMonths} months · {roles.length} {roles.length === 1 ? 'role' : 'roles'} · {awards.length} {awards.length === 1 ? 'award' : 'awards'}
+              {win.label} · {roles.length} {roles.length === 1 ? 'role' : 'roles'} · {people.length} {people.length === 1 ? 'person' : 'people'}
             </p>
           </div>
           <span className="text-lg font-semibold tabular-nums">{inr(total)}</span>
@@ -234,7 +252,7 @@ export default async function RoleEarningsPage({
 
         {awards.length === 0 ? (
           <div className="rounded-xl border border-border bg-card px-4 py-10 text-center">
-            <p className="text-sm text-muted-foreground">No ownership awards booked in this window.</p>
+            <p className="text-sm text-muted-foreground">No ownership awards booked in {win.key === 'month' ? win.label : 'this period'}.</p>
             <p className="text-xs text-muted-foreground/70 mt-1.5 max-w-md mx-auto">
               Roles earn once a program pays out: add one in Settings → Ownership, give each
               rule a Role label (&ldquo;Accounts&rdquo;, &ldquo;HR&rdquo;), then run payroll for the month.
@@ -248,7 +266,7 @@ export default async function RoleEarningsPage({
               <div className="border-b border-border px-4 py-3">
                 <h2 className="text-sm font-semibold flex items-center gap-2"><HardHat className="h-4 w-4" />By Role</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Expand a role for who earned it and which months it paid
+                  Open a role to see each payment worked out
                 </p>
               </div>
               <div className="divide-y divide-border">
@@ -261,7 +279,7 @@ export default async function RoleEarningsPage({
                           <span className="text-xs text-muted-foreground/60 ml-2">(program, no role label)</span>
                         )}
                         <span className="text-xs text-muted-foreground ml-2">
-                          {role.people.length} {role.people.length === 1 ? 'person' : 'people'}
+                          {role.people.map(p => who(p.employeeId)).join(', ')}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -272,28 +290,24 @@ export default async function RoleEarningsPage({
                         <ChevronDown className="h-4 w-4 text-muted-foreground group-open:rotate-180 transition-transform" />
                       </div>
                     </summary>
-                    <div className="px-4 pb-3 pt-1 space-y-3 bg-secondary/30">
-                      <div>
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 mb-1">Who</p>
-                        {role.people.map(p => (
-                          <div key={p.employeeId} className="flex items-center justify-between gap-3 py-1 text-xs">
-                            <span className="min-w-0 truncate">
-                              {who(p.employeeId)}
-                              <span className="text-muted-foreground ml-1.5">{p.programNames.join(', ')}</span>
+                    {/* Every award in this role, with its sum — newest month first. */}
+                    <div className="px-4 pb-3 pt-1 bg-secondary/30">
+                      <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 py-1">
+                        <Calculator className="h-3 w-3" />How it was worked out
+                      </p>
+                      {awards
+                        .filter(a => roleKeyOf(a) === role.role)
+                        .sort((a, b) => b.bookedYear - a.bookedYear || b.bookedMonth - a.bookedMonth || who(a.employeeId).localeCompare(who(b.employeeId)))
+                        .map((a, i) => (
+                          <div key={i} className="flex items-baseline justify-between gap-3 py-1 text-xs border-t border-border/40 first:border-t-0">
+                            <span className="min-w-0">
+                              <span className="font-medium text-foreground">{who(a.employeeId)}</span>
+                              <span className="text-muted-foreground ml-1.5">{MON[a.bookedMonth - 1]} {a.bookedYear}</span>
+                              <span className="block text-muted-foreground/80 tabular-nums">{explainAward(a)}</span>
                             </span>
-                            <span className="tabular-nums">{inr(p.totalInr)}</span>
+                            <span className="tabular-nums shrink-0">{inr(a.earnedInr)}</span>
                           </div>
                         ))}
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 mb-1">Paid in</p>
-                        {role.months.map(m => (
-                          <div key={`${m.year}-${m.month}`} className="flex items-center justify-between gap-3 py-1 text-xs">
-                            <span className="text-muted-foreground">{m.label}</span>
-                            <span className="tabular-nums">{inr(m.totalInr)}</span>
-                          </div>
-                        ))}
-                      </div>
                     </div>
                   </details>
                 ))}
@@ -359,7 +373,7 @@ export default async function RoleEarningsPage({
                 {periodOptions.map(o => (
                   <a
                     key={o.key}
-                    href={`/dashboard/reports/role-earnings?months=${windowMonths}&at=${encodeURIComponent(o.key)}`}
+                    href={`${BASE}?${periodQuery}&at=${encodeURIComponent(o.key)}`}
                     className={`rounded-lg border px-2 py-1 text-[11px] ${o.key === selected.key
                       ? 'border-primary/40 bg-primary/10 text-primary font-medium'
                       : 'border-border text-muted-foreground hover:text-foreground'}`}

@@ -68,3 +68,15 @@ describe('rateLabel is the only implementation', () => {
     expect(offenders).toEqual([])
   })
 })
+
+describe('explainAward', () => {
+  it('spells out the sum for each kind of reward', async () => {
+    const { explainAward } = await import('./format')
+    expect(explainAward({ basis: 'billing', percent: 3, basisAmountInr: 29050, earnedInr: 871.5 })).toBe('3% × ₹29,050 billing = ₹872')
+    expect(explainAward({ basis: 'collected', percent: 2, basisAmountInr: 32250, earnedInr: 645 })).toBe('2% × ₹32,250 collections = ₹645')
+    expect(explainAward({ basis: 'entries', percent: null, fixedAmountInr: 5, basisAmountInr: 0, earnedInr: 0 })).toBe('0 entries × ₹5 = ₹0')
+    expect(explainAward({ basis: 'activities', percent: null, fixedAmountInr: 5, basisAmountInr: 1, earnedInr: 5 })).toBe('1 activity × ₹5 = ₹5')
+    expect(explainAward({ basis: 'clients_handled', percent: 3, basisAmountInr: 6300, earnedInr: 189 })).toBe('3% × ₹6,300 their clients’ billing = ₹189')
+    expect(explainAward({ basis: 'fixed', percent: null, fixedAmountInr: 1000, basisAmountInr: 0, earnedInr: 1000 })).toBe('Fixed = ₹1,000')
+  })
+})

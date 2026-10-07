@@ -82,3 +82,21 @@ export function rateLabel(a: RateShape): string {
   if (a.basis === 'mixed') return 'mixed rates'
   return a.basis
 }
+
+/**
+ * The whole sum behind one award, so a reader can check it by hand:
+ * "3% × ₹29,050 billing = ₹872" · "45 tasks × ₹5 = ₹225" · "Fixed = ₹1,000".
+ */
+export function explainAward(a: RateShape & { earnedInr: number }): string {
+  const earned = `₹${inr(a.earnedInr)}`
+  const unit = PER_PERSON_UNIT[a.basis]
+  if (unit && a.percent == null) {
+    const units = Math.round(a.basisAmountInr)
+    return `${inr(units)} ${units === 1 ? unit.one : unit.many} × ₹${inr(a.fixedAmountInr ?? 0)} = ${earned}`
+  }
+  if (a.percent != null) {
+    return `${a.percent}% × ₹${inr(a.basisAmountInr)} ${unit?.money ?? BASIS_NOUN[a.basis] ?? a.basis} = ${earned}`
+  }
+  if (a.basis === 'fixed') return `Fixed = ${earned}`
+  return earned
+}

@@ -109,3 +109,26 @@ describe('totalEarned', () => {
     expect(totalEarned([])).toBe(0)
   })
 })
+
+describe('resolveRoleWindow', () => {
+  const today = new Date(2026, 9, 7)   // 7 Oct 2026
+  it('a picked month shows just that month; the future is refused', async () => {
+    const { resolveRoleWindow } = await import('./role-earnings')
+    expect(resolveRoleWindow({ month: '2026-09' }, today)).toMatchObject({ key: 'month', months: [{ month: 9, year: 2026 }], label: 'September 2026' })
+    expect(resolveRoleWindow({ month: '2026-11' }, today).key).toBe('12m')
+  })
+  it('ranges', async () => {
+    const { resolveRoleWindow } = await import('./role-earnings')
+    expect(resolveRoleWindow({ range: 'last' }, today).months).toEqual([{ month: 9, year: 2026 }])
+    expect(resolveRoleWindow({ range: '3m' }, today).label).toBe('Last 3 months · Aug–Oct 2026')
+    expect(resolveRoleWindow({ range: 'ytd' }, today).months).toHaveLength(10)
+    expect(resolveRoleWindow({}, today).months).toHaveLength(12)
+    expect(resolveRoleWindow({ months: '6' }, today).months).toHaveLength(6)   // old links
+  })
+  it('arrows never step into the future', async () => {
+    const { stepMonth } = await import('./role-earnings')
+    expect(stepMonth({ month: 10, year: 2026 }, -1, today)).toBe('2026-09')
+    expect(stepMonth({ month: 10, year: 2026 }, 1, today)).toBeNull()
+    expect(stepMonth({ month: 1, year: 2026 }, -1, today)).toBe('2025-12')
+  })
+})
