@@ -92,3 +92,12 @@ describe('several people handling the same client', () => {
     expect(m.C).toMatchObject({ units: 1, amountInr: 500 })   // from the table
   })
 })
+
+describe('tasks entered', () => {
+  it('a task My Work created on Start is not a task entered', async () => {
+    const { isAutoCreatedTaskEvent } = await import('./work-measures')
+    expect(isAutoCreatedTaskEvent({ label: 'Auto-created from My Work' })).toBe(true)
+    expect(isAutoCreatedTaskEvent({ label: undefined })).toBe(false)
+    expect(isAutoCreatedTaskEvent(null)).toBe(false)
+  })
+})

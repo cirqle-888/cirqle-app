@@ -6,9 +6,11 @@
  * "per item" would pay for one click.
  *
  * Tasks record no creator either, but entering one by hand (Add Task,
- * Duplicate, My Work) writes a "task created" activity event naming the
- * person; imports, the recurring cron and the Shortcuts API do not, so
- * `task_created` counts hand-entered tasks only.
+ * Duplicate) writes a "task created" activity event naming the person;
+ * imports, the recurring cron and the Shortcuts API do not. My Work also logs
+ * one when Start auto-creates a task from an assigned request — that is work
+ * begun, not a task entered, and is excluded. So `task_created` counts
+ * hand-entered tasks only.
  */
 export const ACTIVITY_KINDS = {
   task_created:     { label: 'Tasks entered (Add Task, Duplicate)', singular: 'task' },

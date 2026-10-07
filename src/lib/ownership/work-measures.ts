@@ -188,6 +188,10 @@ export async function loadPlanned(admin: Admin, period: OwnershipPeriod, employe
 const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
 
 /** Count recorded work of the chosen kinds, per person, with every item listed. */
+/** "Task created" events written when My Work starts a request, not by hand. */
+export const isAutoCreatedTaskEvent = (detail: { label?: string } | null | undefined): boolean =>
+  /auto-created/i.test(detail?.label ?? '')
+
 export async function loadActivities(
   admin: Admin, period: OwnershipPeriod, employeeIds: string[], kinds: string[],
 ): Promise<Record<string, PersonMeasure>> {
@@ -221,10 +225,14 @@ export async function loadActivities(
         // 15 minutes of the task's own creation — re-logging an old task, or
         // logging someone else's, earns nothing.
         const { data: events } = await fetchAll(admin.from('activity_logs')
-          .select('actor_id, entity_id, created_at')
+          .select('actor_id, entity_id, created_at, detail')
           .eq('entity_type', 'task').eq('action', 'created').in('actor_id', employeeIds)
           .gte('created_at', fromIso).lt('created_at', toIso).order('created_at', { ascending: true }))
-        const evs = (events ?? []) as { actor_id: string; entity_id: string | null; created_at: string }[]
+        // Starting assigned work in My Work creates the task automatically and
+        // logs it as "created" by whoever pressed Start — work begun, not a
+        // task entered — so those events are not counted.
+        const evs = ((events ?? []) as { actor_id: string; entity_id: string | null; created_at: string; detail: { label?: string } | null }[])
+          .filter(e => !isAutoCreatedTaskEvent(e.detail))
         const ids = [...new Set(evs.map(e => e.entity_id).filter((x): x is string => !!x))]
         const tasks = new Map<string, { task_number: number | null; title: string | null; created_at: string; deleted_at: string | null }>()
         for (let i = 0; i < ids.length; i += 200) {
