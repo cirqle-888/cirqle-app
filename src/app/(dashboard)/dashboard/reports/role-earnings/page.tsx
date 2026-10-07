@@ -293,7 +293,7 @@ export default async function RoleEarningsPage({
                     {/* Every award in this role, with its sum — newest month first. */}
                     <div className="px-4 pb-3 pt-1 bg-secondary/30">
                       <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 py-1">
-                        <Calculator className="h-3 w-3" />How it was worked out
+                        <Calculator className="h-3 w-3" />{seeEveryone ? 'How it was worked out' : 'Payments'}
                       </p>
                       {awards
                         .filter(a => roleKeyOf(a) === role.role)
@@ -303,7 +303,7 @@ export default async function RoleEarningsPage({
                             <span className="min-w-0">
                               <span className="font-medium text-foreground">{who(a.employeeId)}</span>
                               <span className="text-muted-foreground ml-1.5">{MON[a.bookedMonth - 1]} {a.bookedYear}</span>
-                              <span className="block text-muted-foreground/80 tabular-nums">{explainAward(a)}</span>
+                              {seeEveryone && <span className="block text-muted-foreground/80 tabular-nums">{explainAward(a)}</span>}
                             </span>
                             <span className="tabular-nums shrink-0">{inr(a.earnedInr)}</span>
                           </div>
@@ -334,9 +334,13 @@ export default async function RoleEarningsPage({
                         <div key={hat.role} className="flex items-center justify-between gap-3 text-xs">
                           <span className="min-w-0 truncate text-muted-foreground">
                             {hat.role}
-                            <span className="text-muted-foreground/60 ml-1.5">
-                              ({rateLabel(hat)})
-                            </span>
+                            {/* The rate and measured billing are for whoever sees
+                                everyone's pay — not for someone viewing their own. */}
+                            {seeEveryone && (
+                              <span className="text-muted-foreground/60 ml-1.5">
+                                ({rateLabel(hat)})
+                              </span>
+                            )}
                           </span>
                           <span className="tabular-nums text-muted-foreground">{inr(hat.totalInr)}</span>
                         </div>

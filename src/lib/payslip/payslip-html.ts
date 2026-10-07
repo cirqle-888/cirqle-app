@@ -1,6 +1,5 @@
 import type { PayslipData } from './types'
 import { round2 } from '@/lib/calculations/currency'
-import { rateLabel } from '@/lib/ownership/format'
 
 /** Light-mode brand palette (hex only — email-safe). */
 const C = {
@@ -75,24 +74,20 @@ export function adjustmentLabel(
 }
 
 /**
- * Label for one ownership line: the program, the hat the person wore, and the
- * rate — "Manager Revenue Share · Ops Manager (2% of billing)". Showing the
- * rate is what turns a number into something an employee can check.
+ * Label for one ownership line on a payslip: the role only — "Client
+ * Managing", "Operations · Operation Manager".
+ *
+ * Deliberately NO rate and NO measured amount. "(3% of their clients' billing
+ * (₹6,300))" told the employee the client's billing and the share they get;
+ * the payslip goes to the employee, so it shows what they earned and for which
+ * role, nothing about how the company prices its work. The full working-out
+ * stays in the owner-facing reports (Earnings by Role, Payroll).
  */
-export function ownershipRowLabel(a: {
-  programName: string; label: string | null; basis: string; percent: number | null
-  basisAmountInr?: number; fixedAmountInr?: number | null
-}): string {
-  const hat = a.label ? ` · ${a.label}` : ''
-  // Via the shared formatter, so a per-entry award reads "142 entries × ₹5"
-  // rather than the nothing an `a.percent`-only rate produced for it.
-  const rate = ` (${rateLabel({
-    basis: a.basis,
-    basisAmountInr: a.basisAmountInr ?? 0,
-    percent: a.percent,
-    fixedAmountInr: a.fixedAmountInr,
-  })})`
-  return `${a.programName}${hat}${rate}`
+export function ownershipRowLabel(a: { programName: string; label: string | null }): string {
+  const hat = a.label?.trim()
+  // "Client Managing · Client Managing" — a rule named like its program says it once.
+  if (!hat || hat.toLowerCase() === a.programName.trim().toLowerCase()) return a.programName
+  return `${a.programName} · ${hat}`
 }
 
 /** Full HTML email body — light theme, no per-band earnings, no performance %. */
