@@ -24,7 +24,18 @@ export interface PayslipMonthEarning {
   earnings: number
 }
 
+/**
+ * How earnings are shown on the payslip.
+ *  detailed — one line per source (Creative Rewards, each ownership role, bonus…)
+ *  summary  — a single "Total Earnings" figure; what each part is for is not shown.
+ */
+export type PayslipFormat = 'detailed' | 'summary'
+export const PAYSLIP_FORMATS: readonly PayslipFormat[] = ['detailed', 'summary'] as const
+export const isPayslipFormat = (v: unknown): v is PayslipFormat => v === 'detailed' || v === 'summary'
+
 export interface PayslipData {
+  /** Absent = detailed (every payslip sent before formats existed). */
+  format?: PayslipFormat
   employee: {
     id: string
     cqid: string

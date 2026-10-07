@@ -16,7 +16,7 @@ import { getResend, payslipFrom, isEmailConfigured } from '@/lib/email/resend'
 import { buildPayslipData } from './build-payslip'
 import { renderPayslipHtml, renderPayslipText } from './payslip-html'
 import { renderPayslipPdf, payslipFilename } from './payslip-pdf'
-import type { PayslipData } from './types'
+import { isPayslipFormat, type PayslipData, type PayslipFormat } from './types'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
@@ -27,19 +27,20 @@ function defaultSubject(d: PayslipData): string {
 // ─── Preview ──────────────────────────────────────────────────────────────────
 
 export async function getPayslipPreview(
-  employeeId: string, month: number, year: number,
+  employeeId: string, month: number, year: number, format: PayslipFormat = 'detailed',
 ): Promise<ActionResult<{ data: PayslipData; html: string; subject: string; recipient: string; emailConfigured: boolean }>> {
   const guard = await requireReadPermission(PERMS.PAYROLL_EDIT)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const built = await buildPayslipData(employeeId, month, year)
   if (!built.ok) return { ok: false, error: built.error }
+  const d: PayslipData = { ...built.data, format: isPayslipFormat(format) ? format : 'detailed' }
 
   return {
     ok: true,
     data: {
-      data: built.data,
-      html: renderPayslipHtml(built.data),
+      data: d,
+      html: renderPayslipHtml(d),
       subject: defaultSubject(built.data),
       recipient: built.data.employee.email,
       emailConfigured: isEmailConfigured(),
@@ -56,6 +57,8 @@ export interface SendPayslipInput {
   toOverride?: string       // override recipient
   subjectOverride?: string  // override subject
   note?: string             // optional personal note shown in the email
+  /** detailed (default) or summary — one earnings figure. */
+  format?: PayslipFormat
 }
 
 export async function sendPayslip(
@@ -76,6 +79,7 @@ export interface SendBulkInput {
   year: number
   note?: string
   onlyEmployeeIds?: string[]  // optional subset; default = all paid in month
+  format?: PayslipFormat
 }
 
 export async function sendBulkPayslips(
@@ -104,7 +108,7 @@ export async function sendBulkPayslips(
   let sent = 0, failed = 0
   for (const rec of paid as any[]) {
     const r = await sendOne(
-      { employeeId: rec.employee_id, month: input.month, year: input.year, note: input.note },
+      { employeeId: rec.employee_id, month: input.month, year: input.year, note: input.note, format: input.format },
       guard.employeeId,
     )
     if (r.ok) { sent++; results.push({ cqid: rec.employee?.cqid || '—', to: r.data?.to || '', ok: true }) }
@@ -144,7 +148,7 @@ async function sendOne(
 
   const built = await buildPayslipData(input.employeeId, input.month, input.year)
   if (!built.ok) return { ok: false, error: built.error }
-  const d = built.data
+  const d: PayslipData = { ...built.data, format: isPayslipFormat(input.format) ? input.format : 'detailed' }
 
   const to = (input.toOverride || d.employee.email || '').trim()
   if (!to) return { ok: false, error: `${d.employee.cqid} has no email address.` }

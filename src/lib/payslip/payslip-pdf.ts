@@ -246,12 +246,14 @@ export async function renderPayslipPdf(d: PayslipData): Promise<Buffer> {
   doc.text('AMOUNT (INR)', W - M - 12, y + 17, { align: 'right' })
   y += ROW_H
 
-  if (s.baseSalary > 0) tableRow('Base Salary', inr(s.baseSalary))
-  tableRow('Creative Rewards', inr(s.commission), C.green)
-  if (s.bonus > 0) tableRow('Bonus', inr(s.bonus), C.green)
+  // Summary format: the Gross Earnings row below is the only earnings line.
+  const detailed = d.format !== 'summary'
+  if (detailed && s.baseSalary > 0) tableRow('Base Salary', inr(s.baseSalary))
+  if (detailed) tableRow('Creative Rewards', inr(s.commission), C.green)
+  if (detailed && s.bonus > 0) tableRow('Bonus', inr(s.bonus), C.green)
   // Corrections for already-closed months, paid with this payslip and labelled
   // with the month they came from.
-  if (s.adjustment) {
+  if (detailed && s.adjustment) {
     tableRow(
       adjustmentLabel(s.adjustmentSources),
       (s.adjustment < 0 ? '- ' : '') + inr(Math.abs(s.adjustment)),
@@ -260,7 +262,9 @@ export async function renderPayslipPdf(d: PayslipData): Promise<Buffer> {
   }
 
   // Ownership rewards, one line per program so the amount is explained.
-  if ((s.ownershipAwards ?? []).length > 0) {
+  if (!detailed) {
+    // nothing — earnings are the single Gross Earnings figure
+  } else if ((s.ownershipAwards ?? []).length > 0) {
     for (const a of s.ownershipAwards) tableRow(ownershipRowLabel(a), inr(a.earnedInr), C.green)
   } else if (s.ownership) {
     tableRow('Ownership Reward', inr(s.ownership), C.green)
@@ -270,7 +274,7 @@ export async function renderPayslipPdf(d: PayslipData): Promise<Buffer> {
   doc.setFillColor(245, 243, 255); doc.setDrawColor(...C.accentBorder)
   doc.rect(M, y, iW, ROW_H, 'FD')
   doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...C.ink)
-  doc.text('Gross Earnings', M + 12, y + 17)
+  doc.text(detailed ? 'Gross Earnings' : 'Total Earnings', M + 12, y + 17)
   doc.text(inr(gross), W - M - 12, y + 17, { align: 'right' })
   y += ROW_H + 16
 

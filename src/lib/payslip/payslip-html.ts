@@ -96,6 +96,8 @@ export function renderPayslipHtml(d: PayslipData, note?: string): string {
   const gross = s.baseSalary + s.commission + s.bonus + (s.adjustment || 0) + (s.ownership || 0)
   const deductions = s.advancesDeducted + s.otherDeductions
   const statusPaid = s.status === 'paid'
+  // Summary: one earnings figure, no list of what each part is for.
+  const summary = d.format === 'summary'
 
   // ── 6-month bar chart (table-based, email-safe) ────────────────────────────
   const maxEarn = Math.max(1, ...d.sixMonthEarnings.map(m => m.earnings))
@@ -168,6 +170,7 @@ export function renderPayslipHtml(d: PayslipData, note?: string): string {
         <tr><td style="padding:20px 28px 0;">
           <div style="font-size:12px;font-weight:600;color:${C.muted};text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Earnings &amp; Deductions</div>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            ${summary ? salaryRow('Total Earnings', inr(gross), C.ink, true) : `
             ${s.baseSalary > 0 ? salaryRow('Base Salary', inr(s.baseSalary)) : ''}
             ${salaryRow('Creative Rewards', inr(s.commission), C.green)}
             ${s.bonus > 0 ? salaryRow('Bonus', inr(s.bonus), C.green) : ''}
@@ -184,7 +187,7 @@ export function renderPayslipHtml(d: PayslipData, note?: string): string {
                   )).join('')
                 : (s.ownership ? salaryRow('Ownership Reward', inr(s.ownership), C.green) : '')}
             <tr><td colspan="2" style="border-top:1px solid ${C.border};padding-top:4px;"></td></tr>
-            ${salaryRow('Gross', inr(gross), C.ink, true)}
+            ${salaryRow('Gross', inr(gross), C.ink, true)}`}
             ${s.advancesDeducted > 0 ? salaryRow('Advance Deducted', '− ' + inr(s.advancesDeducted), C.red) : ''}
             ${s.otherDeductions > 0 ? salaryRow('Other Deductions', '− ' + inr(s.otherDeductions), C.red) : ''}
           </table>
@@ -281,11 +284,15 @@ export function renderPayslipText(d: PayslipData): string {
     `${d.employee.name} (${d.employee.cqid})${d.employee.designation ? ' · ' + d.employee.designation : ''}`,
     d.payslipNumber ? `Payslip No: ${d.payslipNumber}` : '',
     ``,
-    s.baseSalary > 0 ? `Base Salary:     ${inr(s.baseSalary)}` : '',
-    `Creative Rewards: ${inr(s.commission)}`,
-    s.bonus > 0 ? `Bonus:           ${inr(s.bonus)}` : '',
-    s.adjustment ? `${adjustmentLabel(s.adjustmentSources)}: ${s.adjustment < 0 ? '-' : ''}${inr(Math.abs(s.adjustment))}` : '',
-    ...(s.ownershipAwards ?? []).map(a => `${ownershipRowLabel(a)}: ${inr(a.earnedInr)}`),
+    ...(d.format === 'summary'
+      ? [`Total Earnings:  ${inr(s.baseSalary + s.commission + s.bonus + (s.adjustment || 0) + (s.ownership || 0))}`]
+      : [
+          s.baseSalary > 0 ? `Base Salary:     ${inr(s.baseSalary)}` : '',
+          `Creative Rewards: ${inr(s.commission)}`,
+          s.bonus > 0 ? `Bonus:           ${inr(s.bonus)}` : '',
+          s.adjustment ? `${adjustmentLabel(s.adjustmentSources)}: ${s.adjustment < 0 ? '-' : ''}${inr(Math.abs(s.adjustment))}` : '',
+          ...(s.ownershipAwards ?? []).map(a => `${ownershipRowLabel(a)}: ${inr(a.earnedInr)}`),
+        ]),
     s.advancesDeducted > 0 ? `Advance Ded:    -${inr(s.advancesDeducted)}` : '',
     s.otherDeductions > 0 ? `Deductions:     -${inr(s.otherDeductions)}` : '',
     `NET ${s.status === 'paid' ? 'PAID' : 'PAYABLE'}: ${inr(s.netSalary)}`,

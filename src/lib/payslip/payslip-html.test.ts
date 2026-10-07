@@ -21,3 +21,39 @@ describe('ownershipRowLabel', () => {
     }
   })
 })
+
+describe('summary format', () => {
+  const base = {
+    employee: { id: 'e', cqid: 'CQID005', name: 'Noora', email: 'n@x', designation: 'Client Success', role: 'employee' },
+    period: { month: 9, year: 2026, monthName: 'September', label: 'September 2026' },
+    payslipNumber: 'PAY-005-1026', generatedAt: '2026-10-07T00:00:00Z',
+    salary: {
+      salaryType: 'fixed', baseSalary: 0, commission: 231, bonus: 0, adjustment: 0, adjustmentSources: [],
+      ownership: 189,
+      ownershipAwards: [{ programName: 'Client Managing', label: 'Client Managing', basis: 'clients_handled', basisAmountInr: 6300, percent: 3, fixedAmountInr: null, earnedInr: 189 }],
+      advancesDeducted: 0, otherDeductions: 0, netSalary: 420, status: 'pending', paidDate: null,
+    },
+    performance: { rating: 100 }, attendance: { workedDays: 6, daysInMonth: 30 },
+    contributionRanges: [], monthTasks: [], sixMonthEarnings: [],
+    totals: { monthEarnings: 231, monthTaskCount: 6, sixMonthTotal: 420 },
+    company: { name: 'Cirqle', email: 'a@b', website: 'x', phone: '1', logoUrl: null },
+  } as unknown as import('./types').PayslipData
+
+  it('detailed lists each earning', async () => {
+    const { renderPayslipHtml, renderPayslipText } = await import('./payslip-html')
+    expect(renderPayslipHtml(base)).toContain('Creative Rewards')
+    expect(renderPayslipHtml(base)).toContain('Client Managing')
+    expect(renderPayslipText(base)).toContain('Creative Rewards')
+  })
+
+  it('summary shows one Total Earnings figure and nothing about what it is for', async () => {
+    const { renderPayslipHtml, renderPayslipText } = await import('./payslip-html')
+    const d = { ...base, format: 'summary' as const }
+    for (const out of [renderPayslipHtml(d), renderPayslipText(d)]) {
+      expect(out).toContain('Total Earnings')
+      expect(out).toContain('420')
+      expect(out).not.toContain('Creative Rewards')
+      expect(out).not.toContain('Client Managing')
+    }
+  })
+})

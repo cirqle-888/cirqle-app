@@ -1,5 +1,6 @@
 'use client'
 
+import { isPayslipFormat, type PayslipFormat } from '@/lib/payslip/types'
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
@@ -276,6 +277,10 @@ export default function PayrollClient({
   const [payslipModal, setPayslipModal] = useState<{ employeeId: string } | null>(null)
   const [bulkPayslipConfirm, setBulkPayslipConfirm] = useState(false)
   const [bulkSending, setBulkSending] = useState(false)
+  // Same remembered choice as the single Send Payslip window.
+  const [bulkFormat, setBulkFormat] = useState<PayslipFormat>(() => {
+    try { const v = localStorage.getItem('cirqle.payslipFormat'); return isPayslipFormat(v) ? v : 'detailed' } catch { return 'detailed' }
+  })
   const [confirmModal, setConfirmModal]       = useState<{
     title: string; body: string; confirmLabel: string; onConfirm: () => void
     /** Shows the "Paid from" account picker (Mark Paid only). */
@@ -648,7 +653,8 @@ export default function PayrollClient({
   // ── Bulk payslip send (all PAID employees this month) ─────────────────────
   async function handleBulkPayslips() {
     setBulkSending(true)
-    const result = await sendBulkPayslips({ month: viewMonth, year: viewYear })
+    try { localStorage.setItem('cirqle.payslipFormat', bulkFormat) } catch { /* private window */ }
+    const result = await sendBulkPayslips({ month: viewMonth, year: viewYear, format: bulkFormat })
     setBulkSending(false)
     setBulkPayslipConfirm(false)
     if (result.ok && result.data) {
@@ -2853,6 +2859,17 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 </p>
               </div>
             </div>
+            <div role="radiogroup" aria-label="Payslip format" className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-secondary p-1">
+              {(['detailed', 'summary'] as const).map(f => (
+                <button key={f} type="button" role="radio" aria-checked={bulkFormat === f} onClick={() => setBulkFormat(f)}
+                  className={`rounded-md py-1.5 text-sm font-medium transition-colors ${bulkFormat === f ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                  {f === 'detailed' ? 'Detailed' : 'Summary'}
+                </button>
+              ))}
+            </div>
+            <p className="-mt-2 text-[11px] text-muted-foreground">
+              {bulkFormat === 'detailed' ? 'Each earning on its own line.' : 'One Total Earnings figure — no breakdown.'}
+            </p>
             <div className="flex gap-3">
               <button onClick={() => setBulkPayslipConfirm(false)} disabled={bulkSending}
                 className="flex-1 bg-secondary text-sm font-medium py-2.5 rounded-lg hover:bg-secondary/80 transition-colors disabled:opacity-50">
