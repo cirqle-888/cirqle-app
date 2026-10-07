@@ -16,7 +16,7 @@ import { getResend, payslipFrom, isEmailConfigured } from '@/lib/email/resend'
 import { buildPayslipData } from './build-payslip'
 import { renderPayslipHtml, renderPayslipText } from './payslip-html'
 import { renderPayslipPdf, payslipFilename } from './payslip-pdf'
-import { isPayslipFormat, type PayslipData, type PayslipFormat } from './types'
+import { isPayslipFormat, DEFAULT_PAYSLIP_FORMAT, type PayslipData, type PayslipFormat } from './types'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
@@ -27,14 +27,14 @@ function defaultSubject(d: PayslipData): string {
 // ─── Preview ──────────────────────────────────────────────────────────────────
 
 export async function getPayslipPreview(
-  employeeId: string, month: number, year: number, format: PayslipFormat = 'detailed',
+  employeeId: string, month: number, year: number, format: PayslipFormat = DEFAULT_PAYSLIP_FORMAT,
 ): Promise<ActionResult<{ data: PayslipData; html: string; subject: string; recipient: string; emailConfigured: boolean }>> {
   const guard = await requireReadPermission(PERMS.PAYROLL_EDIT)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const built = await buildPayslipData(employeeId, month, year)
   if (!built.ok) return { ok: false, error: built.error }
-  const d: PayslipData = { ...built.data, format: isPayslipFormat(format) ? format : 'detailed' }
+  const d: PayslipData = { ...built.data, format: isPayslipFormat(format) ? format : DEFAULT_PAYSLIP_FORMAT }
 
   return {
     ok: true,
@@ -57,7 +57,7 @@ export interface SendPayslipInput {
   toOverride?: string       // override recipient
   subjectOverride?: string  // override subject
   note?: string             // optional personal note shown in the email
-  /** detailed (default) or summary — one earnings figure. */
+  /** summary (default) — one earnings figure — or detailed. */
   format?: PayslipFormat
 }
 
@@ -148,7 +148,7 @@ async function sendOne(
 
   const built = await buildPayslipData(input.employeeId, input.month, input.year)
   if (!built.ok) return { ok: false, error: built.error }
-  const d: PayslipData = { ...built.data, format: isPayslipFormat(input.format) ? input.format : 'detailed' }
+  const d: PayslipData = { ...built.data, format: isPayslipFormat(input.format) ? input.format : DEFAULT_PAYSLIP_FORMAT }
 
   const to = (input.toOverride || d.employee.email || '').trim()
   if (!to) return { ok: false, error: `${d.employee.cqid} has no email address.` }

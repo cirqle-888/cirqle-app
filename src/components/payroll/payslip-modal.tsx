@@ -4,9 +4,7 @@ import { useEffect, useState } from 'react'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { X, Mail, Send, Loader2, AlertTriangle, FileText, CheckCircle } from 'lucide-react'
 import { getPayslipPreview, sendPayslip } from '@/lib/payslip/actions'
-import { isPayslipFormat, type PayslipFormat } from '@/lib/payslip/types'
-
-const FORMAT_KEY = 'cirqle.payslipFormat'
+import { DEFAULT_PAYSLIP_FORMAT, type PayslipFormat } from '@/lib/payslip/types'
 const FORMAT_HELP: Record<PayslipFormat, string> = {
   detailed: 'Each earning on its own line — Creative Rewards, each role, bonus.',
   summary: 'One Total Earnings figure — what each part is for is not shown.',
@@ -33,10 +31,8 @@ export function PayslipModal({ employeeId, month, year, monthLabel, onClose, onS
   const [note, setNote]         = useState('')
   const [sending, setSending]   = useState(false)
   const [sentTo, setSentTo]     = useState<string | null>(null)
-  // The last format used is remembered on this device.
-  const [format, setFormat] = useState<PayslipFormat>(() => {
-    try { const v = localStorage.getItem(FORMAT_KEY); return isPayslipFormat(v) ? v : 'detailed' } catch { return 'detailed' }
-  })
+  // Every payslip starts as Summary; Detailed is a deliberate choice per send.
+  const [format, setFormat] = useState<PayslipFormat>(DEFAULT_PAYSLIP_FORMAT)
   const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
@@ -62,7 +58,6 @@ export function PayslipModal({ employeeId, month, year, monthLabel, onClose, onS
 
   function chooseFormat(f: PayslipFormat) {
     setFormat(f)
-    try { localStorage.setItem(FORMAT_KEY, f) } catch { /* private window */ }
   }
 
   async function handleSend() {
@@ -139,7 +134,7 @@ export function PayslipModal({ employeeId, month, year, monthLabel, onClose, onS
               <div>
                 <label className="text-xs font-medium text-muted-foreground">Format</label>
                 <div role="radiogroup" aria-label="Payslip format" className="mt-1 grid grid-cols-2 gap-1 rounded-lg border border-border bg-secondary p-1">
-                  {(['detailed', 'summary'] as const).map(f => (
+                  {(['summary', 'detailed'] as const).map(f => (
                     <button key={f} type="button" role="radio" aria-checked={format === f} onClick={() => chooseFormat(f)}
                       className={`rounded-md py-1.5 text-sm font-medium transition-colors ${format === f ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                       {f === 'detailed' ? 'Detailed' : 'Summary'}

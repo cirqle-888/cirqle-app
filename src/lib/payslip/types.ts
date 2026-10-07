@@ -32,9 +32,11 @@ export interface PayslipMonthEarning {
 export type PayslipFormat = 'detailed' | 'summary'
 export const PAYSLIP_FORMATS: readonly PayslipFormat[] = ['detailed', 'summary'] as const
 export const isPayslipFormat = (v: unknown): v is PayslipFormat => v === 'detailed' || v === 'summary'
+/** What a payslip is sent as unless Detailed is chosen for that send. */
+export const DEFAULT_PAYSLIP_FORMAT: PayslipFormat = 'summary'
 
 export interface PayslipData {
-  /** Absent = detailed (every payslip sent before formats existed). */
+  /** Absent = detailed — how payslips rendered before formats existed (history snapshots). */
   format?: PayslipFormat
   employee: {
     id: string

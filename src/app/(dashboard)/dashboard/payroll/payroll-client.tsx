@@ -1,6 +1,6 @@
 'use client'
 
-import { isPayslipFormat, type PayslipFormat } from '@/lib/payslip/types'
+import { DEFAULT_PAYSLIP_FORMAT, type PayslipFormat } from '@/lib/payslip/types'
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
@@ -277,10 +277,8 @@ export default function PayrollClient({
   const [payslipModal, setPayslipModal] = useState<{ employeeId: string } | null>(null)
   const [bulkPayslipConfirm, setBulkPayslipConfirm] = useState(false)
   const [bulkSending, setBulkSending] = useState(false)
-  // Same remembered choice as the single Send Payslip window.
-  const [bulkFormat, setBulkFormat] = useState<PayslipFormat>(() => {
-    try { const v = localStorage.getItem('cirqle.payslipFormat'); return isPayslipFormat(v) ? v : 'detailed' } catch { return 'detailed' }
-  })
+  // Summary unless Detailed is chosen for this send — same as Send Payslip.
+  const [bulkFormat, setBulkFormat] = useState<PayslipFormat>(DEFAULT_PAYSLIP_FORMAT)
   const [confirmModal, setConfirmModal]       = useState<{
     title: string; body: string; confirmLabel: string; onConfirm: () => void
     /** Shows the "Paid from" account picker (Mark Paid only). */
@@ -653,7 +651,6 @@ export default function PayrollClient({
   // ── Bulk payslip send (all PAID employees this month) ─────────────────────
   async function handleBulkPayslips() {
     setBulkSending(true)
-    try { localStorage.setItem('cirqle.payslipFormat', bulkFormat) } catch { /* private window */ }
     const result = await sendBulkPayslips({ month: viewMonth, year: viewYear, format: bulkFormat })
     setBulkSending(false)
     setBulkPayslipConfirm(false)
@@ -2860,7 +2857,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
               </div>
             </div>
             <div role="radiogroup" aria-label="Payslip format" className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-secondary p-1">
-              {(['detailed', 'summary'] as const).map(f => (
+              {(['summary', 'detailed'] as const).map(f => (
                 <button key={f} type="button" role="radio" aria-checked={bulkFormat === f} onClick={() => setBulkFormat(f)}
                   className={`rounded-md py-1.5 text-sm font-medium transition-colors ${bulkFormat === f ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                   {f === 'detailed' ? 'Detailed' : 'Summary'}
