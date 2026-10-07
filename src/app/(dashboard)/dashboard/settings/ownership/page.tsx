@@ -1,8 +1,9 @@
 import { redirect } from 'next/navigation'
-import { createAdminClient } from '@/lib/supabase/server'
+import { createAdminClient, fetchAll } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { loadPrograms } from '@/lib/ownership/engine'
+import { ACTIVITY_KINDS, isPayableLogPair, logKind, logKindLabel } from '@/lib/ownership/activity-kinds'
 import OwnershipClient from './ownership-client'
 
 export const dynamic = 'force-dynamic'
@@ -40,6 +41,30 @@ export default async function OwnershipSettingsPage() {
   const handlers = Object.fromEntries(((handlerRows ?? []) as { client_id: string; employee_id: string; effective_from: string }[])
     .map(h => [h.client_id, { employeeId: h.employee_id, from: h.effective_from }]))
 
+  // Activities an "activities" program can count: the built-in kinds, then
+  // every action the activity log has recorded with a person in the last year
+  // — so work a new feature logs becomes payable here without a code change.
+  const since = new Date(); since.setFullYear(since.getFullYear() - 1)
+  const { data: logged } = await fetchAll(admin.from('activity_logs')
+    .select('entity_type, action')
+    .not('actor_id', 'is', null)
+    .gte('created_at', since.toISOString())
+    .order('id', { ascending: true }))
+  const counts = new Map<string, { entityType: string; action: string; n: number }>()
+  for (const r of (logged ?? []) as { entity_type: string; action: string }[]) {
+    if (!isPayableLogPair(r.entity_type, r.action)) continue
+    const k = logKind(r.entity_type, r.action)
+    const c = counts.get(k) ?? { entityType: r.entity_type, action: r.action, n: 0 }
+    c.n++
+    counts.set(k, c)
+  }
+  const activityOptions = [
+    ...Object.entries(ACTIVITY_KINDS).map(([key, v]) => ({ key, label: v.label, builtIn: true, count: null as number | null })),
+    ...[...counts.entries()]
+      .sort((a, b) => b[1].n - a[1].n)
+      .map(([key, c]) => ({ key, label: logKindLabel(c.entityType, c.action), builtIn: false, count: c.n })),
+  ]
+
   const now = new Date()
 
   return (
@@ -54,6 +79,7 @@ export default async function OwnershipSettingsPage() {
       // Absent pre-migration — the unit scope option simply won't be offered.
       orgUnits={(unitRes.data ?? []) as { id: string; name: string; type: string }[]}
       handlers={handlers}
+      activityOptions={activityOptions}
       currentMonth={now.getMonth() + 1}
       currentYear={now.getFullYear()}
     />

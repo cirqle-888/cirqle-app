@@ -21,7 +21,10 @@ import type { OwnershipProgram, OwnershipRule, OwnershipBasis, OwnershipPeriodTy
 import { saveProgram, setProgramActive, deleteProgram, saveRule, deleteRule, previewMonth, runAwardsForMonth, setClientHandler } from './actions'
 import { rateLabel, BASIS_CHOICE_LABEL as BASIS_LABEL, PER_UNIT_BASES, PER_PERSON_UNIT } from '@/lib/ownership/format'
 import { PER_PERSON_BASES, ruleEmployees } from '@/lib/ownership/types'
-import { ACTIVITY_KINDS, type ActivityKind } from '@/lib/ownership/activity-kinds'
+import { activityKindLabel } from '@/lib/ownership/activity-kinds'
+
+/** One tickable activity in a program: a built-in kind or a logged action type. */
+interface ActivityOption { key: string; label: string; builtIn: boolean; count: number | null }
 
 const PERIOD_LABEL: Record<OwnershipPeriodType, string> = {
   monthly: 'Monthly', quarterly: 'Quarterly', yearly: 'Yearly', one_time: 'One-time',
@@ -64,6 +67,8 @@ interface Props {
   orgUnits: { id: string; name: string; type: string }[]
   /** clientId → current handler. */
   handlers: Record<string, { employeeId: string; from: string }>
+  /** Built-in activity kinds, then every logged action type (see page.tsx). */
+  activityOptions: ActivityOption[]
   currentMonth: number
   currentYear: number
 }
@@ -444,6 +449,7 @@ export default function OwnershipClient(p: Props) {
         <ProgramModal
           initial={programModal === 'new' ? null : programModal}
           clients={p.clients} services={p.services} categories={p.categories} orgUnits={p.orgUnits}
+          activityOptions={p.activityOptions}
           onClose={() => setProgramModal(null)}
           onSaved={() => { setProgramModal(null); success('Program saved'); refresh() }}
           onError={(m) => toastError('Could not save', m)}
@@ -492,8 +498,9 @@ export default function OwnershipClient(p: Props) {
 
 // ── Program form ─────────────────────────────────────────────────────────────
 
-function ProgramModal({ initial, clients, services, categories, orgUnits, onClose, onSaved, onError }: {
+function ProgramModal({ initial, clients, services, categories, orgUnits, activityOptions, onClose, onSaved, onError }: {
   initial: OwnershipProgram | null
+  activityOptions: ActivityOption[]
   clients: { id: string; name: string }[]
   services: { id: string; name: string }[]
   categories: { id: string; name: string }[]
@@ -592,14 +599,41 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, onClos
             <div className="rounded-lg border border-border bg-secondary/20 p-3">
               <p className="text-xs font-medium mb-2">Count these activities <span className="text-muted-foreground font-normal">· each item once, by who recorded it</span></p>
               <div className="grid grid-cols-2 gap-1.5">
-                {(Object.keys(ACTIVITY_KINDS) as ActivityKind[]).map(k => (
-                  <label key={k} className="flex items-center gap-2 text-xs">
-                    <input type="checkbox" checked={kinds.includes(k)}
-                      onChange={e => setKinds(prev => e.target.checked ? [...prev, k] : prev.filter(x => x !== k))} />
-                    {ACTIVITY_KINDS[k].label}
+                {activityOptions.filter(o => o.builtIn).map(o => (
+                  <label key={o.key} className="flex items-center gap-2 text-xs">
+                    <input type="checkbox" checked={kinds.includes(o.key)}
+                      onChange={e => setKinds(prev => e.target.checked ? [...prev, o.key] : prev.filter(x => x !== o.key))} />
+                    {o.label}
                   </label>
                 ))}
               </div>
+              {/* Every other action the app logs with a person — new features
+                  that log their work appear here on their own. */}
+              {(() => {
+                const fromLog = activityOptions.filter(o => !o.builtIn)
+                // A kind saved earlier that has not been logged in the last year
+                // stays visible, so it can still be unticked.
+                const stale = kinds.filter(k => k.startsWith('log:') && !fromLog.some(o => o.key === k))
+                if (!fromLog.length && !stale.length) return null
+                return (
+                  <details open={kinds.some(k => k.startsWith('log:'))} className="group mt-2.5 border-t border-border pt-2">
+                    <summary className="flex items-center justify-between cursor-pointer select-none list-none text-[11px] text-muted-foreground">
+                      <span>More from the activity log <span className="opacity-70">· {fromLog.length} kinds</span></span>
+                      <ChevronDown className="w-3.5 h-3.5 group-open:rotate-180 transition-transform" />
+                    </summary>
+                    <div className="grid grid-cols-2 gap-1.5 mt-2">
+                      {[...fromLog, ...stale.map(k => ({ key: k, label: activityKindLabel(k), builtIn: false, count: 0 }))].map(o => (
+                        <label key={o.key} className="flex items-center gap-2 text-xs">
+                          <input type="checkbox" checked={kinds.includes(o.key)}
+                            onChange={e => setKinds(prev => e.target.checked ? [...prev, o.key] : prev.filter(x => x !== o.key))} />
+                          <span className="min-w-0 truncate">{o.label}</span>
+                          {o.count != null && <span className="text-[10px] text-muted-foreground/60 tabular-nums">{o.count}</span>}
+                        </label>
+                      ))}
+                    </div>
+                  </details>
+                )
+              })()}
             </div>
           )}
 

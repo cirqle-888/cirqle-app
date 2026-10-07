@@ -51,7 +51,7 @@ const empty = (ids: string[]) => Object.fromEntries(ids.map(id => [id, { units: 
 // ── Activities catalogue ─────────────────────────────────────────────────────
 
 export { ACTIVITY_KINDS, isActivityKind, type ActivityKind } from './activity-kinds'
-import { isActivityKind } from './activity-kinds'
+import { isActivityKind, parseLogKind } from './activity-kinds'
 
 // ── Pure attribution ─────────────────────────────────────────────────────────
 
@@ -188,6 +188,19 @@ export async function loadPlanned(admin: Admin, period: OwnershipPeriod, employe
 const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
 
 /** Count recorded work of the chosen kinds, per person, with every item listed. */
+/** Tasks by id that still exist (not soft-deleted) — what a per-task count may pay for. */
+async function liveTasks(admin: Admin, ids: (string | null)[]) {
+  const want = [...new Set(ids.filter((x): x is string => !!x))]
+  const out = new Map<string, { task_number: number | null; title: string | null; created_at: string }>()
+  for (let i = 0; i < want.length; i += 200) {
+    const { data } = await admin.from('tasks').select('id, task_number, title, created_at, deleted_at').in('id', want.slice(i, i + 200))
+    for (const t of (data ?? []) as { id: string; task_number: number | null; title: string | null; created_at: string; deleted_at: string | null }[]) {
+      if (!t.deleted_at) out.set(t.id, t)
+    }
+  }
+  return out
+}
+
 /** "Task created" events written when My Work starts a request, not by hand. */
 export const isAutoCreatedTaskEvent = (detail: { label?: string } | null | undefined): boolean =>
   /auto-created/i.test(detail?.label ?? '')
@@ -246,6 +259,41 @@ export async function loadActivities(
           if (Math.abs(new Date(e.created_at).getTime() - new Date(t.created_at).getTime()) > 15 * 60_000) continue
           counted.add(e.entity_id!)
           push(e.actor_id, `#${t.task_number ?? '—'} ${t.title ?? ''}`.trim(), e.created_at)
+        }
+      } else if (kind === 'contribution_saved') {
+        // Scoring a task's contributions. Each task counts once per person
+        // per period however often it is re-saved, and only while it exists.
+        const { data: events } = await fetchAll(admin.from('activity_logs')
+          .select('actor_id, entity_id, created_at')
+          .eq('entity_type', 'task').in('action', ['contribution_saved', 'contribution_corrected_closed_period'])
+          .in('actor_id', employeeIds).gte('created_at', fromIso).lt('created_at', toIso)
+          .order('created_at', { ascending: true }))
+        const evs = (events ?? []) as { actor_id: string; entity_id: string | null; created_at: string }[]
+        const tasks = await liveTasks(admin, evs.map(e => e.entity_id))
+        const seen = new Set<string>()
+        for (const e of evs) {
+          const t = e.entity_id ? tasks.get(e.entity_id) : undefined
+          const key = `${e.actor_id}|${e.entity_id}`
+          if (!t || seen.has(key)) continue
+          seen.add(key)
+          push(e.actor_id, `#${t.task_number ?? '—'} ${t.title ?? ''}`.trim(), e.created_at)
+        }
+      } else if (parseLogKind(kind)) {
+        // Any other logged action: each item (entity) once per person per period.
+        const { entityType, action } = parseLogKind(kind)!
+        const { data: events } = await fetchAll(admin.from('activity_logs')
+          .select('id, actor_id, entity_id, created_at, detail')
+          .eq('entity_type', entityType).eq('action', action)
+          .in('actor_id', employeeIds).gte('created_at', fromIso).lt('created_at', toIso)
+          .order('created_at', { ascending: true }))
+        const seen = new Set<string>()
+        for (const e of (events ?? []) as { id: string; actor_id: string; entity_id: string | null; created_at: string; detail: Record<string, unknown> | null }[]) {
+          const key = `${e.actor_id}|${e.entity_id ?? e.id}`
+          if (seen.has(key)) continue
+          seen.add(key)
+          const d = e.detail ?? {}
+          const name = [d.title, d.label, d.name, d.client_name].find(v => typeof v === 'string' && v) as string | undefined
+          push(e.actor_id, name ? String(name).slice(0, 70) : `${entityType} ${action}`.replace(/_/g, ' '), e.created_at)
         }
       } else if (kind === 'invoice_followup') {
         const { data } = await admin.from('invoice_followups')
