@@ -2,7 +2,7 @@ import { jsPDF } from 'jspdf'
 import sharp from 'sharp'
 import type { PayslipData } from './types'
 import { round2 } from '@/lib/calculations/currency'
-import { adjustmentLabel, ownershipRowLabel, additionalEarnings, summaryCreative, summaryArrears, payBasisLabel } from './payslip-html'
+import { adjustmentLabel, ownershipRowLabel, summaryAdditional, summaryCreative, summaryArrears, payBasisLabel } from './payslip-html'
 
 // Professional light palette — A4, white background
 const C = {
@@ -242,7 +242,7 @@ export async function renderPayslipPdf(d: PayslipData): Promise<Buffer> {
   const detailed = d.format !== 'summary'
   if (s.baseSalary > 0) tableRow('Base Salary', inr(s.baseSalary))
   tableRow('Creative Rewards', inr(detailed ? s.commission : summaryCreative(s)), C.green)
-  if (!detailed && additionalEarnings(s)) tableRow('Additional Earnings', inr(additionalEarnings(s)), C.green)
+  if (!detailed && summaryAdditional(s)) tableRow('Additional Earnings', inr(summaryAdditional(s)), C.green)
   if (detailed && s.bonus > 0) tableRow('Bonus', inr(s.bonus), C.green)
   // Corrections for already-closed months, paid with this payslip and labelled
   // with the month they came from.

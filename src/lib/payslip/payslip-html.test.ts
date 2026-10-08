@@ -92,3 +92,13 @@ describe('summary: corrections and pay basis', () => {
     expect(payBasisLabel({ baseSalary: 15000, commission: 500 })).toBe('Base + Earnings')
   })
 })
+
+describe('a recovery larger than creative rewards', () => {
+  it('no line goes negative and the lines still add up to the net', async () => {
+    const { summaryCreative, summaryAdditional } = await import('./payslip-html')
+    const s = { commission: 162, ownership: 888, bonus: 0, adjustment: -679 }
+    expect(summaryCreative(s)).toBe(0)
+    expect(summaryAdditional(s)).toBe(371)
+    expect(summaryCreative(s) + summaryAdditional(s)).toBe(162 + 888 - 679)
+  })
+})

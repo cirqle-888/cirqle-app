@@ -97,7 +97,18 @@ export function additionalEarnings(s: { ownership?: number; bonus?: number }): n
  * printed; a POSITIVE one (money owed back) is shown as "Arrears". Either way
  * the lines still add up to the net.
  */
-export const summaryCreative = (s: { commission: number; adjustment?: number }) => s.commission + Math.min(0, s.adjustment || 0)
+export const summaryCreative = (s: { commission: number; adjustment?: number }) =>
+  Math.max(0, s.commission + Math.min(0, s.adjustment || 0))
+/**
+ * Additional Earnings on a Summary payslip: ownership + bonus, less whatever
+ * part of a recovered overpayment Creative Rewards could not absorb — so no
+ * line goes below zero and the lines still add up to the net.
+ */
+export const summaryAdditional = (s: { commission: number; adjustment?: number; ownership?: number; bonus?: number }) => {
+  const recovered = -Math.min(0, s.adjustment || 0)
+  const leftOver = Math.max(0, recovered - s.commission)
+  return Math.max(0, additionalEarnings(s) - leftOver)
+}
 export const summaryArrears = (s: { adjustment?: number }) => Math.max(0, s.adjustment || 0)
 
 /**
@@ -195,7 +206,7 @@ export function renderPayslipHtml(d: PayslipData, note?: string): string {
             ${summary ? `
             ${s.baseSalary > 0 ? salaryRow('Base Salary', inr(s.baseSalary)) : ''}
             ${salaryRow('Creative Rewards', inr(summaryCreative(s)), C.green)}
-            ${additionalEarnings(s) ? salaryRow('Additional Earnings', inr(additionalEarnings(s)), C.green) : ''}
+            ${summaryAdditional(s) ? salaryRow('Additional Earnings', inr(summaryAdditional(s)), C.green) : ''}
             ${summaryArrears(s) ? salaryRow('Arrears (previous months)', inr(summaryArrears(s)), C.green) : ''}
             <tr><td colspan="2" style="border-top:1px solid ${C.border};padding-top:4px;"></td></tr>
             ${salaryRow('Total Earnings', inr(gross), C.ink, true)}` : `
@@ -316,7 +327,7 @@ export function renderPayslipText(d: PayslipData): string {
       ? [
           s.baseSalary > 0 ? `Base Salary:     ${inr(s.baseSalary)}` : '',
           `Creative Rewards: ${inr(summaryCreative(s))}`,
-          additionalEarnings(s) ? `Additional Earnings: ${inr(additionalEarnings(s))}` : '',
+          summaryAdditional(s) ? `Additional Earnings: ${inr(summaryAdditional(s))}` : '',
           summaryArrears(s) ? `Arrears (previous months): ${inr(summaryArrears(s))}` : '',
           `Total Earnings:  ${inr(s.baseSalary + s.commission + s.bonus + (s.adjustment || 0) + (s.ownership || 0))}`,
         ]
