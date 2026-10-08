@@ -42,12 +42,12 @@ disaster-recovery path from migrations. That needs a baseline dump — see
 | 2026-10-06 | `20261006100000_ownership_work_bases` | applied | Run by hand in the SQL editor: "Success. No rows returned". Verified: `client_handlers` table and `ownership_programs.activity_kinds` present. |
 | 2026-10-06 | `20261006120000_ownership_rule_clients` | applied | Run by hand in the SQL editor: "Success. No rows returned". Verified: `ownership_rules.client_ids` readable via PostgREST (200). |
 | 2026-10-07 | `20261007100000_ownership_rule_employee_ids` | applied | Run by hand in the SQL editor (second run — the first executed only a selection and left no column). Verified: `ownership_rules.employee_ids` readable via PostgREST (200, `null` on existing rules). |
+| 2026-10-08 | `20261008100000_payroll_paid_tolerance` | applied | Run by hand in the SQL editor (second run — the first pasted only 35 of 70 lines and failed with nothing applied). Verified: 11 payslips moved pending → paid (40 → 51 paid); no pending payslip is covered to within ₹1; 10 partly paid ones remain pending by design. |
 
 ## Waiting to be applied
 
 | Migration | What it adds | Until it is applied |
 |---|---|---|
-| `20261008100000_payroll_paid_tolerance` | `sync_payroll_payments()` treats a payslip paid to within ₹1 as paid (was ₹0.01), and marks the ~14 fully paid but still-pending payslips (Nov 2024 – Apr 2026, a few paise short) paid, dated their last payment. | Safe in either order. Until it runs those payslips stay pending and can be rewritten by a recalculation of their month. |
 | `20261004120000_retire_offer_intake` | Relabels `offer.prepare` to "Manage offer product catalog" (all it still gates) and takes `capture.use` back from designations that only had it for AI Capture's retired offer mode — today, Flyer Designer. No data deleted. | Safe in any order. Until it runs, the Designations screen still describes `offer.prepare` as the old Offer Preparation workspace, and Flyer Designer still sees AI Capture (which now just points offer lists to Offer Studio). |
 ### Follow-up: Realtime is not delivering for `employee_presence`
 
