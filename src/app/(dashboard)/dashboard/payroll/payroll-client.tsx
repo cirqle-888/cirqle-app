@@ -311,6 +311,11 @@ export default function PayrollClient({
 
   // ── Data state ────────────────────────────────────────────────────────────
   const [payroll,    setPayroll]    = useState(payrollRecords)
+  // Server-side changes (Recalculate, an award run, another tab) arrive as new
+  // props on router.refresh(); without this the cards kept their first copy and
+  // a recalculation looked like it changed nothing.
+  const [syncedFrom, setSyncedFrom] = useState(payrollRecords)
+  if (syncedFrom !== payrollRecords) { setSyncedFrom(payrollRecords); setPayroll(payrollRecords) }
   const [advList,    setAdvList]    = useState(advances)
   const [creditList, setCreditList] = useState(credits)
   const [empList,    setEmpList]    = useState(employees)
