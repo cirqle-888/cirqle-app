@@ -154,24 +154,22 @@ export async function buildPayslipData(
     addEarn((s.calculated_at || '').slice(0, 7), s.earnings_inr)
   }
 
-  // The trend shows each month's TOTAL earnings — what that month's payslip
-  // says — not just contribution earnings. Contribution-only bars disagreed
-  // with the payslip (₹231 against ₹420) and, on a Summary payslip, gave away
-  // the split. A month with a payroll record uses its gross (this month: the
-  // very figures on this payslip); a month without one falls back to its
-  // contribution earnings. Whole rupees.
-  type PayRow = { month: number; year: number; base_salary: number | null; commission_earned: number | null; bonus: number | null; adjustment_earned?: number | null; ownership_earned?: number | null }
-  const grossOf = (r: PayRow) => (r.base_salary || 0) + (r.commission_earned || 0) + (r.bonus || 0)
-    + (r.adjustment_earned || 0) + (r.ownership_earned || 0)
+  // The trend shows what each month finally EARNED (the payslip's net) — not
+  // just contribution earnings, which disagreed with the payslip (₹231
+  // against ₹420) and gave away the split. A month without a payroll record
+  // falls back to its contribution earnings. Whole rupees.
+  // Each bar is what that month finally paid: the payslip's net. This month
+  // is this payslip's own net, so the trend ends on the figure above it.
+  type PayRow = { month: number; year: number; net_salary: number | null }
   const payByMonth = new Map<string, number>()
   try {
     const { data: payRows } = await admin.from('payroll')
-      .select('month, year, base_salary, commission_earned, bonus, adjustment_earned, ownership_earned')
+      .select('month, year, net_salary')
       .eq('employee_id', employeeId)
       .in('year', [...new Set(sixMonths.map(x => x.year))])
-    for (const r of (payRows ?? []) as PayRow[]) payByMonth.set(monthKey(r.year, r.month), grossOf(r))
+    for (const r of (payRows ?? []) as PayRow[]) payByMonth.set(monthKey(r.year, r.month), Number(r.net_salary) || 0)
   } catch { /* fall back to contribution earnings for every month */ }
-  if (pay) payByMonth.set(monthKey(year, month), grossOf({ month, year, ...(pay as Omit<PayRow, 'month' | 'year'>) }))
+  if (pay) payByMonth.set(monthKey(year, month), Number(pay.net_salary) || 0)
 
   const sixMonthEarnings: PayslipMonthEarning[] = sixMonths.map(({ month: m, year: y }) => ({
     month: m,

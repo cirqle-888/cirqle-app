@@ -2,7 +2,7 @@ import { jsPDF } from 'jspdf'
 import sharp from 'sharp'
 import type { PayslipData } from './types'
 import { round2 } from '@/lib/calculations/currency'
-import { adjustmentLabel, ownershipRowLabel } from './payslip-html'
+import { adjustmentLabel, ownershipRowLabel, additionalEarnings } from './payslip-html'
 
 // Professional light palette — A4, white background
 const C = {
@@ -36,6 +36,7 @@ const BAND_DOT: Record<string, [number, number, number]> = {
 }
 
 const SALARY_TYPE_LABEL: Record<string, string> = {
+  commission_only:      'Commission only',
   pure_commission:      'Commission-based',
   fixed:                'Fixed',
   base_plus_commission: 'Base + Commission',
@@ -248,14 +249,15 @@ export async function renderPayslipPdf(d: PayslipData): Promise<Buffer> {
 
   // Summary format: the Gross Earnings row below is the only earnings line.
   const detailed = d.format !== 'summary'
-  if (detailed && s.baseSalary > 0) tableRow('Base Salary', inr(s.baseSalary))
-  if (detailed) tableRow('Creative Rewards', inr(s.commission), C.green)
+  if (s.baseSalary > 0) tableRow('Base Salary', inr(s.baseSalary))
+  tableRow('Creative Rewards', inr(s.commission), C.green)
+  if (!detailed && additionalEarnings(s)) tableRow('Additional Earnings', inr(additionalEarnings(s)), C.green)
   if (detailed && s.bonus > 0) tableRow('Bonus', inr(s.bonus), C.green)
   // Corrections for already-closed months, paid with this payslip and labelled
   // with the month they came from.
-  if (detailed && s.adjustment) {
+  if (s.adjustment) {
     tableRow(
-      adjustmentLabel(s.adjustmentSources),
+      detailed ? adjustmentLabel(s.adjustmentSources) : 'Adjustment (previous months)',
       (s.adjustment < 0 ? '- ' : '') + inr(Math.abs(s.adjustment)),
       s.adjustment < 0 ? C.red : C.green,
     )
@@ -274,7 +276,7 @@ export async function renderPayslipPdf(d: PayslipData): Promise<Buffer> {
   doc.setFillColor(245, 243, 255); doc.setDrawColor(...C.accentBorder)
   doc.rect(M, y, iW, ROW_H, 'FD')
   doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...C.ink)
-  doc.text(detailed ? 'Gross Earnings' : 'Total Earnings', M + 12, y + 17)
+  doc.text('Total Earnings', M + 12, y + 17)
   doc.text(inr(gross), W - M - 12, y + 17, { align: 'right' })
   y += ROW_H + 16
 

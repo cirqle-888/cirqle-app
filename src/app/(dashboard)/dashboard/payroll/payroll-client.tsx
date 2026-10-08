@@ -613,6 +613,11 @@ export default function PayrollClient({
       year: record.year,
       finalNet,
       liveCommission,
+      // finalNet includes these (storedExtras) — they must be sent too, or the
+      // payslip is saved with them as ₹0 while its net still counts them, and
+      // a prior-period adjustment is never settled (so it would recur).
+      liveAdjustment: Number(record.adjustment_earned) || 0,
+      liveOwnership: Number(record.ownership_earned) || 0,
       salaryCategory: '001480fa-6ea1-47e5-9461-aef7a914fac5',
       bankAccountId: paidFromRef.current || null,
     })

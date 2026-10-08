@@ -425,11 +425,14 @@ export async function markPayrollPaid(
   const today = todayISO()
 
   const updates: Record<string, unknown> = { status: 'paid', paid_date: today }
-  // Write the live figures whenever ANY variable component is present. The
-  // old `liveCommission > 0` alone left a stale net stored for anyone paid on
-  // base salary or prior-period adjustments only.
-  const liveAdjustment = input.liveAdjustment || 0
-  const liveOwnership = input.liveOwnership || 0
+  // A caller that does not send adjustment / ownership must not erase them:
+  // writing 0 while the net still counted them left paid payslips whose parts
+  // did not add up (Sep 2026: four payslips) and never settled the adjustment.
+  // Absent → keep what the record already holds.
+  const { data: stored } = await admin.from('payroll')
+    .select('adjustment_earned, ownership_earned').eq('id', input.id).maybeSingle()
+  const liveAdjustment = input.liveAdjustment ?? (Number((stored as { adjustment_earned?: number } | null)?.adjustment_earned) || 0)
+  const liveOwnership = input.liveOwnership ?? (Number((stored as { ownership_earned?: number } | null)?.ownership_earned) || 0)
   if (input.liveCommission > 0 || liveAdjustment !== 0 || liveOwnership > 0) {
     updates.commission_earned = input.liveCommission
     updates.adjustment_earned = liveAdjustment

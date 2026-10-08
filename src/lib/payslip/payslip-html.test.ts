@@ -46,14 +46,30 @@ describe('summary format', () => {
     expect(renderPayslipText(base)).toContain('Creative Rewards')
   })
 
-  it('summary shows one Total Earnings figure and nothing about what it is for', async () => {
+  it('summary consolidates ownership into Additional Earnings and names no role', async () => {
     const { renderPayslipHtml, renderPayslipText } = await import('./payslip-html')
     const d = { ...base, format: 'summary' as const }
     for (const out of [renderPayslipHtml(d), renderPayslipText(d)]) {
+      expect(out).toContain('Creative Rewards')
+      expect(out).toContain('Additional Earnings')
       expect(out).toContain('Total Earnings')
       expect(out).toContain('420')
-      expect(out).not.toContain('Creative Rewards')
       expect(out).not.toContain('Client Managing')
     }
+  })
+})
+
+describe('summary consolidates the rest into Additional Earnings', () => {
+  it('Creative Rewards + Additional Earnings + adjustment add up to Total Earnings and net', async () => {
+    const { renderPayslipText, additionalEarnings } = await import('./payslip-html')
+    const s = { salaryType: 'commission_only', baseSalary: 0, commission: 4687, bonus: 0, adjustment: 0, adjustmentSources: [], ownership: 784,
+      ownershipAwards: [{ programName: 'Operations', label: 'Invoicing', basis: 'billing', basisAmountInr: 1, percent: 1, fixedAmountInr: null, earnedInr: 784 }],
+      advancesDeducted: 0, otherDeductions: 0, netSalary: 5471, status: 'paid', paidDate: '2026-10-07' }
+    expect(additionalEarnings(s)).toBe(784)
+    const text = renderPayslipText({ format: 'summary', salary: s, employee: { name: 'S', cqid: 'CQID002', designation: null }, period: { label: 'September 2026', month: 9, year: 2026, monthName: 'September' }, payslipNumber: null, attendance: { workedDays: 1, daysInMonth: 30 }, totals: { monthTaskCount: 1, sixMonthTotal: 0 }, contributionRanges: [], sixMonthEarnings: [], company: { name: 'C' } } as never)
+    expect(text).toContain('Creative Rewards: ₹4,687')
+    expect(text).toContain('Additional Earnings: ₹784')
+    expect(text).toContain('Total Earnings:  ₹5,471')
+    expect(text).not.toMatch(/Invoicing|Operations/)
   })
 })
