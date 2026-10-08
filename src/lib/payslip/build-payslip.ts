@@ -3,6 +3,7 @@ import { getQualityBand } from '@/lib/calculations/commission'
 import { round2 } from '@/lib/calculations/currency'
 import type { PayslipData, PayslipBand, PayslipTask, PayslipMonthEarning } from './types'
 import { loadAwardsForPayslip } from '@/lib/ownership/engine'
+import { getCompanySettings } from '@/lib/settings/company-settings'
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -16,11 +17,27 @@ const BAND_LABELS: Record<string, string> = {
 }
 const BAND_ORDER: PayslipBand['band'][] = ['100', '76-99', '51-75', '26-50', '0-25']
 
+// Used only for a field left empty in Settings → Company.
 const COMPANY_DEFAULTS = {
   name:    'Cirqle Works',
   email:   'team@cirqle.work',
   website: 'www.cirqle.work',
   phone:   '+91 81295 34377',
+}
+
+/**
+ * The company details printed on a payslip, from Settings → Company. The
+ * footer used to show hard-coded values, so a changed phone number never
+ * reached a payslip. A website is shown without "https://".
+ */
+export function companyFromSettings(settings: Record<string, string>) {
+  const pick = (key: string, fallback: string) => (settings[key] ?? '').trim() || fallback
+  return {
+    name:    pick('company_name', COMPANY_DEFAULTS.name),
+    email:   pick('company_email', COMPANY_DEFAULTS.email),
+    website: pick('company_website', COMPANY_DEFAULTS.website).replace(/^https?:\/\//i, '').replace(/\/$/, ''),
+    phone:   pick('company_phone', COMPANY_DEFAULTS.phone),
+  }
 }
 
 function monthKey(y: number, m: number) { return `${y}-${String(m).padStart(2, '0')}` }
@@ -266,7 +283,7 @@ export async function buildPayslipData(
       sixMonthTotal: Math.round(sixMonthTotal),
     },
     company: {
-      ...COMPANY_DEFAULTS,
+      ...companyFromSettings(await getCompanySettings()),
       logoUrl: await (async () => {
         const { data } = await admin.from('company_settings').select('value').eq('key', 'logo_url').maybeSingle()
         return (data?.value as string | null) || null
