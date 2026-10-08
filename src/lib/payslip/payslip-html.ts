@@ -30,15 +30,6 @@ const BAND_DOT: Record<string, string> = {
   '0-25':  '#dc2626',
 }
 
-const SALARY_TYPE_LABEL: Record<string, string> = {
-  commission_only:      'Commission Only',
-  pure_commission:      'Pure Commission',
-  fixed:                'Fixed Salary',
-  base_plus_commission: 'Base + Commission',
-  fixed_plus_bonus:     'Fixed + Bonus',
-  hourly:               'Hourly',
-}
-
 const inr = (n: number) =>
   '₹' + round2(n).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 
@@ -98,6 +89,27 @@ export function ownershipRowLabel(a: { programName: string; label: string | null
  */
 export function additionalEarnings(s: { ownership?: number; bonus?: number }): number {
   return (s.ownership || 0) + (s.bonus || 0)
+}
+
+/**
+ * Summary format and earlier-month corrections: a NEGATIVE correction (an
+ * overpayment recovered) is folded into Creative Rewards, so no deduction is
+ * printed; a POSITIVE one (money owed back) is shown as "Arrears". Either way
+ * the lines still add up to the net.
+ */
+export const summaryCreative = (s: { commission: number; adjustment?: number }) => s.commission + Math.min(0, s.adjustment || 0)
+export const summaryArrears = (s: { adjustment?: number }) => Math.max(0, s.adjustment || 0)
+
+/**
+ * How this payslip was paid, read from its own figures — not the employee's
+ * salary_type setting, which said "Fixed Salary" for someone with a ₹0 base
+ * paid entirely in creative rewards.
+ */
+export function payBasisLabel(s: { baseSalary: number; commission: number; ownership?: number; bonus?: number }): string {
+  const variable = s.commission + (s.ownership || 0) + (s.bonus || 0)
+  if (s.baseSalary > 0 && variable > 0) return 'Base + Earnings'
+  if (s.baseSalary > 0) return 'Fixed Salary'
+  return 'Commission-based'
 }
 
 /** Full HTML email body — light theme, no per-band earnings, no performance %. */
@@ -182,9 +194,9 @@ export function renderPayslipHtml(d: PayslipData, note?: string): string {
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
             ${summary ? `
             ${s.baseSalary > 0 ? salaryRow('Base Salary', inr(s.baseSalary)) : ''}
-            ${salaryRow('Creative Rewards', inr(s.commission), C.green)}
+            ${salaryRow('Creative Rewards', inr(summaryCreative(s)), C.green)}
             ${additionalEarnings(s) ? salaryRow('Additional Earnings', inr(additionalEarnings(s)), C.green) : ''}
-            ${s.adjustment ? salaryRow('Adjustment (previous months)', (s.adjustment < 0 ? '− ' : '') + inr(Math.abs(s.adjustment)), s.adjustment < 0 ? C.red : C.green) : ''}
+            ${summaryArrears(s) ? salaryRow('Arrears (previous months)', inr(summaryArrears(s)), C.green) : ''}
             <tr><td colspan="2" style="border-top:1px solid ${C.border};padding-top:4px;"></td></tr>
             ${salaryRow('Total Earnings', inr(gross), C.ink, true)}` : `
             ${s.baseSalary > 0 ? salaryRow('Base Salary', inr(s.baseSalary)) : ''}
@@ -214,7 +226,7 @@ export function renderPayslipHtml(d: PayslipData, note?: string): string {
           <table role="presentation" width="100%" style="background:linear-gradient(135deg,#f5f3ff,#ede9fe);border:1px solid #ddd6fe;border-radius:12px;"><tr>
             <td style="padding:16px 20px;">
               <div style="font-size:12px;font-weight:600;color:${C.muted};text-transform:uppercase;letter-spacing:0.08em;">Net ${statusPaid ? 'Paid' : 'Payable'}</div>
-              <div style="font-size:11px;color:${C.faint};margin-top:2px;">${SALARY_TYPE_LABEL[s.salaryType] || s.salaryType}${deductions > 0 ? ` · after ${inr(deductions)} deductions` : ''}</div>
+              <div style="font-size:11px;color:${C.faint};margin-top:2px;">${payBasisLabel(s)}${deductions > 0 ? ` · after ${inr(deductions)} deductions` : ''}</div>
             </td>
             <td style="padding:16px 20px;text-align:right;">
               <div style="font-size:26px;font-weight:800;color:${C.accent};">${inr(s.netSalary)}</div>
@@ -303,9 +315,9 @@ export function renderPayslipText(d: PayslipData): string {
     ...(d.format === 'summary'
       ? [
           s.baseSalary > 0 ? `Base Salary:     ${inr(s.baseSalary)}` : '',
-          `Creative Rewards: ${inr(s.commission)}`,
+          `Creative Rewards: ${inr(summaryCreative(s))}`,
           additionalEarnings(s) ? `Additional Earnings: ${inr(additionalEarnings(s))}` : '',
-          s.adjustment ? `Adjustment (previous months): ${s.adjustment < 0 ? '-' : ''}${inr(Math.abs(s.adjustment))}` : '',
+          summaryArrears(s) ? `Arrears (previous months): ${inr(summaryArrears(s))}` : '',
           `Total Earnings:  ${inr(s.baseSalary + s.commission + s.bonus + (s.adjustment || 0) + (s.ownership || 0))}`,
         ]
       : [

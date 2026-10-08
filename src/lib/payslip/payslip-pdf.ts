@@ -2,7 +2,7 @@ import { jsPDF } from 'jspdf'
 import sharp from 'sharp'
 import type { PayslipData } from './types'
 import { round2 } from '@/lib/calculations/currency'
-import { adjustmentLabel, ownershipRowLabel, additionalEarnings } from './payslip-html'
+import { adjustmentLabel, ownershipRowLabel, additionalEarnings, summaryCreative, summaryArrears, payBasisLabel } from './payslip-html'
 
 // Professional light palette — A4, white background
 const C = {
@@ -33,15 +33,6 @@ const BAND_DOT: Record<string, [number, number, number]> = {
   '51-75': [124, 58, 237],
   '26-50': [217, 119, 6],
   '0-25':  [220, 38, 38],
-}
-
-const SALARY_TYPE_LABEL: Record<string, string> = {
-  commission_only:      'Commission only',
-  pure_commission:      'Commission-based',
-  fixed:                'Fixed',
-  base_plus_commission: 'Base + Commission',
-  fixed_plus_bonus:     'Fixed + Bonus',
-  hourly:               'Hourly',
 }
 
 const MILESTONES = [50000, 100000, 150000, 200000, 300000, 500000, 1000000]
@@ -250,17 +241,20 @@ export async function renderPayslipPdf(d: PayslipData): Promise<Buffer> {
   // Summary format: the Gross Earnings row below is the only earnings line.
   const detailed = d.format !== 'summary'
   if (s.baseSalary > 0) tableRow('Base Salary', inr(s.baseSalary))
-  tableRow('Creative Rewards', inr(s.commission), C.green)
+  tableRow('Creative Rewards', inr(detailed ? s.commission : summaryCreative(s)), C.green)
   if (!detailed && additionalEarnings(s)) tableRow('Additional Earnings', inr(additionalEarnings(s)), C.green)
   if (detailed && s.bonus > 0) tableRow('Bonus', inr(s.bonus), C.green)
   // Corrections for already-closed months, paid with this payslip and labelled
   // with the month they came from.
-  if (s.adjustment) {
+  if (detailed && s.adjustment) {
     tableRow(
-      detailed ? adjustmentLabel(s.adjustmentSources) : 'Adjustment (previous months)',
+      adjustmentLabel(s.adjustmentSources),
       (s.adjustment < 0 ? '- ' : '') + inr(Math.abs(s.adjustment)),
       s.adjustment < 0 ? C.red : C.green,
     )
+  } else if (!detailed && summaryArrears(s)) {
+    // Summary: only money owed back is mentioned; a recovery sits inside Creative Rewards.
+    tableRow('Arrears (previous months)', inr(summaryArrears(s)), C.green)
   }
 
   // Ownership rewards, one line per program so the amount is explained.
@@ -311,7 +305,7 @@ export async function renderPayslipPdf(d: PayslipData): Promise<Buffer> {
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...C.muted)
   doc.text(`NET ${statusPaid ? 'PAID' : 'PAYABLE'}`, M + 14, y + 20)
   doc.setFontSize(8); doc.setTextColor(...C.faint)
-  const typeLabel = SALARY_TYPE_LABEL[s.salaryType] || s.salaryType
+  const typeLabel = payBasisLabel(s)
   doc.text(
     typeLabel + (totalDeductions > 0 ? `  ·  after ${inr(totalDeductions)} deductions` : ''),
     M + 14, y + 34,

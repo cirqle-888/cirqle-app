@@ -73,3 +73,22 @@ describe('summary consolidates the rest into Additional Earnings', () => {
     expect(text).not.toMatch(/Invoicing|Operations/)
   })
 })
+
+describe('summary: corrections and pay basis', () => {
+  it('a recovered overpayment is folded into Creative Rewards — no deduction line', async () => {
+    const { summaryCreative, summaryArrears } = await import('./payslip-html')
+    expect(summaryCreative({ commission: 5153, adjustment: -291 })).toBe(4862)
+    expect(summaryArrears({ adjustment: -291 })).toBe(0)
+  })
+  it('money owed back is shown as arrears', async () => {
+    const { summaryCreative, summaryArrears } = await import('./payslip-html')
+    expect(summaryCreative({ commission: 4000, adjustment: 291 })).toBe(4000)
+    expect(summaryArrears({ adjustment: 291 })).toBe(291)
+  })
+  it('pay basis comes from the payslip, not the profile setting', async () => {
+    const { payBasisLabel } = await import('./payslip-html')
+    expect(payBasisLabel({ baseSalary: 0, commission: 231, ownership: 189 })).toBe('Commission-based')
+    expect(payBasisLabel({ baseSalary: 15000, commission: 0 })).toBe('Fixed Salary')
+    expect(payBasisLabel({ baseSalary: 15000, commission: 500 })).toBe('Base + Earnings')
+  })
+})
