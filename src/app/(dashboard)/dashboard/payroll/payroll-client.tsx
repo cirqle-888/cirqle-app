@@ -642,7 +642,8 @@ export default function PayrollClient({
     setConfirmModal(null)
     const result = await markPayrollUnpaid(id)
     if (result.ok) {
-      setPayroll(p => p.map(r => r.id === id ? { ...r, status: 'pending', paid_date: undefined } : r))
+      // The restored corrections and net come back with the result.
+      setPayroll(p => p.map(r => r.id === id ? { ...r, ...(result.data?.updates ?? {}), status: 'pending', paid_date: undefined } : r))
     }
   }
 

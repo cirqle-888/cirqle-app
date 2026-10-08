@@ -22,7 +22,7 @@ import {
   buildCreditLedger, fetchCreditMovements, settlementRefusal, type CreditBalance,
 } from '@/lib/finance/credit-ledger'
 import { computeMonthlyCommissions } from '@/lib/payroll/compute'
-import { pendingAdjustmentTotals, settleAdjustments } from '@/lib/payroll/adjustments'
+import { pendingAdjustmentTotals, settleAdjustments, unsettleAdjustments } from '@/lib/payroll/adjustments'
 import { computeMonthlyOwnership } from '@/lib/ownership/engine'
 import { retryWithoutScope, withoutScope } from '@/lib/finance/classify'
 import { todayISO } from '@/lib/utils/local-date'
@@ -517,14 +517,32 @@ export async function markPayrollPaid(
 
 // ─── Mark Unpaid ─────────────────────────────────────────────────────────────
 
-export async function markPayrollUnpaid(id: string): Promise<ActionResult> {
+export async function markPayrollUnpaid(id: string): Promise<ActionResult<{ updates: Record<string, unknown> }>> {
   const guard = await requirePermission(PERMS.PAYROLL_MARK_PAID)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()
+  const { data: rec } = await admin.from('payroll')
+    .select('employee_id, month, year, base_salary, commission_earned, bonus, ownership_earned, advances_deducted, other_deductions')
+    .eq('id', id).maybeSingle()
+
+  // Corrections this payment settled return to THIS payslip (not next
+  // month's): un-settle them and put their total back on the record, with the
+  // net recomputed, so the pending payslip shows exactly what re-paying pays.
+  const restore: Record<string, unknown> = {}
+  if (rec) {
+    const r = rec as { employee_id: string; month: number; year: number; base_salary: number | null; commission_earned: number | null; bonus: number | null; ownership_earned: number | null; advances_deducted: number | null; other_deductions: number | null }
+    const { pendingTotal } = await unsettleAdjustments(admin, r.employee_id, r.month, r.year)
+      .catch(() => ({ reopened: 0, pendingTotal: 0 }))
+    const adjustment = Math.round(pendingTotal)
+    restore.adjustment_earned = adjustment
+    restore.net_salary = Math.max(0, (r.base_salary || 0) + (r.commission_earned || 0) + (r.bonus || 0)
+      + (r.ownership_earned || 0) + adjustment - (r.advances_deducted || 0) - (r.other_deductions || 0))
+  }
+
   const { error } = await admin
     .from('payroll')
-    .update({ status: 'pending', paid_date: null })
+    .update({ status: 'pending', paid_date: null, ...restore })
     .eq('id', id)
   if (error) return { ok: false, error: error.message }
 
@@ -560,7 +578,7 @@ export async function markPayrollUnpaid(id: string): Promise<ActionResult> {
   })
 
   revalidatePath(REVALIDATE)
-  return { ok: true }
+  return { ok: true, data: { updates: { status: 'pending', paid_date: null, ...restore } } }
 }
 
 // ─── Toggle Reveal Salary ─────────────────────────────────────────────────────

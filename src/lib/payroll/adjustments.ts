@@ -398,3 +398,33 @@ export async function settleAdjustments(
     .in('id', ids)
   return { settled: error ? 0 : ids.length }
 }
+
+/**
+ * Undo of a payment: the adjustments that payslip settled go back to pending,
+ * so they ride on that SAME month's payslip again when it is re-paid — never
+ * postponed to next month. Returns the payslip's adjustment total afterwards
+ * (every pending row for the employee — exactly what markPayrollPaid will
+ * settle on the re-pay).
+ */
+export async function unsettleAdjustments(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: SupabaseClient<any, any, any>,
+  employeeId: string,
+  month: number,
+  year: number,
+): Promise<{ reopened: number; pendingTotal: number }> {
+  const { data: settled } = await admin
+    .from('payroll_adjustments')
+    .select('id')
+    .eq('employee_id', employeeId)
+    .eq('settled_month', month)
+    .eq('settled_year', year)
+  const ids = (settled || []).map((r: { id: string }) => r.id)
+  if (ids.length) {
+    await admin.from('payroll_adjustments')
+      .update({ settled_month: null, settled_year: null, settled_at: null })
+      .in('id', ids)
+  }
+  const totals = await pendingAdjustmentTotals(admin)
+  return { reopened: ids.length, pendingTotal: totals[employeeId] || 0 }
+}
