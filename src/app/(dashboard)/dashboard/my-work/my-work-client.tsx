@@ -6,7 +6,7 @@ import {
   DndContext, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable, closestCorners, type DragEndEvent,
 } from '@dnd-kit/core'
 import {
-  LayoutGrid, CalendarDays, List, Loader2, Check, ChevronRight, CircleAlert, X as XIcon,
+  LayoutGrid, CalendarDays, List, Loader2, Check, ChevronRight, CircleAlert, X as XIcon, Users,
 } from 'lucide-react'
 import dynamicImport from 'next/dynamic'
 import Header from '@/components/layout/header'
@@ -16,7 +16,7 @@ import {
   WORK_STAGES, STAGE_LABEL, STAGE_HINT, STAGE_CHIP, stageOf, stageOfPlan, canMove,
   isPending, moveRefusalReason, type WorkStage,
 } from '@/lib/requests/my-work'
-import { moveMyWork, type MyWorkRow } from './actions'
+import { moveMyWork, moveTeamWork, type MyWorkRow, type TeamMemberLoad } from './actions'
 import { CHECKLIST_LABEL, CHECKLIST_HINT } from '@/lib/requests/kind'
 
 const DiscussButton = dynamicImport(
@@ -38,6 +38,11 @@ function rowStage(r: MyWorkRow): WorkStage {
 interface Props {
   initialRows: MyWorkRow[]
   firstName: string
+  /** Managers only: who has work on their board (busiest-late first). Empty = no team switch. */
+  team?: TeamMemberLoad[]
+  /** Whose board this is when a manager opened someone else's; null = my own. */
+  viewing?: { employeeId: string; cqid: string } | null
+  myEmployeeId?: string
 }
 
 const todayISO = () => new Date().toLocaleDateString('en-CA')
@@ -248,7 +253,7 @@ function Column({ stage, rows, busyId, totalCount, footer, onOpen }: {
   )
 }
 
-export default function MyWorkClient({ initialRows, firstName }: Props) {
+export default function MyWorkClient({ initialRows, firstName, team = [], viewing = null, myEmployeeId }: Props) {
   const router = useRouter()
   const toast = useToast()
   const [rows, setRows] = useState(initialRows)
@@ -319,7 +324,10 @@ export default function MyWorkClient({ initialRows, firstName }: Props) {
     if (!canMove(from, to)) { toast.toastError('Cannot move that way', moveRefusalReason(from, to)); return }
 
     setBusyId(id)
-    const res = await moveMyWork(id, to, row.source)
+    // A manager on a team member's board moves the card FOR them.
+    const res = viewing
+      ? await moveTeamWork(viewing.employeeId, id, to, row.source)
+      : await moveMyWork(id, to, row.source)
     setBusyId(null)
     if (!res.ok || !res.data) { toast.toastError('Could not update', res.error); return }
     // Trust the status the server actually wrote rather than assuming the
@@ -350,9 +358,39 @@ export default function MyWorkClient({ initialRows, firstName }: Props) {
   return (
     <div className="space-y-5 pb-10">
       <Header
-        title="My Work"
-        subtitle={pendingCount === 0 ? 'Nothing pending — you are all caught up' : `${pendingCount} still to do`}
+        title={viewing ? `${viewing.cqid} — Work` : 'My Work'}
+        subtitle={viewing
+          ? `${pendingCount} still to do · moving a card here updates it for ${viewing.cqid}`
+          : pendingCount === 0 ? 'Nothing pending — you are all caught up' : `${pendingCount} still to do`}
       />
+
+      {/* Team switch — for whoever runs the work. Pick a person to see their
+          board and move their cards when they have not. Busiest-late first. */}
+      {team.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-muted-foreground mr-1 inline-flex items-center gap-1"><Users className="w-3.5 h-3.5" /> Team</span>
+          {[...team.filter(t => t.employeeId === myEmployeeId), ...team.filter(t => t.employeeId !== myEmployeeId)].map(t => {
+            const mine = t.employeeId === myEmployeeId
+            const active = viewing ? viewing.employeeId === t.employeeId : mine
+            return (
+              <button
+                key={t.employeeId}
+                onClick={() => router.push(mine ? '/dashboard/my-work' : `/dashboard/my-work?for=${t.employeeId}`)}
+                className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border text-xs font-medium transition-colors ${
+                  active ? 'bg-primary/15 text-primary border-primary/30' : 'bg-secondary text-muted-foreground border-border hover:text-foreground'}`}
+              >
+                {mine ? 'Me' : t.cqid}
+                {t.open > 0 && <span className="tabular-nums opacity-70">{t.open}</span>}
+                {t.overdue > 0 && (
+                  <span className="inline-flex items-center gap-0.5 rounded-full bg-red-500/15 px-1.5 text-[10px] font-semibold text-red-500 tabular-nums" title={`${t.overdue} overdue`}>
+                    {t.overdue}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {/* The whole point of the page, answered before anything else: how much
           is on my plate, and is any of it late. */}
@@ -417,7 +455,7 @@ export default function MyWorkClient({ initialRows, firstName }: Props) {
       {rows.length === 0 ? (
         <div className="rounded-2xl border border-border bg-card px-5 py-12 text-center">
           <Check className="w-8 h-8 text-green-500 mx-auto mb-3" />
-          <p className="font-medium">Nothing assigned to you yet, {firstName}</p>
+          <p className="font-medium">{viewing ? `Nothing assigned to ${viewing.cqid}` : `Nothing assigned to you yet, ${firstName}`}</p>
           <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
             When someone assigns you a request it appears here. Nothing to do until then.
           </p>

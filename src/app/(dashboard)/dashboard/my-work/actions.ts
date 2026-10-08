@@ -16,7 +16,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { syncRequestStatusFromTask } from '@/lib/requests/task-sync'
@@ -72,6 +72,14 @@ export async function fetchMyWork(): Promise<ActionResult<MyWorkRow[]>> {
   if (!guard.ok) return { ok: false, error: guard.error }
   const rows = await loadMyWork(createAdminClient(), guard.employeeId)
   return { ok: true, data: rows }
+}
+
+/** " (moved for CQID004)" — appended to a log note when a manager moved the card. */
+async function onBehalfNote(employeeId: string): Promise<string> {
+  try {
+    const { data } = await createAdminClient().from('employees').select('cqid').eq('id', employeeId).maybeSingle()
+    return ` (moved for ${(data as { cqid?: string } | null)?.cqid ?? 'a team member'})`
+  } catch { return ' (moved for a team member)' }
 }
 
 /** A PostgREST row whose shape we know but whose generated types cannot
@@ -196,7 +204,52 @@ export async function moveMyWork(
 ): Promise<ActionResult<{ status: string; taskCreated?: boolean; warning?: string }>> {
   const guard = await requirePermission(PERMS.REQUESTS_WORK_OWN)
   if (!guard.ok) return { ok: false, error: guard.error }
-  if (source === 'plan') return movePlanItem(requestId, toStage, guard.employeeId)
+  return moveWorkFor(requestId, toStage, source, { assigneeId: guard.employeeId, actorId: guard.employeeId })
+}
+
+// ── Team view: a manager moving someone else's card ─────────────────────────
+//
+// Designers do not always move their own cards along. Whoever runs the work —
+// admin, content planner, task manager (requests.manage) — can open a team
+// member's board and move cards FOR them. It is the same move as the
+// designer's own: same legal transitions, same task creation and pricing, the
+// task assigned to the DESIGNER (it is their work). Only the log differs: the
+// actor is the manager, and the note says whose card it was.
+
+/** Active people who have work assigned, with how much is open and overdue. */
+export interface TeamMemberLoad { employeeId: string; cqid: string; open: number; overdue: number }
+
+/** One team member's board, for a manager. */
+export async function fetchTeamWork(employeeId: string): Promise<ActionResult<MyWorkRow[]>> {
+  const guard = await requireReadPermission(PERMS.REQUESTS_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const rows = await loadMyWork(createAdminClient(), employeeId)
+  return { ok: true, data: rows }
+}
+
+/** Move a team member's card on their behalf. */
+export async function moveTeamWork(
+  employeeId: string, requestId: string, toStage: WorkStage, source: 'request' | 'plan' = 'request',
+): Promise<ActionResult<{ status: string; taskCreated?: boolean; warning?: string }>> {
+  const guard = await requirePermission(PERMS.REQUESTS_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!employeeId) return { ok: false, error: 'Pick whose board to update.' }
+  return moveWorkFor(requestId, toStage, source, { assigneeId: employeeId, actorId: guard.employeeId })
+}
+
+interface MoveParties {
+  /** Whose card it is — must be the row's assignee; the task is assigned to them. */
+  assigneeId: string
+  /** Who pressed the button — recorded in the activity log. */
+  actorId: string
+}
+
+async function moveWorkFor(
+  requestId: string, toStage: WorkStage, source: 'request' | 'plan', who: MoveParties,
+): Promise<ActionResult<{ status: string; taskCreated?: boolean; warning?: string }>> {
+  if (source === 'plan') return movePlanItem(requestId, toStage, who)
+  const forOther = who.actorId !== who.assigneeId
+  const forNote = forOther ? await onBehalfNote(who.assigneeId) : ''
 
   const admin = createAdminClient()
   const { data: req, error } = await admin
@@ -208,7 +261,7 @@ export async function moveMyWork(
   // The check the permission cannot make. Admins are NOT exempt here: an admin
   // moving someone else's card should do it from the inbox, where the action is
   // logged as an inbox change rather than as the assignee's own progress.
-  if ((req as Row).assigned_employee_id !== guard.employeeId) {
+  if ((req as Row).assigned_employee_id !== who.assigneeId) {
     return { ok: false, error: 'This work is assigned to someone else.' }
   }
 
@@ -235,10 +288,10 @@ export async function moveMyWork(
     if (updErr) return { ok: false, error: 'Could not update this item. Try again.' }
 
     void logActivity({
-      actorId: guard.employeeId, entityType: 'client', entityId: (req as Row).client_id ?? '',
+      actorId: who.actorId, entityType: 'client', entityId: (req as Row).client_id ?? '',
       action: 'updated', category: 'crm', clientId: (req as Row).client_id ?? null,
-      note: `Complimentary: ${(req as Row).title} → ${STAGE_LABEL[toStage]}`,
-      detail: { requestId, from, to: toStage, kind: 'checklist' },
+      note: `Complimentary: ${(req as Row).title} → ${STAGE_LABEL[toStage]}${forNote}`,
+      detail: { requestId, from, to: toStage, kind: 'checklist', ...(forOther ? { onBehalfOf: who.assigneeId } : {}) },
     })
 
     revalidatePath(REVALIDATE); revalidatePath('/dashboard/requests')
@@ -249,7 +302,7 @@ export async function moveMyWork(
   let created = false
   let warning: string | undefined
   try {
-    const r = await ensureTaskForRequest(admin, req, guard.employeeId)
+    const r = await ensureTaskForRequest(admin, req, who.assigneeId)
     taskId = r.taskId; created = r.created; warning = r.warning
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'Could not create the task for this work.' }
@@ -264,15 +317,15 @@ export async function moveMyWork(
   // timeline entry and the milestone email — so there is deliberately no
   // separate notifyRequesterStatus call here; adding one would email twice.
   await syncRequestStatusFromTask(taskId, taskStatus)
-  await ensureAssigned(admin, taskId, guard.employeeId)
+  await ensureAssigned(admin, taskId, who.assigneeId)
 
   const target = STAGE_TARGET_STATUS[toStage]!
 
   void logActivity({
-    actorId: guard.employeeId, entityType: 'task', entityId: taskId,
+    actorId: who.actorId, entityType: 'task', entityId: taskId,
     action: 'updated', category: 'crm', clientId: (req as Row).client_id ?? null,
-    note: `My Work: ${(req as Row).ref_no ? `REQ-${String((req as Row).ref_no).padStart(4, '0')}` : 'request'} → ${STAGE_LABEL[toStage]}`,
-    detail: { requestId, from, to: toStage, taskStatus, taskCreated: created },
+    note: `My Work: ${(req as Row).ref_no ? `REQ-${String((req as Row).ref_no).padStart(4, '0')}` : 'request'} → ${STAGE_LABEL[toStage]}${forNote}`,
+    detail: { requestId, from, to: toStage, taskStatus, taskCreated: created, ...(forOther ? { onBehalfOf: who.assigneeId } : {}) },
   })
 
   revalidatePath(REVALIDATE); revalidatePath('/dashboard/requests'); revalidatePath('/dashboard/tasks')
@@ -292,9 +345,12 @@ export async function moveMyWork(
  * matrix exactly like the request path.
  */
 async function movePlanItem(
-  itemId: string, toStage: WorkStage, employeeId: string,
+  itemId: string, toStage: WorkStage, who: MoveParties,
 ): Promise<ActionResult<{ status: string; taskCreated?: boolean; warning?: string }>> {
   const admin = createAdminClient()
+  const employeeId = who.assigneeId
+  const forOther = who.actorId !== who.assigneeId
+  const forNote = forOther ? await onBehalfNote(who.assigneeId) : ''
 
   const { data: item, error } = await admin
     .from('social_calendar_items')
@@ -372,10 +428,12 @@ async function movePlanItem(
   await ensureAssigned(admin, taskId, employeeId)
 
   void logActivity({
-    actorId: employeeId, entityType: 'task', entityId: taskId,
+    actorId: who.actorId, entityType: 'task', entityId: taskId,
     action: created ? 'created' : 'updated', category: 'crm',
-    note: `My Work: plan item → ${STAGE_LABEL[toStage]}`,
-    detail: { itemId, from, to: toStage, taskStatus, taskCreated: created },
+    note: `My Work: plan item → ${STAGE_LABEL[toStage]}${forNote}`,
+    // A plan item turned into a task on Start is work begun, not a task
+    // entered — labelled so the "tasks entered" ownership count skips it.
+    detail: { itemId, from, to: toStage, taskStatus, taskCreated: created, ...(created ? { label: 'Auto-created from My Work' } : {}), ...(forOther ? { onBehalfOf: who.assigneeId } : {}) },
   })
 
   revalidatePath(REVALIDATE)
