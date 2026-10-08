@@ -1,7 +1,7 @@
 'use client'
 
+import { bulkGeneratePayroll } from '@/app/(dashboard)/dashboard/payroll/actions'
 import { useState, useMemo } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
@@ -90,7 +90,6 @@ interface Props {
 export default function BulkGenerateModal({
   employees, existingPayroll, contributionScores, allTasks, onClose, onGenerated,
 }: Props) {
-  const supabase = createClient()
   const { dn } = usePrivacy()
   const now = new Date()
 
@@ -283,7 +282,7 @@ export default function BulkGenerateModal({
       advances_deducted: 0,
       other_deductions: 0,
       net_salary: s.net_salary,
-      status: 'pending',
+      status: 'pending' as const,
     }))
 
     const BATCH = 50
@@ -294,16 +293,17 @@ export default function BulkGenerateModal({
 
     for (let i = 0; i < records.length; i += BATCH) {
       const batch = records.slice(i, i + BATCH)
-      const { data, error } = await supabase
-        .from('payroll')
-        .insert(batch)
-        .select('*, employee:employees(id, cqid, name)')
-      if (error) {
-        errors.push(`Batch ${Math.floor(i/BATCH)+1}: ${error.message}`)
+      // Through the server action, not a browser insert: it writes each
+      // month's ownership and puts outstanding corrections on ONE payslip
+      // (a browser insert left both at ₹0).
+      const res = await bulkGeneratePayroll(batch)
+      if (!res.ok) {
+        errors.push(`Batch ${Math.floor(i/BATCH)+1}: ${res.error}`)
         failed += batch.length
       } else {
-        inserted += data?.length || 0
-        if (data) insertedRecords.push(...data)
+        const data = res.data?.rows ?? []
+        inserted += data.length
+        insertedRecords.push(...data)
       }
     }
 

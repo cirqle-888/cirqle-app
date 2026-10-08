@@ -16,6 +16,7 @@ import { fetchAll, fetchAllIn } from '@/lib/supabase/server'
 // Canonical money rounding — a local Math.round(n * 100) / 100 disagrees at
 // the .xx5 midpoints (1.005 -> 1.00 instead of 1.01). See currency.ts round2.
 import { round2 as r2 } from '@/lib/calculations/currency'
+import { resolveEarning, type CommissionAgreement } from '@/lib/agreements/resolve-earning'
 
 /**
  * Payroll states that FINALIZE a month. Once any payslip for a month reaches
@@ -137,7 +138,7 @@ export async function refreshMonthStoredEarnings(
   const { data: tasks } = await fetchAll(
     admin
       .from('tasks')
-      .select('id, billing_amount_inr, client_id, service_id')
+      .select('id, task_date, billing_amount_inr, client_id, service_id')
       .gte('task_date', monthStart)
       .lt('task_date', nextMonthStart)
       .is('deleted_at', null)
@@ -173,7 +174,7 @@ export async function refreshMonthStoredEarnings(
   // historical commission_percentage, or every past task on that pair silently
   // reprices to the 50% fallback. Adding an is_active filter here would rewrite
   // earnings across every deactivated pair. Covered by compute.test.ts.
-  const [pricingRes, empRes, taskToolsRes, toolsRes] = await Promise.all([
+  const [pricingRes, empRes, taskToolsRes, toolsRes, agreementsRes, ratesRes] = await Promise.all([
     fetchAll(admin.from('client_service_pricing').select('client_id, service_id, commission_percentage').order('client_id').order('service_id')),
     admin.from('employees').select('id, performance_rating'),
     fetchAllIn(
@@ -181,7 +182,16 @@ export async function refreshMonthStoredEarnings(
       taskIds,
     ),
     admin.from('tools').select('id, fixed_percentage, is_active'),
+    // Special commission agreements — applied exactly as the contribution
+    // engine and the report apply them (resolveEarning). Without this the
+    // refresh rewrote an agreed ₹1,000-per-task earning back to the normal
+    // pool share, so payroll paid less than the report showed.
+    admin.from('employee_commission_agreements').select('*').eq('is_active', true),
+    admin.from('exchange_rates').select('currency, rate_to_inr'),
   ])
+  const agreements = ((agreementsRes as { data: unknown[] | null }).data || []) as CommissionAgreement[]
+  const rates: Record<string, number> = { INR: 1 }
+  for (const r of ((ratesRes as { data: { currency: string; rate_to_inr: number }[] | null }).data || [])) rates[r.currency] = Number(r.rate_to_inr) || 1
   const pmap = new Map((pricingRes.data || []).map((p: any) => [`${p.client_id}|${p.service_id}`, p.commission_percentage]))
   const rating = new Map((empRes.data || []).map((e: any) => [e.id, Number(e.performance_rating) || 100]))
   const toolPctById = new Map((toolsRes.data || []).map((t: any) => [t.id, t.is_active !== false ? Number(t.fixed_percentage) || 0 : 0]))
@@ -199,11 +209,24 @@ export async function refreshMonthStoredEarnings(
       : 50
     const pool = (t.billing_amount_inr || 0) * commPct / 100
     const remainingPool = pool * (1 - (toolPctByTask.get(t.id) || 0) / 100)
-    const newEarn = r2(remainingPool * (s.score_percentage / 100) * ((rating.get(s.employee_id) ?? 100) / 100))
+    const normalEarn = r2(remainingPool * (s.score_percentage / 100) * ((rating.get(s.employee_id) ?? 100) / 100))
+    const resolved = resolveEarning({
+      employeeId: s.employee_id,
+      taskDate: t.task_date,
+      clientId: t.client_id,
+      serviceId: t.service_id,
+      normalEarning: normalEarn,
+      isManualOverride: false,
+      agreements,
+      billingAmountInr: t.billing_amount_inr || 0,
+      remainingPool,
+      rates,
+    })
+    const newEarn = resolved.earnings_inr
     if (Math.abs((s.earnings_inr || 0) - newEarn) > 0.01) {
       const { error } = await admin
         .from('contribution_scores')
-        .update({ earnings_inr: newEarn })
+        .update({ earnings_inr: newEarn, earning_source: resolved.earning_source, agreement_id: resolved.agreement_id })
         .eq('task_id', s.task_id)
         .eq('employee_id', s.employee_id)
       if (!error) { refreshed++ }

@@ -22,7 +22,7 @@ import {
   buildCreditLedger, fetchCreditMovements, settlementRefusal, type CreditBalance,
 } from '@/lib/finance/credit-ledger'
 import { computeMonthlyCommissions } from '@/lib/payroll/compute'
-import { pendingAdjustmentTotals, settleAdjustments, unsettleAdjustments } from '@/lib/payroll/adjustments'
+import { settleAdjustments, unsettleAdjustments, loadAdjustmentPlacement } from '@/lib/payroll/adjustments'
 import { computeMonthlyOwnership } from '@/lib/ownership/engine'
 import { retryWithoutScope, withoutScope } from '@/lib/finance/classify'
 import { todayISO } from '@/lib/utils/local-date'
@@ -33,6 +33,31 @@ interface ActionResult<T = void> {
   ok: boolean
   error?: string
   data?: T
+}
+
+/**
+ * A pending payslip's figures, worked out on the SERVER from the sources —
+ * creative rewards from contribution scores, ownership from the month's
+ * awards, the correction from loadAdjustmentPlacement. Mark Paid and Update
+ * use this instead of numbers sent by the browser, which could be stale
+ * (Aug 2026: CQID001 paid ₹2,085 ownership five hours after the award had
+ * become ₹1,406).
+ */
+async function liveFigures(
+  admin: ReturnType<typeof createAdminClient>,
+  rec: { employee_id: string; month: number; year: number; base_salary: number | null; bonus: number | null; ownership_earned: number | null; advances_deducted: number | null; other_deductions: number | null },
+): Promise<{ commission: number; ownership: number; adjustment: number; net: number } | { error: string }> {
+  const commissionRes = await computeMonthlyCommissions(admin, rec.month, rec.year)
+  if (!commissionRes.ok) return { error: commissionRes.error }
+  const ownershipBy = await computeMonthlyOwnership(admin, rec.month, rec.year)
+  const placement = await loadAdjustmentPlacement(admin, [{ employeeId: rec.employee_id, month: rec.month, year: rec.year }])
+  const commission = Math.round(commissionRes.commissionByEmployee[rec.employee_id] || 0)
+  // null = ownership could not be computed: keep what is stored, never wipe it.
+  const ownership = ownershipBy ? Math.round(ownershipBy[rec.employee_id] || 0) : Math.round(rec.ownership_earned || 0)
+  const adjustment = placement.adjustmentFor(rec.employee_id, rec.month, rec.year)
+  const net = Math.max(0, (rec.base_salary || 0) + commission + (rec.bonus || 0) + ownership + adjustment
+    - (rec.advances_deducted || 0) - (rec.other_deductions || 0))
+  return { commission, ownership, adjustment, net }
 }
 
 // ─── Refresh Payroll ──────────────────────────────────────────────────────────
@@ -65,17 +90,26 @@ export async function refreshPayrollRecord(
   const oldComm = record.commission_earned || 0
   const oldNet  = record.net_salary || 0
 
+  // The browser's numbers are only a hint; the payslip gets what the server
+  // works out from the sources — ownership and correction included, which the
+  // old version never refreshed.
+  const live = await liveFigures(admin, record)
+  if ('error' in live) return { ok: false, error: live.error }
+
   // Tolerance check — ignore sub-rupee float noise so we don't write a no-op.
-  if (Math.round(oldComm) === Math.round(input.newCommission) &&
-      Math.round(oldNet)  === Math.round(input.newNetSalary)) {
+  if (Math.round(oldComm) === live.commission && Math.round(oldNet) === Math.round(live.net)
+    && Math.round(record.ownership_earned || 0) === live.ownership
+    && Math.round(record.adjustment_earned || 0) === live.adjustment) {
     return { ok: true, data: { row: record } } // Already in sync
   }
 
   const { data, error } = await admin
     .from('payroll')
     .update({
-      commission_earned: input.newCommission,
-      net_salary:        input.newNetSalary,
+      commission_earned: live.commission,
+      ownership_earned:  live.ownership,
+      adjustment_earned: live.adjustment,
+      net_salary:        live.net,
     })
     .eq('id', input.id)
     .select('*, employee:employees(id, cqid, name)')
@@ -95,9 +129,9 @@ export async function refreshPayrollRecord(
       month:          record.month,
       year:           record.year,
       prevCommission: oldComm,
-      newCommission:  input.newCommission,
+      newCommission:  live.commission,
       prevNet:        oldNet,
-      newNet:         input.newNetSalary,
+      newNet:         live.net,
     },
   })
 
@@ -130,7 +164,9 @@ export async function recalculatePayrollForMonth(
   // Unsettled prior-period adjustments (corrections owed for already-closed
   // months — see src/lib/payroll/adjustments.ts). They ride along in this
   // month's net without ever reopening the month they came from.
-  const adjustmentByEmployee = await pendingAdjustmentTotals(admin)
+  // Outstanding corrections go on ONE payslip per employee (see
+  // pickAdjustmentTarget) — every other pending payslip carries 0.
+  const placement = await loadAdjustmentPlacement(admin)
 
   // Ownership rewards for this month (revenue share, profit share, incentives,
   // bonuses). NULL means "could not compute" — distinct from "computed as
@@ -162,7 +198,7 @@ export async function recalculatePayrollForMonth(
     // refresh produce the same stored value (no flip-flopping).
     const newCommission = Math.round(commissionByEmployee[record.employee_id] || 0)
     const oldCommission = record.commission_earned || 0
-    const newAdjustment = Math.round(adjustmentByEmployee[record.employee_id] || 0)
+    const newAdjustment = placement.adjustmentFor(record.employee_id, input.month, input.year)
     const oldAdjustment = (record as { adjustment_earned?: number }).adjustment_earned || 0
     const oldOwnership = (record as { ownership_earned?: number }).ownership_earned || 0
     const newOwnership = ownershipByEmployee
@@ -300,14 +336,17 @@ async function withComputedExtras<T extends {
   advances_deducted?: number | null; other_deductions?: number | null
 }>(admin: ReturnType<typeof createAdminClient>, rows: T[]): Promise<T[]> {
   try {
-    const adjustments = await pendingAdjustmentTotals(admin)
+    // Corrections go on one payslip per employee, even when several months
+    // are generated at once.
+    const placement = await loadAdjustmentPlacement(admin,
+      rows.map(r => ({ employeeId: r.employee_id, month: r.month, year: r.year })))
     const ownershipByMonth = new Map<string, Record<string, number> | null>()
     const out: T[] = []
     for (const row of rows) {
       const key = `${row.year}-${row.month}`
       if (!ownershipByMonth.has(key)) ownershipByMonth.set(key, await computeMonthlyOwnership(admin, row.month, row.year))
       const ownership = Math.round(ownershipByMonth.get(key)?.[row.employee_id] || 0)
-      const adjustment = Math.round(adjustments[row.employee_id] || 0)
+      const adjustment = placement.adjustmentFor(row.employee_id, row.month, row.year)
       if (!ownership && !adjustment) { out.push(row); continue }
       const net = Math.max(0, (row.base_salary || 0) + (row.commission_earned || 0) + ownership + adjustment
         - (row.advances_deducted || 0) - (row.other_deductions || 0))
@@ -424,21 +463,33 @@ export async function markPayrollPaid(
   const admin = createAdminClient()
   const today = todayISO()
 
-  const updates: Record<string, unknown> = { status: 'paid', paid_date: today }
-  // A caller that does not send adjustment / ownership must not erase them:
-  // writing 0 while the net still counted them left paid payslips whose parts
-  // did not add up (Sep 2026: four payslips) and never settled the adjustment.
-  // Absent → keep what the record already holds.
-  const { data: stored } = await admin.from('payroll')
-    .select('adjustment_earned, ownership_earned').eq('id', input.id).maybeSingle()
-  const liveAdjustment = input.liveAdjustment ?? (Number((stored as { adjustment_earned?: number } | null)?.adjustment_earned) || 0)
-  const liveOwnership = input.liveOwnership ?? (Number((stored as { ownership_earned?: number } | null)?.ownership_earned) || 0)
-  if (input.liveCommission > 0 || liveAdjustment !== 0 || liveOwnership > 0) {
-    updates.commission_earned = input.liveCommission
-    updates.adjustment_earned = liveAdjustment
-    updates.ownership_earned = liveOwnership
-    updates.net_salary = input.finalNet
+  // What is paid is worked out HERE, from the sources — never the browser's
+  // numbers, which could be stale (Aug 2026 paid a stale ownership figure;
+  // Sep 2026 lost ownership and the correction to ₹0).
+  const { data: rec } = await admin.from('payroll')
+    .select('employee_id, month, year, status, base_salary, bonus, ownership_earned, advances_deducted, other_deductions')
+    .eq('id', input.id).maybeSingle()
+  if (!rec) return { ok: false, error: 'Payroll record not found' }
+  if ((rec as { status: string }).status === 'paid') return { ok: false, error: 'Already paid' }
+  const live = await liveFigures(admin, rec as Parameters<typeof liveFigures>[1])
+  if ('error' in live) return { ok: false, error: live.error }
+  const fresh = {
+    commission_earned: live.commission, ownership_earned: live.ownership,
+    adjustment_earned: live.adjustment, net_salary: live.net,
   }
+  // The figures moved since the confirmation was shown: save them, do NOT pay,
+  // and let the owner confirm the real amount.
+  if (Math.abs(live.net - input.finalNet) >= 1) {
+    await admin.from('payroll').update(fresh).eq('id', input.id)
+    revalidatePath(REVALIDATE)
+    return {
+      ok: false,
+      error: `The amount changed to ₹${Math.round(live.net).toLocaleString('en-IN')} (was ₹${Math.round(input.finalNet).toLocaleString('en-IN')} on screen). Nothing was paid — check it and Mark Paid again.`,
+      data: { updates: fresh },
+    }
+  }
+  const liveAdjustment = live.adjustment
+  const updates: Record<string, unknown> = { status: 'paid', paid_date: today, ...fresh }
 
   const { error: updateErr } = await admin
     .from('payroll')
@@ -459,14 +510,14 @@ export async function markPayrollPaid(
     entityType: 'payroll',
     entityId:   input.id,
     action:     'marked_paid',
-    detail:     { month: input.month, year: input.year, net: input.finalNet, cqid: input.employeeCqid },
+    detail:     { month: input.month, year: input.year, net: live.net, cqid: input.employeeCqid },
   })
 
   // Auto-create Cash Book outflow entry AND allocate it to this payroll record,
   // so the entry shows "Fully Allocated" instead of "Unallocated". (The cashbook
   // computes salary allocation status from cashbook_payroll_allocations; creating
   // the entry alone left it unallocated.)
-  if (input.finalNet > 0) {
+  if (live.net > 0) {
     const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
     const monthName = MONTHS[input.month - 1]
     // No `created_by` — that column marks hand-typed cash-book rows for the
@@ -491,8 +542,8 @@ export async function markPayrollPaid(
       category_id: input.salaryCategory,
       employee_id: input.employeeId,
       description: `Salary — ${input.employeeCqid} — ${monthName} ${input.year}`,
-      amount:      input.finalNet,
-      amount_inr:  input.finalNet,
+      amount:      live.net,
+      amount_inr:  live.net,
       currency:    'INR',
       reference:   `payroll:${input.id}`,
       scope:       'company' as const,   // salaries are company opex on the P&L
@@ -506,7 +557,7 @@ export async function markPayrollPaid(
       await admin.from('cashbook_payroll_allocations').insert({
         cashbook_entry_id: entry.id,
         payroll_id:        input.id,
-        allocated_amount:  input.finalNet,
+        allocated_amount:  live.net,
       })
     }
   }
@@ -532,9 +583,11 @@ export async function markPayrollUnpaid(id: string): Promise<ActionResult<{ upda
   const restore: Record<string, unknown> = {}
   if (rec) {
     const r = rec as { employee_id: string; month: number; year: number; base_salary: number | null; commission_earned: number | null; bonus: number | null; ownership_earned: number | null; advances_deducted: number | null; other_deductions: number | null }
-    const { pendingTotal } = await unsettleAdjustments(admin, r.employee_id, r.month, r.year)
-      .catch(() => ({ reopened: 0, pendingTotal: 0 }))
-    const adjustment = Math.round(pendingTotal)
+    await unsettleAdjustments(admin, r.employee_id, r.month, r.year).catch(() => ({ reopened: 0, pendingTotal: 0 }))
+    // This payslip is pending again, so it is now the one that carries them
+    // (the earliest pending after the last paid month).
+    const placement = await loadAdjustmentPlacement(admin, [{ employeeId: r.employee_id, month: r.month, year: r.year }])
+    const adjustment = placement.adjustmentFor(r.employee_id, r.month, r.year)
     restore.adjustment_earned = adjustment
     restore.net_salary = Math.max(0, (r.base_salary || 0) + (r.commission_earned || 0) + (r.bonus || 0)
       + (r.ownership_earned || 0) + adjustment - (r.advances_deducted || 0) - (r.other_deductions || 0))

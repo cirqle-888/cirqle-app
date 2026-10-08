@@ -623,6 +623,11 @@ export default function PayrollClient({
     })
     if (result.ok && result.data) {
       setPayroll(p => p.map(r => r.id === id ? { ...r, ...result.data!.updates } : r))
+    } else {
+      // The server re-works the figures before paying; when they moved it
+      // saves them and pays nothing, so show the fresh numbers and say why.
+      if (result.data?.updates) setPayroll(p => p.map(r => r.id === id ? { ...r, ...result.data!.updates } : r))
+      toastError('Not paid', result.error)
     }
   }
 

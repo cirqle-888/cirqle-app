@@ -18,7 +18,7 @@ import { requirePermission, requireReadPermission } from '@/lib/permissions/chec
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { isMonthFinalized } from '@/lib/payroll/compute'
-import { persistAwardsForMonth, loadPrograms, loadMembersByDesignation, loadPeriodAggregates, clientsOf } from '@/lib/ownership/engine'
+import { persistAwardsForMonth, syncPendingPayrollOwnership, loadPrograms, loadMembersByDesignation, loadPeriodAggregates, clientsOf } from '@/lib/ownership/engine'
 import { computeAwards, resolveParticipants, totalProfitSharePercent } from '@/lib/ownership/compute'
 import { periodForBookingMonth, activeForPeriod } from '@/lib/ownership/periods'
 import { PER_PERSON_BASES, PER_PERSON_MONEY_BASES, type OwnershipBasis, type OwnershipPeriodType, type OwnershipScopeKind } from '@/lib/ownership/types'
@@ -326,6 +326,8 @@ export async function runAwardsForMonth(month: number, year: number): Promise<Ac
   const admin = createAdminClient()
   try {
     const res = await persistAwardsForMonth(admin, month, year)
+    // Pending payslips for the month take the new ownership straight away.
+    await syncPendingPayrollOwnership(admin, month, year).catch(() => ({ updated: 0 }))
     revalidatePath(REVALIDATE)
     revalidatePath('/dashboard/payroll')
     return { ok: true, data: res }

@@ -428,3 +428,66 @@ export async function unsettleAdjustments(
   const totals = await pendingAdjustmentTotals(admin)
   return { reopened: ids.length, pendingTotal: totals[employeeId] || 0 }
 }
+
+// ── Which ONE payslip carries the outstanding corrections ───────────────────
+
+export interface PayslipKey { month: number; year: number; status: string }
+
+/**
+ * Outstanding corrections belong to exactly ONE payslip: the employee's
+ * earliest pending payslip AFTER their last paid month.
+ *
+ * Previously every pending payslip that was recalculated or generated took the
+ * whole pending total, so with several pending payslips (old unpaid months,
+ * a multi-month Bulk Generate) one −₹291 could be deducted more than once.
+ *
+ *   Undo September          → last paid is August → September carries them
+ *   correction found later  → September paid      → October carries them
+ *   stale 2025 pending rows → before a later paid month → never chosen
+ *
+ * null when no such payslip exists yet — they wait for the next one.
+ */
+export function pickAdjustmentTarget(payslips: PayslipKey[]): { month: number; year: number } | null {
+  const idx = (p: { month: number; year: number }) => p.year * 12 + p.month
+  const lastPaid = Math.max(-Infinity, ...payslips.filter(p => p.status === 'paid').map(idx))
+  const candidates = payslips.filter(p => p.status !== 'paid' && idx(p) > lastPaid).sort((a, b) => idx(a) - idx(b))
+  return candidates.length ? { month: candidates[0].month, year: candidates[0].year } : null
+}
+
+/**
+ * For every employee with outstanding corrections: the total, and the one
+ * payslip that carries it. `adjustmentFor(emp, month, year)` returns the amount
+ * that payslip should show — the total on the target, 0 on every other.
+ * `extra` lists payslips about to be created (treated as pending).
+ */
+export async function loadAdjustmentPlacement(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: SupabaseClient<any, any, any>,
+  extra: { employeeId: string; month: number; year: number }[] = [],
+): Promise<{ adjustmentFor: (employeeId: string, month: number, year: number) => number }> {
+  const totals = await pendingAdjustmentTotals(admin)
+  const ids = Object.keys(totals).filter(id => totals[id] !== 0)
+  const targets = new Map<string, { month: number; year: number } | null>()
+  if (ids.length) {
+    const { data } = await admin.from('payroll').select('employee_id, month, year, status').in('employee_id', ids)
+    const byEmp = new Map<string, PayslipKey[]>()
+    for (const r of (data ?? []) as { employee_id: string; month: number; year: number; status: string }[]) {
+      const list = byEmp.get(r.employee_id) ?? []
+      list.push({ month: r.month, year: r.year, status: r.status })
+      byEmp.set(r.employee_id, list)
+    }
+    for (const e of extra) {
+      if (!totals[e.employeeId]) continue
+      const list = byEmp.get(e.employeeId) ?? []
+      if (!list.some(p => p.month === e.month && p.year === e.year)) list.push({ month: e.month, year: e.year, status: 'pending' })
+      byEmp.set(e.employeeId, list)
+    }
+    for (const id of ids) targets.set(id, pickAdjustmentTarget(byEmp.get(id) ?? []))
+  }
+  return {
+    adjustmentFor: (employeeId, month, year) => {
+      const t = targets.get(employeeId)
+      return t && t.month === month && t.year === year ? Math.round(totals[employeeId] || 0) : 0
+    },
+  }
+}

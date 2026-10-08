@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { computeMonthlyCommissions } from '@/lib/payroll/compute'
-import { pendingAdjustmentTotals } from '@/lib/payroll/adjustments'
+import { loadAdjustmentPlacement } from '@/lib/payroll/adjustments'
 import { computeMonthlyOwnership } from '@/lib/ownership/engine'
 import { notifyAdmins } from '@/lib/notifications/create'
 import { logCronRun } from '@/lib/cron/log'
@@ -75,7 +75,11 @@ export async function GET(req: NextRequest) {
   // Corrections owed for already-closed months ride along in this draft. Never
   // blocks the draft: a missing table (pre-migration) or a read failure simply
   // means no adjustments this run.
-  const adjustmentByEmployee = await pendingAdjustmentTotals(admin).catch(() => ({} as Record<string, number>))
+  // …on ONE payslip per employee: this draft only if it is their earliest
+  // pending payslip after the last paid month (pickAdjustmentTarget).
+  const placement = await loadAdjustmentPlacement(admin,
+    ((employeesRes.data || []) as { id: string }[]).map(e => ({ employeeId: e.id, month, year })))
+    .catch(() => ({ adjustmentFor: () => 0 }))
 
   // Ownership rewards earned for the month. Never blocks the draft — an
   // uncomputable month simply drafts without them and a later recalc fills
@@ -87,7 +91,7 @@ export async function GET(req: NextRequest) {
     .map((e: any) => ({
       employee: e,
       commission: Math.round(commissionByEmployee[e.id] || 0),
-      adjustment: Math.round(adjustmentByEmployee[e.id] || 0),
+      adjustment: placement.adjustmentFor(e.id, month, year),
       ownership: Math.round(ownershipByEmployee[e.id] || 0),
       baseSalary: Number(e.base_salary) || 0,
     }))

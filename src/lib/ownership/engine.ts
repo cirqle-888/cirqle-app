@@ -466,3 +466,33 @@ export async function loadAwardsForPayslip(
 }
 
 export { monthBounds }
+
+/**
+ * After the month's awards are recomputed, bring that month's PENDING
+ * payslips in line: ownership = the awards, net recomputed. Paid payslips are
+ * never touched. Without this, "Run now" left a pending payslip holding the
+ * old figure and Mark Paid paid it (Aug 2026: ₹2,085 against a ₹1,406 award).
+ */
+export async function syncPendingPayrollOwnership(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: SupabaseClient<any, any, any>,
+  month: number,
+  year: number,
+): Promise<{ updated: number }> {
+  const byEmployee = await computeMonthlyOwnership(admin, month, year)
+  if (!byEmployee) return { updated: 0 }               // could not compute — leave payslips alone
+  const { data } = await admin.from('payroll')
+    .select('id, employee_id, base_salary, commission_earned, bonus, adjustment_earned, ownership_earned, advances_deducted, other_deductions')
+    .eq('month', month).eq('year', year).eq('status', 'pending')
+  let updated = 0
+  for (const r of (data || []) as Record<string, number | string | null>[]) {
+    const ownership = Math.round(byEmployee[r.employee_id as string] || 0)
+    if (Math.round(Number(r.ownership_earned) || 0) === ownership) continue
+    const n = (k: string) => Number(r[k]) || 0
+    const net = Math.max(0, n('base_salary') + n('commission_earned') + n('bonus') + n('adjustment_earned') + ownership
+      - n('advances_deducted') - n('other_deductions'))
+    const { error } = await admin.from('payroll').update({ ownership_earned: ownership, net_salary: net }).eq('id', r.id as string)
+    if (!error) updated++
+  }
+  return { updated }
+}
