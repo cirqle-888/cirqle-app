@@ -21,6 +21,8 @@ import { COVER_MODES, WORK_FORMAT_LABEL, formatsFor } from '@/lib/portfolio/type
 import { prepareAvatarForUpload, prepareLogoForUpload, resizeForUpload, slugFromFilename, titleFromFilename } from '@/lib/portfolio/resize'
 import type { PreparedLogo } from '@/lib/portfolio/resize'
 import FlyersPanel from './flyers-panel'
+import PresentationPanel from './presentation-panel'
+import type { ShowcaseEntry } from '@/lib/portfolio/showcase'
 import { uploadMedia } from './upload-media'
 import {
   createWorkUploadUrls, deleteBrand, deleteWorkItem, reorderBrands, reorderCollectionItems,
@@ -32,6 +34,8 @@ interface Props {
   collections: PortfolioCollection[]
   flyers: FlyerRow[]
   flyerError: string | null
+  showcases: ShowcaseEntry[]
+  showcaseError: string | null
   loadError: string | null
   canManage: boolean
   siteUrl: string
@@ -46,7 +50,7 @@ interface UploadProgress {
 const ACCEPT = 'image/jpeg,image/png,image/webp,image/avif,video/mp4,video/webm,video/quicktime'
 
 export default function PortfolioClient({
-  configured, collections, flyers, flyerError, loadError, canManage, siteUrl,
+  configured, collections, flyers, flyerError, showcases, showcaseError, loadError, canManage, siteUrl,
 }: Props) {
   const router = useRouter()
   const toast = useToast()
@@ -112,7 +116,7 @@ export default function PortfolioClient({
   const [dragOver, setDragOver] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const [tab, setTab] = useState<'work' | 'flyers'>('work')
+  const [tab, setTab] = useState<'work' | 'presentation' | 'flyers'>('work')
   const [linkModal, setLinkModal] = useState<{ url: string; title: string; cover: File | null } | null>(null)
   const [linkBusy, setLinkBusy] = useState<string | null>(null)
   const coverRef = useRef<HTMLInputElement>(null)
@@ -583,8 +587,8 @@ export default function PortfolioClient({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {collection && <a
-            href={`${siteUrl}/portfolio/${collection.slug}`}
+          {(tab === 'presentation' || collection) && <a
+            href={tab === 'presentation' ? `${siteUrl}/portfolio` : `${siteUrl}/portfolio/${collection!.slug}`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border bg-secondary text-xs text-muted-foreground hover:text-foreground"
@@ -604,6 +608,7 @@ export default function PortfolioClient({
       <div className="flex items-center gap-1 border-b border-border">
         {([
           { id: 'work' as const, label: 'Work', count: collections.reduce((n, c) => n + c.brands.reduce((m, b) => m + b.items.length, 0), 0) },
+          { id: 'presentation' as const, label: 'Presentation', count: showcases.length },
           { id: 'flyers' as const, label: 'Supermarket flyers', count: flyers.length },
         ]).map((t) => (
           <button
@@ -620,6 +625,18 @@ export default function PortfolioClient({
           </button>
         ))}
       </div>
+
+      {tab === 'presentation' && (
+        <PresentationPanel
+          showcases={showcases}
+          error={showcaseError}
+          canManage={canManage}
+          siteUrl={siteUrl}
+          onToast={(kind, title, body) =>
+            kind === 'success' ? toast.success(title, body) : toast.toastError(title, body)
+          }
+        />
+      )}
 
       {tab === 'flyers' && (
         <FlyersPanel

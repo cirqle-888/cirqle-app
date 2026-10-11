@@ -48,7 +48,9 @@ async function decode(file: File): Promise<ImageBitmap> {
   }
 }
 
-async function toWebp(source: ImageBitmap, width: number, height: number): Promise<Blob> {
+async function toWebp(
+  source: ImageBitmap, width: number, height: number, quality: number = WEBP_QUALITY,
+): Promise<Blob> {
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
@@ -59,7 +61,7 @@ async function toWebp(source: ImageBitmap, width: number, height: number): Promi
   ctx.drawImage(source, 0, 0, width, height)
 
   const blob = await new Promise<Blob | null>((resolve) =>
-    canvas.toBlob(resolve, 'image/webp', WEBP_QUALITY),
+    canvas.toBlob(resolve, 'image/webp', quality),
   )
   if (!blob) throw new Error('This browser cannot save WebP images.')
   return blob
@@ -97,6 +99,58 @@ export async function resizeForUpload(file: File): Promise<ResizedImage> {
       }
     }
     return { width, height, renditions }
+  } finally {
+    bitmap.close()
+  }
+}
+
+/**
+ * One high-quality rendition for a full-screen presentation.
+ *
+ * The gallery makes four small WebP sizes because its tiles are small. A
+ * presentation hero fills the whole viewport, so it needs the opposite: ONE
+ * file as close to the original as is sensible. That means
+ *
+ *   · the original aspect ratio, untouched — nothing is cropped here; the
+ *     website crops at display time from the focal point;
+ *   · the original resolution, up to `maxWidth` (2880 covers a retina
+ *     desktop) and NEVER upscaled, so a small file stays small instead of
+ *     being blurred up;
+ *   · a higher WebP quality than the gallery's.
+ *
+ * This is not byte-identical to the file that was picked — it is re-encoded —
+ * but at 0.92 the difference is not visible, and a 12 MB print export would
+ * otherwise be a 12 MB hero.
+ */
+export async function prepareShowcaseImage(
+  file: File,
+  opts: { maxWidth?: number; quality?: number } = {},
+): Promise<{ width: number; height: number; blob: Blob }> {
+  const maxWidth = opts.maxWidth ?? 2880
+  const quality = opts.quality ?? 0.92
+  const bitmap = await decode(file)
+  const sourceWidth = bitmap.width
+  const sourceHeight = bitmap.height
+  if (!sourceWidth || !sourceHeight) throw new Error('That file is not a readable image.')
+
+  try {
+    const width = Math.min(sourceWidth, maxWidth)
+    const height = Math.round((sourceHeight / sourceWidth) * width)
+    let source = bitmap
+    let temporary: ImageBitmap | null = null
+    if (width !== sourceWidth) {
+      try {
+        temporary = await createImageBitmap(bitmap, { resizeWidth: width, resizeHeight: height, resizeQuality: 'high' })
+        source = temporary
+      } catch {
+        // Older browsers ignore the resize options; drawImage scales below.
+      }
+    }
+    try {
+      return { width, height, blob: await toWebp(source, width, height, quality) }
+    } finally {
+      temporary?.close()
+    }
   } finally {
     bitmap.close()
   }
