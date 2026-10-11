@@ -26,6 +26,8 @@ import ContentBriefFields from '@/components/content-brief/content-brief-fields'
 import ContentBriefView from '@/components/content-brief/content-brief-view'
 import { EMPTY_BRIEF_DRAFT, asContentBrief, type ContentBriefDraft } from '@/lib/content-brief'
 import { predictTask } from '@/lib/requests/predict-task'
+import { useFormDraft } from '@/lib/drafts/use-form-draft'
+import { DraftRecoveryBanner, DraftSavedHint } from '@/components/ui/draft-recovery'
 const QuickCreateClientModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(m => m.QuickCreateClientModal), { ssr: false })
 import {
   Inbox, AlertTriangle, ChevronRight, Clock, Link2, Loader2, Play,
@@ -41,16 +43,24 @@ import {
 import {
   setRequestStatusAction, markRequestViewed, getRequestTimeline,
   postExternalUpdate, updateInternalNotes, markRevisionAddressed, postRequestNote,
-  assignRequestEmployee, createManualRequest, createBrandOnboardingChecklist, searchTasksForLink, linkRequestToTask,
+  assignRequestEmployee, createManualRequest, searchTasksForLink, linkRequestToTask,
   reorderStaffPriority, bulkSetRequestStatus, bulkAssignRequestEmployee,
 } from './actions'
 import { DiscussButton } from '@/components/chat/discuss-button'
 import { CampaignCard } from '@/components/campaigns/campaign-card'
 import { useBatchSelection } from '@/lib/hooks/use-batch-selection'
 import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { BulkOutcomeBar } from '@/components/ui/bulk-outcome-bar'
+import { describeBulkPlan, summariseBulkOutcome, type BulkReport } from '@/lib/bulk/outcome'
+import { listTemplates, previewTemplateRun, runTemplate } from '@/lib/templates/actions'
+import { templatesFor, BUILTIN_PREFIX, type TaskTemplate, type TemplatePlan } from '@/lib/templates/model'
+
+/** The built-in that this panel used to be hard-coded to. */
+const BRAND_ONBOARDING_TEMPLATE_ID = `${BUILTIN_PREFIX}brand-onboarding`
 import { formatDate } from '@/lib/utils/format-date'
 import {
-  BRAND_ONBOARDING_STEPS, CHECKLIST_HINT, CHECKLIST_LABEL,
+  CHECKLIST_HINT, CHECKLIST_LABEL,
   REQUEST_KIND_CHECKLIST, REQUEST_KIND_REQUEST, isChecklistRequest,
 } from '@/lib/requests/kind'
 
@@ -183,6 +193,33 @@ const EMPTY_NEW = {
   // Complimentary / setup work: assigned and tracked, never a task, never
   // billed, never shown to the client. See lib/requests/kind.
   isChecklist: false,
+}
+
+type NewRequestForm = typeof EMPTY_NEW
+
+/**
+ * A fresh blank form.
+ *
+ * `EMPTY_NEW` is a module constant, so assigning it directly handed every
+ * reset the *same* nested brief object. A factory also gives the draft layer
+ * something to compare an in-progress form against.
+ */
+const emptyNewRequest = (): NewRequestForm => ({ ...EMPTY_NEW, brief: { ...EMPTY_BRIEF_DRAFT } })
+
+/**
+ * Has the user actually started a request?
+ *
+ * The form opens with a default priority and an empty brief, so a structural
+ * "any field filled?" test would call an untouched form a draft and offer it
+ * back on every visit.
+ */
+function newRequestStarted(f: NewRequestForm): boolean {
+  if (f.clientId || f.title.trim() || f.serviceId) return true
+  if (f.dueDate || f.assignedEmployeeId || f.estimatedValue) return true
+  if (f.priority !== EMPTY_NEW.priority || f.isPlanned || f.isChecklist) return true
+  const b = f.brief
+  return !!(b.contentType || b.caption.trim() || b.notes.trim()
+    || b.captionCanvas || b.referenceImages.length || b.links.length)
 }
 
 const inrFmt = (n: number) =>
@@ -384,10 +421,32 @@ export default function RequestsClient({
   const [assigneeFilter, setAssigneeFilter] = useState<string>('')
   const [showOnboard, setShowOnboard] = useState(false)
   const [onboarding, setOnboarding] = useState(false)
-  const [onboardForm, setOnboardForm] = useState({ clientId: '', assignedEmployeeId: '' })
+  const [onboardForm, setOnboardForm] = useState({
+    clientId: '', assignedEmployeeId: '', templateId: BRAND_ONBOARDING_TEMPLATE_ID, startDate: '',
+  })
+  /** Every template this viewer may run — built-ins plus the stored ones. */
+  const [templates, setTemplates] = useState<TaskTemplate[]>([])
+  /**
+   * What the chosen template would create here, recomputed server-side.
+   *
+   * Stamped with the inputs it was computed for, and judged stale during
+   * render rather than cleared from an effect — so a preview for last
+   * client's selection can never be the one the Create button acts on.
+   */
+  const [templatePreview, setTemplatePreview] = useState<
+    { key: string; value: { templateName: string; plan: TemplatePlan } | null } | null
+  >(null)
   const [showNew, setShowNew] = useState(false)
   const [showNewMenu, setShowNewMenu] = useState(false)
-  const [newForm, setNewForm] = useState(EMPTY_NEW)
+  const [newForm, setNewForm] = useState<NewRequestForm>(emptyNewRequest)
+
+  // Unsent request drafts survive a refresh or an interrupted session. The
+  // create path is unchanged — a restored draft still goes through
+  // createManualRequest and its server-side validation.
+  const draft = useFormDraft<NewRequestForm>('request.new', newForm, {
+    enabled: showNew,
+    isMeaningful: newRequestStarted,
+  })
 
   // ── Smart Task default ────────────────────────────────────────────────────
   // The Task (service) pre-fills from the title and the client's history
@@ -433,6 +492,12 @@ export default function RequestsClient({
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkAssignOpen, setBulkAssignOpen] = useState(false)
   const [bulkAssignEmpId, setBulkAssignEmpId] = useState<string>('')
+  /** Confirmation shown BEFORE a bulk action writes anything. */
+  const [bulkConfirm, setBulkConfirm] = useState<{ verb: string; run: () => void } | null>(null)
+  /** Result of the last bulk run — kept so a partial failure can be retried. */
+  const [bulkReport, setBulkReport] = useState<BulkReport | null>(null)
+  /** The action to re-run against the failed ids only. */
+  const bulkRetryRef = useRef<((ids: string[]) => Promise<void>) | null>(null)
 
   // Priority drag + manual rank override
   const [editRank, setEditRank] = useState<{ id: string; val: string } | null>(null)
@@ -701,8 +766,36 @@ export default function RequestsClient({
   }
 
   // ── Batch actions ──────────────────────────────────────────────────────
-  async function doBulkStatus(status: RequestStatus) {
-    const ids = [...batchSel.selected]
+  //
+  // Each one goes through the same three steps the improvement plan asks for:
+  // confirm the affected count before writing, report a partial failure
+  // honestly, and leave exactly the refused rows selected so Retry re-runs
+  // only those. The server actions already return `{ succeeded, failed }`
+  // per row; this is the UI finally reading it.
+  //
+  // Deliberately no Undo: none of these tables carries a version or an
+  // updated-at precondition, so "undo" would blind-write the previous value
+  // and could discard a colleague's edit made in between. See lib/bulk/outcome.
+
+  /** Apply the outcome of a bulk run: report it, then narrow the selection. */
+  function finishBulk(report: BulkReport, cleanUp?: () => void) {
+    setBulkReport(report.tone === 'success' ? null : report)
+    if (report.tone === 'success') {
+      success(report.title)
+      batchSel.clear()
+      cleanUp?.()
+      return
+    }
+    if (report.tone === 'failure') toastError(report.title, report.body)
+    // Keep only what still needs doing. Clearing everything would hide which
+    // rows were refused; keeping everything would re-apply to rows that took.
+    batchSel.clear()
+    batchSel.setMode(true)
+    for (const id of report.retryable) batchSel.toggle(id)
+  }
+
+  async function runBulkStatus(ids: string[], status: RequestStatus) {
+    if (!ids.length) return
     setBulkBusy(true)
     const res = await bulkSetRequestStatus(ids, status)
     setBulkBusy(false)
@@ -710,33 +803,40 @@ export default function RequestsClient({
       const succeededSet = new Set(res.data.succeeded)
       setRequests(prev => prev.map(x => succeededSet.has(x.id) ? { ...x, status } : x))
     }
-    if (res.ok) {
-      success(`${ids.length} request${ids.length !== 1 ? 's' : ''} updated`)
-      batchSel.clear()
-    } else {
-      toastError('Some requests could not be updated', res.error)
-    }
+    finishBulk(summariseBulkOutcome(res.data, ids, 'request'))
   }
 
-  async function doBulkAssign() {
+  function doBulkStatus(status: RequestStatus, verb: string) {
     const ids = [...batchSel.selected]
-    const emp = employees.find(e => e.id === bulkAssignEmpId) || null
+    bulkRetryRef.current = retryIds => runBulkStatus(retryIds, status)
+    setBulkConfirm({ verb, run: () => void runBulkStatus(ids, status) })
+  }
+
+  async function runBulkAssign(ids: string[], employeeId: string) {
+    if (!ids.length) return
+    const emp = employees.find(e => e.id === employeeId) || null
     setBulkBusy(true)
-    const res = await bulkAssignRequestEmployee(ids, bulkAssignEmpId || null, emp?.cqid || null)
+    const res = await bulkAssignRequestEmployee(ids, employeeId || null, emp?.cqid || null)
     setBulkBusy(false)
     if (res.data) {
       const succeededSet = new Set(res.data.succeeded)
-      const patch = { assigned_employee_id: bulkAssignEmpId || null, assigned_employee: emp ? { id: emp.id, cqid: emp.cqid, name: emp.name } : null }
+      const patch = { assigned_employee_id: employeeId || null, assigned_employee: emp ? { id: emp.id, cqid: emp.cqid, name: emp.name } : null }
       setRequests(prev => prev.map(x => succeededSet.has(x.id) ? { ...x, ...patch } : x))
     }
-    if (res.ok) {
-      success(`${ids.length} request${ids.length !== 1 ? 's' : ''} ${emp ? `assigned to ${dn(emp)}` : 'unassigned'}`)
+    finishBulk(summariseBulkOutcome(res.data, ids, 'request'), () => {
       setBulkAssignOpen(false)
       setBulkAssignEmpId('')
-      batchSel.clear()
-    } else {
-      toastError('Some requests could not be assigned', res.error)
-    }
+    })
+  }
+
+  function doBulkAssign() {
+    const ids = [...batchSel.selected]
+    const empId = bulkAssignEmpId
+    bulkRetryRef.current = retryIds => runBulkAssign(retryIds, empId)
+    // The assign modal already states the count and the target, so this one
+    // confirms through the modal's own Apply rather than a second dialog.
+    setBulkAssignOpen(false)
+    void runBulkAssign(ids, empId)
   }
 
   // ── AI Capture ──────────────────────────────────────────────────────────
@@ -771,7 +871,8 @@ export default function RequestsClient({
     if (res.ok && res.data) {
       setRequests(prev => [res.data, ...prev])
       setShowNew(false)
-      setNewForm(EMPTY_NEW)
+      setNewForm(emptyNewRequest())
+      draft.clear() // the request exists now; the draft would only confuse
       setTab('new')
       success(
         `${refLabel(res.data.ref_no)} created`,
@@ -782,31 +883,74 @@ export default function RequestsClient({
     } else toastError('Could not create the request', res.error)
   }
 
-  /**
-   * Start a brand: write the whole setup checklist at once.
-   *
-   * Re-runnable on purpose — the action skips steps this client already has, so
-   * a brand that arrives with a Facebook page keeps that item ticked instead of
-   * collecting a duplicate.
-   */
+  // ── Templates ────────────────────────────────────────────────────────────
+  // The brand-onboarding checklist generalised: a named list of steps with
+  // relative due dates, run against a client. Brand onboarding is itself now
+  // one of these (a built-in), so this panel's original job is unchanged and
+  // every other repeatable job gets the same preview and the same
+  // skip-what-already-exists rule. See lib/templates.
+
+  // Loaded when the panel opens rather than on mount: most visits to this page
+  // never run a template.
+  useEffect(() => {
+    if (!showOnboard || templates.length > 0) return
+    let cancelled = false
+    void listTemplates().then(res => {
+      if (!cancelled && res.ok && res.data) setTemplates(res.data)
+    })
+    return () => { cancelled = true }
+  }, [showOnboard, templates.length])
+
+  const previewKey = showOnboard && onboardForm.clientId
+    ? [onboardForm.templateId, onboardForm.clientId, onboardForm.assignedEmployeeId, onboardForm.startDate].join('|')
+    : ''
+
+  const previewFresh = !!templatePreview && templatePreview.key === previewKey
+  /** Fresh preview, or null while one is in flight or the inputs are incomplete. */
+  const preview = previewFresh ? templatePreview.value : null
+  const previewing = !!previewKey && !previewFresh
+
+  // The preview is computed on the server, by the same function the run uses,
+  // so what the user approves is what gets written.
+  useEffect(() => {
+    if (!previewKey) return
+    let cancelled = false
+    void previewTemplateRun({
+      templateId: onboardForm.templateId,
+      clientId: onboardForm.clientId,
+      assignedEmployeeId: onboardForm.assignedEmployeeId || null,
+      startDate: onboardForm.startDate || undefined,
+    }).then(res => {
+      if (cancelled) return
+      setTemplatePreview({ key: previewKey, value: res.ok && res.data ? res.data : null })
+    })
+    return () => { cancelled = true }
+    // previewKey carries every input; listing them again would re-fire on
+    // every parent render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewKey])
+
   async function doStartOnboarding() {
     if (onboarding || !onboardForm.clientId) return
     setOnboarding(true)
-    const res = await createBrandOnboardingChecklist({
+    const res = await runTemplate({
+      templateId: onboardForm.templateId,
       clientId: onboardForm.clientId,
       assignedEmployeeId: onboardForm.assignedEmployeeId || null,
+      startDate: onboardForm.startDate || undefined,
     })
     setOnboarding(false)
-    if (!res.ok) { toastError('Could not start the checklist', res.error); return }
+    if (!res.ok) { toastError('Could not run the template', res.error); return }
 
     setShowOnboard(false)
+    setTemplatePreview(null)
     const { created, skipped } = res.data!
     if (created === 0) {
-      success('Nothing to add', 'This client already has every setup step.')
+      success('Nothing to add', 'This client already has every step of it.')
     } else {
       success(
-        `${created} setup ${created === 1 ? 'step' : 'steps'} added`,
-        skipped > 0 ? `${skipped} already existed and were left alone` : 'Complimentary — assigned, tracked, never billed',
+        `${created} ${created === 1 ? 'item' : 'items'} added`,
+        skipped > 0 ? `${skipped} already existed and were left alone` : undefined,
       )
       router.refresh()
     }
@@ -1069,20 +1213,37 @@ export default function RequestsClient({
         </div>
       )}
 
-      {/* ── New brand setup: one click for the whole checklist ─────────────── */}
+      {/* ── Run a template ──────────────────────────────────────────────────
+          Was "New Brand Setup", which ran one hard-coded nine-step checklist.
+          Brand onboarding is now a built-in template, so this panel runs it
+          exactly as before AND runs any other template the agency saves —
+          with the same preview and the same skip-what-exists rule. */}
       {showOnboard && (
         <ModalOverlay onClose={() => setShowOnboard(false)} sheetOnMobile>
-          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md overflow-hidden">
-            <div className="px-5 py-4 border-b border-border">
+          <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md max-h-[90dvh] flex flex-col overflow-hidden">
+            <div className="px-5 py-4 border-b border-border shrink-0">
               <h2 className="font-bold text-base flex items-center gap-2">
-                <ListChecks className="w-4 h-4 text-emerald-500" /> New Brand Setup
+                <ListChecks className="w-4 h-4 text-emerald-500" /> Run a template
               </h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {BRAND_ONBOARDING_STEPS.length} steps — Facebook page, Instagram, Meta configuration,
-                the starter highlight icons. Complimentary: assigned and tracked, never billed.
+                A saved list of steps written into a client&rsquo;s requests. Nothing is billed —
+                a request becomes a task only when somebody presses Start.
               </p>
             </div>
-            <div className="p-5 space-y-3">
+            <div className="p-5 space-y-3 overflow-y-auto flex-1">
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Template *</label>
+                <select value={onboardForm.templateId}
+                  onChange={e => setOnboardForm(f => ({ ...f, templateId: e.target.value }))}
+                  className="w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50">
+                  {templates.length === 0 && (
+                    <option value={BRAND_ONBOARDING_TEMPLATE_ID}>Brand onboarding</option>
+                  )}
+                  {templatesFor(templates, { clientId: onboardForm.clientId || null }).map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1.5">Client *</label>
                 <select value={onboardForm.clientId}
@@ -1092,39 +1253,88 @@ export default function RequestsClient({
                   {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1.5">Assign every step to</label>
-                <select value={onboardForm.assignedEmployeeId}
-                  onChange={e => setOnboardForm(f => ({ ...f, assignedEmployeeId: e.target.value }))}
-                  className="w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50">
-                  <option value="">Nobody yet — assign them later</option>
-                  {employees.map(e => <option key={e.id} value={e.id}>{dn(e)}</option>)}
-                </select>
-                <p className="text-[11px] text-muted-foreground mt-1.5">
-                  Assigned steps appear on that person&rsquo;s My Work board straight away.
-                </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Assign every step to</label>
+                  <select value={onboardForm.assignedEmployeeId}
+                    onChange={e => setOnboardForm(f => ({ ...f, assignedEmployeeId: e.target.value }))}
+                    className="w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50">
+                    <option value="">Nobody yet — assign them later</option>
+                    {employees.map(e => <option key={e.id} value={e.id}>{dn(e)}</option>)}
+                  </select>
+                </div>
+                <div>
+                  {/* Day 0 for the template's relative offsets: "three days
+                      after the run", not a fixed calendar date. */}
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Starting</label>
+                  <input type="date" value={onboardForm.startDate}
+                    onChange={e => setOnboardForm(f => ({ ...f, startDate: e.target.value }))}
+                    className="w-full bg-secondary border border-border rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50" />
+                </div>
               </div>
-              <details className="rounded-xl border border-border bg-secondary/40 px-3 py-2">
-                <summary className="text-xs text-muted-foreground cursor-pointer select-none">
-                  What gets created
-                </summary>
-                <ul className="mt-2 space-y-1">
-                  {BRAND_ONBOARDING_STEPS.map(step => (
-                    <li key={step.title} className="text-[11px] text-muted-foreground flex gap-1.5">
-                      <span className="text-emerald-500 shrink-0">•</span>
-                      <span><strong className="text-foreground/80">{step.title}</strong> — {step.description}</span>
-                    </li>
-                  ))}
-                </ul>
-              </details>
+              <p className="text-[11px] text-muted-foreground">
+                Assigned steps appear on that person&rsquo;s My Work board straight away.
+                Due dates follow the template, counted from the starting date.
+              </p>
+
+              {/* The preview. Computed on the server by the same function the
+                  run uses, so this list IS what gets written. */}
+              {!onboardForm.clientId ? (
+                <p className="text-[11px] text-muted-foreground/70 rounded-xl border border-border bg-secondary/40 px-3 py-2.5">
+                  Pick a client to see exactly what would be created.
+                </p>
+              ) : previewing ? (
+                <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 px-3 py-2.5">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Working out what this would create…
+                </p>
+              ) : preview ? (
+                <div className="rounded-xl border border-border bg-secondary/40 px-3 py-2.5 space-y-2">
+                  <p className="text-xs font-semibold">
+                    {preview.plan.create.length === 0
+                      ? 'Nothing to add — this client already has every step'
+                      : `Will create ${preview.plan.create.length} item${preview.plan.create.length === 1 ? '' : 's'}`}
+                    {preview.plan.skip.length > 0 && (
+                      <span className="font-normal text-muted-foreground">
+                        {' '}· {preview.plan.skip.length} already {preview.plan.skip.length === 1 ? 'exists' : 'exist'}
+                      </span>
+                    )}
+                  </p>
+                  <ul className="space-y-1">
+                    {preview.plan.create.map(step => (
+                      <li key={step.title} className="text-[11px] text-muted-foreground flex gap-1.5">
+                        <span className="text-emerald-500 shrink-0">•</span>
+                        <span>
+                          <strong className="text-foreground/80">{step.title}</strong>
+                          {step.dueDate && <span className="text-muted-foreground/70"> — due {step.dueDate}</span>}
+                          {step.complimentary && <span className="text-muted-foreground/70"> · complimentary</span>}
+                        </span>
+                      </li>
+                    ))}
+                    {preview.plan.skip.map(step => (
+                      <li key={`skip-${step.title}`} className="text-[11px] text-muted-foreground/50 flex gap-1.5 line-through">
+                        <span className="shrink-0">•</span>
+                        <span>{step.title}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <p className="text-[11px] text-destructive px-3 py-2.5">
+                  Could not work out what this template would create. Try another one.
+                </p>
+              )}
             </div>
-            <div className="px-5 py-4 border-t border-border flex justify-end gap-2">
+            <div className="px-5 py-4 border-t border-border flex justify-end gap-2 shrink-0">
               <button onClick={() => setShowOnboard(false)}
                 className="px-4 py-2 text-sm rounded-xl bg-secondary border border-border hover:bg-secondary/70 transition-colors">Cancel</button>
-              <button onClick={doStartOnboarding} disabled={onboarding || !onboardForm.clientId}
+              <button
+                onClick={doStartOnboarding}
+                disabled={onboarding || !onboardForm.clientId || !preview || preview.plan.create.length === 0}
                 className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-xl gradient-bg text-white hover:opacity-90 disabled:opacity-50 transition-opacity">
                 {onboarding ? <Loader2 className="w-4 h-4 animate-spin" /> : <ListChecks className="w-4 h-4" />}
-                Create checklist
+                {preview && preview.plan.create.length > 0
+                  ? `Create ${preview.plan.create.length}`
+                  : 'Create'}
               </button>
             </div>
           </div>
@@ -1151,7 +1361,14 @@ export default function RequestsClient({
                     setShowNewMenu(false)
                     if (t.action.kind === 'form') setShowNew(true)
                     else if (t.action.kind === 'onboarding') {
-                      setOnboardForm({ clientId: clientFilter || '', assignedEmployeeId: '' })
+                      // Keeps this entry point's original meaning: it opens
+                      // the panel already set to the brand-onboarding template.
+                      setOnboardForm({
+                        clientId: clientFilter || '',
+                        assignedEmployeeId: '',
+                        templateId: BRAND_ONBOARDING_TEMPLATE_ID,
+                        startDate: '',
+                      })
                       setShowOnboard(true)
                     }
                     else if (isExternalHref(t.action.href)) window.open(t.action.href, '_blank', 'noopener')
@@ -1250,6 +1467,15 @@ export default function RequestsClient({
           </div>
         </div>
       </div>
+
+      {/* What the last bulk run actually did, and a retry for the part it didn't. */}
+      <BulkOutcomeBar
+        className="mb-3"
+        report={bulkReport}
+        busy={bulkBusy}
+        onRetry={() => { const run = bulkRetryRef.current; if (run && bulkReport) void run(bulkReport.retryable) }}
+        onDismiss={() => setBulkReport(null)}
+      />
 
       {/* Tokenized active filters (client dropdown chip; search shows in the bar) */}
       <ActiveFilterChips
@@ -1880,6 +2106,8 @@ export default function RequestsClient({
               <button onClick={() => setShowNew(false)} aria-label="Close" className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground"><X className="w-4 h-4" /></button>
             </div>
             <div className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
+              <DraftRecoveryBanner draft={draft} onRestore={setNewForm} label="Unsent request" />
+
               {/* Client + Service: who it's for and what it is. Service is the
                   only "type" question — the brief's content type is filled in
                   from it on save, so nobody picks the same thing twice. */}
@@ -2010,7 +2238,8 @@ export default function RequestsClient({
                 </div>
               </details>
             </div>
-            <div className="px-5 py-3.5 border-t border-border flex justify-end gap-2 shrink-0">
+            <div className="px-5 py-3.5 border-t border-border flex items-center justify-end gap-2 shrink-0">
+              <DraftSavedHint draft={draft} className="mr-auto" />
               <button onClick={() => setShowNew(false)}
                 className="h-10 px-4 text-sm rounded-lg border border-border hover:bg-secondary transition-colors">Cancel</button>
               <button onClick={doCreate} disabled={creating || !newForm.clientId || !newForm.title.trim()}
@@ -2111,12 +2340,23 @@ export default function RequestsClient({
           onClear={batchSel.clear}
           busy={bulkBusy}
           actions={[
-            { key: 'in_progress', label: 'On Going', icon: <Clock className="w-3.5 h-3.5" />, tint: 'blue', onClick: () => doBulkStatus('in_progress') },
-            { key: 'completed', label: 'Completed', icon: <CheckCircle2 className="w-3.5 h-3.5" />, tint: 'emerald', onClick: () => doBulkStatus('completed') },
-            { key: 'archived', label: 'Archive', icon: <Inbox className="w-3.5 h-3.5" />, tint: 'amber', onClick: () => doBulkStatus('archived') },
-            { key: 'cancelled', label: 'Cancel', icon: <X className="w-3.5 h-3.5" />, tint: 'red', onClick: () => doBulkStatus('cancelled') },
+            { key: 'in_progress', label: 'On Going', icon: <Clock className="w-3.5 h-3.5" />, tint: 'blue', onClick: () => doBulkStatus('in_progress', 'mark on going') },
+            { key: 'completed', label: 'Completed', icon: <CheckCircle2 className="w-3.5 h-3.5" />, tint: 'emerald', onClick: () => doBulkStatus('completed', 'mark completed') },
+            { key: 'archived', label: 'Archive', icon: <Inbox className="w-3.5 h-3.5" />, tint: 'amber', onClick: () => doBulkStatus('archived', 'archive') },
+            { key: 'cancelled', label: 'Cancel', icon: <X className="w-3.5 h-3.5" />, tint: 'red', onClick: () => doBulkStatus('cancelled', 'cancel') },
             { key: 'assign', label: 'Assign', icon: <UserRound className="w-3.5 h-3.5" />, tint: 'cyan', onClick: () => setBulkAssignOpen(true) },
           ] as BatchAction[]}
+        />
+      )}
+
+      {/* The affected count, before anything is written. */}
+      {bulkConfirm && (
+        <ConfirmDialog
+          title={`${bulkConfirm.verb[0].toUpperCase()}${bulkConfirm.verb.slice(1)} ${batchSel.count} request${batchSel.count !== 1 ? 's' : ''}?`}
+          body={describeBulkPlan(batchSel.count, bulkConfirm.verb, 'request')}
+          confirmLabel="Apply"
+          onConfirm={() => { const run = bulkConfirm.run; setBulkConfirm(null); run() }}
+          onCancel={() => setBulkConfirm(null)}
         />
       )}
 

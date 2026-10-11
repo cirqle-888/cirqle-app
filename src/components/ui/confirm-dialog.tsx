@@ -1,6 +1,7 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
+import { useDialogFocus } from '@/lib/hooks/use-dialog-focus'
 
 export interface ConfirmModalProps {
   title: string
@@ -24,6 +25,12 @@ export function ConfirmDialog({
   title, body, confirmLabel, danger, requireTypedText, onConfirm, onCancel,
 }: ConfirmModalProps) {
   const [typed, setTyped] = useState('')
+  // Trap Tab inside the dialog and hand focus back on close. Neither happened
+  // before: Tab walked into the page behind the confirmation, and closing one
+  // left keyboard users at <body>. `danger` dialogs focus the container, so a
+  // held Enter cannot complete a destructive action.
+  const panelRef = useRef<HTMLDivElement>(null)
+  useDialogFocus(panelRef, { isConfirmation: !!danger || !!requireTypedText })
   // Trailing whitespace from a paste or an autocorrected space should not be
   // the thing standing between someone and a deliberate action.
   const unlocked = !requireTypedText || typed.trim() === requireTypedText.trim()
@@ -31,7 +38,13 @@ export function ConfirmDialog({
   return (
     <div className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in"
       onMouseDown={e => { if (e.target === e.currentTarget) onCancel() }}>
-      <div className="bg-background rounded-xl shadow-2xl p-6 max-w-sm w-full animate-in zoom-in-95">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
+        className="bg-background rounded-xl shadow-2xl p-6 max-w-sm w-full animate-in zoom-in-95 focus:outline-none"
+      >
         <h3 className="font-semibold text-sm mb-2">{title}</h3>
         <p className="text-sm text-muted-foreground mb-5 leading-relaxed">{body}</p>
 

@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { createAdminClient, fetchAll } from '@/lib/supabase/server'
+import { createAdminClient, fetchAll, columnExists } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { financialVisibility } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
@@ -34,11 +34,19 @@ export default async function ClientsPage() {
   // designations, 'legacy' (identical to today) for everyone else.
   const scope = await loadServiceScope(supabase, me, 'global')
 
+  // The department override needs 20261011120000_client_department. Probed
+  // (and cached) rather than guessed, because the two selects below already
+  // use a try/fallback pair for the draft columns, and folding a second
+  // optional column into it would make a database missing EITHER one lose
+  // BOTH features.
+  const hasDeptOverride = await columnExists(supabase, 'clients', 'department_id')
+
   const [clientsRes, invoicesRes, tasksRes, pricingRes, servicesRes] = await Promise.all([
     // Draft (trial) columns need 20261003100000_draft_clients; without them
     // the list loads as before and nothing shows as a draft.
     (async () => {
       const base = 'id, name, code, contact_name, email, phone, country, default_currency, is_active, pricing_pending, business_partner_id, created_at'
+        + (hasDeptOverride ? ', department_id' : '')
       const res = await fetchAll(supabase.from('clients')
         .select(`${base}, is_draft, draft_note, draft_created_at, draft_creator:employees!clients_draft_created_by_fkey(name)`)
         .order('name'))
@@ -125,6 +133,7 @@ export default async function ClientsPage() {
       services={scopeServiceList((servicesRes.data || []) as any[], scope)}
       departments={departments}
       clientDepartments={clientDepartments}
+      canSetDepartment={hasDeptOverride}
       showAmounts={showAmounts}
       canCreate={isAdmin || hasPermission(me, PERMS.CLIENTS_CREATE) || hasPermission(me, PERMS.SETTINGS_ACCESS)}
       canEdit={isAdmin || hasPermission(me, PERMS.CLIENTS_EDIT) || hasPermission(me, PERMS.SETTINGS_ACCESS)}

@@ -19,10 +19,9 @@ import {
   setRequestStatus, logRequestActivity, requestStatusFromTask, type RequestStatus,
 } from '@/lib/requests/core'
 import { notifyRequesterStatus } from '@/lib/requests/notify'
-import { logActivity } from '@/lib/activity/log'
 import { aiParse, findClient, findService, normalizeDate } from '@/lib/ai/request-capture'
 import {
-  BRAND_ONBOARDING_STEPS, REQUEST_KIND_CHECKLIST, REQUEST_KIND_REQUEST,
+  REQUEST_KIND_CHECKLIST, REQUEST_KIND_REQUEST,
   isChecklistRequest, type RequestKind,
 } from '@/lib/requests/kind'
 
@@ -354,79 +353,16 @@ export async function assignRequestEmployee(
 const OPEN_STATUSES = ['submitted', 'under_review', 'approved', 'started', 'in_progress', 'waiting_for_content', 'revision_requested']
 
 /**
- * Start a new brand: create the whole setup checklist for a client at once.
+ * Brand onboarding moved to the template engine.
  *
- * Nine items typed by hand is how steps get skipped, and a half-configured Meta
- * account is discovered weeks later when a post fails to publish. This writes
- * the standard list (lib/requests/kind) as checklist items, optionally all
- * assigned to one person, and reports how many it wrote.
- *
- * Idempotent by title: run it twice on the same client and the second run adds
- * only whatever is missing, so a brand that already has a Facebook page keeps
- * its ticked-off item instead of getting a duplicate.
+ * `createBrandOnboardingChecklist` lived here and wrote nine hard-coded setup
+ * steps for a client, skipping any it already had. That is now ONE built-in
+ * template (`lib/templates/actions.ts`, `BUILT_IN_TEMPLATES`) run through
+ * `runTemplate`, which keeps the same title-based skip rule and adds the
+ * preview and the relative due dates every other repeatable job needed. The
+ * step list itself is unchanged, still in `lib/requests/kind`.
  */
-export async function createBrandOnboardingChecklist(input: {
-  clientId: string
-  assignedEmployeeId?: string | null
-  dueDate?: string | null
-}): Promise<ActionResult<{ created: number; skipped: number }>> {
-  const guard = await requirePermission(PERMS.REQUESTS_MANAGE)
-  if (!guard.ok) return { ok: false, error: guard.error }
-  if (!input.clientId) return { ok: false, error: 'Pick a client first.' }
 
-  const admin = createAdminClient()
-
-  // What this client already has, so a re-run tops up rather than duplicates.
-  let existing = new Set<string>()
-  try {
-    const { data, error } = await admin
-      .from('task_requests')
-      .select('title')
-      .eq('client_id', input.clientId)
-      .eq('kind', REQUEST_KIND_CHECKLIST)
-    if (error) {
-      return { ok: false, error: 'Complimentary items need migration 20260829180000. Apply it, then try again.' }
-    }
-    existing = new Set((data ?? []).map((r: { title: string }) => r.title.trim().toLowerCase()))
-  } catch {
-    return { ok: false, error: 'Could not read this client\u2019s existing checklist.' }
-  }
-
-  const wanted = BRAND_ONBOARDING_STEPS.filter(
-    step => !existing.has(step.title.trim().toLowerCase()),
-  )
-  if (wanted.length === 0) {
-    return { ok: true, data: { created: 0, skipped: BRAND_ONBOARDING_STEPS.length } }
-  }
-
-  const now = new Date().toISOString()
-  const rows = wanted.map(step => ({
-    source: 'manual',
-    kind: REQUEST_KIND_CHECKLIST,
-    client_id: input.clientId,
-    title: step.title,
-    description: step.description,
-    status: 'submitted',
-    client_status: 'submitted',
-    priority: 'normal',
-    due_date: input.dueDate || null,
-    assigned_employee_id: input.assignedEmployeeId || null,
-    last_staff_viewed_at: now,
-  }))
-
-  const { error } = await admin.from('task_requests').insert(rows)
-  if (error) return { ok: false, error: error.message }
-
-  void logActivity({
-    actorId: guard.employeeId, entityType: 'client', entityId: input.clientId,
-    action: 'created', category: 'crm', clientId: input.clientId,
-    note: `Brand onboarding checklist started — ${rows.length} step${rows.length === 1 ? '' : 's'}`,
-    detail: { created: rows.length, skipped: BRAND_ONBOARDING_STEPS.length - rows.length },
-  })
-
-  revalidatePath(REVALIDATE)
-  return { ok: true, data: { created: rows.length, skipped: BRAND_ONBOARDING_STEPS.length - rows.length } }
-}
 export async function createManualRequest(input: {
   clientId: string
   title: string

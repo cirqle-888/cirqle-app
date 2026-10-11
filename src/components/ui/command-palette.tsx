@@ -6,7 +6,9 @@ import { globalSearch } from '@/lib/search/global-search'
 import { usePermissions } from '@/contexts/permission-context'
 import { useFavorites } from '@/contexts/favorites-context'
 import { useWorkspace } from '@/contexts/workspace-context'
-import { navSections, type NavItem } from '@/lib/nav-sections'
+import { navSections, isNavItemVisible, type NavItem } from '@/lib/nav-sections'
+import { openKeyboardGuide } from '@/components/ui/keyboard-guide'
+import { availableCreateShortcuts, canOpenSearchHref, matchesNavSearch, searchResultHref } from '@/lib/search/navigation'
 import { resolveFavoriteIcon, iconKeyFor } from '@/lib/favorites/icon-map'
 import { recordUsage, listFrequent, listRecent, type UsageItem } from '@/lib/quick-actions/actions'
 import { FavoriteToggle } from '@/components/ui/favorite-toggle'
@@ -150,21 +152,22 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
+  const [searchError, setSearchError] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const [dbResults, setDbResults] = useState<Result[]>([])
   const [frequent, setFrequent] = useState<UsageItem[]>([])
   const [recent, setRecent] = useState<UsageItem[]>([])
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const searchVersion = useRef(0)
+  const invalidateSearch = useCallback(() => ++searchVersion.current, [])
 
   // Every module/page the viewer has permission to reach — the full catalogue,
   // not a stale hand-picked subset. Workspace-restricted hrefs (if any) are
   // ranked first, never hidden — Quick Actions can always reach anything
   // Search results should be able to reach, per spec.
   const allNavItems: NavItem[] = useMemo(
-    () => navSections.flatMap(s => s.items).filter(i =>
-      (!i.requiredPerm || can(i.requiredPerm)) && (!i.adminOnly || user.isAdmin)
-    ),
+    () => navSections.flatMap(s => s.items).filter(i => isNavItemVisible(i, can, user.isAdmin)),
     [can, user.isAdmin],
   )
   const workspaceHrefs = activeWorkspace.sidebarModuleHrefs
@@ -198,127 +201,139 @@ export function CommandPalette() {
       setDbResults([])
       setActiveIndex(0)
       requestAnimationFrame(() => inputRef.current?.focus())
-      void listFrequent().then(setFrequent)
-      void listRecent().then(setRecent)
+      void listFrequent().then(setFrequent).catch(() => setFrequent([]))
+      void listRecent().then(setRecent).catch(() => setRecent([]))
     }, 0)
     return () => clearTimeout(t)
   }, [open])
 
   // ── DB search ─────────────────────────────────────────────────────────────
-  const search = useCallback(async (q: string) => {
+  const search = useCallback(async (q: string, version: number) => {
+    if (version !== searchVersion.current) return
+    setSearchError(false)
     if (!q.trim()) { setDbResults([]); setLoading(false); return }
     setLoading(true)
+    try {
+      // Server action, NOT browser-side supabase: search is the discovery layer,
+      // so results are permission-gated and department-scoped on the server
+      // (see src/lib/search/global-search.ts). The anon-key queries this
+      // replaced surfaced payroll, cashbook and out-of-department clients to
+      // any signed-in employee.
+      const { tasks: tasksData, invoices: invoicesData, clients: clientsData, employees: employeesData,
+        projects: projectsData, quotations: quotationsData, payroll: payrollData, cashbook: cashbookData } =
+        await globalSearch(q)
 
-    // Server action, NOT browser-side supabase: search is the discovery layer,
-    // so results are permission-gated and department-scoped on the server
-    // (see src/lib/search/global-search.ts). The anon-key queries this
-    // replaced surfaced payroll, cashbook and out-of-department clients to
-    // any signed-in employee.
-    const { tasks: tasksData, invoices: invoicesData, clients: clientsData, employees: employeesData,
-      projects: projectsData, quotations: quotationsData, payroll: payrollData, cashbook: cashbookData } =
-      await globalSearch(q)
+      const results: Result[] = []
 
-    const results: Result[] = []
+      for (const t of tasksData) {
+        const client = Array.isArray(t.client) ? t.client[0] : t.client
+        results.push({
+          id: `task-${t.id}`,
+          kind: 'task',
+          label: t.title,
+          sublabel: `${client?.name ?? 'No client'} · ${t.task_date}`,
+          badge: capitalize(t.status),
+          badgeColor: taskBadgeColor(t.status),
+          href: searchResultHref('task', t.id, t.title),
+        })
+      }
 
-    for (const t of tasksData) {
-      const client = Array.isArray(t.client) ? t.client[0] : t.client
-      results.push({
-        id: `task-${t.id}`,
-        kind: 'task',
-        label: t.title,
-        sublabel: `${client?.name ?? 'No client'} · ${t.task_date}`,
-        badge: capitalize(t.status),
-        badgeColor: taskBadgeColor(t.status),
-        href: `/dashboard/tasks`,
-      })
+      for (const inv of invoicesData) {
+        const client = Array.isArray(inv.client) ? inv.client[0] : inv.client
+        results.push({
+          id: `invoice-${inv.id}`,
+          kind: 'invoice',
+          label: inv.invoice_number,
+          sublabel: client?.name ?? 'Unknown client',
+          badge: capitalize(inv.status),
+          badgeColor: invoiceBadgeColor(inv.status),
+          href: searchResultHref('invoice', inv.id),
+        })
+      }
+
+      for (const c of clientsData) {
+        results.push({
+          id: `client-${c.id}`,
+          kind: 'client',
+          label: c.name,
+          sublabel: c.code ? `Code: ${c.code}` : undefined,
+          href: searchResultHref('client', c.id),
+        })
+      }
+
+      for (const e of employeesData) {
+        results.push({
+          id: `employee-${e.id}`,
+          kind: 'employee',
+          label: e.name,
+          sublabel: e.email,
+          href: `/dashboard/payroll`,
+        })
+      }
+
+      for (const p of projectsData) {
+        const client = Array.isArray(p.client) ? p.client[0] : p.client
+        results.push({
+          id: `project-${p.id}`,
+          kind: 'project',
+          label: p.campaign_name,
+          sublabel: client?.name ?? 'Unknown client',
+          href: searchResultHref('project', p.id),
+        })
+      }
+
+      for (const q of quotationsData) {
+        const client = Array.isArray(q.client) ? q.client[0] : q.client
+        results.push({
+          id: `quotation-${q.id}`,
+          kind: 'quotation',
+          label: q.quotation_number,
+          sublabel: `${client?.name ?? 'Unknown client'} · ${q.status}`,
+          href: `/dashboard/quotations`,
+        })
+      }
+
+      for (const pr of payrollData) {
+        const emp = Array.isArray(pr.employee) ? pr.employee[0] : pr.employee
+        results.push({
+          id: `payroll-${pr.id}`,
+          kind: 'payroll',
+          label: pr.payslip_number || `Payslip`,
+          sublabel: `${emp?.name ?? 'Unknown employee'} · ${pr.month}/${pr.year}`,
+          badge: capitalize(pr.status || ''),
+          href: `/dashboard/payroll`,
+        })
+      }
+
+      for (const cb of cashbookData) {
+        results.push({
+          id: `cashbook-${cb.id}`,
+          kind: 'cashbook',
+          label: cb.description || 'Entry',
+          sublabel: `${cb.entry_date} · Amount: ${cb.amount}`,
+          href: searchResultHref('cashbook', cb.id),
+        })
+      }
+
+      if (version === searchVersion.current) setDbResults(results)
+    } catch {
+      if (version === searchVersion.current) {
+        setDbResults([])
+        setSearchError(true)
+      }
+    } finally {
+      if (version === searchVersion.current) setLoading(false)
     }
-
-    for (const inv of invoicesData) {
-      const client = Array.isArray(inv.client) ? inv.client[0] : inv.client
-      results.push({
-        id: `invoice-${inv.id}`,
-        kind: 'invoice',
-        label: inv.invoice_number,
-        sublabel: client?.name ?? 'Unknown client',
-        badge: capitalize(inv.status),
-        badgeColor: invoiceBadgeColor(inv.status),
-        href: `/dashboard/invoices`,
-      })
-    }
-
-    for (const c of clientsData) {
-      results.push({
-        id: `client-${c.id}`,
-        kind: 'client',
-        label: c.name,
-        sublabel: c.code ? `Code: ${c.code}` : undefined,
-        href: `/dashboard/tasks?client=${c.id}`,
-      })
-    }
-
-    for (const e of employeesData) {
-      results.push({
-        id: `employee-${e.id}`,
-        kind: 'employee',
-        label: e.name,
-        sublabel: e.email,
-        href: `/dashboard/payroll`,
-      })
-    }
-
-    for (const p of projectsData) {
-      const client = Array.isArray(p.client) ? p.client[0] : p.client
-      results.push({
-        id: `project-${p.id}`,
-        kind: 'project',
-        label: p.campaign_name,
-        sublabel: client?.name ?? 'Unknown client',
-        href: `/dashboard/advertising`,
-      })
-    }
-
-    for (const q of quotationsData) {
-      const client = Array.isArray(q.client) ? q.client[0] : q.client
-      results.push({
-        id: `quotation-${q.id}`,
-        kind: 'quotation',
-        label: q.quotation_number,
-        sublabel: `${client?.name ?? 'Unknown client'} · ${q.status}`,
-        href: `/dashboard/quotations`,
-      })
-    }
-
-    for (const pr of payrollData) {
-      const emp = Array.isArray(pr.employee) ? pr.employee[0] : pr.employee
-      results.push({
-        id: `payroll-${pr.id}`,
-        kind: 'payroll',
-        label: pr.payslip_number || `Payslip`,
-        sublabel: `${emp?.name ?? 'Unknown employee'} · ${pr.month}/${pr.year}`,
-        badge: capitalize(pr.status || ''),
-        href: `/dashboard/payroll`,
-      })
-    }
-
-    for (const cb of cashbookData) {
-      results.push({
-        id: `cashbook-${cb.id}`,
-        kind: 'cashbook',
-        label: cb.description || 'Entry',
-        sublabel: `${cb.entry_date} · Amount: ${cb.amount}`,
-        href: `/dashboard/cashbook`,
-      })
-    }
-
-    setDbResults(results)
-    setLoading(false)
   }, [])
 
   useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => search(query), 200)
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [query, search])
+    const version = invalidateSearch()
+    if (open) debounceRef.current = setTimeout(() => { void search(query, version) }, 200)
+    return () => {
+      invalidateSearch()
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [query, search, open, invalidateSearch])
 
   // ── Build visible list ────────────────────────────────────────────────────
   const { sections, flat } = useMemo(() => {
@@ -370,15 +385,11 @@ export function CommandPalette() {
       sections.push({
         label: 'Quick Actions',
         icon: Plus,
-        items: [
-          { id: 'qa-task', kind: 'action', label: 'Create new task', href: '/dashboard/tasks?new=true' },
-          { id: 'qa-invoice', kind: 'action', label: 'Create new invoice', href: '/dashboard/invoices?new=true' },
-          { id: 'qa-quotation', kind: 'action', label: 'Create new quotation', href: '/dashboard/quotations?new=true' },
-          { id: 'qa-cashbook', kind: 'action', label: 'Add cashbook entry', href: '/dashboard/cashbook?new=true' },
-        ],
+        items: availableCreateShortcuts(can, user.isAdmin, user.isViewAs)
+          .map(item => ({ ...item, kind: 'action' as const })),
       })
     } else {
-      const navFiltered = sortedNavItems.filter(n => n.label.toLowerCase().includes(q))
+      const navFiltered = sortedNavItems.filter(n => matchesNavSearch(n, q))
       if (navFiltered.length > 0) {
         sections.push({
           label: 'Pages',
@@ -409,9 +420,15 @@ export function CommandPalette() {
       }
     }
 
-    const flat = sections.flatMap(s => s.items)
-    return { sections, flat }
-  }, [query, dbResults, favorites, frequent, recent, sortedNavItems])
+    // Saved links may outlive a permission change. Apply the same route gate
+    // as the sidebar to history, favorites and record results as well.
+    const visibleSections = sections.map(section => ({
+      ...section,
+      items: section.items.filter(item => canOpenSearchHref(item.href, can, user.isAdmin, user.isViewAs)),
+    })).filter(section => section.items.length > 0)
+    const flat = visibleSections.flatMap(s => s.items)
+    return { sections: visibleSections, flat }
+  }, [query, dbResults, favorites, frequent, recent, sortedNavItems, can, user.isAdmin, user.isViewAs])
 
   // ── Keyboard nav ──────────────────────────────────────────────────────────
   function onKeyDown(e: React.KeyboardEvent) {
@@ -434,7 +451,7 @@ export function CommandPalette() {
       label: result.label,
       href: result.href,
       workspaceId: activeWorkspace.isSystem ? null : activeWorkspace.id,
-    })
+    }).catch(() => {})
     router.push(result.href)
     setOpen(false)
   }
@@ -461,9 +478,16 @@ export function CommandPalette() {
           <input
             ref={inputRef}
             value={query}
-            onChange={e => setQuery(e.target.value)}
+            onChange={e => {
+              ++searchVersion.current
+              setDbResults([])
+              setSearchError(false)
+              setLoading(!!e.target.value.trim())
+              setQuery(e.target.value)
+            }}
             onKeyDown={onKeyDown}
             role="combobox"
+            aria-label="Search Cirqle"
             aria-expanded="true"
             aria-controls="command-palette-results"
             aria-activedescendant={flat[activeIndex] ? `command-palette-option-${activeIndex}` : undefined}
@@ -475,7 +499,7 @@ export function CommandPalette() {
               <div className="w-3.5 h-3.5 border-2 border-violet-500/40 border-t-violet-500 rounded-full animate-spin" />
             )}
             {query && (
-              <button type="button" onClick={() => setQuery('')} className="text-muted-foreground/50 hover:text-foreground transition-colors">
+              <button type="button" aria-label="Clear search" onClick={() => { ++searchVersion.current; setQuery(''); setDbResults([]); setSearchError(false); setLoading(false); inputRef.current?.focus() }} className="text-muted-foreground/50 hover:text-foreground transition-colors">
                 <X className="w-4 h-4" />
               </button>
             )}
@@ -486,8 +510,14 @@ export function CommandPalette() {
         </div>
 
         {/* Results */}
+        {searchError && (
+          <div role="status" className="px-4 py-3 text-sm text-muted-foreground border-b border-border flex items-center justify-between gap-3">
+            <span>Records couldn’t be loaded. You can still open pages.</span>
+            <button type="button" className="shrink-0 font-medium text-primary" onClick={() => { void search(query, ++searchVersion.current) }}>Retry</button>
+          </div>
+        )}
         <div id="command-palette-results" role="listbox" aria-label="Search results" className="max-h-[420px] overflow-y-auto py-1.5 overscroll-contain">
-          {flat.length === 0 && !loading && (
+          {flat.length === 0 && !loading && !searchError && (
             <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground/40">
               <AlertCircle className="w-8 h-8 opacity-30" />
               <span className="text-sm">{query ? `No results for "${query}"` : 'Start typing to search…'}</span>
@@ -516,13 +546,20 @@ export function CommandPalette() {
           })()}
         </div>
 
-        {/* Footer hint */}
+        {/* Footer hint. The `?` is the only discovery route to the full
+            shortcut list, so it is stated here rather than left to chance. */}
         <div className="flex items-center justify-between px-4 py-2.5 border-t border-foreground/[0.06] text-[10px] text-muted-foreground/30 font-mono">
           <div className="flex items-center gap-3">
             <span>↑↓ navigate</span>
             <span>↵ open</span>
           </div>
-          <span>⌘K to toggle</span>
+          <button
+            type="button"
+            onClick={() => { setOpen(false); openKeyboardGuide() }}
+            className="font-mono hover:text-muted-foreground transition-colors cursor-pointer"
+          >
+            ? all shortcuts
+          </button>
         </div>
       </div>
     </div>

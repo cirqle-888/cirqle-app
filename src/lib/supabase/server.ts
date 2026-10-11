@@ -222,6 +222,8 @@ const MISSING_TABLES_LOGGED = new Set<string>()
  * Run a single (non-paginated) query against a table that may not exist yet
  * (unapplied migration). Skips the network entirely on subsequent calls once
  * absence is known — eliminating the 50-200ms wasted round-trip per page nav.
+ * Unexpected failures must reach the page's error boundary: rendering empty
+ * assignments or packages would misrepresent the underlying records.
  *
  * Usage:
  *   safeQuery('task_assignments', supabase.from('task_assignments').select('task_id, employee_id'))
@@ -239,6 +241,9 @@ export async function safeQuery<T = any>(
       console.warn(`[safeQuery] Table "${table}" not found — caching absence; queries for this table will return [] until server restart.`)
     }
     return { data: [], error: null }
+  }
+  if (error) {
+    throw new Error(`Unable to load ${table}. Please try again.`, { cause: error })
   }
   return { data: (data ?? []) as T[], error: null }
 }

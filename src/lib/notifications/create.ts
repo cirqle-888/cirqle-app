@@ -85,17 +85,17 @@ export async function createNotification(input: NotificationContent & { employee
 export async function notifyAdmins(input: NotificationContent): Promise<void> {
   try {
     const admin = createAdminClient()
-    // Admin = designation.is_admin = true, OR no designation at all
-    // (pre-migration fallback — mirrors the same rule in lib/permissions/check.ts).
+    // Only an explicit admin designation receives administrative notifications.
     const { data: employees, error: empErr } = await admin
       .from('employees')
       .select('id, designation_id, designation:designation_id(is_admin)')
       .eq('is_active', true)
+      .eq('is_archived', false)
     if (empErr || !employees) { console.warn('notifyAdmins: could not list employees:', empErr?.message); return }
 
     type EmployeeRow = { id: string; designation_id: string | null; designation: { is_admin: boolean } | { is_admin: boolean }[] | null }
     const adminIds = (employees as EmployeeRow[])
-      .filter(e => !e.designation_id || (Array.isArray(e.designation) ? e.designation[0]?.is_admin : e.designation?.is_admin) === true)
+      .filter(e => (Array.isArray(e.designation) ? e.designation[0]?.is_admin : e.designation?.is_admin) === true)
       .map(e => e.id)
     if (!adminIds.length) return
 
@@ -108,6 +108,7 @@ export async function notifyAdmins(input: NotificationContent): Promise<void> {
       source_key: input.sourceKey ?? null,
     }))
     const { error } = await admin.from('notifications').insert(rows)
+    const insertedIds = error ? [] : [...adminIds]
     // Bulk insert: a single duplicate-key row aborts the whole batch under
     // default Postgres behavior, so on conflict fall back to per-row inserts
     // (each independently no-ops on its own duplicate).
@@ -116,13 +117,15 @@ export async function notifyAdmins(input: NotificationContent): Promise<void> {
         for (const row of rows) {
           const { error: rowErr } = await admin.from('notifications').insert(row)
           if (rowErr && rowErr.code !== '23505') console.warn('notifyAdmins row failed:', rowErr.message)
+          if (!rowErr) insertedIds.push(row.employee_id)
         }
       } else {
         console.warn('notifyAdmins failed:', error.message)
       }
     }
-    // Web push each admin's devices (best-effort).
-    for (const employeeId of adminIds) {
+    // Only newly inserted notifications may push. Retries must not re-alert
+    // admins about records already delivered or failed writes.
+    for (const employeeId of insertedIds) {
       void sendWebPush(employeeId, {
         title: input.title,
         body: input.message ?? undefined,
@@ -144,11 +147,12 @@ export async function notifyAdminsBatch(inputs: NotificationContent[]): Promise<
       .from('employees')
       .select('id, designation_id, designation:designation_id(is_admin)')
       .eq('is_active', true)
+      .eq('is_archived', false)
     if (empErr || !employees) { console.warn('notifyAdminsBatch: could not list employees:', empErr?.message); return }
 
     type EmployeeRow = { id: string; designation_id: string | null; designation: { is_admin: boolean } | { is_admin: boolean }[] | null }
     const adminIds = (employees as EmployeeRow[])
-      .filter(e => !e.designation_id || (Array.isArray(e.designation) ? e.designation[0]?.is_admin : e.designation?.is_admin) === true)
+      .filter(e => (Array.isArray(e.designation) ? e.designation[0]?.is_admin : e.designation?.is_admin) === true)
       .map(e => e.id)
     if (!adminIds.length) return
 
@@ -168,30 +172,28 @@ export async function notifyAdminsBatch(inputs: NotificationContent[]): Promise<
     
     // Attempt bulk insert; ignores 23505 constraints via fallback.
     const { error } = await admin.from('notifications').insert(rows)
+    const insertedRows: typeof rows = error ? [] : [...rows]
     if (error) {
       if (error.code === '23505') {
         for (const row of rows) {
           const { error: rowErr } = await admin.from('notifications').insert(row)
           if (rowErr && rowErr.code !== '23505') console.warn('notifyAdminsBatch row failed:', rowErr.message)
+          if (!rowErr) insertedRows.push(row)
         }
       } else {
         console.warn('notifyAdminsBatch failed:', error.message)
       }
     }
     
-    // Web push each admin's devices for each notification
-    for (const employeeId of adminIds) {
-      for (const input of inputs) {
-        void sendWebPush(employeeId, {
-          title: input.title,
-          body: input.message ?? undefined,
-          url: input.link ?? '/dashboard',
-          tag: input.sourceKey ?? undefined,
-        })
-      }
+    for (const row of insertedRows) {
+      void sendWebPush(row.employee_id, {
+        title: row.title,
+        body: row.message ?? undefined,
+        url: row.link ?? '/dashboard',
+        tag: row.source_key ?? undefined,
+      })
     }
   } catch (err) {
     console.warn('notifyAdminsBatch threw:', err)
   }
 }
-

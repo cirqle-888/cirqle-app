@@ -5,6 +5,7 @@ import { financialVisibility, stripTaskListPricing, userCanSee } from '@/lib/per
 import { TASK_COLUMNS_NO_PRICING, TASK_JOINS } from '@/lib/tasks/select-columns'
 import { PERMS } from '@/lib/permissions/keys'
 import { resolveTaskVisibilityMode, fetchEmployeeServiceIds, filterTasksByVisibility } from '@/lib/tasks/visibility'
+import { matchesTaskRef } from '@/lib/navigation/focus-record'
 import { loadUnitScope, scopeTasksByUnit, unitTaskIdsFrom } from '@/lib/scope/unit-scope'
 import { loadServiceScope } from '@/lib/scope/service-scope'
 import { visibleEmployeeIds, scopeEmployeeList, stripEmployeeNames } from '@/lib/scope/employee-scope'
@@ -55,6 +56,9 @@ function historyCutoffISO(months: number): string {
 // any client `.limit()` value. To fetch the working set we paginate with
 // `.range()` in chunks of 1,000 until we hit a partial page. Capped at 50,000
 // as a runaway-safety guard (10× more than any real agency should hit).
+/** The two spellings a `?task=` deep link can be matched against. */
+type TaskRef = { id?: string | null; task_number?: number | string | null }
+
 async function fetchAllTasks(
   supabase: ReturnType<typeof createAdminClient>,
   hasDeletedAt: boolean,
@@ -453,7 +457,9 @@ export default async function TasksPage({
   } catch { /* portal not migrated */ }
 
   // ?q=… deep link (e.g. "View Task #42" from a request) pre-fills the search.
-  const initialSearch = typeof sp?.q === 'string' ? sp.q : ''
+  // `?task=` (resolved further down) may override it with the exact task
+  // number, which matches one row instead of every row sharing a word.
+  let focusSearch = ''
 
   // Structured deep link, used by the Packages page to open exactly the work a
   // package covers: ?client=<id>&service=<id>&from=<date>&to=<date>. A name in
@@ -463,6 +469,55 @@ export default async function TasksPage({
   const initialService = one('service')
   const from = one('from'), to = one('to')
   const initialDateRange = from && to ? { from, to } : null
+
+  // ── Complete record navigation (`?task=<id|number>`) ──────────────────────
+  // A link to one specific task — from a request, a chat message, a chip
+  // someone copied — used to depend on that task happening to fall inside the
+  // rolling history window. Outside it, the screen searched for a row that was
+  // never fetched and showed "no results".
+  //
+  // So resolve exactly that one task, and only when it is not already here.
+  // It goes through the SAME select and the SAME downstream pipeline as every
+  // other row — stripTaskListPricing, filterTasksByVisibility, scopeToUnit —
+  // so reaching an old task can never reach a task this viewer may not see.
+  // One row, not `?history=all`: the window stays where it is.
+  const focusTaskRef = one('task')
+  let focusTaskMissing = false
+  if (focusTaskRef) {
+    const already = (initialTasks as TaskRef[]).find(t => matchesTaskRef(t, focusTaskRef))
+    if (already) {
+      // In the window already — just put it in front of the user.
+      focusSearch = String(already.task_number ?? '')
+    } else {
+      try {
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(focusTaskRef)
+        const asNumber = focusTaskRef.replace(/^#/, '')
+        let q = supabase.from('tasks').select(selectClause).limit(1)
+        if (isUuid) q = q.eq('id', focusTaskRef)
+        else if (/^\d+$/.test(asNumber)) q = q.eq('task_number', Number(asNumber))
+        else q = q.eq('id', focusTaskRef) // no plausible spelling; let it miss
+        if (hasDeletedAt) q = q.is('deleted_at', null)
+        const { data: found } = await q
+        const survivors = scopeToUnit(filterTasksByVisibility(
+          stripTaskListPricing((found || []) as unknown as Record<string, unknown>[], vis.tasksPricing),
+          visibilityMode, myServiceIds, myTaskIds,
+        ))
+        if (survivors.length) {
+          // Appended, not prepended: the list sorts itself, and the search
+          // prefill is what actually surfaces it.
+          initialTasks.push(...survivors)
+          focusSearch = String((survivors[0] as TaskRef).task_number ?? '')
+        } else {
+          // Either it does not exist or this viewer may not see it. The notice
+          // says the same thing for both, so the screen never confirms the
+          // existence of a task outside someone's scope.
+          focusTaskMissing = true
+        }
+      } catch {
+        focusTaskMissing = true
+      }
+    }
+  }
 
   // ── Service catalogue, scoped the same way tasks are ──────────────────────
   // Task ROWS were already filtered by service, but the catalogue behind the
@@ -510,7 +565,8 @@ export default async function TasksPage({
       promotionSocialItem={promotionSocialItem}
       requestRefByTaskId={requestRefByTaskId}
       pendingRequestCount={pendingRequestCount}
-      initialSearch={initialSearch}
+      initialSearch={focusSearch || (typeof sp?.q === 'string' ? sp.q : '')}
+      focusTaskMissing={focusTaskMissing}
       initialClient={initialClient}
       initialService={initialService}
       initialDateRange={initialDateRange}

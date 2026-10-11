@@ -15,13 +15,8 @@ import Link from 'next/link'
 import { GripVertical, X, type LucideIcon } from 'lucide-react'
 import { useFavorites } from '@/contexts/favorites-context'
 import { usePermissions } from '@/contexts/permission-context'
-import { navSections, isNavItemVisible, type NavItem } from '@/lib/nav-sections'
-
-/** href → nav item, so a pinned page can be checked against the same gate the
- *  sidebar uses. Built once: navSections is a module constant. */
-const NAV_ITEM_BY_HREF = new Map<string, NavItem>(
-  navSections.flatMap(s => s.items.map(i => [i.href, i] as const)),
-)
+import { canOpenHref } from '@/lib/nav-sections'
+import { SAVED_VIEW_ENTITY_TYPE } from '@/lib/saved-views/model'
 import { resolveFavoriteIcon } from '@/lib/favorites/icon-map'
 import type { FavoriteEntry } from '@/lib/favorites/queries'
 
@@ -102,13 +97,20 @@ export function FavoritesSection({
   // this list was not, which meant a stale pin rendered a link the router then
   // refused — looking like a permission leak.
   //
-  // Gated with the SAME helper the sidebar, launcher and command palette use,
-  // so the two can never disagree. A pin to something outside navSections
-  // (a record, not a page) has no permission to check and is left alone.
-  const visibleFavorites = favorites.filter(fav => {
-    const item = NAV_ITEM_BY_HREF.get(fav.href)
-    return !item || isNavItemVisible(item, can, user.isAdmin)
-  })
+  // Gated with `canOpenHref` — the same rule the dashboard layout's
+  // denied-route guard applies — so a rendered pin can never lead somewhere
+  // the router then bounces. An exact-href lookup was not enough: it missed
+  // every pin carrying a query string (a record deep-link, and now a saved
+  // view), because `/dashboard/invoices?status=overdue` is not a nav href.
+  // `canOpenHref` strips the query and resolves the most specific nav item,
+  // so those are gated too. A pin to something outside navSections has no
+  // permission to check and is left alone.
+  //
+  // Saved views are favourites rows as well, but they belong to the screen
+  // whose filters they restore and render as chips there — not in this list.
+  const visibleFavorites = favorites.filter(fav =>
+    fav.entityType !== SAVED_VIEW_ENTITY_TYPE && canOpenHref(fav.href, can, user.isAdmin),
+  )
 
   if (visibleFavorites.length === 0) return null
 

@@ -15,6 +15,8 @@ import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
 import { seedFromTasks } from '@/lib/hooks/use-smart-sort'
 import { useRole } from '@/contexts/role-context'
+import { usePermissions } from '@/contexts/permission-context'
+import { useCreateShortcut } from '@/lib/hooks/use-create-shortcut'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
 import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
@@ -26,8 +28,54 @@ import { Label } from '@/components/ui/label'
 import { FormField, FormLabel, FormControl } from '@/components/ui/form'
 import dynamic from 'next/dynamic'
 import { daysFromTodayISO, todayISO } from '@/lib/utils/local-date'
+import { useFormDraft } from '@/lib/drafts/use-form-draft'
+import { useScrollRestore } from '@/lib/lists/use-scroll-restore'
+import {
+  IDLE, SAVING, failed, canSubmit, submitLabel, missingRequired, requiredFieldMessage,
+  type SubmitState,
+} from '@/lib/forms/submit-state'
+import { FormStatus } from '@/components/ui/form-status'
+import { DraftRecoveryBanner, DraftSavedHint } from '@/components/ui/draft-recovery'
 
 const ClientEditModal = dynamic(() => import('@/components/ui/client-edit-modal').then(mod => mod.ClientEditModal), { ssr: false })
+
+/**
+ * A blank quotation form.
+ *
+ * Extracted from the two places that built it inline so the draft layer has
+ * something to compare against: the form opens pre-filled (today's date,
+ * INR, standard terms, one empty line), so "is there a draft worth keeping?"
+ * cannot be answered by asking whether any field is non-empty.
+ */
+function emptyQuotationForm() {
+  return {
+    client_id: '',
+    currency: 'INR' as Currency,
+    issue_date: todayISO(),
+    valid_until: daysFromTodayISO(30),
+    notes: '',
+    terms: 'Payment due within 7 days of approval.',
+    items: [{ description: '', quantity: 1, unit_price: 0, total: 0 }] as QuotationItem[],
+  }
+}
+
+type QuotationForm = ReturnType<typeof emptyQuotationForm>
+
+/**
+ * Has the user actually started a quotation?
+ *
+ * The dates are ignored: they are derived from today, so a draft saved
+ * yesterday would otherwise always look "edited" when reopened today, and an
+ * untouched form would autosave itself on the stroke of midnight.
+ */
+function quotationFormStarted(form: QuotationForm): boolean {
+  const blank = emptyQuotationForm()
+  if (form.client_id) return true
+  if (form.notes.trim()) return true
+  if (form.currency !== blank.currency) return true
+  if (form.terms.trim() !== blank.terms) return true
+  return form.items.some(i => i.description.trim() || i.unit_price > 0 || i.quantity !== 1)
+}
 
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
@@ -177,7 +225,12 @@ async function generateInvoiceNumber(
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function QuotationsClient({ initialQuotations, clients: initialClients }: Props) {
+  // Coming back from a record lands where the list was left, not at the top.
+  // See lib/lists/scroll-restore for the rules.
+  useScrollRestore('quotations')
+
   const { role } = useRole()
+  const { can, user: permissionUser } = usePermissions()
   const isSuperAdmin = role === 'super_admin'
   const router = useRouter()
   const pathname = usePathname()
@@ -188,8 +241,12 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
   const [quotations, setQuotations] = useState<Quotation[]>(initialQuotations)
   const [clients, setClients] = useState<ClientRow[]>(initialClients)
   const [showForm, setShowForm] = useState(false)
+  useCreateShortcut(can('billing.edit') && !permissionUser.isViewAs, () => setShowForm(true))
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
+  // Shared save/pending/error vocabulary — see lib/forms/submit-state. This
+  // form previously tracked a bare `saving` boolean and, on a failed insert,
+  // showed the user nothing at all.
+  const [submit, setSubmit] = useState<SubmitState>(IDLE)
   // Tokenized search facets (field-scoped + operators) + live draft.
   const [searchFacets, setSearchFacets] = useState<SearchFacet[]>(() => {
     try { const raw = searchParams.get('sf'); return raw ? JSON.parse(raw) : [] } catch { return [] }
@@ -225,14 +282,14 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
     default_currency: 'INR' as Currency,
   })
 
-  const [form, setForm] = useState({
-    client_id: '',
-    currency: 'INR' as Currency,
-    issue_date: todayISO(),
-    valid_until: daysFromTodayISO(30),
-    notes: '',
-    terms: 'Payment due within 7 days of approval.',
-    items: [{ description: '', quantity: 1, unit_price: 0, total: 0 }] as QuotationItem[],
+  const [form, setForm] = useState<QuotationForm>(emptyQuotationForm)
+
+  // Unsent quotation drafts survive a refresh or an interrupted session.
+  // Autosave runs only while the modal is open, and submission is unchanged —
+  // a restored draft still goes through the same insert and the same checks.
+  const draft = useFormDraft<QuotationForm>('quotation.new', form, {
+    enabled: showForm,
+    isMeaningful: quotationFormStarted,
   })
 
   const supabase = createClient()
@@ -306,9 +363,23 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
   const totalAmount = form.items.reduce((s, i) => s + (i.total || 0), 0)
 
   // ── Submit new quotation ─────────────────────────────────────────────────
+  /** Named so the message can quote the labels the form itself uses. */
+  const REQUIRED_FIELDS = [
+    { key: 'client_id', label: 'Client' },
+    { key: 'issue_date', label: 'Issue date' },
+  ]
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setSaving(true)
+
+    const missing = requiredFieldMessage(missingRequired(form, REQUIRED_FIELDS))
+    if (missing) { setSubmit(failed(missing)); return }
+    if (!form.items.some(i => i.description.trim())) {
+      setSubmit(failed('Add at least one line with a description.'))
+      return
+    }
+
+    setSubmit(SAVING)
     const client = clients.find(c => c.id === form.client_id)
     const quotationNumber = generateQuotationNumber(new Date(form.issue_date), client?.code || '001')
 
@@ -342,17 +413,14 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
       if (itemInserts.length) await supabase.from('quotation_items').insert(itemInserts)
       setQuotations(prev => [{ ...quo, items: form.items }, ...prev])
       setShowForm(false)
-      setForm({
-        client_id: '',
-        currency: 'INR',
-        issue_date: todayISO(),
-        valid_until: daysFromTodayISO(30),
-        notes: '',
-        terms: 'Payment due within 7 days of approval.',
-        items: [{ description: '', quantity: 1, unit_price: 0, total: 0 }],
-      })
+      setForm(emptyQuotationForm())
+      draft.clear() // the quotation exists now; the draft would only confuse
+      setSubmit(IDLE)
+      return
     }
-    setSaving(false)
+    // Previously a silent no-op: the modal stayed open with no indication that
+    // anything had failed.
+    setSubmit(failed(error?.message))
   }
 
   // Approving or rejecting is an outcome, not a step: Approved unlocks
@@ -797,6 +865,8 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
             </div>
 
             <form onSubmit={handleSubmit} className="p-6 space-y-6">
+              <DraftRecoveryBanner draft={draft} onRestore={setForm} label="Unsent quotation" />
+
               {/* Client + Currency row */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="Client" required>
@@ -1000,23 +1070,29 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
               </Field>
 
               {/* Actions */}
-              <div className="flex gap-3 pt-4 border-t border-border">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setShowForm(false)}
-                  className="flex-1"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={saving || !form.client_id}
-                  loading={saving}
-                  className="flex-1 gradient-bg text-white"
-                >
-                  {saving ? 'Creating…' : 'Create Quotation'}
-                </Button>
+              <div className="pt-4 border-t border-border space-y-2">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <FormStatus state={submit} />
+                  <DraftSavedHint draft={draft} />
+                </div>
+                <div className="flex gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowForm(false)}
+                    className="flex-1"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={!canSubmit(submit, !!form.client_id)}
+                    loading={submit.status === 'saving'}
+                    className="flex-1 gradient-bg text-white"
+                  >
+                    {submitLabel(submit, { idle: 'Create Quotation', saving: 'Creating…' })}
+                  </Button>
+                </div>
               </div>
             </form>
           </div>

@@ -11,6 +11,8 @@ import { useCopy } from '@/lib/hooks/use-copy'
 import Header from '@/components/layout/header'
 import { RequestApprovalDialog } from '@/components/approvals/request-approval-dialog'
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
+import { SavedViews } from '@/components/ui/saved-views'
+import { useScrollRestore } from '@/lib/lists/use-scroll-restore'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
 import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
 import {
@@ -45,6 +47,7 @@ import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useRole } from '@/contexts/role-context'
+import { useCreateShortcut } from '@/lib/hooks/use-create-shortcut'
 import { computeMarkup, type MarkupType } from '@/lib/finance/markup'
 import { usePermissions } from '@/contexts/permission-context'
 import { PERMS, RECORD_PAYMENT_PERMS } from '@/lib/permissions/keys'
@@ -287,6 +290,10 @@ function findLinkedCashbookEntry(inv: Invoice, p: Payment) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function InvoicesClient({ initialInvoices, clients, draftClientIds = [], bankAccounts, cashbookCategories, services, companySettings, exchangeRates, visibility, agreementBreakdowns }: Props) {
+  // Coming back from a record lands where the list was left, not at the top.
+  // See lib/lists/scroll-restore for the rules.
+  useScrollRestore('invoices')
+
   const showAmounts     = visibility.amounts
   const showTotals      = visibility.totals
   const showLinePricing = visibility.linePricing
@@ -467,6 +474,10 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
 
   // Panel modes
   const [panelMode, setPanelMode] = useState<'detail' | 'pay' | 'new' | 'generate' | 'batch_generate' | 'discounts'>('detail')
+  useCreateShortcut(can('billing.edit') && !permUser.isViewAs, () => {
+    setPanelMode('new')
+    setSelectedId(null)
+  })
   const [saving, setSaving] = useState(false)
   // Invoice currently being resynced from its tasks — drives the spinner on that row's button.
   const [resyncingId, setResyncingId] = useState<string | null>(null)
@@ -2636,6 +2647,10 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
               )}
             </div>
           </div>
+
+          {/* Named saved views — "Unpaid this month", "Awaiting client".
+              Stores the screen's own URL filters, so it needs no wiring here. */}
+          <SavedViews className="mt-2" />
 
           {/* Tokenized active filters */}
           <ActiveFilterChips

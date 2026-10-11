@@ -20,6 +20,19 @@ interface FavoritesContextValue {
   favorites: FavoriteEntry[]
   isFavorited: (entityType: string, entityId?: string | null) => boolean
   toggleFavorite: (input: FavoriteInput) => Promise<void>
+  /**
+   * Save-or-overwrite, for entries that are edited rather than toggled.
+   *
+   * Saved views need this: re-saving "Unpaid this month" after changing a
+   * filter must update the stored href, where `toggleFavorite` would delete
+   * the view instead. The server action already upserts on
+   * (employee_id, entity_type, entity_id), so this is the same round trip.
+   *
+   * Resolves `true` when the write succeeded.
+   */
+  upsertFavorite: (input: FavoriteInput) => Promise<boolean>
+  /** Unconditional delete, where `toggleFavorite` would re-create a missing entry. */
+  removeFavoriteEntry: (entityType: string, entityId?: string | null) => Promise<void>
   reorder: (orderedIds: string[]) => Promise<void>
 }
 
@@ -57,6 +70,46 @@ export function FavoritesProvider({ initialFavorites, children }: { initialFavor
     }
   }, [favorites])
 
+  const upsertFavorite = useCallback(async (input: FavoriteInput) => {
+    const existing = favorites.find(
+      f => f.entityType === input.entityType && (f.entityId ?? '') === (input.entityId ?? ''),
+    )
+    const optimistic: FavoriteEntry = {
+      id: existing?.id ?? `temp-${Date.now()}`,
+      entityType: input.entityType,
+      entityId: input.entityId ?? null,
+      href: input.href,
+      label: input.label,
+      iconKey: input.iconKey,
+      position: existing?.position ?? favorites.length,
+    }
+    setFavorites(prev => (existing
+      ? prev.map(f => (f.id === existing.id ? optimistic : f))
+      : [...prev, optimistic]))
+
+    const res = await addFavorite(input)
+    if (res.ok && res.data) {
+      setFavorites(prev => prev.map(f => (f.id === optimistic.id ? { ...f, id: res.data!.id } : f)))
+      return true
+    }
+    // Roll back to exactly what was there before — restoring the old entry
+    // rather than dropping it, so a failed re-save does not look like a delete.
+    setFavorites(prev => (existing
+      ? prev.map(f => (f.id === optimistic.id ? existing : f))
+      : prev.filter(f => f.id !== optimistic.id)))
+    return false
+  }, [favorites])
+
+  const removeFavoriteEntry = useCallback(async (entityType: string, entityId?: string | null) => {
+    const existing = favorites.find(
+      f => f.entityType === entityType && (f.entityId ?? '') === (entityId ?? ''),
+    )
+    if (!existing) return
+    setFavorites(prev => prev.filter(f => f.id !== existing.id))
+    const res = await removeFavorite(entityType, entityId ?? null)
+    if (!res.ok) setFavorites(prev => [...prev, existing]) // rollback
+  }, [favorites])
+
   const reorder = useCallback(async (orderedIds: string[]) => {
     setFavorites(prev => {
       const byId = new Map(prev.map(f => [f.id, f]))
@@ -66,8 +119,8 @@ export function FavoritesProvider({ initialFavorites, children }: { initialFavor
   }, [])
 
   const value = useMemo<FavoritesContextValue>(
-    () => ({ favorites, isFavorited, toggleFavorite, reorder }),
-    [favorites, isFavorited, toggleFavorite, reorder],
+    () => ({ favorites, isFavorited, toggleFavorite, upsertFavorite, removeFavoriteEntry, reorder }),
+    [favorites, isFavorited, toggleFavorite, upsertFavorite, removeFavoriteEntry, reorder],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

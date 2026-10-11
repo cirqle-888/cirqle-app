@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  typescript: {
+    // Production/typecheck uses fresh `next typegen` output. Dev validators
+    // can be stale or mid-write while a development server is running.
+    tsconfigPath: process.env.NODE_ENV === 'production' ? 'tsconfig.typecheck.json' : 'tsconfig.json',
+  },
   experimental: {
     // Client Router Cache TTLs (seconds). Next 15+ defaults `dynamic` to 0,
     // which means our `force-dynamic` pages are NEVER cached client-side — so

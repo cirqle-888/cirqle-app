@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
+import ClientWorkspaceButton from '@/components/clients/client-workspace-button'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { usePermissions } from '@/contexts/permission-context'
 import { canOpenHref } from '@/lib/nav-sections'
@@ -96,6 +97,7 @@ export default function ClientDetailClient({
         crumbLabel={client.name}
         actions={
           <>
+            <ClientWorkspaceButton client={client} />
             <Link href={`/dashboard/tasks?q=${encodeURIComponent(client.name)}`}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
               <CheckSquare className="w-4 h-4" /> Tasks

@@ -24,6 +24,7 @@ import Link from 'next/link'
 import Header from '@/components/layout/header'
 import type { AnalyticsView } from '@/lib/analytics/view'
 import type { EarningsAggregate } from '@/lib/analytics/earnings'
+import type { ActionQueueItem, ActionQueueKey } from '@/lib/dashboard/action-queue'
 import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
 import type { DateFilterValue } from '@/components/ui/date-filter'
 import {
@@ -71,6 +72,13 @@ interface Props {
   pendingRequests?: { count: number; items: { id: string; title: string }[] }
   draftInvoicesSample?: string[]
   payrollPendingCount?: number
+  /**
+   * The role-specific action queue (non-admins). Built server-side from the
+   * viewer's own permissions, so an accounts person sees collections and a
+   * manager sees approvals — the same buckets Smart Focus gives admins,
+   * rendered into the existing employee workspace rather than a new screen.
+   */
+  actionQueue?: ActionQueueItem[]
   /** Company Ops strip (Finance Engine) — null pre-scope-migration or for non-admins. */
   companyOps?: import('@/lib/finance/kpis').CompanyOpsStrip | null
   /**
@@ -243,6 +251,7 @@ export default function DashboardClient(props: Props) {
           payrollRecords={props.payrollRecords}
           pendingContribCount={props.pendingContribCount}
           myActions={props.myActions}
+          actionQueue={props.actionQueue}
           canViewAnalytics={props.canViewAnalytics ?? false}
         />
       </Suspense>
@@ -640,6 +649,20 @@ function FollowupTile({ icon, label, count, tint }: { icon: React.ReactNode; lab
   )
 }
 
+/** Icon per action-queue bucket. Lives here, not in the queue module, so that
+ *  module stays free of JSX and testable in a node environment. */
+const QUEUE_ICON: Record<ActionQueueKey, React.ReactNode> = {
+  overdue_invoices:      <PhoneCall className="w-4 h-4 text-red-400" />,
+  requests_awaiting:     <ClipboardList className="w-4 h-4 text-cyan-400" />,
+  my_contributions:      <AlertTriangle className="w-4 h-4 text-amber-400" />,
+  drafts_to_send:        <Send className="w-4 h-4 text-orange-400" />,
+  payroll_review:        <CheckCircle className="w-4 h-4 text-emerald-400" />,
+  missing_contributions: <AlertTriangle className="w-4 h-4 text-amber-400" />,
+  my_tasks:              <ClipboardList className="w-4 h-4 text-blue-400" />,
+  today_tasks:           <Zap className="w-4 h-4 text-blue-400" />,
+  notifications:         <BellRing className="w-4 h-4 text-violet-400" />,
+}
+
 function FocusCard({ icon, color, title, count, unit, sub, items, onClick }: {
   icon: React.ReactNode; color: string; title: string; count: number; unit: string
   sub?: string; items: string[]; onClick: () => void
@@ -765,10 +788,13 @@ function statusBadgeClass(status: string) {
 function EmployeeDashboard({
   todayStr, scoresPromise, payrollRecords: _payrollRecords, pendingContribCount = 0,
   myActions = { active: [], needContribution: [] },
+  actionQueue = [],
   canViewAnalytics = false,
 }: {
   todayStr: string; scoresPromise: Promise<any[]>; payrollRecords: any[]; pendingContribCount?: number
   myActions?: { active: any[]; needContribution: any[] }
+  /** Permission-scoped action queue; see Props above. */
+  actionQueue?: ActionQueueItem[]
   /** `dashboard.view_analytics` — gates the KPI cards, breakdown and activity chart below. */
   canViewAnalytics?: boolean
 }) {
@@ -980,10 +1006,50 @@ function EmployeeDashboard({
     }
   }, [sortedByDate])
 
+  // Buckets already rendered in full by "Needs your action", plus notifications
+  // (the header bell owns that count). Filtering here rather than in
+  // buildActionQueue keeps the queue model complete and testable.
+  const QUEUE_SUPPRESSED: ActionQueueKey[] = ['my_tasks', 'my_contributions', 'notifications']
+  const queueCards = actionQueue.filter(i => !QUEUE_SUPPRESSED.includes(i.key))
+
   return (
     <div>
       <Header title="My Workspace" subtitle={todayLabel} />
       <div className="p-4 md:p-6 space-y-6">
+
+        {/* ── Your action queue ───────────────────────────────────────────
+            The buckets this viewer is entitled to that the panel below does
+            not already cover: collections for accounts, approvals for
+            managers, payroll for whoever reviews it. Own tasks and unscored
+            contributions are filtered out because "Needs your action" renders
+            them in full detail immediately underneath, and notifications are
+            dropped because the bell already carries that count. */}
+        {queueCards.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Zap className="w-4 h-4 text-primary shrink-0" />
+              <p className="text-sm font-semibold">Your action queue</p>
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/25">
+                {queueCards.reduce((n, i) => n + i.count, 0)} need attention
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+              {queueCards.map(item => (
+                <FocusCard
+                  key={item.key}
+                  icon={QUEUE_ICON[item.key]}
+                  color={item.tone}
+                  title={item.title}
+                  count={item.count}
+                  unit={item.unit}
+                  sub={item.reason}
+                  items={item.items}
+                  onClick={() => router.push(item.href)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ── Needs your action — first thing on load ─────────────────────── */}
         {(myActions.needContribution.length > 0 || myActions.active.length > 0) && (

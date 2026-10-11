@@ -1,6 +1,6 @@
 'use client'
 
-import { getMyNotifications, type NotificationRow } from '@/app/api/notifications/actions'
+import { getMyNotifications } from '@/app/api/notifications/actions'
 
 /**
  * One notifications fetch shared by every consumer on the page.
@@ -46,9 +46,4 @@ export function fetchSharedNotifications(): Promise<NotificationsResult> {
     .finally(() => { inflight = null })
 
   return inflight
-}
-
-/** Unread count over just the rows a given consumer displays. */
-export function unreadIn(rows: NotificationRow[], limit: number): number {
-  return rows.slice(0, limit).filter(r => !r.read).length
 }

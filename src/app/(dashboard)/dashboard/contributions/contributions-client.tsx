@@ -17,6 +17,8 @@ import { usePrivacy } from '@/contexts/privacy-context'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
+import { SavedViews } from '@/components/ui/saved-views'
+import { useScrollRestore } from '@/lib/lists/use-scroll-restore'
 import { TokenizedSearch, type SearchFacet, type FacetOp } from '@/components/ui/tokenized-search'
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
 import type { DateFilterValue } from '@/components/ui/date-filter'
@@ -182,6 +184,9 @@ export default function ContributionsClient({
   performanceHistory, visibilitySettings,
   permissionFlags, suggestionEvidence = {},
 }: Props) {
+  // Coming back from a record lands where the list was left, not at the top.
+  // See lib/lists/scroll-restore for the rules.
+  useScrollRestore('contributions')
 
   // ── Toast ───────────────────────────────────────────
   const toast = useToast()
@@ -1678,6 +1683,9 @@ export default function ContributionsClient({
         </PageChrome>
 
         <PageContent>
+
+          {/* Named saved views — stores this screen's own URL filters. */}
+          <SavedViews className="mb-3" />
 
           {/* ── Tokenized active filters (ERPNext-style chips) ── */}
           <ActiveFilterChips

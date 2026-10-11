@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission, requireAnyPermission, resolveCurrentEmployeeId, requireAdmin } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { sanitizeClientForm } from '@/lib/clients/form'
+import { retryWithoutColumn, withoutColumn, isMissingColumn } from '@/lib/db/missing-column'
 import { logActivity } from '@/lib/activity/log'
 import { syncRatesToDb, ratesAreStale } from '@/lib/fx/sync'
 import { revalidatePath, revalidateTag } from 'next/cache'
@@ -357,7 +358,13 @@ export async function createClient(form: Record<string, unknown>): Promise<Actio
   if (!auth.ok) return { ok: false, error: auth.error }
 
   const admin = createAdminClient()
-  const { data, error } = await admin.from('clients').insert(sanitizeClientForm(form)).select().single()
+  // `department_id` needs 20261011120000_client_department. Retried without it
+  // rather than probed, so a database that has not had the migration applied
+  // still creates the client — it simply derives its department from services,
+  // which is what every client did before the column existed.
+  const row = sanitizeClientForm(form)
+  const { data, error } = await retryWithoutColumn('department_id', strip =>
+    admin.from('clients').insert(strip ? withoutColumn(row, 'department_id') : row).select().single())
   if (error) return { ok: false, error: error.message }
   void logActivity({
     actorId: auth.employeeId, entityType: 'client', entityId: data.id,
@@ -374,13 +381,67 @@ export async function updateClient(
   if (!auth.ok) return { ok: false, error: auth.error }
 
   const admin = createAdminClient()
-  const { data, error } = await admin.from('clients').update({ ...sanitizeClientForm(form), pricing_pending: false }).eq('id', id).select().single()
+  // See createClient on `department_id`.
+  const row = { ...sanitizeClientForm(form), pricing_pending: false }
+  const { data, error } = await retryWithoutColumn('department_id', strip =>
+    admin.from('clients').update(strip ? withoutColumn(row, 'department_id') : row).eq('id', id).select().single())
   if (error) return { ok: false, error: error.message }
   void logActivity({
     actorId: auth.employeeId, entityType: 'client', entityId: id,
     action: 'edited', clientId: id, detail: { label: data.name ?? data.code },
   })
   return { ok: true, data }
+}
+
+/**
+ * Set (or clear) the department override on several clients at once.
+ *
+ * Per row, not one `.in('id', ids)` update, for the reason every other bulk
+ * action here learned: a single statement is all-or-nothing, so one refused
+ * row reports total failure while the caller cannot tell which rows actually
+ * changed. Looping lets the UI report a partial run honestly and retry only
+ * what was refused — see lib/bulk/outcome.
+ *
+ * `departmentId: null` clears the override, which puts those clients back to
+ * deriving their departments from the services they buy.
+ *
+ * Unlike createClient/updateClient this does NOT strip the column and carry
+ * on when the migration is missing: there, `department_id` is one field among
+ * many and the rest of the form should still save. Here it is the entire
+ * operation, so stripping it would report success for a run that changed
+ * nothing.
+ */
+export async function bulkSetClientDepartment(
+  ids: string[],
+  departmentId: string | null,
+): Promise<ActionResult<{ succeeded: string[]; failed: string[] }>> {
+  const auth = await requireClientEditor()
+  if (!auth.ok) return { ok: false, error: auth.error }
+  if (!ids.length) return { ok: false, error: 'No clients selected.' }
+
+  const admin = createAdminClient()
+  const succeeded: string[] = []
+  const failed: string[] = []
+  for (const id of ids) {
+    const { error } = await admin.from('clients').update({ department_id: departmentId }).eq('id', id)
+    if (isMissingColumn(error, 'department_id')) {
+      return { ok: false, error: 'Setting a department needs migration 20261011120000_client_department. Apply it, then try again.' }
+    }
+    if (error) failed.push(id)
+    else succeeded.push(id)
+  }
+
+  void logActivity({
+    actorId: auth.employeeId, entityType: 'client', entityId: null,
+    action: 'edited',
+    detail: { bulk: true, field: 'department_id', to: departmentId, count: succeeded.length, attempted: ids.length },
+  })
+
+  return {
+    ok: failed.length === 0,
+    data: { succeeded, failed },
+    error: failed.length ? `${failed.length} client${failed.length === 1 ? '' : 's'} could not be updated` : undefined,
+  }
 }
 
 export async function upsertClientServicePricings(

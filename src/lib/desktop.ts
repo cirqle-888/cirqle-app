@@ -18,6 +18,7 @@ export interface DesktopActivity {
 
 export interface CirqleDesktopBridge {
   version: number
+  openClientWorkspace?: (client: { id: string; name: string; code?: string; phone?: string; country?: string; showTasks?: boolean; showInvoices?: boolean }) => Promise<{ ok: boolean; reason?: string; partial?: boolean }>
   retry?: (pane: string) => void
   updateLogo?: (url: string) => void
   /** Write text to the OS clipboard from the main process (v3+). See lib/clipboard.ts. */
@@ -33,7 +34,7 @@ export interface CirqleDesktopBridge {
     filename: string,
     action: ReceiptShareAction,
     caption?: string,
-  ) => Promise<{ ok: boolean; action?: ReceiptShareAction; reason?: string; path?: string }>
+  ) => Promise<{ ok: boolean; action?: ReceiptShareAction; reason?: string; path?: string; pasted?: boolean; message?: string; accountLabel?: string }>
 
   /** OS idle time + screen lock, for presence (v4+). See lib/presence/activity.ts. */
   presence?: { query: () => Promise<DesktopActivity> }

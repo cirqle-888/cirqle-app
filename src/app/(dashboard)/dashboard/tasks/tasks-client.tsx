@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, useRef, Fragment, useCallback } from 'react'
+import { useCreateShortcut } from '@/lib/hooks/use-create-shortcut'
 import {
   DndContext, closestCenter, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent,
 } from '@dnd-kit/core'
@@ -38,12 +39,21 @@ import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
 import type { DateFilterValue } from '@/components/ui/date-filter'
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
+import { FocusedRecordNotice } from '@/components/ui/focused-record-notice'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { useScrollRestore } from '@/lib/lists/use-scroll-restore'
+import { IDLE, SAVING, failed, canSubmit, type SubmitState } from '@/lib/forms/submit-state'
+import { FormStatus } from '@/components/ui/form-status'
+import { BulkOutcomeBar } from '@/components/ui/bulk-outcome-bar'
+import { describeBulkPlan, summariseBulkOutcome, type BulkReport } from '@/lib/bulk/outcome'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
 import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
 import type { Currency } from '@/types'
 import { taskCode, taskCodeMatches, nextTaskNumber } from '@/lib/utils/task-code'
 import { deriveWorkScope, retryWithoutScope, withoutScope, isScopeColumnMissing } from '@/lib/finance/classify'
 import { seedFromTasks } from '@/lib/hooks/use-smart-sort'
+import { useFormDraft } from '@/lib/drafts/use-form-draft'
+import { DraftRecoveryBanner, DraftSavedHint } from '@/components/ui/draft-recovery'
 import { useRole } from '@/contexts/role-context'
 import { usePermissions } from '@/contexts/permission-context'
 import { clientPickerSub } from '@/lib/clients/draft'
@@ -220,6 +230,12 @@ interface Props {
   requestRefByTaskId?: Record<string, { id: string; ref_no: number }>
   /** Pre-filled search (?q=… deep link, e.g. "#42" from a request). */
   initialSearch?: string
+  /**
+   * `?task=<id|number>` named a task the server could not surface — it does
+   * not exist, or it falls outside this viewer's scope. Resolved server-side
+   * (tasks/page.tsx) so the two cases are indistinguishable here.
+   */
+  focusTaskMissing?: boolean
   /** Pre-selected client filter (?client=<id>), e.g. from a package's task link. */
   initialClient?: string
   /** Pre-selected service filter (?service=<id>). */
@@ -334,6 +350,26 @@ const EMPTY_FORM = {
   derived_max: '',                                                               // optional ceiling (INR), Advanced
 }
 
+type TaskForm = typeof EMPTY_FORM
+
+/**
+ * Has the user actually started a task?
+ *
+ * The Add Task form opens with a dozen defaults — today's date, quantity 1,
+ * INR, fixed billing, billable — so a structural "any field filled?" test
+ * would call an untouched form a draft and offer it back on every visit.
+ * These are the fields that only get a value because somebody typed or picked
+ * one.
+ */
+function taskFormStarted(f: TaskForm): boolean {
+  if (f.title.trim() || f.description.trim()) return true
+  if (f.client_id || f.service_id || f.task_number.trim()) return true
+  if (f.parent_task_id || f.variant_type || f.variant_label.trim()) return true
+  if (f.spend.trim() || f.manual_billing_amount.trim()) return true
+  if (f.is_recurring || f.derived_on) return true
+  return false
+}
+
 // ── Reorderable column system ─────────────────────────────────────────────────
 type ColKey = 'client' | 'service' | 'date' | 'billing' | 'qty' | 'total' | 'status'
 const DEFAULT_COL_ORDER: ColKey[] = ['client', 'service', 'date', 'billing', 'qty', 'total', 'status']
@@ -404,7 +440,11 @@ function SortablePanelRow({ id, label, onUp, onDown, isFirst, isLast }: {
   )
 }
 
-export default function TasksClient({ promotionRequest, promotionSocialItem, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', initialClient = '', initialService = '', initialDateRange = null, dbTaskTotal, fullHistory = false, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, packages = [], packageItems = [], employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
+export default function TasksClient({ promotionRequest, promotionSocialItem, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', focusTaskMissing = false, initialClient = '', initialService = '', initialDateRange = null, dbTaskTotal, fullHistory = false, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, packages = [], packageItems = [], employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
+  // Coming back from a record lands where the list was left, not at the top.
+  // See lib/lists/scroll-restore for the rules.
+  useScrollRestore('tasks')
+
   const { role, employee: currentEmployee } = useRole()
   // Browser DB search runs through the anon/RLS client, which cannot reproduce
   // the server's service- and unit-scoped visibility model — so it is, and must
@@ -418,7 +458,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
   // "Search DB" button that silently did nothing.
   const canDbSearch = role !== 'employee'
 
-  const { can } = usePermissions()
+  const { can, user: permissionUser } = usePermissions()
   const { toasts, dismiss, success, error: toastError } = useToast()
   const { dn } = usePrivacy()
 
@@ -632,8 +672,15 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     })()
   }, [])
   const [showForm, setShowForm] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [addError, setAddError] = useState<string | null>(null)
+  // `?task=` named something the server could not surface; dismissable.
+  const [showFocusTaskNotice, setShowFocusTaskNotice] = useState(focusTaskMissing)
+  useCreateShortcut(can('tasks.create') && !permissionUser.isViewAs, () => setShowForm(true))
+  // Shared save/pending/error vocabulary — see lib/forms/submit-state. The
+  // two pieces of state it replaces (`saving` + `addError`) could disagree:
+  // a failed submit left the error on screen with the button re-enabled and
+  // no indication of which of the two the user was looking at.
+  const [submit, setSubmit] = useState<SubmitState>(IDLE)
+  const saving = submit.status === 'saving'
   const [filterStatus, setFilterStatus] = useState('')
   const [filterClient, setFilterClient] = useState(initialClient)
   const [filterService, setFilterService] = useState(initialService)
@@ -647,6 +694,19 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     () => initialSearch ? [{ field: 'any', op: 'contains', text: initialSearch }] : [],
   )
   const [searchDraft, setSearchDraft] = useState('')
+  const previousSearchLink = useRef(initialSearch)
+  useEffect(() => {
+    // Next preserves this screen when a search result links to another query
+    // on /tasks. Apply the new link instead of keeping the previous search.
+    if (previousSearchLink.current === initialSearch) return
+    previousSearchLink.current = initialSearch
+    setSearchFacets(initialSearch ? [{ field: 'any', op: 'contains', text: initialSearch }] : [])
+    setSearchDraft('')
+    setFilterClient(initialClient)
+    setFilterService(initialService)
+    setFilterStatus('')
+    setFilterBilling('')
+  }, [initialSearch, initialClient, initialService])
   const activeFacets = useMemo<SearchFacet[]>(
     () => searchDraft.trim() ? [...searchFacets, { field: 'any', op: 'contains' as const, text: searchDraft.trim() }] : searchFacets,
     [searchFacets, searchDraft],
@@ -669,7 +729,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
   const [tablePageSize, setTablePageSize] = useState(50)
   const [mobileLimit, setMobileLimit] = useState(50)
   const [showMobileFilters, setShowMobileFilters] = useState(false)
-  const [form, setForm] = useState(EMPTY_FORM)
+  const [form, setForm] = useState<TaskForm>(EMPTY_FORM)
   const [previewTaskNumber, setPreviewTaskNumber] = useState<number | null>(null)
 
   // ── Request promotion (?fromRequest=…) — open Add Task prefilled (design §5).
@@ -710,6 +770,17 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     setShowForm(true)
     window.history.replaceState(null, '', '/dashboard/tasks')
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Recoverable draft ─────────────────────────────────────────────────────
+  // An unsent Add Task survives a refresh or an interrupted session. Switched
+  // off while promoting a request or a calendar item: that form arrives
+  // deliberately prefilled, and offering an older draft on top of it would be
+  // asking which of two prefills the user meant. Submission is unchanged — a
+  // restored draft still goes through handleSubmit and the same server checks.
+  const draft = useFormDraft<TaskForm>('task.new', form, {
+    enabled: showForm && !promotingRequestId && !promotingSocialItemId,
+    isMeaningful: taskFormStarted,
+  })
 
   useEffect(() => {
     seedFromTasks(initialTasks.map(t => ({
@@ -1436,17 +1507,51 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     setEmptyingTrash(false)
   }
 
-  async function bulkUpdateStatus(status: string) {
-    const ids = [...selectedTasks]
-    const res = await serverBulkUpdateStatus(ids, status)
-    if (res.ok) {
-      setTasks(prev => prev.map(t => selectedTasks.has(t.id) ? { ...t, status } : t))
+  // ── Bulk actions: preview, honest reporting, retry the refused rows ──────
+  //
+  // The server actions now return `{ succeeded, failed }` per row, so a
+  // partial apply is reported as one instead of being flattened into "Bulk
+  // update failed". `finishBulk` narrows the selection to the failures so
+  // Retry re-runs only those.
+  //
+  // Deliberately no Undo: these tables carry no version or updated-at
+  // precondition, so an undo would blind-write the previous value and could
+  // discard a colleague's edit. See lib/bulk/outcome.
+  const [bulkConfirm, setBulkConfirm] = useState<{ verb: string; run: () => void } | null>(null)
+  const [bulkReport, setBulkReport] = useState<BulkReport | null>(null)
+  const bulkRetryRef = useRef<((ids: string[]) => Promise<void>) | null>(null)
+
+  function finishBulk(report: BulkReport, cleanUp?: () => void) {
+    setBulkReport(report.tone === 'success' ? null : report)
+    if (report.tone === 'success') {
+      success(report.title)
       setSelectedTasks(new Set())
       setBulkMode(false)
-      success(`${ids.length} task${ids.length !== 1 ? 's' : ''} updated to ${getStatusLabel(status)}`)
-    } else {
-      toastError('Bulk update failed', res.error)
+      cleanUp?.()
+      return
     }
+    if (report.tone === 'failure') toastError(report.title, report.body)
+    // Leave exactly what still needs doing selected.
+    setSelectedTasks(new Set(report.retryable))
+    setBulkMode(true)
+  }
+
+  async function runBulkStatus(ids: string[], status: string) {
+    if (!ids.length) return
+    const res = await serverBulkUpdateStatus(ids, status)
+    const report = summariseBulkOutcome(res.data, ids, 'task')
+    const applied = new Set(res.data?.succeeded ?? [])
+    setTasks(prev => prev.map(t => applied.has(t.id) ? { ...t, status } : t))
+    finishBulk(report)
+  }
+
+  function bulkUpdateStatus(status: string) {
+    const ids = [...selectedTasks]
+    bulkRetryRef.current = retryIds => runBulkStatus(retryIds, status)
+    setBulkConfirm({
+      verb: `mark ${getStatusLabel(status).toLowerCase()}`,
+      run: () => void runBulkStatus(ids, status),
+    })
   }
 
   // ── Bulk assign employees ───────────────────────────────────────────────
@@ -1459,20 +1564,22 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     setBulkAssignOpen(true)
   }
 
-  async function saveBulkAssign() {
+  async function runBulkAssign(ids: string[], empIds: string[]) {
+    if (!ids.length) return
     setBulkAssignSaving(true)
-    const ids = [...selectedTasks]
-    const empIds = [...bulkAssignSelected]
     const res = await serverBulkAssignEmployees(ids, empIds)
     setBulkAssignSaving(false)
-    if (res.ok) {
-      setBulkAssignOpen(false)
-      setSelectedTasks(new Set())
-      setBulkMode(false)
-      success(`${ids.length} task${ids.length !== 1 ? 's' : ''} reassigned`)
-    } else {
-      toastError('Bulk assign failed', res.error)
-    }
+    finishBulk(summariseBulkOutcome(res.data, ids, 'task'), () => setBulkAssignOpen(false))
+  }
+
+  function saveBulkAssign() {
+    const ids = [...selectedTasks]
+    const empIds = [...bulkAssignSelected]
+    bulkRetryRef.current = retryIds => runBulkAssign(retryIds, empIds)
+    // The modal already states the count and lists the chosen employees, so
+    // Apply there IS the preview step — no second dialog.
+    setBulkAssignOpen(false)
+    void runBulkAssign(ids, empIds)
   }
 
   // ── Bulk delete (soft) ──────────────────────────────────────────────────
@@ -1548,8 +1655,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setSaving(true)
-    setAddError(null)
+    setSubmit(SAVING)
     const qty = resolveTaskQuantity({
       pricingType, quantity: form.quantity, hours: form.hours, spend: form.spend,
     })
@@ -1793,6 +1899,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
 
       setShowForm(false)
       setForm({ ...EMPTY_FORM, task_date: todayISO() })
+      draft.clear() // the task exists now; the draft would only confuse
       // The pick has been consumed by the link-back above; leaving it set
       // would show a stale "will be linked" banner on the NEXT task.
       setPickedSource(null)
@@ -1804,10 +1911,10 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       const parts = [err.message, err.details, err.hint, err.code && `(${err.code})`].filter(Boolean)
       const detail = parts.join(' · ') || 'Unknown database error'
       console.warn('Add task failed:', { message: err.message, details: err.details, hint: err.hint, code: err.code })
-      setAddError(detail)
+      setSubmit(failed(detail))
       toastError(`Add task failed: ${detail}`)
     }
-    setSaving(false)
+    setSubmit(prev => (prev.status === 'error' ? prev : IDLE))
   }
 
   async function updateStatus(id: string, status: string) {
@@ -2846,6 +2953,24 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
               )}
             </div>
           </div>
+
+          {/* What the last bulk run actually did, and a retry for the rest. */}
+          <BulkOutcomeBar
+            className="mb-3"
+            report={bulkReport}
+            onRetry={() => { const run = bulkRetryRef.current; if (run && bulkReport) void run(bulkReport.retryable) }}
+            onDismiss={() => setBulkReport(null)}
+          />
+
+          {/* A ?task= deep link the server could not resolve, explained rather
+              than left looking like an empty search. */}
+          <FocusedRecordNotice
+            className="mb-3"
+            outcome={showFocusTaskNotice ? 'missing' : 'none'}
+            what="task"
+            onShow={() => {}}
+            onDismiss={() => setShowFocusTaskNotice(false)}
+          />
 
           {/* ── Active filter chips (tokenized filters, ERPNext-style) ── */}
           <ActiveFilterChips
@@ -4180,6 +4305,17 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
         />
       )}
 
+      {/* The affected count, before anything is written. */}
+      {bulkConfirm && (
+        <ConfirmDialog
+          title={`${bulkConfirm.verb[0].toUpperCase()}${bulkConfirm.verb.slice(1)} ${selectedTasks.size} task${selectedTasks.size !== 1 ? 's' : ''}?`}
+          body={describeBulkPlan(selectedTasks.size, bulkConfirm.verb, 'task')}
+          confirmLabel="Apply"
+          onConfirm={() => { const run = bulkConfirm.run; setBulkConfirm(null); run() }}
+          onCancel={() => setBulkConfirm(null)}
+        />
+      )}
+
       {/* ── Bulk Assign modal ── */}
       {bulkAssignOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -4773,6 +4909,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
               <button onClick={() => setShowForm(false)} className="text-muted-foreground hover:text-foreground p-1 -m-1"><X className="w-5 h-5" /></button>
             </div>
             <form ref={addFormRef} onSubmit={handleSubmit} className="px-5 sm:px-6 pt-4 pb-4 space-y-4 overflow-y-auto flex-1 min-h-0">
+              <DraftRecoveryBanner draft={draft} onRestore={setForm} label="Unsent task" />
 
               {/* Task number + Title */}
               <div className="grid grid-cols-[88px_1fr] sm:grid-cols-[110px_1fr] gap-3">
@@ -5590,15 +5727,16 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
               {/* Sticky action footer — always reachable while scrolling.
                   -mx-5/-mx-6 + px-5/px-6 lets the bar span the full width of
                   the scroll container and sit on top of a backdrop-blur surface. */}
-              {addError && (
-                <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 -mb-1">{addError}</p>
-              )}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <FormStatus state={submit} />
+                <DraftSavedHint draft={draft} />
+              </div>
               {/* pr-20 on mobile keeps the last button clear of the floating chat
                   launcher (fixed bottom-right, ~4.25rem corner); safe-area inset
                   lifts the buttons above the home indicator on notched phones. */}
               <div className="sticky bottom-0 -mx-5 sm:-mx-6 pl-5 pr-20 sm:px-6 -mb-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/85 border-t border-border flex gap-3">
-                <Button type="button" variant="outline" onClick={() => { setShowForm(false); setAddError(null); clearPickedSource() }} className="flex-1" size="lg">Cancel</Button>
-                <Button type="submit" disabled={!selectedService} loading={saving} className="flex-1 bg-gradient-to-r from-primary to-violet-600 hover:from-primary/90 hover:to-violet-600/90 text-primary-foreground" size="lg">
+                <Button type="button" variant="outline" onClick={() => { setShowForm(false); setSubmit(IDLE); clearPickedSource() }} className="flex-1" size="lg">Cancel</Button>
+                <Button type="submit" disabled={!canSubmit(submit, !!selectedService)} loading={saving} className="flex-1 bg-gradient-to-r from-primary to-violet-600 hover:from-primary/90 hover:to-violet-600/90 text-primary-foreground" size="lg">
                   Add Task {previewTaskNumber != null && <span className="opacity-70 ml-1">#{previewTaskNumber}</span>}
                 </Button>
               </div>

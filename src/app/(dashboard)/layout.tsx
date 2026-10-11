@@ -7,6 +7,7 @@ import { WorkspaceProvider } from '@/contexts/workspace-context'
 import { RequestsBadgeProvider } from '@/contexts/requests-badge-context'
 import { PresenceProvider } from '@/contexts/presence-context'
 import { CommandPalette } from '@/components/ui/command-palette'
+import { KeyboardGuide } from '@/components/ui/keyboard-guide'
 // TEMPORARY — remove with the bypass. See src/lib/permissions/dev-bypass.ts
 import { PermissionBypassBanner } from '@/components/dev/permission-bypass-banner'
 import { DesktopNotifier } from '@/components/desktop/desktop-notifier'
@@ -64,9 +65,7 @@ async function fetchLogoUrls(): Promise<{ logoUrl: string | null; logoUrlDark: s
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   // Best-effort loads — both graceful so the dashboard always renders.
-  // Distinguish "lookup errored" (transient DB failure → fail CLOSED, never
-  // grant admin on an error) from "returned null" (no employee row →
-  // legacy single-admin setup → permissive fallback is intentional).
+  // Missing or failed profile loads never grant permissions.
   const [meResult, logos] = await Promise.all([
     loadCurrentUser().then(
       (u) => ({ user: u, failed: false }),
@@ -99,9 +98,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const loadFailed = meResult.failed
   const { logoUrl, logoUrlDark, faviconUrl } = logos
 
-  // Permissive admin shape ONLY for the pre-migration single-admin case
-  // (signed in, no employee record). If the lookup errored, fall back to a
-  // zero-permission user instead — a transient DB error must not grant admin.
+  // A missing profile gets a zero-permission shell.
   const fallbackUser: PermissionUser = {
     employeeId: '',
     authId: '',
@@ -124,10 +121,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
         email: me.email,
         designationId: me.designationId,
         designationName: me.designationName,
-        // The pre-migration "no designation → treat as admin" fallback must NOT
-        // apply while previewing: an employee with no designation is exactly
-        // the case the preview needs to show honestly, not paper over.
-        isAdmin: me.isViewAs ? me.isAdmin : (me.isAdmin || me.designationId === null),
+        // Use the same authority as server actions, including during previews.
+        isAdmin: me.isAdmin,
         permissions: Array.from(me.permissions),
         dateOfBirth: me.dateOfBirth,
         isViewAs: me.isViewAs,
@@ -232,6 +227,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 See src/lib/permissions/dev-bypass.ts */}
             <PermissionBypassBanner />
             <CommandPalette />
+            <KeyboardGuide />
             <DesktopNotifier />
             <FloatingCommsWidget />
             <FxRatesAutoSync />

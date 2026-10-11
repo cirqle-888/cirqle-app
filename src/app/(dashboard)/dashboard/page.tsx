@@ -16,6 +16,7 @@ import { summarizeFollowups } from '@/lib/followups/grouping'
 import { getMyNotifications } from '@/app/api/notifications/actions'
 import DashboardClient from './dashboard-client'
 import { toISODate, todayISO } from '@/lib/utils/local-date'
+import { buildActionQueue, type ActionQueueItem } from '@/lib/dashboard/action-queue'
 
 export const dynamic = 'force-dynamic'
 
@@ -388,16 +389,31 @@ export default async function DashboardPage() {
   const canSeePricing = isAdmin || !!me?.permissions?.has('tasks.view_pricing')
   const pendingPricing = canSeePricing ? await getPendingPricing(supabase) : { clients: [], services: [], total: 0 }
 
-  // ── Smart Focus extras (admin only) ─────────────────────────────────────────
+  // ── Action-queue extras ─────────────────────────────────────────────────────
   // Everything else this section needs (overdueInvoices, draftInvoices,
   // unscoredDoneTasks, payrollRecords) is ALREADY computed above — these are
   // the only genuinely new, lightweight reads.
+  //
+  // These used to sit behind `if (isAdmin)`, which left the two roles the
+  // agency actually runs on with an empty dashboard: an accounts person could
+  // not see the overdue queue that is their whole job, and a manager could not
+  // see the approvals queued on them by name. Each read is now gated on the
+  // permission that governs the data it returns.
   let notifications: { rows: any[]; unreadCount: number } = { rows: [], unreadCount: 0 }
   let pendingRequests: { count: number; items: { id: string; title: string }[] } = { count: 0, items: [] }
-  if (isAdmin) {
-    const notifRes = await getMyNotifications(5).catch(() => null)
-    if (notifRes?.ok && notifRes.data) notifications = notifRes.data
 
+  const canReviewRequests = isAdmin
+    || hasPermission(me, PERMS.REQUESTS_REVIEW)
+    || hasPermission(me, PERMS.REQUESTS_MANAGE)
+  const canSeeInvoices = isAdmin || hasPermission(me, PERMS.BILLING_VIEW_INVOICES)
+
+  // Notifications are the viewer's OWN unread mail, addressed to them by id.
+  // Gating that on isAdmin was simply a bug: an employee never saw a count for
+  // messages that were already theirs to read.
+  const notifRes = await getMyNotifications(5).catch(() => null)
+  if (notifRes?.ok && notifRes.data) notifications = notifRes.data
+
+  if (canReviewRequests) {
     try {
       const { data: reqRows } = await supabase
         .from('task_requests')
@@ -408,7 +424,41 @@ export default async function DashboardPage() {
       pendingRequests = { count: reqRows?.length || 0, items: (reqRows || []).slice(0, 3) }
     } catch { /* table not migrated yet */ }
   }
+
+  // Billing buckets for a non-admin who holds billing.view_invoices.
+  //
+  // Counts and invoice numbers only — never an amount column. The queue needs
+  // "twelve are overdue", not what they are worth, and selecting no money
+  // fields means this cannot leak a portfolio total to someone holding
+  // view_invoices without view_totals. Admins already have both figures from
+  // the full invoice fetch above, so this runs only for everyone else.
+  let billingQueue = { overdue: 0, drafts: 0, overdueSample: [] as string[], draftSample: [] as string[] }
+  if (!isAdmin && canSeeInvoices) {
+    try {
+      const closed = ['paid', 'cancelled', 'written_off']
+      const [overdueRes, draftRes] = await Promise.all([
+        supabase.from('invoices')
+          .select('invoice_number, due_date', { count: 'exact' })
+          .not('status', 'in', `(${closed.join(',')})`)
+          .lt('due_date', todayStr)
+          .order('due_date', { ascending: true })
+          .limit(3),
+        supabase.from('invoices')
+          .select('invoice_number', { count: 'exact' })
+          .eq('status', 'draft')
+          .order('issue_date', { ascending: true })
+          .limit(3),
+      ])
+      billingQueue = {
+        overdue: overdueRes.count ?? 0,
+        drafts: draftRes.count ?? 0,
+        overdueSample: (overdueRes.data || []).map((r: { invoice_number: string | null }) => r.invoice_number).filter((n): n is string => !!n),
+        draftSample: (draftRes.data || []).map((r: { invoice_number: string | null }) => r.invoice_number).filter((n): n is string => !!n),
+      }
+    } catch { /* invoices unreadable for this role — queue simply stays empty */ }
+  }
   const draftInvoicesSample = draftInvoices.slice(0, 3).map(i => `${i.invoice_number} — ${i.client?.name || ''}`)
+
   const payrollPendingCount = isAdmin ? payrollRecords.filter((p: any) => p.status === 'pending').length : 0
 
   // ── My pending actions (employee view) ─────────────────────────────────────
@@ -446,6 +496,35 @@ export default async function DashboardPage() {
       }
     } catch { /* defensive — widget simply stays hidden */ }
   }
+
+  // The non-admin action queue. Admins keep the existing Smart Focus grid,
+  // which is already wired to the full dataset they fetch above; this fills the
+  // gap for everyone else, from the same buckets and in the same order.
+  const actionQueue: ActionQueueItem[] = isAdmin ? [] : buildActionQueue(
+    {
+      isAdmin,
+      billing: canSeeInvoices,
+      requestsReview: canReviewRequests,
+      payroll: hasPermission(me, PERMS.PAYROLL_VIEW),
+      contributionsAll: hasPermission(me, PERMS.CONTRIBUTIONS_VIEW_ALL),
+      hasEmployeeRecord: !!employeeId,
+    },
+    {
+      overdueInvoices: billingQueue.overdue,
+      draftsToSend: billingQueue.drafts,
+      requestsAwaiting: pendingRequests.count,
+      myContributions: myActions.needContribution.length,
+      myTasks: myActions.active.length,
+      unreadNotifications: notifications.unreadCount,
+    },
+    {
+      overdue_invoices: billingQueue.overdueSample,
+      drafts_to_send: billingQueue.draftSample,
+      requests_awaiting: pendingRequests.items.map(r => r.title),
+      my_contributions: myActions.needContribution.slice(0, 3).map((t: { title: string }) => t.title),
+      my_tasks: myActions.active.slice(0, 3).map((t: { title: string }) => t.title),
+    },
+  )
 
   // ── Company Ops strip (Finance Engine) ────────────────────────────────────
   // Admin-only. Trailing 4 months covers the 3-month burn window; untriaged
@@ -514,6 +593,7 @@ export default async function DashboardPage() {
       notifications={notifications}
       pendingRequests={pendingRequests}
       draftInvoicesSample={draftInvoicesSample}
+      actionQueue={actionQueue}
       payrollPendingCount={payrollPendingCount}
       companyOps={companyOps}
       canViewAnalytics={canViewAnalytics}

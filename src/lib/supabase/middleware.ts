@@ -304,9 +304,8 @@ export async function updateSession(request: NextRequest) {
   }
 
   // Permission gating for dashboard subroutes.
-  // Fail OPEN: if migration isn't applied yet, no employee row, or no designation assigned,
-  // do NOT gate — the legacy single-admin app keeps working until the migration runs
-  // and the admin assigns designations.
+  // Missing profiles are rejected. Missing designations get no permissions;
+  // they may still open the dashboard while an admin assigns their access.
   if (user && pathname.startsWith('/dashboard')) {
     // Fast path: profile already cached this session?
     const cached = await verifyProfile(
@@ -396,9 +395,6 @@ export async function updateSession(request: NextRequest) {
       supabaseResponse.cookies.delete(PROFILE_COOKIE)
       return NextResponse.redirect(url)
     }
-
-    // No designation assigned yet → fail open
-    if (!profile.designationId) return supabaseResponse
 
     // Admin designation → no gating
     if (profile.isAdmin) return supabaseResponse

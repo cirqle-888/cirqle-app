@@ -36,7 +36,8 @@ import {
   markNotificationRead, markAllNotificationsRead,
   type NotificationRow,
 } from '@/app/api/notifications/actions'
-import { fetchSharedNotifications, unreadIn } from '@/lib/notifications/shared-fetch'
+import { fetchSharedNotifications } from '@/lib/notifications/shared-fetch'
+import { notificationMetrics } from '@/lib/notifications/digest'
 
 type Tab = 'chat' | 'alerts'
 
@@ -293,13 +294,18 @@ export function FloatingCommsWidget() {
   }, [])
   const refreshNotifs = useCallback(async () => {
     // Shared with NotificationBell — see lib/notifications/shared-fetch. The
-    // shared call fetches 30; slice back to the 20 this widget has always shown
-    // so both the list and the badge are unchanged.
+    // shared call fetches 30; slice back to the 20 this widget has always
+    // shown so the list is unchanged.
+    //
+    // The badge counts ACTIONABLE unread only, the same rule the bell uses —
+    // two badges on one screen disagreeing about how many notifications there
+    // are is worse than either number on its own. Snoozes are not applied
+    // here: they are per-group and this widget does not group.
     const res = await fetchSharedNotifications()
     if (res.ok && res.data) {
       const rows = res.data.rows.slice(0, 20)
       setNotifs(rows)
-      setNotifUnread(unreadIn(rows, 20))
+      setNotifUnread(notificationMetrics(rows).actionableUnread)
     }
   }, [])
 

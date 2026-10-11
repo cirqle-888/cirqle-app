@@ -472,7 +472,7 @@ export default function ReceiptModal({ input, onClose }: Props) {
       const dataUrl = canvas.toDataURL('image/png', 0.97)
       const res = await bridge.shareReceipt(dataUrl, `Cirqle-Receipt-${input.receiptNo}.png`, action, `Payment receipt — ${input.receiptNo}`)
       if (res?.ok) flashDone()
-      else setError('Could not share to WhatsApp. Try the Image button and drag it in.')
+      else if (res?.reason !== 'cancelled') setError(res?.message || 'Could not share to WhatsApp. Try the Image button and drag it in.')
     } catch (e) {
       console.error('Receipt share to WhatsApp failed', e)
       setError('Could not share to WhatsApp. Try the Image button and drag it in.')

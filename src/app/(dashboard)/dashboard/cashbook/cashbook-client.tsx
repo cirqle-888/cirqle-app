@@ -13,6 +13,10 @@ import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
 import { Plus, X, TrendingUp, TrendingDown, Minus, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, Landmark, CheckCircle, ArrowLeftRight, Copy, Users, Sparkles, ChevronDown, Repeat, ArrowUpRight } from 'lucide-react'
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
+import { SavedViews } from '@/components/ui/saved-views'
+import { useScrollRestore } from '@/lib/lists/use-scroll-restore'
+import { resolveFocus, focusNoticeLabel } from '@/lib/navigation/focus-record'
+import { FocusedRecordNotice } from '@/components/ui/focused-record-notice'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
 import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
 import { cn, BRANDED_PILL_BASE_CLASS } from '@/lib/utils'
@@ -27,6 +31,7 @@ import type { Currency } from '@/types'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useRole } from '@/contexts/role-context'
+import { useCreateShortcut } from '@/lib/hooks/use-create-shortcut'
 import type { ReceiptInput } from '@/components/cashbook/receipt-modal'
 
 import Link from 'next/link'
@@ -234,16 +239,21 @@ interface Props {
 const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 
 export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts, showTotals, markupAvailable, canEditEntries, allTags }: Props) {
+  // Coming back from a record lands where the list was left, not at the top.
+  // See lib/lists/scroll-restore for the rules.
+  useScrollRestore('cashbook')
+
   const { role } = useRole()
   const isAdmin = role === 'super_admin'
   // Employee names are private: show CQID by default and the real name only
   // when an admin has unlocked reveal. The expense-split picker previously
   // rendered `e.name || e.cqid`, i.e. the name whenever one existed.
-  const { revealNames } = usePermissions()
+  const { revealNames, user: permissionUser } = usePermissions()
   const maskEmployee = (e: { name?: string | null; cqid?: string | null } | null | undefined) =>
     displayEmployee({ name: e?.name ?? '', cqid: e?.cqid ?? '' }, { revealNames, canReveal: true })
   const [entries, setEntries] = useState<Entry[]>(initialEntries)
   const [showForm, setShowForm] = useState(false)
+  useCreateShortcut(canEditEntries && !permissionUser.isViewAs, () => setShowForm(true))
   const [showTransfer, setShowTransfer] = useState(false)
   const [formEditingId, setFormEditingId] = useState<string | null>(null)   // non-null = editing existing
   const [saving, setSaving] = useState(false)
@@ -299,22 +309,13 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     }
   }, [filterType, filterMonth, searchFacets, filterCategory, filterScope, filterAllocStatus, filterClient, filterTags, sortDir, filterMinAmount, filterMaxAmount, pathname, router, searchParams])
 
-  // Deep-link focus: when arriving via `?focus=<entryId>` (e.g. from an invoice's
-  // linked-payments list), scroll that row into view and flash a highlight once.
-  useEffect(() => {
-    const focusId = searchParams.get('focus')
-    if (!focusId) return
-    const t = setTimeout(() => {
-      const el = document.querySelector<HTMLElement>(`[data-entry-id="${focusId}"]`)
-      if (!el) return
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      el.classList.add('ring-2', 'ring-inset', 'ring-violet-500/60', 'bg-violet-500/5')
-      setTimeout(() => el.classList.remove('ring-2', 'ring-inset', 'ring-violet-500/60', 'bg-violet-500/5'), 2600)
-    }, 350)
-    return () => clearTimeout(t)
-    // Run once on mount for the initial focus target.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // Deep-link focus (`?focus=<entryId>`, e.g. from an invoice's linked-payments
+  // list). `focusId` is held in state rather than re-read from the URL at each
+  // use, because the notice below stays on screen while the user clears the
+  // filters that were hiding the row — and clearing them rewrites the query
+  // string. The scroll/flash effect itself lives further down, next to
+  // `filteredEntries`, since what it can do depends on what is on screen.
+  const [focusId, setFocusId] = useState(() => searchParams.get('focus'))
 
   const [recurringMonths, setRecurringMonths] = useState(0) // 0 = not recurring
 
@@ -1094,6 +1095,36 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     return result
   }, [entries, filterType, filterMonth, activeFacets, filterCategory, filterScope, filterAllocStatus, filterClient, filterTags, sortDir, filterMinAmount, filterMaxAmount, invoiceCategoryId, salaryCategoryId])
 
+  // ── Where did the deep-linked entry end up? ───────────────────────────────
+  // Three outcomes, and they used to be indistinguishable: on screen, loaded
+  // but filtered out, or never loaded. Only the first one could ever scroll,
+  // so a link to an entry outside the active month silently did nothing.
+  const focus = useMemo(
+    () => resolveFocus(focusId, entries, filteredEntries, e => e.id),
+    [focusId, entries, filteredEntries],
+  )
+
+  // Scroll to it once it is actually rendered — which may be after the user
+  // clears the filters that were hiding it, hence the dependency on `focus`.
+  useEffect(() => {
+    if (focus.kind !== 'visible') return
+    const t = setTimeout(() => {
+      const el = document.querySelector<HTMLElement>(`[data-entry-id="${focus.record.id}"]`)
+      if (!el) return
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('ring-2', 'ring-inset', 'ring-violet-500/60', 'bg-violet-500/5')
+      setTimeout(() => el.classList.remove('ring-2', 'ring-inset', 'ring-violet-500/60', 'bg-violet-500/5'), 2600)
+    }, 350)
+    return () => clearTimeout(t)
+  }, [focus])
+
+  /** Clear every filter that could be hiding the focused entry. */
+  function showFocusedEntry() {
+    setFilterType(''); setFilterMonth(''); setFilterCategory(''); setFilterScope('')
+    setSearchFacets([]); setSearchDraft(''); setFilterAllocStatus(''); setFilterClient('')
+    setFilterMinAmount(''); setFilterMaxAmount(''); setFilterTags([])
+  }
+
   const totalInflow  = filteredEntries.filter(e => e.type === 'inflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
   const totalOutflow = filteredEntries.filter(e => e.type === 'outflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
   const net = totalInflow - totalOutflow
@@ -1525,6 +1556,21 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             )}
           </div>
         </div>
+
+        {/* Named saved views — stores this screen's own URL filters. */}
+        <SavedViews className="mb-3" />
+
+        {/* A deep link that landed outside the active filters, explained. */}
+        <FocusedRecordNotice
+          className="mb-3"
+          outcome={focus.kind}
+          what="entry"
+          label={focus.kind === 'hidden'
+            ? focusNoticeLabel({ reference: focus.record.reference || focus.record.description, date: focus.record.entry_date })
+            : undefined}
+          onShow={showFocusedEntry}
+          onDismiss={() => setFocusId(null)}
+        />
 
         {/* Tokenized active filters (ERPNext-style chips) */}
         <ActiveFilterChips

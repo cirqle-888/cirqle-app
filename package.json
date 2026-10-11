@@ -8,6 +8,7 @@
     "lint:privacy": "node scripts/check-name-privacy.mjs",
     "start": "next start",
     "lint": "eslint --max-warnings 2128",
+    "typecheck": "next typegen && tsc --noEmit -p tsconfig.typecheck.json",
     "test": "vitest run",
     "test:watch": "vitest"
   },

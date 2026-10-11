@@ -81,7 +81,7 @@ export const roleRoutes: Record<Role, string[]> = {
 // Context
 // ─────────────────────────────────────────────────────
 const RoleContext = createContext<RoleContextType>({
-  role: 'super_admin',
+  role: 'employee',
   employee: null,
   loading: true,
 })

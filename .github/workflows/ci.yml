@@ -25,7 +25,7 @@ jobs:
       # `lint` carries --max-warnings, pinned to the count on 2026-08-30, so the
       # warning debt can shrink but never grow. See eslint.config.mjs.
       - run: npm run lint
-      - run: npx tsc --noEmit
+      - run: npm run typecheck
 
   test:
     runs-on: ubuntu-latest

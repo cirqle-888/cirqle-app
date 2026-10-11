@@ -35,6 +35,7 @@ import { autoLinkTaskPackage } from '@/lib/packages/auto-link'
 import { normalizeNoChargeReason, retryWithoutNoChargeReason, withoutNoChargeReason } from '@/lib/tasks/billable'
 import { retryWithoutColumn, withoutColumn } from '@/lib/db/missing-column'
 import { invalidateAnalyticsForDates } from '@/lib/analytics/invalidate'
+import type { BulkOutcome as BulkRowOutcome } from '@/lib/bulk/outcome'
 
 const REVALIDATE = '/dashboard/tasks'
 
@@ -293,7 +294,7 @@ export async function serverUpdateTaskStatus(
 export async function serverBulkUpdateStatus(
   ids:      string[],
   toStatus: string,
-): Promise<ActionResult> {
+): Promise<ActionResult<BulkRowOutcome>> {
   const guard = await requirePermission(PERMS.TASKS_EDIT)
   if (!guard.ok) return { ok: false, error: guard.error }
 
@@ -301,13 +302,24 @@ export async function serverBulkUpdateStatus(
 
   const admin = createAdminClient()
   const CHUNK = 100
+  // Chunk outcomes are reported rather than bailed on.
+  //
+  // This used to `return` on the first chunk error, which with 100-row chunks
+  // meant a failure on the second chunk left the first hundred ALREADY
+  // UPDATED while the UI said "Bulk update failed" — a silent partial apply
+  // reported as a total one. Continuing and reporting which ids went through
+  // lets the caller retry exactly the rest; the user asked for all of them,
+  // and each chunk is independent.
+  const succeeded: string[] = []
+  const failed: string[] = []
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK)
     const { error } = await admin
       .from('tasks')
       .update({ status: toStatus })
       .in('id', chunk)
-    if (error) return { ok: false, error: error.message }
+    if (error) failed.push(...chunk)
+    else succeeded.push(...chunk)
   }
 
   void logActivity({
@@ -315,12 +327,13 @@ export async function serverBulkUpdateStatus(
     entityType: 'task',
     entityId:   null,
     action:     'status_changed',
-    detail:     { bulk: true, count: ids.length, to: toStatus },
+    detail:     { bulk: true, count: succeeded.length, attempted: ids.length, to: toStatus },
   })
 
-  // SYNC INTEGRITY!
+  // SYNC INTEGRITY! Only for rows that actually changed — re-syncing a task
+  // whose update failed would write derived values from its unchanged status.
   const touched: (string | null | undefined)[] = []
-  for (const id of ids) {
+  for (const id of succeeded) {
     await syncDraftInvoices(id)
     const scope = await readTaskScope(admin, id)
     touched.push(scope?.taskDate)
@@ -329,9 +342,13 @@ export async function serverBulkUpdateStatus(
   await bustAnalytics(...touched)
 
   // Mirror onto any promoted requests (no-op when none are linked).
-  void syncRequestStatusFromTasks(ids, toStatus).catch(() => {})
+  if (succeeded.length) void syncRequestStatusFromTasks(succeeded, toStatus).catch(() => {})
 
-  return { ok: true }
+  return {
+    ok: failed.length === 0,
+    data: { succeeded, failed },
+    error: failed.length ? `${failed.length} task${failed.length === 1 ? '' : 's'} could not be updated` : undefined,
+  }
 }
 
 // ── Bulk assign employees ───────────────────────────────────────────────────
@@ -343,20 +360,33 @@ export async function serverBulkUpdateStatus(
 export async function serverBulkAssignEmployees(
   taskIds:     string[],
   employeeIds: string[],
-): Promise<ActionResult> {
+): Promise<ActionResult<BulkRowOutcome>> {
   const guard = await requirePermission(PERMS.TASKS_ASSIGN)
   if (!guard.ok) return { ok: false, error: guard.error }
   if (!taskIds.length) return { ok: false, error: 'No tasks selected.' }
 
   const admin = createAdminClient()
 
-  const { error: delErr } = await admin.from('task_assignments').delete().in('task_id', taskIds)
-  if (delErr) return { ok: false, error: delErr.message }
-
-  if (employeeIds.length > 0) {
-    const rows = taskIds.flatMap(task_id => employeeIds.map(employee_id => ({ task_id, employee_id })))
-    const { error: insErr } = await admin.from('task_assignments').insert(rows)
-    if (insErr) return { ok: false, error: insErr.message }
+  // Per task, not one delete + one insert across all of them.
+  //
+  // Reassignment is destructive-then-constructive and there is no transaction
+  // here, so the old shape had a bad failure mode: the blanket DELETE would
+  // succeed, the INSERT would fail, and every selected task was left with NO
+  // assignees at all — reported only as "Bulk assign failed". Doing it one
+  // task at a time bounds that to the single task that failed, and lets the
+  // caller retry exactly those. The cost is two round trips per task instead
+  // of two in total, which a selection of tens of tasks can afford.
+  const succeeded: string[] = []
+  const failed: string[] = []
+  for (const taskId of taskIds) {
+    const { error: delErr } = await admin.from('task_assignments').delete().eq('task_id', taskId)
+    if (delErr) { failed.push(taskId); continue }
+    if (employeeIds.length > 0) {
+      const rows = employeeIds.map(employee_id => ({ task_id: taskId, employee_id }))
+      const { error: insErr } = await admin.from('task_assignments').insert(rows)
+      if (insErr) { failed.push(taskId); continue }
+    }
+    succeeded.push(taskId)
   }
 
   void logActivity({
@@ -364,10 +394,14 @@ export async function serverBulkAssignEmployees(
     entityType: 'task',
     entityId:   null,
     action:     'assigned',
-    detail:     { bulk: true, taskCount: taskIds.length, employeeIds },
+    detail:     { bulk: true, taskCount: succeeded.length, attempted: taskIds.length, employeeIds },
   })
 
-  return { ok: true }
+  return {
+    ok: failed.length === 0,
+    data: { succeeded, failed },
+    error: failed.length ? `${failed.length} task${failed.length === 1 ? '' : 's'} could not be reassigned` : undefined,
+  }
 }
 
 // ── Bulk delete (soft) ──────────────────────────────────────────────────────

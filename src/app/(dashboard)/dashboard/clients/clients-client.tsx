@@ -1,19 +1,31 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient as createSupabaseClient } from '@/lib/supabase/client'
 import Header from '@/components/layout/header'
+import ClientWorkspaceButton from '@/components/clients/client-workspace-button'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import AppSelect from '@/components/ui/app-select'
+import { FilterDropdown } from '@/components/ui/filter-dropdown'
+import { useBatchSelection } from '@/lib/hooks/use-batch-selection'
+import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { BulkOutcomeBar } from '@/components/ui/bulk-outcome-bar'
+import { describeBulkPlan, summariseBulkOutcome, type BulkReport } from '@/lib/bulk/outcome'
+import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
+import {
+  NO_DEPARTMENT, filterByDepartments, departmentFilterOptions, selectedDepartmentLabels,
+  clientDepartmentIds,
+} from '@/lib/clients/department-filter'
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
   Plus, Search, X, Edit2, Archive, ArchiveRestore, ChevronRight,
-  Users2, Award, IndianRupee, AlertTriangle, Settings2, Layers, FlaskConical, CheckCircle2,
+  Users2, Award, IndianRupee, AlertTriangle, Settings2, Layers, FlaskConical, CheckCircle2, CheckSquare,
 } from 'lucide-react'
-import { createClient, updateClient, deactivateClient, reactivateClient } from '@/app/(dashboard)/dashboard/settings/actions'
+import { createClient, updateClient, deactivateClient, reactivateClient, bulkSetClientDepartment } from '@/app/(dashboard)/dashboard/settings/actions'
 import { approveDraftClient } from '@/app/(dashboard)/dashboard/tasks/quick-create-actions'
 import type { Currency } from '@/types'
 
@@ -44,6 +56,12 @@ interface ClientRow {
   draft_note?: string | null
   draft_created_at?: string | null
   draft_creator?: { name: string | null } | { name: string | null }[] | null
+  /**
+   * Department override. NULL — the default and the state of every row before
+   * 20261011120000 — means "derive it from the services this client buys",
+   * which is the original behaviour. See lib/clients/department-filter.
+   */
+  department_id?: string | null
 }
 
 interface ClientStats {
@@ -66,6 +84,11 @@ interface Props {
   canPricingMatrix?: boolean
   /** clients.create / settings.access — may turn a draft into a real client. */
   canApproveDraft?: boolean
+  /**
+   * `clients.department_id` exists (migration 20261011120000). False hides the
+   * picker entirely rather than offering a field that silently will not save.
+   */
+  canSetDepartment?: boolean
 }
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
@@ -73,7 +96,7 @@ const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
 const draftCreatorName = (c: { draft_creator?: ClientRow['draft_creator'] }) =>
   (Array.isArray(c.draft_creator) ? c.draft_creator[0]?.name : c.draft_creator?.name) || null
 
-export default function ClientsClient({ clients: initialClients, stats, departments = [], clientDepartments = {}, showAmounts, canCreate, canEdit, canPricingMatrix = false, canApproveDraft = false }: Props) {
+export default function ClientsClient({ clients: initialClients, stats, departments = [], clientDepartments = {}, showAmounts, canCreate, canEdit, canPricingMatrix = false, canApproveDraft = false, canSetDepartment = false }: Props) {
   const router = useRouter()
   const toast = useToast()
   const { ds } = usePrivacy()
@@ -82,6 +105,26 @@ export default function ClientsClient({ clients: initialClients, stats, departme
   const [filter, setFilter] = useState<'active' | 'drafts' | 'archived' | 'all'>('active')
   const [sort, setSort] = useState<'name' | 'outstanding' | 'tasks'>('name')
   const [groupByDept, setGroupByDept] = useState(false)
+  /**
+   * Narrow the list to one or more departments. Separate from `groupByDept`
+   * on purpose: grouping answers "who belongs where?", filtering answers
+   * "show me only mine", and the two compose — filter to two departments and
+   * group, and you get exactly those two headings.
+   */
+  const [deptFilter, setDeptFilter] = useState<string[]>([])
+
+  // ── Bulk department change ───────────────────────────────────────────────
+  // Same select → action bar → confirm → report → retry flow every other
+  // module uses, so there is nothing new to learn here. The department is the
+  // only field worth setting in bulk: it is the one that is wrong for a whole
+  // group of clients at once, usually right after a department is created.
+  const batchSel = useBatchSelection()
+  const [bulkDeptOpen, setBulkDeptOpen] = useState(false)
+  const [bulkDeptId, setBulkDeptId] = useState<string>('')
+  const [bulkConfirm, setBulkConfirm] = useState<{ verb: string; qualifier?: string; run: () => void } | null>(null)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkReport, setBulkReport] = useState<BulkReport | null>(null)
+  const bulkRetryRef = useRef<((ids: string[]) => Promise<void>) | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<Record<string, any>>({})
@@ -93,6 +136,9 @@ export default function ClientsClient({ clients: initialClients, stats, departme
     if (filter === 'active')   pool = pool.filter(c => c.is_active !== false)
     if (filter === 'archived') pool = pool.filter(c => c.is_active === false)
     if (filter === 'drafts')   pool = pool.filter(c => c.is_draft && c.is_active !== false)
+    // Departments are derived from the services a client buys, so this is an
+    // intersection, not an equality — see lib/clients/department-filter.
+    pool = filterByDepartments(pool, deptFilter, clientDepartments)
     if (search) {
       const q = search.toLowerCase()
       pool = pool.filter(c =>
@@ -104,7 +150,7 @@ export default function ClientsClient({ clients: initialClients, stats, departme
       if (sort === 'tasks')       return (stats[b.id]?.tasks || 0) - (stats[a.id]?.tasks || 0)
       return (a.name || '').localeCompare(b.name || '')
     })
-  }, [clients, search, filter, sort, stats])
+  }, [clients, search, filter, sort, stats, deptFilter, clientDepartments])
 
   // Portfolio totals for the KPI strip (active clients only).
   const totals = useMemo(() => {
@@ -160,6 +206,49 @@ export default function ClientsClient({ clients: initialClients, stats, departme
       toast.success('Client created', `${res.data.name} · code ${res.data.code}`)
     }
     setShowForm(false)
+  }
+
+  /** Apply a bulk outcome: report it, then narrow the selection to the failures. */
+  function finishBulk(report: BulkReport) {
+    setBulkReport(report.tone === 'success' ? null : report)
+    if (report.tone === 'success') {
+      toast.success(report.title)
+      batchSel.clear()
+      return
+    }
+    if (report.tone === 'failure') toast.error(report.title, report.body)
+    // Leave exactly what still needs doing selected, so Retry cannot
+    // re-apply to the clients that already took the change.
+    batchSel.clear()
+    batchSel.setMode(true)
+    for (const id of report.retryable) batchSel.toggle(id)
+  }
+
+  async function runBulkDepartment(ids: string[], departmentId: string | null) {
+    if (!ids.length) return
+    setBulkBusy(true)
+    const res = await bulkSetClientDepartment(ids, departmentId)
+    setBulkBusy(false)
+    // A missing migration is not a partial failure — nothing was attempted.
+    if (!res.ok && !res.data) { toast.error('Could not change the department', res.error); return }
+    const applied = new Set(res.data?.succeeded ?? [])
+    setClients(prev => prev.map(c => applied.has(c.id) ? { ...c, department_id: departmentId } : c))
+    finishBulk(summariseBulkOutcome(res.data, ids, 'client'))
+  }
+
+  function startBulkDepartment() {
+    const ids = [...batchSel.selected]
+    const chosen = bulkDeptId || null
+    bulkRetryRef.current = retryIds => runBulkDepartment(retryIds, chosen)
+    const name = departments.find(d => d.id === chosen)?.name
+    setBulkDeptOpen(false)
+    setBulkConfirm({
+      verb: chosen ? 'file' : 'reset',
+      qualifier: chosen
+        ? `under ${name}`
+        : 'to deriving their department from the services they buy',
+      run: () => void runBulkDepartment(ids, chosen),
+    })
   }
 
   async function archive(client: ClientRow) {
@@ -248,6 +337,32 @@ export default function ClientsClient({ clients: initialClients, stats, departme
             <option value="tasks">Sort: Most tasks</option>
           </AppSelect>
           {departments.length > 0 && (
+            <FilterDropdown
+              multiple
+              compact
+              sortKey="client-departments"
+              className="shrink-0"
+              placeholder="Department"
+              options={departmentFilterOptions(departments)}
+              value=""
+              onChange={() => {}}
+              values={deptFilter}
+              onToggle={v => setDeptFilter(prev =>
+                prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v])}
+              onClear={() => setDeptFilter([])}
+            />
+          )}
+          {canEdit && canSetDepartment && departments.length > 0 && (
+            <button onClick={() => { if (batchSel.mode) batchSel.clear(); else batchSel.setMode(true) }}
+              className={`flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border transition-all shrink-0 ${
+                batchSel.mode
+                  ? 'bg-primary/10 border-primary/30 text-primary'
+                  : 'bg-secondary/30 border-border/50 text-muted-foreground hover:text-foreground'
+              }`}>
+              <CheckSquare className="w-3.5 h-3.5" /> {batchSel.mode ? 'Done' : 'Select'}
+            </button>
+          )}
+          {departments.length > 0 && (
             <button onClick={() => setGroupByDept(g => !g)}
               className={`flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border transition-all shrink-0 ${
                 groupByDept
@@ -258,10 +373,48 @@ export default function ClientsClient({ clients: initialClients, stats, departme
             </button>
           )}
         </div>
-        {groupByDept && (
+        {/* The chosen departments, removable.
+            Only past one: the dropdown's own trigger names a single selection
+            perfectly well, and repeating it directly underneath is noise. Two
+            or more collapse to "N selected" up there, which is the point at
+            which you can no longer see what you filtered to. */}
+        <ActiveFilterChips
+          className="-mt-1"
+          chips={deptFilter.length < 2 ? [] : selectedDepartmentLabels(deptFilter, departments).map(d => ({
+            key: d.value,
+            label: 'Department',
+            value: d.label,
+            onRemove: () => setDeptFilter(prev => prev.filter(x => x !== d.value)),
+          }))}
+          onClearAll={() => setDeptFilter([])}
+        />
+
+        {(groupByDept || deptFilter.length > 0) && (
           <p className="text-[11px] text-muted-foreground -mt-2">
             Departments are derived from the services each client buys — a client buying from several departments appears under each.
           </p>
+        )}
+
+        {/* What the last bulk change did, and a retry for the part it didn't. */}
+        <BulkOutcomeBar
+          report={bulkReport}
+          busy={bulkBusy}
+          onRetry={() => { const run = bulkRetryRef.current; if (run && bulkReport) void run(bulkReport.retryable) }}
+          onDismiss={() => setBulkReport(null)}
+        />
+
+        {/* Select-all, only while selecting. Acts on what is on screen — the
+            filters are the selection tool, so "all" means "all of these". */}
+        {batchSel.mode && filtered.length > 0 && (
+          <label className="flex items-center gap-2 text-xs text-muted-foreground px-1 -mb-1 cursor-pointer w-fit">
+            <input
+              type="checkbox"
+              className="accent-violet-500 w-3.5 h-3.5"
+              checked={filtered.length > 0 && filtered.every(c => batchSel.isSelected(c.id))}
+              onChange={() => batchSel.toggleAll(filtered.map(c => c.id))}
+            />
+            Select all {filtered.length} shown
+          </label>
         )}
 
         {/* List */}
@@ -271,17 +424,40 @@ export default function ClientsClient({ clients: initialClients, stats, departme
               <Users2 className="w-8 h-8 text-muted-foreground/40 mb-2" />
               <p className="text-sm font-medium">No clients found</p>
               <p className="text-xs text-muted-foreground mt-1">
-                {search ? 'Try a different search.' : filter === 'archived' ? 'No archived clients.' : 'Add your first client to get started.'}
+                {deptFilter.length > 0
+                  ? 'No clients buy from the selected department yet.'
+                  : search ? 'Try a different search.'
+                  : filter === 'archived' ? 'No archived clients.'
+                  : 'Add your first client to get started.'}
               </p>
             </div>
           )}
           {(() => {
             const renderClientRow = (client: ClientRow) => {
             const s = stats[client.id]
+            const picked = batchSel.mode && batchSel.isSelected(client.id)
             return (
               <div key={client.id}
-                className="group bg-card border border-border/60 rounded-2xl px-4 md:px-5 py-3.5 flex items-center gap-3 hover:border-primary/25 hover:shadow-sm transition-all cursor-pointer"
-                onClick={() => router.push(`/dashboard/clients/${client.id}`)}>
+                className={`group bg-card border rounded-2xl px-4 md:px-5 py-3.5 flex items-center gap-3 hover:shadow-sm transition-all cursor-pointer ${
+                  picked
+                    ? 'border-violet-500/60 bg-violet-500/[0.04] ring-1 ring-violet-500/20'
+                    : 'border-border/60 hover:border-primary/25'
+                }`}
+                // While selecting, the row toggles rather than navigates —
+                // otherwise ticking twelve clients means twelve trips back.
+                onClick={() => batchSel.mode
+                  ? batchSel.toggle(client.id)
+                  : router.push(`/dashboard/clients/${client.id}`)}>
+                {batchSel.mode && (
+                  <input
+                    type="checkbox"
+                    className="accent-violet-500 w-4 h-4 shrink-0"
+                    checked={batchSel.isSelected(client.id)}
+                    onChange={() => batchSel.toggle(client.id)}
+                    onClick={e => e.stopPropagation()}
+                    aria-label={`Select ${client.name}`}
+                  />
+                )}
                 {/* Identity */}
                 <div className="w-10 h-10 rounded-xl gradient-bg flex items-center justify-center text-white text-xs font-bold shrink-0">
                   {client.code || client.name.slice(0, 2).toUpperCase()}
@@ -333,6 +509,7 @@ export default function ClientsClient({ clients: initialClients, stats, departme
                 </div>
                 {/* Row actions */}
                 <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                  <ClientWorkspaceButton client={client} />
                   {client.is_draft && canApproveDraft && client.is_active !== false && (
                     <button onClick={() => approve(client)} disabled={approvingId === client.id}
                       title="Make this a real client — from now on its work can be invoiced"
@@ -365,13 +542,24 @@ export default function ClientsClient({ clients: initialClients, stats, departme
 
             if (!groupByDept) return filtered.map(renderClientRow)
 
-            const sections = [
+            // Headings follow the filter. Without this, filtering to Branding
+            // and grouping still rendered a Social Media heading — because the
+            // clients that matched also buy from there — which reads as the
+            // filter having failed. When nothing is filtered, every department
+            // shows, as before.
+            const allSections = [
               ...departments,
               { id: null as any, name: 'No department', color: null },
             ]
+            const sections = deptFilter.length === 0
+              ? allSections
+              : allSections.filter(dep =>
+                  dep.id ? deptFilter.includes(dep.id) : deptFilter.includes(NO_DEPARTMENT))
             return sections.map(dep => {
               const rows = filtered.filter(c => {
-                const deps = clientDepartments[c.id] || []
+                // Override first, services otherwise — the same precedence the
+                // filter and the form use.
+                const deps = clientDepartmentIds(c, clientDepartments)
                 return dep.id ? deps.includes(dep.id) : deps.length === 0
               })
               if (rows.length === 0) return null
@@ -446,6 +634,39 @@ export default function ClientsClient({ clients: initialClients, stats, departme
                   <input value={form.gstin || ''} onChange={e => setForm(p => ({ ...p, gstin: e.target.value }))} className={inputCls} placeholder="Optional" />
                 </div>
               </div>
+              {canSetDepartment && departments.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Department</label>
+                  <AppSelect
+                    value={form.department_id || ''}
+                    onChange={e => setForm(p => ({ ...p, department_id: e.target.value || null }))}
+                  >
+                    <option value="">From its services (default)</option>
+                    {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </AppSelect>
+                  {/* Says what the default actually does, and — when an
+                      override is set that its services contradict — which
+                      departments it would otherwise be in. One of the two is
+                      wrong, and the person editing is the one who can tell. */}
+                  <p className="text-[11px] text-muted-foreground mt-1.5">
+                    {(() => {
+                      const derived = (editingId && clientDepartments[editingId]) || []
+                      const names = derived
+                        .map(id => departments.find(d => d.id === id)?.name)
+                        .filter(Boolean)
+                        .join(', ')
+                      if (!form.department_id) {
+                        return names
+                          ? `Currently ${names}, from the services it buys.`
+                          : 'Buys nothing yet, so it has no department. Pick one to file it anyway.'
+                      }
+                      return names
+                        ? `Overrides its services, which say ${names}.`
+                        : 'Filed here regardless of what it buys.'
+                    })()}
+                  </p>
+                </div>
+              )}
               <p className="text-[11px] text-muted-foreground">
                 Service pricing for this client is managed on their dashboard and in Settings → Pricing Matrix.
               </p>
@@ -458,6 +679,64 @@ export default function ClientsClient({ clients: initialClients, stats, departme
             </form>
           </div>
         </ModalOverlay>
+      )}
+
+      {/* ── Bulk action bar ── */}
+      {batchSel.mode && (
+        <BatchActionBar
+          count={batchSel.count}
+          onClear={batchSel.clear}
+          busy={bulkBusy}
+          actions={[
+            {
+              key: 'department',
+              label: 'Set department',
+              icon: <Layers className="w-3.5 h-3.5" />,
+              tint: 'violet',
+              onClick: () => { setBulkDeptId(''); setBulkDeptOpen(true) },
+            },
+          ] as BatchAction[]}
+        />
+      )}
+
+      {/* ── Bulk department picker ── */}
+      {bulkDeptOpen && (
+        <ModalOverlay onClose={() => setBulkDeptOpen(false)}>
+          <div className="bg-card border border-border rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4">
+            <div>
+              <h2 className="font-semibold text-sm">
+                Set the department on {batchSel.count} client{batchSel.count !== 1 ? 's' : ''}
+              </h2>
+              <p className="text-xs text-muted-foreground mt-1">
+                This overrides what their services say. Clearing it puts them back to
+                deriving the department from the services they buy.
+              </p>
+            </div>
+            <AppSelect value={bulkDeptId} onChange={e => setBulkDeptId(e.target.value)}>
+              <option value="">Clear the override (derive from services)</option>
+              {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </AppSelect>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setBulkDeptOpen(false)}
+                className="px-4 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">Cancel</button>
+              <button onClick={startBulkDepartment} disabled={bulkBusy}
+                className="px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-semibold hover:bg-violet-500 disabled:opacity-50 transition-colors">
+                Continue
+              </button>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* The affected count, before anything is written. */}
+      {bulkConfirm && (
+        <ConfirmDialog
+          title={`Change ${batchSel.count} client${batchSel.count !== 1 ? 's' : ''}?`}
+          body={describeBulkPlan(batchSel.count, bulkConfirm.verb, 'client', bulkConfirm.qualifier)}
+          confirmLabel="Apply"
+          onConfirm={() => { const run = bulkConfirm.run; setBulkConfirm(null); run() }}
+          onCancel={() => setBulkConfirm(null)}
+        />
       )}
 
       {/* Archive confirm */}
