@@ -104,3 +104,25 @@ browser meanwhile. A Windows target can be added later from this same codebase
 On the Cirqle side the bridge lives in `src/lib/desktop.ts` (`isDesktop()`, share
 preference helpers); the receipt dialog is `src/components/cashbook/receipt-modal.tsx`
 and the preference UI is in Settings → WhatsApp (`DesktopReceiptShareCard`).
+
+## Desktop 0.9.2 audit fixes
+
+Every visible pane has a labelled close button in the row below the toolbar.
+Close Flyer Cirqle or its second pane directly using ×. Closing the last
+non-Cirqle pane returns to Cirqle; the last Cirqle pane remains open.
+WhatsApp account tabs scroll when space is tight. Closing a WhatsApp pane
+keeps its linked account; removing an account remains a separate action.
+
+Remote panes cannot invoke toolbar/account/download management actions.
+WhatsApp uses a retry-only preload for the bundled error page. App navigation
+is restricted to the configured Cirqle and Flyer origins, with other links
+opening in the system browser. Download filenames cannot escape the downloads
+folder, and receipt downloads accept PNG, JPEG or WebP with a size limit.
+Clipboard history is collected only while the Cirqle window is focused.
+Cold-start deep links wait for the window; update requests have a timeout.
+Auto-paste reports whether the paste operation was attempted successfully,
+not whether WhatsApp accepted or sent the image. Sending still requires review.
+
+Builds remain unsigned, with manual installation. These fixes do not add offline
+mode or an automatic installer/updater. The checks cover IPC sender boundaries,
+download containment, pane close/hide behavior, and queued deep links.

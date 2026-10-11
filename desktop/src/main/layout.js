@@ -31,7 +31,7 @@ const deps = {
 }
 function init(d) { Object.assign(deps, d) }
 
-const TOOLBAR_H = 48
+const TOOLBAR_H = 104
 const SPLITTER_W = 6
 const MIN_RATIO = 0.2   // legacy two-pane drag bounds (kept for callers)
 const MAX_RATIO = 0.8
@@ -80,8 +80,21 @@ function normalizeSizes() {
   if (!Array.isArray(state.sizes) || state.sizes.length !== state.panes.length) {
     state.sizes = state.panes.map(() => 1 / state.panes.length)
   }
+  state.sizes = state.sizes.map(s => Number.isFinite(s) && s > 0 ? s : 1 / state.panes.length)
   const total = state.sizes.reduce((a, b) => a + b, 0) || 1
-  state.sizes = state.sizes.map(s => Math.max(0.01, s / total))
+  state.sizes = state.sizes.map(s => s / total)
+  // Preserve relative proportions while reserving a readable width per pane.
+  const width = deps.getWin()?.getContentBounds().width || 1440
+  const minimum = Math.min(280 / Math.max(1, width - SPLITTER_W * (state.panes.length - 1)), 1 / state.panes.length)
+  let free = 1, flexible = state.sizes.map((_, i) => i), result = [...state.sizes]
+  while (flexible.length) {
+    const sum = flexible.reduce((t, i) => t + state.sizes[i], 0)
+    const small = flexible.filter(i => free * state.sizes[i] / sum < minimum)
+    if (!small.length) { flexible.forEach(i => { result[i] = free * state.sizes[i] / sum }); break }
+    small.forEach(i => { result[i] = minimum; free -= minimum })
+    flexible = flexible.filter(i => !small.includes(i))
+  }
+  state.sizes = result
 }
 
 /**
@@ -126,15 +139,17 @@ function layout() {
   // Hide everything first, then place + show only the panes in the list.
   for (const v of allPaneViews()) v.setVisible(false)
 
-  const n = state.panes.length
+  const visiblePanes = state.expandedPane && state.panes.includes(state.expandedPane) ? [state.expandedPane] : state.panes
+  const n = visiblePanes.length
+  const visibleSizes = n === 1 ? [1] : state.sizes
   deps.ensureSplitters(Math.max(0, n - 1))
   const splitters = deps.getSplitters()
   splitters.forEach(s => s.setVisible(false))
 
   const innerW = b.width - SPLITTER_W * (n - 1)
   let x = 0
-  state.panes.forEach((pane, i) => {
-    const w = i === n - 1 ? b.width - x : Math.round(innerW * state.sizes[i])
+  visiblePanes.forEach((pane, i) => {
+    const w = i === n - 1 ? b.width - x : Math.round(innerW * visibleSizes[i])
     deps.ensureView(pane)
     const v = viewFor(pane)
     if (v) {
@@ -155,6 +170,7 @@ function layout() {
 
 // ── Pane mutations ───────────────────────────────────────────────────────────
 function commit() {
+  if (!state.panes.includes(state.expandedPane)) state.expandedPane = null
   syncLegacy()
   layout()
   saveSettings()
@@ -165,6 +181,7 @@ function commit() {
 function addPane(pane, { front = false } = {}) {
   if (state.panes.includes(pane)) return false
   if (state.panes.length >= MAX_PANES) return false
+  state.expandedPane = null
   // New pane takes an equal share, squeezed proportionally from the others.
   const share = 1 / (state.panes.length + 1)
   state.sizes = state.sizes.map(s => s * (1 - share))
@@ -178,7 +195,10 @@ function addPane(pane, { front = false } = {}) {
 function removePane(pane) {
   const i = state.panes.indexOf(pane)
   if (i === -1) return false
-  if (state.panes.length === 1) return false // never an empty window
+  if (state.panes.length === 1) {
+    if (pane === 'cirqle') return false
+    state.panes = ['cirqle']; state.sizes = [1]; commit(); return true
+  }
   state.panes.splice(i, 1)
   const freed = state.sizes.splice(i, 1)[0]
   state.sizes[Math.max(0, i - 1)] += freed
@@ -189,7 +209,7 @@ function removePane(pane) {
 /** Swap one pane id for another in place (same slot + width). */
 function replacePane(from, to) {
   const i = state.panes.indexOf(from)
-  if (i === -1) return false
+  if (i === -1 || (from !== to && state.panes.includes(to))) return false
   state.panes[i] = to
   commit()
   return true
@@ -201,7 +221,9 @@ function dragBoundary(i, frac) {
   const before = state.sizes.slice(0, i).reduce((a, b) => a + b, 0)
   const pair = state.sizes[i] + state.sizes[i + 1]
   let left = frac - before
-  left = Math.max(MIN_PANE, Math.min(pair - MIN_PANE, left))
+  const width = deps.getWin()?.getContentBounds().width || 1440
+  const minimum = Math.min(pair / 2, Math.max(MIN_PANE, 280 / width))
+  left = Math.max(minimum, Math.min(pair - minimum, left))
   state.sizes[i] = left
   state.sizes[i + 1] = pair - left
   if (state.panes.length === 2) state.ratio = state.sizes[0]
@@ -212,6 +234,8 @@ function dragBoundary(i, frac) {
 // The named presets are deliberately two-pane arrangements: they collapse any
 // wider split back to Cirqle + the active WhatsApp — the "get me home" gesture.
 function applyPreset(p) {
+  if (p !== 'toggleToolbar') state.clientWorkspace = null
+  state.expandedPane = null
   const waPane = `wa:${state.activeWa || (state.waAccounts[0] && state.waAccounts[0].id) || 'default'}`
   if (p === '50') { state.panes = ['cirqle', waPane]; state.sizes = [0.5, 0.5] }
   else if (p === '75') { state.panes = ['cirqle', waPane]; state.sizes = [0.75, 0.25] }
@@ -225,6 +249,6 @@ function applyPreset(p) {
 module.exports = {
   init, layout, applyPreset,
   addPane, removePane, replacePane, dragBoundary,
-  syncLegacy, viewFor, broadcast,
+  syncLegacy, viewFor, broadcast, commit, normalizeSizes,
   TOOLBAR_H, SPLITTER_W, MIN_RATIO, MAX_RATIO, MAX_PANES,
 }

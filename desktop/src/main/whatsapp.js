@@ -9,20 +9,21 @@
  * exported by reference so existing call sites keep their exact shape;
  * layout/menu/window needs are injected via init() as lazy getters.
  */
-const { WebContentsView, clipboard, nativeImage, shell } = require('electron')
+const { WebContentsView, clipboard, nativeImage, shell, Menu } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
 const { state } = require('./settings')
 const dl = require('./downloads')
+const security = require('./security')
 
 const deps = {
   getWin: () => null,
+  feedback: () => {},
   sendStateToChrome: () => {},
   applyPreset: () => {},
   layout: () => {},
   wireContextMenu: () => {},
-  loadError: () => {},
   /** Make the given WhatsApp account visible as a pane (added or swapped in). */
   ensureWaPane: () => {},
 }
@@ -42,10 +43,10 @@ const CHROME_UA =
 // active WhatsApp pane forward + focus it, so ⌘V drops it into the open chat.
 // autoPaste additionally tries to focus WhatsApp's composer and paste for the
 // user (best-effort — WhatsApp Web's DOM can change, so it degrades to manual ⌘V).
-function focusWhatsapp() {
+function focusWhatsapp(accountId) {
   // Whatever the current split is, make sure the active WhatsApp account is
   // actually on screen (creates its view lazily if needed), then focus it.
-  const id = state.activeWa || (state.waAccounts[0] && state.waAccounts[0].id)
+  const id = accountId || state.activeWa || (state.waAccounts[0] && state.waAccounts[0].id)
   deps.ensureWaPane(id)
   const wa = whatsapps[id]
   if (wa) { wa.webContents.focus() }
@@ -55,12 +56,13 @@ async function pasteIntoWhatsappComposer(wa) {
   if (!wa) return false
   try {
     // Focus the message composer (the contenteditable with a data-tab), then paste.
-    await wa.webContents.executeJavaScript(`(() => {
-      const box = document.querySelector('div[contenteditable="true"][data-tab]') ||
+    const found = await wa.webContents.executeJavaScript(`(() => {
+      const box = document.querySelector('#main footer div[contenteditable="true"]') ||
                   document.querySelector('footer div[contenteditable="true"]')
       if (box) { box.focus(); return true }
       return false
     })()`, true)
+    if (!found) return false
     wa.webContents.paste()
     return true
   } catch { return false }
@@ -86,19 +88,47 @@ async function typeCaptionIntoWhatsapp(wa, caption) {
     return true
   } catch { return false }
 }
-function shareImageToWhatsApp(image, { autoPaste = false, caption = null } = {}) {
-  if (!image || image.isEmpty?.()) return { ok: false, reason: 'empty' }
-  clipboard.writeImage(image)
-  const wa = focusWhatsapp()
-  if (autoPaste) {
-    setTimeout(async () => {
-      await pasteIntoWhatsappComposer(wa)
-      // Extra delay so WhatsApp's caption-preview overlay has time to mount
-      // and animate in before we go looking for its input.
-      if (caption) setTimeout(() => typeCaptionIntoWhatsapp(wa, caption), 450)
-    }, 250)
-  }
-  return { ok: true, pasted: autoPaste }
+let sharing = false
+function chooseAccount() {
+  return new Promise(resolve => {
+    let chosen = null
+    const items = [
+      { label: 'Share to WhatsApp · choose an account', enabled: false },
+      { label: 'Review the chat and press Send yourself', enabled: false },
+      { type: 'separator' },
+      ...state.waAccounts.map(account => ({ label: account.label + (account.id === state.activeWa ? ' · active' : ''), click: () => { chosen = account.id } })),
+      { type: 'separator' }, { label: 'Cancel', click: () => { chosen = null } },
+    ]
+    Menu.buildFromTemplate(items).popup({ callback: () => resolve(chosen) })
+  })
+}
+function feedback(result) { deps.feedback(result); return result }
+async function shareImageToWhatsApp(image, { autoPaste = false, caption = null } = {}) {
+  if (!image || image.isEmpty?.()) return feedback({ ok: false, reason: 'empty', message: 'The image could not be opened.' })
+  if (sharing) return { ok: false, reason: 'busy', message: 'Another share is in progress.' }
+  sharing = true
+  try {
+    const accountId = await chooseAccount()
+    if (!accountId) return { ok: false, reason: 'cancelled' }
+    const account = state.waAccounts.find(a => a.id === accountId)
+    if (!account) return feedback({ ok: false, reason: 'account-removed', message: 'This WhatsApp account was removed. Choose another account.' })
+    const view = focusWhatsapp(accountId)
+    clipboard.writeImage(image)
+    let pasted = false, captionPasted = false
+    if (autoPaste) {
+      await new Promise(resolve => setTimeout(resolve, 250))
+      pasted = await pasteIntoWhatsappComposer(view)
+      if (caption && pasted) {
+        await new Promise(resolve => setTimeout(resolve, 450))
+        captionPasted = await typeCaptionIntoWhatsapp(view, caption)
+      }
+    }
+    const message = pasted
+      ? `Paste attempted in ${account.label}. Review the attachment, then press Send.` + (caption && !captionPasted ? ' Add the caption manually.' : '')
+      : `Image copied for ${account.label}. Open the correct chat and press ${process.platform === 'darwin' ? '⌘V' : 'Ctrl+V'}, then review and send.`
+    return feedback({ ok: true, pasted, captionPasted, accountId, accountLabel: account.label, message })
+  } catch { return feedback({ ok: false, reason: 'share-failed', message: 'Could not prepare the image. Try copying or downloading it.' }) }
+  finally { sharing = false }
 }
 // Best-effort MIME type for the synthetic WhatsApp drop — WhatsApp Web uses it
 // to decide between photo preview and document attachment.
@@ -133,7 +163,7 @@ async function dropFileIntoWhatsApp(wa, filePath) {
   try {
     const stat = fs.statSync(filePath)
     if (stat.size > 60 * 1024 * 1024) return { ok: false, reason: 'file too large' } // WhatsApp caps ~64MB
-    const b64 = fs.readFileSync(filePath).toString('base64')
+    const b64 = (await fs.promises.readFile(filePath)).toString('base64')
     const ok = await wa.webContents.executeJavaScript(`(async () => {
       const res = await fetch('data:${mimeFor(filePath)};base64,${b64}')
       const blob = await res.blob()
@@ -142,7 +172,8 @@ async function dropFileIntoWhatsApp(wa, filePath) {
       dt.items.add(file)
       // #main = the open conversation. Fall back to the app root so a drop
       // still registers if WhatsApp changes its DOM.
-      const target = document.querySelector('#main') || document.querySelector('#app') || document.body
+      const target = document.querySelector('#main')
+      if (!target) return false
       for (const type of ['dragenter', 'dragover', 'drop']) {
         target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt }))
       }
@@ -152,26 +183,35 @@ async function dropFileIntoWhatsApp(wa, filePath) {
   } catch (e) { return { ok: false, reason: String(e) } }
 }
 
-function shareFileToWhatsApp(filePath, opts) {
+async function shareFileToWhatsApp(filePath, opts) {
   try {
     if (dl.isImageFile(filePath)) {
       const img = nativeImage.createFromPath(filePath)
-      if (!img.isEmpty()) return shareImageToWhatsApp(img, opts)
+      if (!img.isEmpty()) return await shareImageToWhatsApp(img, opts)
     }
-    // Non-image (PDF etc.): synthesize a drop on the open chat — same path the
-    // drag-out uses. Reveal in Finder only if that fails (old behavior).
-    const wa = focusWhatsapp()
-    dropFileIntoWhatsApp(wa, filePath).then((r) => {
-      if (!r.ok) shell.showItemInFolder(filePath)
-    })
-    return { ok: true }
-  } catch (e) { return { ok: false, reason: String(e) } }
+    if (sharing) return { ok: false, reason: 'busy' }
+    sharing = true
+    try {
+      const accountId = await chooseAccount()
+      if (!accountId) return { ok: false, reason: 'cancelled' }
+      const account = state.waAccounts.find(a => a.id === accountId)
+      if (!account) return { ok: false, reason: 'account-removed' }
+      const view = focusWhatsapp(accountId)
+      const result = await dropFileIntoWhatsApp(view, filePath)
+      if (!result.ok) shell.showItemInFolder(filePath)
+      return feedback({ ...result, accountLabel: account.label, message: result.ok
+        ? `Attachment offered to ${account.label}. Check its preview before pressing Send.`
+        : `Could not attach the file in ${account.label}. Drag it from the opened folder into the correct chat.` })
+    } finally { sharing = false }
+  } catch { return feedback({ ok: false, reason: 'share-failed', message: 'Could not open the file. It may have been moved or deleted.' }) }
 }
 
 function createWhatsappView(id) {
   if (whatsapps[id]) return
   const account = state.waAccounts.find(a => a.id === id)
-  const wa = new WebContentsView({ webPreferences: { partition: `persist:whatsapp:${id}`, preload: path.join(__dirname, '..', 'preload-ui.js') } })
+  const wa = new WebContentsView({ webPreferences: { partition: `persist:whatsapp:${id}`, preload: path.join(__dirname, '..', 'preload-whatsapp.js') } })
+  require('./pane-health').wire(wa, `wa:${id}`, WHATSAPP_URL)
+  security.protectNavigation(wa, shell, ['https://web.whatsapp.com'])
   wa.webContents.setUserAgent(CHROME_UA)
   // A muted account stays muted across recreation — no notification sounds
   // from this pane, so one message to a shared group doesn't chime N times.
@@ -180,10 +220,7 @@ function createWhatsappView(id) {
   dl.wireDownloads(wa.webContents.session, 'whatsapp') // images/files saved from WhatsApp land in the common list too
   deps.wireContextMenu(wa, false)                        // Chrome-style right-click menu (Copy Image, etc.)
   dl.wireEscToCloseDownloads(wa)                        // Esc closes the downloads panel
-  wa.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
-    if (isMainFrame && code !== -3) deps.loadError(wa, WHATSAPP_URL, 'whatsapp')
-  })
-  wa.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' } })
+  wa.webContents.setWindowOpenHandler(({ url }) => { security.openExternal(shell, url); return { action: 'deny' } })
   whatsapps[id] = wa
   const w = deps.getWin(); if (w) w.contentView.addChildView(wa)
   // Keep the downloads catcher + panel on top if they're open when a WA view is added.

@@ -123,3 +123,72 @@ assert.strictEqual(views.studio.visible, false, 'closing pane 1 must not leave i
 assert.strictEqual(views.studio2.visible, true, 'and must not take pane 2 down with it')
 
 console.log(`panes OK — ${Object.keys(views).length} single-instance panes place, hide and cap correctly`)
+
+// A single Flyer pane can be closed, returning to Cirqle.
+state.panes = ['studio']; state.sizes = [1]
+layoutMod.layout()
+assert.strictEqual(layoutMod.removePane('studio'), true)
+assert.deepStrictEqual(state.panes, ['cirqle'])
+assert.strictEqual(views.studio.visible, false)
+assert.strictEqual(views.cirqle.bounds.width, WIN_W)
+assert.strictEqual(layoutMod.removePane('cirqle'), false)
+
+// Remote pages and subframes cannot use toolbar-only actions.
+const security = require(path.join(ROOT, 'src/main/security.js'))
+const makeEvent = url => { const frame = { url }; return { senderFrame: frame, sender: { mainFrame: frame } } }
+assert.strictEqual(security.allowed(makeEvent('https://web.whatsapp.com'), 'downloads:open'), false)
+assert.strictEqual(security.allowed(makeEvent('https://app.cirqle.work.evil.test'), 'clipboard:write'), false)
+assert.strictEqual(security.allowed(makeEvent('https://app.cirqle.work/dashboard'), 'clipboard:write'), true)
+assert.strictEqual(security.allowed(makeEvent('https://app.cirqle.work/dashboard'), 'wa:remove'), false)
+const subframe = makeEvent('https://app.cirqle.work'); subframe.sender.mainFrame = {}
+assert.strictEqual(security.allowed(subframe, 'clipboard:write'), false)
+
+// A renderer-supplied name must never write outside the download directory.
+const downloads = require(path.join(ROOT, 'src/main/downloads.js'))
+downloads.init({ getWin: () => null, getChrome: () => null, buildMenu: noop })
+const saved = downloads.saveDataUrlToDownloads('data:image/png;base64,aGVsbG8=', '../escaped.png')
+assert.ok(saved)
+assert.strictEqual(path.dirname(saved), downloads.downloadsDir())
+assert.strictEqual(path.basename(saved), 'escaped.png')
+assert.strictEqual(downloads.saveDataUrlToDownloads('data:text/plain;base64,aGVsbG8=', 'bad.txt'), null)
+
+// A cold-start deep link is retained until the window exists.
+const links = require(path.join(ROOT, 'src/main/deeplinks.js'))
+let ready = false, navigated = null
+links.init({ ready: () => ready, showApp: noop, navigate: route => { navigated = route } })
+links.handleUrl('cirqle://tasks/123')
+assert.strictEqual(navigated, null)
+ready = true; links.flushPending()
+assert.strictEqual(navigated, '/dashboard/tasks/123')
+downloads.init({ getWin: () => WIN })
+// Workspaces restore proportions, ignore removed accounts and never duplicate panes.
+const workspaces = require(path.join(ROOT, 'src/main/workspaces.js'))
+reset(); layoutMod.addPane('studio')
+state.sizes = [.4, .6]
+assert.strictEqual(workspaces.save('Flyer evening').ok, true)
+assert.strictEqual(state.savedWorkspaces.length, 1)
+layoutMod.removePane('studio')
+assert.strictEqual(workspaces.apply(state.savedWorkspaces[0]), true)
+assert.deepStrictEqual(state.panes, ['cirqle', 'studio'])
+assert.deepStrictEqual(state.sizes, [.4, .6])
+assert.strictEqual(workspaces.expand('studio'), true)
+assert.strictEqual(views.studio.bounds.width, WIN_W)
+assert.strictEqual(views.cirqle.visible, false)
+assert.strictEqual(workspaces.expand('studio'), true)
+assert.strictEqual(views.cirqle.visible, true)
+assert.deepStrictEqual(state.sizes, [.4, .6])
+assert.strictEqual(workspaces.apply({panes:['wa:removed', 'studio', 'studio'], sizes:[.2,.3,.5]}), true)
+assert.deepStrictEqual(state.panes,['studio'])
+assert.strictEqual(workspaces.save('   ').ok,false)
+assert.strictEqual(workspaces.apply({panes:['unknown'],sizes:[1]}),false)
+reset(); layoutMod.addPane('studio'); state.sizes = [.01,.99]; layoutMod.layout()
+assert.ok(views.cirqle.bounds.width >= 280)
+assert.ok(Math.abs(state.sizes.reduce((a,b) => a+b,0)-1) < 1e-9)
+assert.strictEqual(layoutMod.replacePane('cirqle','studio'),false)
+const persisted = JSON.parse(fs.readFileSync(path.join(userData,'layout.json'),'utf8'))
+assert.strictEqual(persisted.paneStatus,undefined)
+assert.strictEqual(persisted.expandedPane,undefined)
+assert.strictEqual(persisted.savedWorkspaces.length,1)
+console.log('saved workspaces, expand/restore, minimum widths and runtime-state persistence OK')
+fs.rmSync(userData, { recursive: true, force: true })
+console.log('security, download containment, last-pane close and cold-start links OK')

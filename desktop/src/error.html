@@ -15,7 +15,7 @@
 </head>
 <body>
   <div class="box">
-    <h2>Couldn’t load this pane</h2>
+    <h2 id="reason">Couldn’t load this pane</h2>
     <p id="msg"></p>
     <button id="retry">Retry</button>
   </div>
@@ -23,12 +23,13 @@
     const p = new URLSearchParams(location.search)
     const url = p.get('url') || ''
     const pane = p.get('pane') || 'cirqle'
+    document.getElementById('reason').textContent = p.get('reason') || 'Couldn’t load this pane'
     const local = url.includes('localhost') || url.includes('127.0.0.1')
-    document.getElementById('msg').innerHTML =
-      'Tried to open <code>' + url + '</code>.' +
-      (local
-        ? '<br/><br/>Your local dev server may not be running. Start it with <code>npm run dev</code> in the cirqle-app project, or relaunch the desktop app with <code>npm start</code> to use the live site.'
-        : '<br/><br/>Check your internet connection, then retry.')
+    const msg = document.getElementById('msg')
+    msg.append('Tried to open ')
+    const address = document.createElement('code')
+    address.textContent = url
+    msg.append(address, '. ' + (local ? 'Start your local dev server, then retry.' : 'Check your internet connection, then retry.'))
     function doRetry() {
       if (window.desk && window.desk.retry) window.desk.retry(pane)
       else if (window.__CIRQLE_DESKTOP__ && window.__CIRQLE_DESKTOP__.retry) window.__CIRQLE_DESKTOP__.retry(pane)

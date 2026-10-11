@@ -9,7 +9,9 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('__CIRQLE_DESKTOP__', {
-  version: 4,
+  version: 6,
+  openClientWorkspace: (client) => ipcRenderer.invoke('client-workspace:open', client),
+  reportSaveState: (status) => ipcRenderer.send('pane:saveStatus', status),
   retry: (pane) => ipcRenderer.send('retry', pane),
   updateLogo: (url) => ipcRenderer.send('cirqle:logo', url),
 
@@ -80,4 +82,73 @@ ipcRenderer.on('cirqle:openNotifications', () => {
   try {
     window.dispatchEvent(new CustomEvent('cirqle:openNotifications'))
   } catch { /* page not ready */ }
+})
+
+// Support save-state feedback even before the hosted Flyer app is redeployed.
+window.addEventListener('DOMContentLoaded', () => {
+  let previous = '', scheduled = false
+  const report = () => {
+    scheduled = false
+    const el = document.querySelector('[data-desktop-save-state]') || [...document.querySelectorAll('[role="status"]')].find(el => /saving|not saved|conflicting|synced|saved/i.test(el.textContent || ''))
+    const label = el?.textContent.trim() || ''
+    const state = el?.dataset.desktopSaveState || (/conflicting/i.test(label) ? 'conflict' : /not saved/i.test(label) ? 'error' : /saving/i.test(label) ? 'saving' : label ? 'saved' : 'idle')
+    const payload = { state, dirty: el?.dataset.desktopDirty === 'true' || ['saving', 'error', 'conflict'].includes(state), label }
+    const signature = JSON.stringify(payload)
+    if (signature !== previous) { previous = signature; ipcRenderer.send('pane:saveStatus', payload) }
+  }
+  const observer = new MutationObserver(() => {
+    if (!scheduled) { scheduled = true; setTimeout(report, 80) }
+  })
+  observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['data-desktop-save-state', 'data-desktop-dirty'] })
+  report()
+})
+
+// Keep the desktop entry point usable with the existing hosted client page.
+window.addEventListener('DOMContentLoaded', () => {
+  let scheduled = false
+  function syncWorkspaceControls() {
+    scheduled = false
+    const match = location.pathname.match(/^\/dashboard\/clients\/([0-9a-f-]{36})\/?$/i)
+    let button = document.getElementById('desktop-client-workspace-fallback')
+    if (!match || document.querySelector('[data-client-workspace-action]')) { button?.remove(); button = null }
+    const heading = document.querySelector('h1')
+    if (match && heading && /Client\s/i.test(heading.parentElement?.textContent || '') && !button && !document.querySelector('[data-client-workspace-action]')) {
+      button = document.createElement('button')
+      button.id = 'desktop-client-workspace-fallback'
+      button.textContent = 'Open client workspace'
+      button.type = 'button'
+      button.style.cssText = 'margin-left:8px;padding:6px 10px;background:#7c3aed;color:white;border:0;border-radius:7px;font-size:12px;cursor:pointer;white-space:nowrap'
+      button.onclick = async () => {
+        button.disabled = true
+        try {
+          const result = await ipcRenderer.invoke('client-workspace:open',{id:match[1],name:heading.textContent.trim()})
+          if (!result?.ok && result?.reason !== 'cancelled') button.textContent = result?.reason || 'Could not open. Try again.'
+        } catch { button.textContent = 'Could not open. Try again.' }
+        finally { button.disabled = false }
+      }
+      heading.parentElement.appendChild(button)
+    }
+    // An old Flyer deployment must not silently show all clients for a scoped URL.
+    const clientId = new URLSearchParams(location.search).get('cirqleClient')
+    const scopedMain = document.querySelector('main[data-client-scope]')
+    const existing = document.getElementById('desktop-flyer-scope-message')
+    const supported = !clientId || scopedMain?.getAttribute('data-client-scope') === clientId
+    if (supported) { if (existing) { const main=document.querySelector('main'); if(main) {main.style.visibility='';main.inert=false} existing.remove() } return }
+    if (existing) return
+    const main = document.querySelector('main')
+    if (!main) return
+    main.style.visibility = 'hidden'
+    main.inert = true
+    const panel = document.createElement('div')
+    panel.id = 'desktop-flyer-scope-message'
+    panel.setAttribute('role','status')
+    panel.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px;text-align:center;background:#0b1120;color:#e5e7eb;font:14px -apple-system,sans-serif;gap:14px'
+    const title = document.createElement('strong'); title.textContent = 'Client Flyers need a Flyer app update'
+    const text = document.createElement('p'); text.textContent = 'Update the Flyer app to show only this client’s offers. Your other workspace panes are ready.'
+    const retry = document.createElement('button'); retry.textContent = 'Try again'; retry.onclick = () => location.reload()
+    panel.append(title,text,retry); document.body.appendChild(panel)
+  }
+  const observer = new MutationObserver(() => { if (!scheduled) { scheduled = true; setTimeout(syncWorkspaceControls,100) } })
+  observer.observe(document.body,{subtree:true,childList:true,characterData:true})
+  syncWorkspaceControls()
 })

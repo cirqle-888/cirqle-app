@@ -19,11 +19,13 @@
  */
 const { app } = require('electron')
 
+let pendingUrl = null
 const deps = {
   navigate: () => {},
   showApp: () => {},
 }
 function init(d) { Object.assign(deps, d) }
+function flushPending() { if (pendingUrl) { const url = pendingUrl; pendingUrl = null; handleUrl(url) } }
 
 const PROTOCOL = 'cirqle'
 
@@ -56,6 +58,7 @@ function routeFor(rawUrl) {
 function handleUrl(rawUrl) {
   const route = routeFor(rawUrl)
   if (!route) return false
+  if (!deps.ready?.()) { pendingUrl = rawUrl; return true }
   deps.showApp()
   deps.navigate(route)
   return true
@@ -104,4 +107,4 @@ function register() {
   return true
 }
 
-module.exports = { init, register, handleUrl, routeFor, registerFileHandler, ROUTES }
+module.exports = { init, flushPending, register, handleUrl, routeFor, registerFileHandler, ROUTES }

@@ -15,7 +15,7 @@ const ROOT = path.join(__dirname, '..')
 const registry = require(path.join(ROOT, 'src', 'shared', 'ipc-channels.js'))
 const known = new Set(Object.values(registry))
 
-const FILES = ['src/main.js', 'src/preload-cirqle.js', 'src/preload-ui.js']
+const FILES = ['src/main.js', 'src/preload-cirqle.js', 'src/preload-ui.js', 'src/preload-whatsapp.js']
 const MODULE_FILES = require('fs').readdirSync(path.join(ROOT, 'src', 'main')).filter((f) => f.endsWith('.js')).map((f) => 'src/main/' + f)
 const CALL_RE = /(?:ipcMain\.(?:on|handle)|ipcRenderer\.(?:send|invoke|on)|webContents\.send)\(\s*'([^']+)'/g
 

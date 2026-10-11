@@ -1,93 +1,98 @@
 'use strict'
-
-/**
- * Lightweight update notifier.
- *
- * The app ships unsigned (no Apple Developer account), and Squirrel.Mac
- * refuses unsigned updates — so electron-updater is off the table until the
- * app is signed + notarized. Instead: fetch a tiny version manifest, compare
- * against app.getVersion(), and offer a download link.
- *
- * Swap path to a real auto-updater later WITHOUT changing the UI surface:
- * keep checkForUpdates(opts) and startPeriodicChecks() as the only entry
- * points and replace their internals with electron-updater calls.
- *
- * Manifest (desktop/latest.json on the repo's main branch):
- *   { "version": "0.6.0", "url": "https://github.com/.../releases" }
- */
-const { app, dialog, shell, Notification } = require('electron')
-
-const FEED_URL =
-  process.env.CIRQLE_UPDATE_FEED ||
-  'https://raw.githubusercontent.com/cirqle-888/cirqle-app/main/desktop/latest.json'
-
-const CHECK_EVERY_MS = 6 * 60 * 60 * 1000 // 6h
-let notifiedVersion = null // notify once per newer version per session
-
-function parseVer(v) {
-  return String(v || '0').replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0)
-}
+const { app, dialog, shell } = require('electron')
+const fs = require('fs')
+const path = require('path')
+const CH = require('../shared/ipc-channels')
+const FEED_URL = process.env.CIRQLE_UPDATE_FEED || 'https://raw.githubusercontent.com/cirqle-888/cirqle-app/main/desktop/latest.json'
+let deps = { getChrome: () => null, allowInstall: async () => true }
+let timer = null, checking = null, installing = false, notifiedVersion = null, updater = null
+let status = { available: false, label: '', ready: false }
+function init(d) { Object.assign(deps, d) }
+function publish(value) { status = { ...status, ...value }; deps.getChrome()?.webContents.send(CH.UPDATE_STATUS, status) }
+function currentStatus() { return status }
+function parseVer(version) { return String(version || '0').replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0) }
 function isNewer(remote, local) {
   const r = parseVer(remote), l = parseVer(local)
-  for (let i = 0; i < Math.max(r.length, l.length); i++) {
-    if ((r[i] || 0) > (l[i] || 0)) return true
-    if ((r[i] || 0) < (l[i] || 0)) return false
+  for (let i = 0; i < Math.max(r.length,l.length); i++) {
+    if ((r[i]||0) > (l[i]||0)) return true
+    if ((r[i]||0) < (l[i]||0)) return false
   }
   return false
 }
-
-async function fetchManifest() {
-  const res = await fetch(FEED_URL, { headers: { 'cache-control': 'no-cache' } })
-  if (!res.ok) throw new Error(`feed ${res.status}`)
-  return res.json()
+function signedUpdatesEnabled() {
+  if (!app.isPackaged) return false
+  try { return JSON.parse(fs.readFileSync(path.join(app.getAppPath(),'package.json'),'utf8')).signedUpdates === true } catch { return false }
 }
-
-/**
- * interactive=true → always tell the user the outcome (menu/tray click).
- * interactive=false → silent unless a new version is found (startup/periodic).
- */
-async function checkForUpdates({ interactive = false } = {}) {
-  let manifest
+function setupSignedUpdater() {
+  if (updater) return updater
+  if (!signedUpdatesEnabled()) return null
+  updater = require('electron-updater').autoUpdater
+  updater.autoDownload = false
+  updater.autoInstallOnAppQuit = false
+  updater.on('update-available', info => publish({ available:true, ready:false, label:`Update ${info.version}`, latest:info.version }))
+  updater.on('update-not-available', () => publish({available:false,ready:false,label:''}))
+  updater.on('download-progress', info => publish({available:true,label:`Updating ${Math.round(info.percent)}%`,downloading:true}))
+  updater.on('update-downloaded', () => publish({available:true,ready:true,downloading:false,label:'Restart to update',message:'Update downloaded. Restart when your work is saved.'}))
+  updater.on('error', () => publish({available:status.available,downloading:false,error:true,label:'Retry update',message:'Could not download or verify the update. Your current app is unchanged.'}))
+  return updater
+}
+async function runCheck({interactive = false} = {}) {
+  publish({error:false,message:interactive ? 'Checking for updates…' : ''})
   try {
-    manifest = await fetchManifest()
-  } catch (err) {
-    if (interactive) {
-      dialog.showMessageBox({ type: 'info', message: 'Could not check for updates', detail: String(err.message || err) })
+    const signed = setupSignedUpdater()
+    if (signed) {
+      const result = await signed.checkForUpdates()
+      const available = result?.updateInfo?.version && isNewer(result.updateInfo.version,app.getVersion())
+      if (!available) {
+        if (interactive) publish({message:`Cirqle Desktop ${app.getVersion()} is up to date.`})
+        return {ok:true,updateAvailable:false}
+      }
+      if (interactive || notifiedVersion !== result.updateInfo.version) {
+        notifiedVersion = result.updateInfo.version
+        const answer = await dialog.showMessageBox({type:'info',message:`Update available: ${result.updateInfo.version}`,detail:'Download it now. You can keep working and restart when your changes are saved.',buttons:['Download update','Later'],defaultId:0,cancelId:1})
+        if (answer.response === 0) await signed.downloadUpdate()
+      }
+      return {ok:true,updateAvailable:true}
     }
-    return { ok: false, error: String(err) }
-  }
-
-  const current = app.getVersion()
-  const latest = manifest?.version
-  if (!latest || !isNewer(latest, current)) {
-    if (interactive) {
-      dialog.showMessageBox({ type: 'info', message: 'Cirqle Desktop is up to date', detail: `Version ${current}` })
+    const response = await fetch(FEED_URL,{headers:{'cache-control':'no-cache'},signal:AbortSignal.timeout(15000)})
+    if (!response.ok) throw new Error('Update server is unavailable')
+    const manifest = await response.json()
+    if (!/^\d+\.\d+\.\d+$/.test(manifest?.version || '')) throw new Error('Invalid update information')
+    if (!isNewer(manifest.version,app.getVersion())) {
+      publish({available:false,ready:false,label:'',message:interactive ? `Cirqle Desktop ${app.getVersion()} is up to date.` : ''})
+      return {ok:true,updateAvailable:false}
     }
-    return { ok: true, updateAvailable: false, current }
+    const url = new URL(manifest.url || 'https://github.com/cirqle-888/cirqle-app/releases')
+    if (url.protocol !== 'https:') throw new Error('Invalid update download address')
+    publish({available:true,latest:manifest.version,label:`Update ${manifest.version}`,message:''})
+    if (interactive || notifiedVersion !== manifest.version) {
+      notifiedVersion = manifest.version
+      const answer = await dialog.showMessageBox({type:'info',message:`Update available: ${manifest.version}`,detail:'This build uses manual updates. Download the installer, quit Cirqle after saving your work, and replace the app in Applications.',buttons:['Open download','Later'],defaultId:0,cancelId:1})
+      if (answer.response === 0) require('./security').openExternal(shell,url.href)
+    }
+    return {ok:true,updateAvailable:true}
+  } catch {
+    publish({error:true,message:interactive ? 'Could not check for updates. Check your connection and try again.' : ''})
+    return {ok:false}
   }
-
-  const url = manifest.url || 'https://github.com/cirqle-888/cirqle-app/releases'
-  if (!interactive && notifiedVersion === latest) return { ok: true, updateAvailable: true, latest }
-  notifiedVersion = latest
-
-  const { response } = await dialog.showMessageBox({
-    type: 'info',
-    message: `Update available: ${latest}`,
-    detail: `You have ${current}. Download the new build, then drag it to Applications as usual.`,
-    buttons: ['Download', 'Later'],
-    defaultId: 0,
-    cancelId: 1,
-  })
-  if (response === 0) shell.openExternal(url)
-  return { ok: true, updateAvailable: true, latest, accepted: response === 0 }
 }
-
-let timer = null
+function checkForUpdates(options = {}) {
+  if (checking) return checking
+  checking = runCheck(options).finally(() => { checking = null })
+  return checking
+}
+async function installUpdate() {
+  if (!status.ready || !updater || installing) return false
+  installing = true
+  try {
+    if (!await deps.allowInstall()) return false
+    updater.quitAndInstall(false,true)
+    return true
+  } finally { installing = false }
+}
 function startPeriodicChecks() {
   if (timer) return
-  // First check shortly after launch (don't block startup), then every 6h.
-  setTimeout(() => { checkForUpdates({ interactive: false }).catch(() => {}) }, 15_000)
-  timer = setInterval(() => { checkForUpdates({ interactive: false }).catch(() => {}) }, CHECK_EVERY_MS)
+  setTimeout(() => { checkForUpdates().catch(() => {}) },15000)
+  timer = setInterval(() => { checkForUpdates().catch(() => {}) },6*60*60*1000)
 }
-
-module.exports = { checkForUpdates, startPeriodicChecks }
+module.exports = { init, checkForUpdates, startPeriodicChecks, installUpdate, currentStatus, isNewer, signedUpdatesEnabled }

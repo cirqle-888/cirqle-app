@@ -7,6 +7,19 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('desk', {
+  selectClientWorkspace: () => ipcRenderer.send('client-workspace:select'),
+  clientChat: () => ipcRenderer.send('client-workspace:chat'),
+  workspaceMenu: () => ipcRenderer.send('workspace:menu'),
+  saveWorkspace: (name) => ipcRenderer.invoke('workspace:save', name),
+  onWorkspacePrompt: (cb) => ipcRenderer.on('workspace:prompt', () => cb()),
+  expandPane: (pane) => ipcRenderer.send('pane:expand', pane),
+  retryPane: (pane) => ipcRenderer.send('pane:retry', pane),
+  waMenu: () => ipcRenderer.send('wa:menu'),
+  onRenamePrompt: (cb) => ipcRenderer.on('wa:renamePrompt', (_e, account) => cb(account)),
+  moreMenu: () => ipcRenderer.send('more:menu'),
+  onShareStatus: (cb) => ipcRenderer.on('share:status', (_e, status) => cb(status)),
+  updateAction: (action) => ipcRenderer.invoke('update:action', action),
+  onUpdateStatus: (cb) => ipcRenderer.on('update:status', (_e, status) => cb(status)),
   preset: (p) => ipcRenderer.send('layout:preset', p),
   reload: (which) => ipcRenderer.send('reload', which),
   goBack: () => ipcRenderer.send('goBack'),

@@ -22,6 +22,8 @@ const { spawn } = require('child_process')
 // lock) alongside the installed app. Must precede every app.getPath() reader.
 if (process.env.CIRQLE_USERDATA) app.setPath('userData', process.env.CIRQLE_USERDATA)
 
+const security = require('./main/security')
+security.install(ipcMain)
 const CH = require('./shared/ipc-channels')
 const { state, saveSettings } = require('./main/settings')
 const dl = require('./main/downloads')
@@ -33,6 +35,15 @@ const presence = require('./main/presence')
 const updates = require('./main/updates')
 const tray = require('./main/tray')
 const deeplinks = require('./main/deeplinks')
+const health = require('./main/pane-health')
+const workspaces = require('./main/workspaces')
+const clientWorkspace = require('./main/client-workspace')
+health.init({ getWin: () => win })
+updates.init({ getChrome: () => chrome, allowInstall: async () => {
+  const ok = await health.confirmClose(['studio', 'studio2'])
+  if (ok) quitApproved = true
+  return ok
+} })
 const { buildMenu, wireContextMenu, truncate, FILE_URL_RE } = menus
 
 menus.init({
@@ -64,12 +75,12 @@ layoutMod.init({
 const { whatsapps, WHATSAPP_URL, CHROME_UA, focusWhatsapp, pasteIntoWhatsappComposer, shareImageToWhatsApp, shareFileToWhatsApp, dropFileIntoWhatsApp, createWhatsappView } = wa
 
 wa.init({
+  feedback: result => chrome?.webContents.send(CH.SHARE_STATUS, result),
   getWin: () => win,
   sendStateToChrome: () => { if (chrome) chrome.webContents.send(CH.STATE, state) },
   applyPreset: (p) => applyPreset(p),
   layout: () => layout(),
   wireContextMenu: (v, c) => wireContextMenu(v, c),
-  loadError: (v, u, p) => loadError(v, u, p),
   ensureWaPane: (id) => ensureWaPane(id),
 })
 
@@ -88,6 +99,7 @@ const CIRQLE_URL = (process.env.CIRQLE_URL || 'https://app.cirqle.work').replace
 // it. STUDIO_URL overrides it the way CIRQLE_URL does, for `npm run dev`.
 const STUDIO_URL = (process.env.STUDIO_URL || 'https://flyer.cirqle.work').replace(/\/$/, '')
 let win, chrome, cirqle, cirqle2, studio, studio2, overlay
+clientWorkspace.init({ cirqleUrl: CIRQLE_URL, studioUrl: STUDIO_URL, feedback: result => chrome?.webContents.send(CH.SHARE_STATUS,result), focusWhatsapp, copyText: text => clipboard.writeText(text) })
 const splitters = []   // one per pane boundary, managed by ensureSplitters()
 const webs = {}        // built-in browser panes, keyed by web-tab id
 
@@ -106,7 +118,7 @@ function makeWindowOpenHandler(getView) {
     if (FILE_URL_RE.test(url) || url.includes('/storage/v1/object/')) {
       try { getView().webContents.downloadURL(url); return { action: 'deny' } } catch { /* fall through to browser */ }
     }
-    shell.openExternal(url)
+    security.openExternal(shell, url)
     return { action: 'deny' }
   }
 }
@@ -155,14 +167,13 @@ function createCirqle2() {
   // person flickers to Away at their own desk. Also keeps chat's realtime
   // listeners responsive while the window is behind something.
   cirqle2 = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-cirqle.js'), backgroundThrottling: false } })
+  health.wire(cirqle2, 'cirqle2', CIRQLE_URL)
   cirqle2.webContents.loadURL(cirqle.webContents.getURL() || CIRQLE_URL)
   dl.wireDownloads(cirqle2.webContents.session, 'cirqle')
   wireContextMenu(cirqle2, true)
   dl.wireEscToCloseDownloads(cirqle2)
+  security.protectNavigation(cirqle2, shell)
   cirqle2.webContents.setWindowOpenHandler(makeWindowOpenHandler(() => cirqle2))
-  cirqle2.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
-    if (isMainFrame && code !== -3) loadError(cirqle2, CIRQLE_URL, 'cirqle')
-  })
   win.contentView.addChildView(cirqle2)
   raiseChrome()
 }
@@ -215,16 +226,13 @@ function buildStudioView(startUrl, paneId) {
   // autosaves on a timer, and Chromium slows timers in a hidden view to about
   // one a minute.
   const v = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-cirqle.js'), backgroundThrottling: false } })
+  health.wire(v, paneId, STUDIO_URL)
   v.webContents.loadURL(startUrl)
   dl.wireDownloads(v.webContents.session, 'cirqle')
   wireContextMenu(v, true)
   dl.wireEscToCloseDownloads(v)
+  security.protectNavigation(v, shell)
   v.webContents.setWindowOpenHandler(makeWindowOpenHandler(() => v))
-  v.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
-    // paneId, not a hard-coded 'studio': both panes can be on screen, and the
-    // error page's Retry has to reload the one that actually failed.
-    if (isMainFrame && code !== -3) loadError(v, STUDIO_URL, paneId)
-  })
   win.contentView.addChildView(v)
   raiseChrome()
   return v
@@ -232,7 +240,7 @@ function buildStudioView(startUrl, paneId) {
 
 /** Open Offer Studio beside whatever is there, or put it away if it is up. */
 function toggleStudio() {
-  if (state.panes.includes('studio')) layoutMod.removePane('studio')
+  if (state.panes.includes('studio')) closePane('studio')
   else layoutMod.addPane('studio')
   layoutMod.broadcast()
 }
@@ -244,7 +252,7 @@ function toggleStudio() {
  * you left it, not back at the top.
  */
 function toggleStudio2() {
-  if (state.panes.includes('studio2')) layoutMod.removePane('studio2')
+  if (state.panes.includes('studio2')) closePane('studio2')
   else layoutMod.addPane('studio2')
   layoutMod.broadcast()
 }
@@ -273,7 +281,7 @@ function createWebView(id) {
   const tab = webTabFor(id)
   if (!tab) return
   const v = new WebContentsView({
-    webPreferences: { partition: 'persist:web', sandbox: true, contextIsolation: true, nodeIntegration: false },
+    webPreferences: { partition: 'persist:web', preload: path.join(__dirname, 'preload-whatsapp.js'), sandbox: true, contextIsolation: true, nodeIntegration: false },
   })
   v.webContents.setUserAgent(wa.CHROME_UA)
   if (!webSessionWired) {
@@ -295,10 +303,11 @@ function createWebView(id) {
       if (state.panes.length < MAX_PANES) addWebPane(url)
       else v.webContents.loadURL(url)
     } else {
-      shell.openExternal(url)
+      security.openExternal(shell, url)
     }
     return { action: 'deny' }
   })
+  health.wire(v, `web:${id}`, tab.url || WEB_HOME)
   v.webContents.loadURL(tab.url || WEB_HOME)
   webs[id] = v
   win.contentView.addChildView(v)
@@ -343,6 +352,7 @@ function ensureView(pane) {
 // an existing WhatsApp slot, or add a new split. Unpauses the account.
 function ensureWaPane(id) {
   if (!id) return
+  state.expandedPane = null
   const account = state.waAccounts.find(a => a.id === id)
   if (account && account.paused) { account.paused = false }
   state.activeWa = id
@@ -359,7 +369,10 @@ function ensureWaPane(id) {
 
 // ── Drive Cirqle's Quick Capture ──────────────────────────────────────────────
 function ensureCirqleVisible() {
-  if (!state.panes.includes('cirqle')) layoutMod.addPane('cirqle', { front: true })
+  if (state.expandedPane && state.expandedPane !== 'cirqle') { state.expandedPane = null; layout(); layoutMod.broadcast() }
+  if (!state.panes.includes('cirqle') && !layoutMod.addPane('cirqle', { front: true })) {
+    layoutMod.replacePane(state.panes[0], 'cirqle')
+  }
 }
 
 function sendTextToCirqle(text) {
@@ -386,11 +399,6 @@ function navigate(route) {
   cirqle.webContents.focus()
 }
 
-// ── Failed loads → a friendly fallback page with Retry ────────────────────────
-function loadError(view, url, pane) {
-  view.webContents.loadFile(path.join(__dirname, 'error.html'), { query: { url, pane } })
-}
-
 // Reload the Cirqle pane IN PLACE. Both reload paths (Cmd/Ctrl+R and the
 // toolbar button) used to call loadURL(CIRQLE_URL), which is the site ROOT —
 // and the web app redirects / to /dashboard. So reloading from any working
@@ -410,21 +418,20 @@ function createViews() {
   // The 2nd Cirqle (compare) is never restored across restarts.
   chrome = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-ui.js') } })
   chrome.webContents.loadFile(path.join(__dirname, 'host.html'))
-  chrome.webContents.once('did-finish-load', () => chrome.webContents.send(CH.STATE, state))
+  chrome.webContents.once('did-finish-load', () => { chrome.webContents.send(CH.STATE, state); chrome.webContents.send(CH.UPDATE_STATUS, updates.currentStatus()) })
 
   dl.wireEscToCloseDownloads(chrome) // Esc from the toolbar view closes the panel too
 
   // See createCirqle2 for why backgroundThrottling is off.
   cirqle = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload-cirqle.js'), backgroundThrottling: false } })
+  health.wire(cirqle, 'cirqle', CIRQLE_URL)
   cirqle.webContents.loadURL(CIRQLE_URL)
   dl.wireDownloads(cirqle.webContents.session, 'cirqle') // capture report / invoice / receipt downloads
   wireContextMenu(cirqle, true)                       // Chrome-style right-click menu
   dl.wireEscToCloseDownloads(cirqle)                     // Esc closes the downloads panel
-  cirqle.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
-    if (isMainFrame && code !== -3) loadError(cirqle, CIRQLE_URL, 'cirqle')
-  })
   // Cirqle pane downloads report/invoice file links into the tray; WhatsApp
   // links keep opening in the system browser.
+  security.protectNavigation(cirqle, shell)
   cirqle.webContents.setWindowOpenHandler(makeWindowOpenHandler(() => cirqle))
 
   // Ensure activeWa is valid
@@ -500,6 +507,7 @@ function pollToolbarPeek() {
 
 function pollClipboard() {
   try {
+    if (!win?.isFocused()) return
     const t = clipboard.readText()
     if (t && t.trim() && t !== lastClip) {
       lastClip = t
@@ -518,6 +526,7 @@ notifications.init({
   cirqleUrl: CIRQLE_URL,
 })
 notifications.register()
+require('./main/toolbar-menus').register({ getWin: () => win, getChrome: () => chrome, switchWa: ensureWaPane, reloadCirqle: reloadCirqleView })
 
 // No init(): presence answers from the OS, not from any window or view.
 presence.register()
@@ -682,7 +691,7 @@ ipcMain.on(CH.SPLIT_MENU, () => {
     { label: `Add a split (${state.panes.length}/${MAX_PANES})`, enabled: false },
     ...add,
   ]
-  if (state.panes.length > 1) {
+  if (state.panes.length > 1 || state.panes[0] !== 'cirqle') {
     template.push({ type: 'separator' }, { label: 'Close a split', enabled: false })
     for (const p of state.panes) {
       template.push({ label: `Close ${paneTitle(p)}`, click: () => ipcMain.emit(CH.SPLIT_CLOSE, null, p) })
@@ -716,8 +725,12 @@ ipcMain.on(CH.SPLIT_ADD, (_e, pane) => {
   }
 })
 
-ipcMain.on(CH.SPLIT_CLOSE, (_e, pane) => {
-  if (typeof pane !== 'string') return
+let closingPane = false
+async function closePane(pane) {
+  if (closingPane || typeof pane !== 'string') return
+  closingPane = true
+  try {
+  if (!await health.confirmClose([pane])) return
   if (!layoutMod.removePane(pane)) return
   // Closing a browser split closes its tab too — a hidden loaded browser is
   // exactly the resource drain this feature exists to avoid.
@@ -728,7 +741,9 @@ ipcMain.on(CH.SPLIT_CLOSE, (_e, pane) => {
     if (state.activeWeb === id) state.activeWeb = state.webTabs[0]?.id ?? null
     saveSettings(); layoutMod.broadcast()
   }
-})
+  } finally { closingPane = false }
+}
+ipcMain.on(CH.SPLIT_CLOSE, (_e, pane) => closePane(pane))
 
 ipcMain.on(CH.WEB_NAV, (_e, { id, op, url } = {}) => {
   const v = webs[id]
@@ -745,7 +760,7 @@ ipcMain.on(CH.WEB_NAV, (_e, { id, op, url } = {}) => {
         ? `https://${target}`
         : `https://www.google.com/search?q=${encodeURIComponent(target)}`
     }
-    wc.loadURL(target)
+    try { if (['https:', 'http:'].includes(new URL(target).protocol)) wc.loadURL(target) } catch {}
   }
   state.activeWeb = id
 })
@@ -753,15 +768,17 @@ ipcMain.on(CH.WEB_NAV, (_e, { id, op, url } = {}) => {
 // ── Share (from the Cirqle pane → the linked WhatsApp pane) ────────────────────
 // action: 'copy' (copy image + focus WA), 'paste' (auto-paste into open chat),
 // 'download' (save into common downloads + reveal in Finder to drag in).
-ipcMain.handle(CH.SHARE_RECEIPT, (_e, { dataUrl, filename, action, caption } = {}) => {
+ipcMain.handle(CH.SHARE_RECEIPT, async (_e, { dataUrl, filename, action, caption } = {}) => {
   if (action === 'download') {
     const p = dl.saveDataUrlToDownloads(dataUrl, filename)
     if (p) { focusWhatsapp(); shell.showItemInFolder(p) }
-    return { ok: !!p, action: 'download', path: p }
+    const result = { ok: !!p, action: 'download', path: p, message: p ? 'Receipt saved. Drag it into the correct WhatsApp chat and review before sending.' : 'Could not save the receipt image.' }
+    chrome?.webContents.send(CH.SHARE_STATUS, result)
+    return result
   }
   const img = dataUrlToImage(dataUrl)
   if (!img || img.isEmpty()) return { ok: false, reason: 'bad-image' }
-  const r = shareImageToWhatsApp(img, { autoPaste: action === 'paste', caption })
+  const r = await shareImageToWhatsApp(img, { autoPaste: action === 'paste', caption })
   return { ...r, action }
 })
 // The web app's clipboard helper falls back to this: navigator.clipboard
@@ -772,13 +789,18 @@ ipcMain.handle(CH.CLIPBOARD_WRITE, (_e, text) => {
   catch { return false }
 })
 ipcMain.on(CH.CAPTURE_CLIPBOARD, sendClipboardToCirqle)
-ipcMain.on(CH.RETRY, (_e, pane) => {
-  if (pane === 'whatsapp' && whatsapps[state.activeWa]) whatsapps[state.activeWa].webContents.loadURL(WHATSAPP_URL, { userAgent: CHROME_UA })
-  else if (pane === 'studio' && studio) studio.webContents.loadURL(STUDIO_URL)
-  else if (pane === 'studio2' && studio2) studio2.webContents.loadURL(STUDIO_URL)
-  else if (cirqle) cirqle.webContents.loadURL(CIRQLE_URL)
+ipcMain.on(CH.RETRY, (event, pane) => health.retry(pane, event?.sender))
+ipcMain.on(CH.PANE_RETRY, (_e, pane) => health.retry(pane))
+ipcMain.on(CH.PANE_SAVE_STATUS, (event, status) => health.report(event.sender, status))
+ipcMain.on(CH.PANE_EXPAND, (_e, pane) => workspaces.expand(pane))
+ipcMain.on(CH.CLIENT_WORKSPACE_SELECT, () => {
+  navigate('/dashboard/clients?workspace=1')
+  chrome?.webContents.send(CH.SHARE_STATUS,{ok:true,message:'Choose a client, then click Open client workspace.'})
 })
+ipcMain.handle(CH.CLIENT_WORKSPACE_OPEN, (_e, client) => clientWorkspace.open(client))
+ipcMain.on(CH.CLIENT_WORKSPACE_CHAT, () => clientWorkspace.chat())
 ipcMain.handle(CH.APP_VERSION, () => app.getVersion())
+ipcMain.handle(CH.UPDATE_ACTION, (_e, action) => action === 'install' ? updates.installUpdate() : updates.checkForUpdates({ interactive: true }))
 
 ipcMain.on(CH.WA_ADD, () => {
   const newId = Date.now().toString()
@@ -884,6 +906,7 @@ ipcMain.on(CH.SPLITTER_END, () => {
 let quitting = false
 
 deeplinks.init({
+  ready: () => !!cirqle,
   navigate: (r) => navigate(r),
   showApp: () => {
     if (!win) return
@@ -911,7 +934,8 @@ app.whenReady().then(() => {
   const { session } = require('electron')
   session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
     const url = details?.requestingUrl || wc?.getURL() || ''
-    const trusted = url.startsWith(CIRQLE_URL) || url.startsWith('https://web.whatsapp.com')
+    let trusted = false
+    try { trusted = [CIRQLE_URL, STUDIO_URL].some(base => new URL(url).origin === new URL(base).origin) } catch {}
     if ((permission === 'media' || permission === 'microphone' || permission === 'audioCapture') && trusted) {
       return callback(true)
     }
@@ -922,6 +946,7 @@ app.whenReady().then(() => {
   dl.loadDownloads() // restore the downloads history (files that still exist on disk)
   win = new BaseWindow({ width: 1440, height: 900, minWidth: 900, minHeight: 600, title: 'Cirqle Desktop' })
   createViews()
+  deeplinks.flushPending()
   buildMenu()
   layout()
   win.on('resize', layout)
@@ -952,6 +977,16 @@ app.whenReady().then(() => {
 })
 
 app.on('activate', () => { if (win && !win.isDestroyed()) win.show() })
-app.on('before-quit', () => { quitting = true })
+let quitApproved = false, quitChecking = false
+app.on('before-quit', event => {
+  if (quitApproved) { quitting = true; return }
+  event.preventDefault()
+  if (quitChecking) return
+  quitChecking = true
+  health.confirmClose([...new Set([...state.panes, 'studio', 'studio2'])]).then(ok => {
+    quitChecking = false
+    if (ok) { quitApproved = true; quitting = true; app.quit() }
+  }).catch(() => { quitChecking = false })
+})
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
 app.on('will-quit', () => { globalShortcut.unregisterAll(); dl.killQuickLook() })

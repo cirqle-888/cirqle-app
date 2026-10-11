@@ -64,15 +64,15 @@ function wireContextMenu(view, isCirqle) {
         items.push({ type: 'separator' })
         items.push({
           label: 'Share Image to Linked WhatsApp',
-          click: () => { wc.copyImageAt(params.x, params.y); setTimeout(() => { const wa = wa.focusWhatsapp(); wa.pasteIntoWhatsappComposer(wa) }, 120) },
+          click: () => { wc.copyImageAt(params.x, params.y); setTimeout(() => { wa.shareImageToWhatsApp(clipboard.readImage(), { autoPaste: true }) }, 120) },
         })
       }
       items.push({ type: 'separator' })
     }
 
     if (link) {
-      items.push({ label: 'Open Link', click: () => view.webContents.loadURL(link) })
-      items.push({ label: 'Open Link in Browser', click: () => shell.openExternal(link) })
+      items.push({ label: 'Open Link', click: () => require('./security').openExternal(shell, link) })
+      items.push({ label: 'Open Link in Browser', click: () => require('./security').openExternal(shell, link) })
       items.push({ label: 'Copy Link', click: () => clipboard.writeText(link) })
       if (FILE_URL_RE.test(link) || link.includes('/storage/v1/object/')) {
         items.push({ label: 'Download to Common Downloads', click: () => { try { wc.downloadURL(link) } catch { /* ignore */ } } })

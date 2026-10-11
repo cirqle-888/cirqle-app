@@ -1,487 +1,211 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <style>
-    :root { color-scheme: dark; }
-    html, body { 
-      margin: 0; height: 100%; 
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
-    }
-    body { 
-      display: flex; align-items: center; justify-content: space-between; 
-      padding: 0 16px; 
-      background: #0b1120; /* Very dark blue-gray */
-      border-bottom: 1px solid #1e293b;
-      color: #e5e7eb; 
-      -webkit-user-select: none; user-select: none; 
-    }
-    
-    .group { display: flex; align-items: center; gap: 8px; }
-    
-    .segmented { 
-      display: flex; align-items: center; 
-      background: #1e293b; 
-      border-radius: 8px; 
-      padding: 3px; 
-    }
-    .segmented button { 
-      background: transparent; border: none; 
-      padding: 5px 8px; margin: 0; 
-      border-radius: 6px; 
-      box-shadow: none;
-    }
-    .segmented button.on { 
-      background: #334155; 
-      color: #fff;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.3); 
-    }
-    .segmented button:hover:not(.on) { background: rgba(255,255,255,0.05); }
-
-    .brand { display: flex; align-items: center; margin-right: 8px; }
-    
-    button { 
-      background: #1e293b; color: #cbd5e1; 
-      border: 1px solid #334155; border-radius: 8px; 
-      padding: 6px 12px; font-size: 13px; font-weight: 500; 
-      cursor: pointer; white-space: nowrap; 
-      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-      transition: all 0.15s ease;
-    }
-    button:hover { background: #334155; color: #f8fafc; border-color: #475569; }
-    button:active { transform: scale(0.97); }
-    
-    button.primary { 
-      background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); 
-      border-color: #7c3aed; color: #fff; font-weight: 600; 
-      box-shadow: 0 2px 4px rgba(124, 58, 237, 0.25);
-    }
-    button.primary:hover { 
-      background: linear-gradient(135deg, #9366f7 0%, #8b5cf6 100%); 
-      box-shadow: 0 4px 6px rgba(124, 58, 237, 0.3);
-    }
-
-    button.icon-btn { padding: 6px 8px; }
-    /* Active/engaged icon button (e.g. compare mode on) */
-    button.icon-btn.active { background: #7c3aed; border-color: #7c3aed; color: #fff; }
-    button.icon-btn.active:hover { background: #8b5cf6; }
-    button svg { 
-      width: 15px; height: 15px; 
-      stroke-width: 2.2; stroke: currentColor; fill: none; 
-      stroke-linecap: round; stroke-linejoin: round; 
-    }
-    /* For filled SVGs like the split icons */
-    button.icon-btn.split-icon svg { stroke: none; fill: currentColor; }
-
-    /* WhatsApp tabs */
-    .wa-tab-wrap { position: relative; display: flex; align-items: center; }
-    .wa-tab-wrap button.wa-tab { 
-      border-radius: 8px; padding-right: 12px;
-      background: #1e293b; border-color: #334155;
-    }
-    .wa-tab-wrap button.wa-tab.has-close {
-      padding-right: 66px; /* room for the mute · pause · remove minis */
-    }
-    .wa-tab-wrap button.wa-tab.on { 
-      background: #22c55e; border-color: #16a34a; color: white;
-      box-shadow: 0 2px 4px rgba(34, 197, 94, 0.2);
-    }
-    .wa-tab-wrap button.wa-tab.on:hover { background: #16a34a; }
-    
-    .wa-close-btn { 
-      position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
-      background: transparent !important; border: none !important; 
-      padding: 4px !important; border-radius: 6px;
-      display: flex; opacity: 0.5; color: inherit; box-shadow: none !important;
-    }
-    .wa-tab-wrap:hover .wa-close-btn { opacity: 0.8; }
-    .wa-close-btn:hover { background: rgba(0,0,0,0.15) !important; opacity: 1 !important; }
-    .wa-tab-wrap button.wa-tab.on + .wa-close-btn:hover { background: rgba(0,0,0,0.2) !important; color: white; }
-    .wa-close-btn svg { width: 12px; height: 12px; }
-    
-    .sep { width: 1px; height: 20px; background: #334155; margin: 0 2px; }
-
-    /* Mini per-tab action buttons (mute / pause / close) */
-    .wa-mini {
-      background: transparent !important; border: none !important;
-      padding: 3px !important; border-radius: 5px;
-      display: flex; opacity: 0.45; color: inherit; box-shadow: none !important;
-    }
-    .wa-tab-wrap:hover .wa-mini { opacity: 0.85 }
-    .wa-mini:hover { background: rgba(0,0,0,0.18) !important; opacity: 1 !important; }
-    .wa-mini svg { width: 12px; height: 12px; }
-    .wa-mini.engaged { opacity: 1; color: #fbbf24; }
-    .wa-tab-wrap .minis { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: flex; gap: 1px; }
-    .wa-tab-wrap button.wa-tab.paused { opacity: 0.55; border-style: dashed; }
-
-    /* Split "+" dropdown */
-    .menu {
-      position: fixed; top: 44px; z-index: 50;
-      background: #111827; border: 1px solid #334155; border-radius: 10px;
-      box-shadow: 0 12px 30px rgba(0,0,0,0.5);
-      min-width: 220px; padding: 5px; display: none;
-    }
-    .menu.open { display: block; }
-    .menu .mi {
-      display: flex; align-items: center; gap: 8px; width: 100%;
-      background: transparent; border: none; box-shadow: none;
-      padding: 7px 10px; border-radius: 7px; font-size: 12.5px; color: #d1d5db;
-      justify-content: flex-start;
-    }
-    .menu .mi:hover { background: #1f2937; color: #fff; }
-    .menu .mi[disabled] { opacity: 0.4; pointer-events: none; }
-    .menu .mhead { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; padding: 6px 10px 2px; }
-    .menu .mdiv { height: 1px; background: #1f2937; margin: 4px 6px; }
-    .menu .mi .close-x { margin-left: auto; opacity: 0.6; }
-
-    /* Browser URL bar */
-    #web-bar { display: none; align-items: center; gap: 4px; }
-    #web-bar input {
-      width: 200px; background: #0f172a; color: #e5e7eb;
-      border: 1px solid #334155; border-radius: 8px;
-      padding: 6px 10px; font-size: 12px; outline: none;
-    }
-    #web-bar input:focus { border-color: #7c3aed; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cirqle workspace controls</title>
+<style>
+:root { color-scheme: dark; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; font-size:12px; }
+* { box-sizing:border-box; }
+body { margin:0; background:#0b1120; color:#e5e7eb; overflow:hidden; user-select:none; }
+#toolbar-row { height:48px; display:flex; align-items:center; gap:6px; padding:0 10px; }
+.brand { width:24px; height:24px; object-fit:contain; margin-right:3px; }
+button { border:1px solid #334155; background:#1e293b; color:#dbe5f1; border-radius:7px; padding:6px 10px; font:inherit; cursor:pointer; white-space:nowrap; }
+button:hover { background:#334155; color:white; }
+button:focus-visible,input:focus-visible { outline:2px solid #a78bfa; outline-offset:1px; }
+button svg { width:14px; height:14px; vertical-align:middle; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+button:disabled { opacity:.35; cursor:default; }
+button.active { background:#6d28d9; border-color:#8b5cf6; color:white; }
+button.primary { background:#7c3aed; border-color:#8b5cf6; color:white; font-weight:600; }
+.spacer { flex:1; min-width:0; }
+#btn-wa { max-width:220px; overflow:hidden; text-overflow:ellipsis; background:#123424; border-color:#246847; }
+.badge { display:none; padding:1px 5px; border-radius:9px; background:#7c3aed; font-size:10px; margin-left:4px; }
+#notif-badge { background:#dc2626; }
+#pane-strip { display:flex; height:32px; border-block:1px solid #334155; background:#111827; }
+.pane-label { display:flex; align-items:center; min-width:0; padding:0 8px; gap:5px; border-right:1px solid #334155; }
+.pane-label.dim { opacity:.55; }
+.pane-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; flex:1; font-weight:500; }
+.pane-state { font-size:10px; color:#94a3b8; max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pane-state.saving,.pane-state.loading { color:#c4b5fd; }
+.pane-state.error,.pane-state.offline,.pane-state.conflict { color:#fbbf24; }
+.pane-label button { padding:2px 5px; border:0; border-radius:4px; background:transparent; font-size:16px; }
+.pane-label button.retry { font-size:11px; color:#fbbf24; }
+#status-row { height:24px; padding:0 10px; display:flex; align-items:center; gap:10px; color:#94a3b8; font-size:11px; }
+#status-message { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+#status-message.error { color:#fbbf24; }
+#status-message.success { color:#86efac; }
+#update-button { display:none; padding:1px 7px; font-size:11px; background:#3b2463; border-color:#6d28d9; }
+#web-bar { display:none; align-items:center; gap:4px; flex:1; max-width:55%; }
+#web-bar button { padding:0 6px; }
+input { color:#f8fafc; background:#0f172a; border:1px solid #475569; border-radius:6px; font:inherit; padding:5px 7px; min-width:0; }
+#web-url { flex:1; padding:2px 6px; }
+#name-form { display:none; align-items:center; gap:4px; }
+#name-input { width:150px; }
+@media(max-width:1050px) { .brand,#btn-back,#btn-forward { display:none; } #btn-wa { max-width:150px; } button { padding:6px 8px; } .pane-state { max-width:75px; } }
+</style>
 </head>
 <body>
-  <!-- LEFT: App Brand & Cirqle Actions -->
-  <div class="group">
-    <div class="brand">
-      <img id="app-logo" src="../assets/icon.png" style="height: 24px; width: auto; max-width: 120px; object-fit: contain;" alt="Logo" />
-    </div>
-    
-    <button class="primary" id="cap" title="Create a new request from clipboard">
-      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-      New Request
-    </button>
-    
-    <div class="sep" style="margin-left: 4px;"></div>
-    
-    <div class="segmented">
-      <button id="btn-back" class="icon-btn" title="Go Back">
-        <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
-      </button>
-      <button id="btn-forward" class="icon-btn" title="Go Forward">
-        <svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
-      </button>
-      <button data-reload="cirqle" class="icon-btn" title="Reload Cirqle">
-        <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
-      </button>
-    </div>
-
-    <!-- One press to have the flyer app beside Cirqle. It is in the split
-         menu too, but a designer opens this every morning and a menu is one
-         press more than that is worth. -->
-    <button id="btn-studio" class="icon-btn" title="Offer Studio — open the flyer app beside Cirqle">
-      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
-    </button>
-
-    <button id="btn-split" class="icon-btn" title="Add a split — 2nd Cirqle, Offer Studio (×2), WhatsApp, or Browser (up to 4 panes)">
-      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/><path d="M17.5 10v4M15.5 12h4" stroke="currentColor" fill="none"/></svg>
-    </button>
-    <div id="web-bar">
-      <div class="sep"></div>
-      <div class="segmented">
-        <button id="web-back" class="icon-btn" title="Browser Back"><svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></button>
-        <button id="web-forward" class="icon-btn" title="Browser Forward"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></button>
-        <button id="web-reload" class="icon-btn" title="Reload Browser"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
-      </div>
-      <input id="web-url" type="text" spellcheck="false" placeholder="Search or enter address" />
-    </div>
-  </div>
-
-  <!-- CENTER: WhatsApp Tabs -->
-  <div class="group">
-    <div id="wa-tabs" style="display:flex; gap:6px;"></div>
-    <button id="wa-add" class="icon-btn" title="Add another WhatsApp account">
-      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-    </button>
-    <button data-reload="whatsapp" class="icon-btn" title="Reload active WhatsApp">
-      <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
-    </button>
-  </div>
-
-  <!-- RIGHT: View Controls & System -->
-  <div class="group">
-    <div class="segmented">
-      <button data-preset="hideWA" class="icon-btn split-icon" title="Cirqle Only">
-        <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/></svg>
-      </button>
-      <button data-preset="75" class="icon-btn split-icon" title="Cirqle 75% / WhatsApp 25%">
-        <svg viewBox="0 0 24 24">
-          <rect x="3" y="5" width="12" height="14" rx="2"/>
-          <rect x="17" y="5" width="4" height="14" rx="1.5" opacity="0.3"/>
-        </svg>
-      </button>
-      <button data-preset="50" class="icon-btn split-icon" title="Split 50% / 50%">
-        <svg viewBox="0 0 24 24">
-          <rect x="3" y="5" width="8" height="14" rx="2"/>
-          <rect x="13" y="5" width="8" height="14" rx="2" opacity="0.3"/>
-        </svg>
-      </button>
-      <button data-preset="25" class="icon-btn split-icon" title="WhatsApp 75% / Cirqle 25%">
-        <svg viewBox="0 0 24 24">
-          <rect x="3" y="5" width="4" height="14" rx="1.5"/>
-          <rect x="9" y="5" width="12" height="14" rx="2" opacity="0.3"/>
-        </svg>
-      </button>
-      <button data-preset="hideCirqle" class="icon-btn split-icon" title="WhatsApp Only">
-        <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" opacity="0.3"/></svg>
-      </button>
-    </div>
-    
-    <div class="sep" style="margin-right: 4px;"></div>
-
-    <button id="btn-notifs" class="icon-btn" title="Notifications & chat" style="position:relative;">
-      <svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
-      <span id="notif-badge" style="display:none;position:absolute;top:-2px;right:-2px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:#ef4444;color:#fff;font-size:9px;line-height:14px;font-weight:700;text-align:center;"></span>
-    </button>
-    <button id="btn-downloads" class="icon-btn" title="Downloaded reports & invoices" style="position:relative;">
-      <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-      <span id="dl-badge" style="display:none;position:absolute;top:-2px;right:-2px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:#8b5cf6;color:#fff;font-size:9px;line-height:14px;font-weight:700;text-align:center;"></span>
-    </button>
-    <button id="btn-fullscreen" class="icon-btn" title="Toggle Full Screen">
-      <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
-    </button>
-    <button data-preset="toggleToolbar" class="icon-btn" title="Hide Toolbar (Cmd/Ctrl+T to show)">
-      <svg viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></svg>
-    </button>
-  </div>
-  
-  <script>
-    const $ = (s) => document.querySelector(s)
-
-    // Workspace logo: never leave a broken-image glyph. If the pushed URL is
-    // dead (e.g. a hashed asset from an old deploy persisted in layout.json),
-    // fall back to the bundled app mark.
-    const DEFAULT_LOGO = '../assets/icon.png'
-    const logoImg = $('#app-logo')
-    logoImg.onerror = () => {
-      if (!logoImg.src.endsWith('assets/icon.png')) logoImg.src = DEFAULT_LOGO
-    }
-
-    // Bind simple static buttons
-    document.querySelectorAll('[data-preset]').forEach((b) => (b.onclick = () => window.desk.preset(b.dataset.preset)))
-    document.querySelectorAll('[data-reload]').forEach((b) => (b.onclick = () => window.desk.reload(b.dataset.reload)))
-    $('#cap').onclick = () => window.desk.capture()
-    $('#btn-back').onclick = () => window.desk.goBack()
-    $('#btn-forward').onclick = () => window.desk.goForward()
-    $('#btn-fullscreen').onclick = () => window.desk.toggleFullscreen()
-    $('#btn-downloads').onclick = () => window.desk.toggleDownloads()
-    $('#btn-notifs').onclick = () => window.desk.openNotifications()
-    $('#wa-add').onclick = () => window.desk.waAdd()
-
-    // ── Split "+" menu — native popup (an HTML dropdown would be clipped by
-    // the 48px-tall toolbar view, so main.js builds a real menu) ────────────
-    let lastState = null
-    $('#btn-split').onclick = () => window.desk.splitMenu()
-
-    // Offer Studio: open it if it is not up, close it if it is. A toggle
-    // rather than an add, because the button shows its own state and a
-    // second press on a lit button plainly means "put it away".
-    // Option-click splits the flyer app in two: a second Studio pane beside
-    // the first, same as the split menu's "Offer Studio 2". The same button
-    // rather than a new icon — a second icon for the same app reads as a
-    // different app.
-    $('#btn-studio').onclick = (e) => {
-      const open = (lastState && lastState.panes) || []
-      const which = e.altKey ? 'studio2' : 'studio'
-      if (open.includes(which)) window.desk.splitClose(which)
-      else window.desk.splitAdd({ kind: which })
-    }
-
-    // ── Browser URL bar (targets the active web pane) ──────────────────────
-    const webBar = $('#web-bar'), webUrl = $('#web-url')
-    $('#web-back').onclick = () => lastState?.activeWeb && window.desk.webNav(lastState.activeWeb, 'back')
-    $('#web-forward').onclick = () => lastState?.activeWeb && window.desk.webNav(lastState.activeWeb, 'forward')
-    $('#web-reload').onclick = () => lastState?.activeWeb && window.desk.webNav(lastState.activeWeb, 'reload')
-    webUrl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && lastState?.activeWeb) {
-        window.desk.webNav(lastState.activeWeb, 'url', webUrl.value)
-        webUrl.blur()
-      }
-    })
-
-    // Tell main where the ⬇ button is (window coords) so the download "fly"
-    // animation knows its landing point. Re-report on resize + layout changes.
-    function reportDlBtn() {
-      const el = $('#btn-downloads'); if (!el) return
-      const r = el.getBoundingClientRect()
-      window.desk.reportDownloadBtn({ x: r.left, y: r.top, w: r.width, h: r.height })
-    }
-    reportDlBtn(); setTimeout(reportDlBtn, 150)
-    window.addEventListener('resize', reportDlBtn)
-
-    // A download just landed → pulse the shelf button.
-    window.desk.onDownloadsPulse(() => {
-      const b = $('#btn-downloads'); if (!b) return
-      b.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.35)' }, { transform: 'scale(1)' }],
-        { duration: 420, easing: 'ease-out' })
-    })
-
-    // Downloads badge: count of files saved this session.
-    window.desk.onDownloads((d) => {
-      const badge = $('#dl-badge')
-      if (!badge) return
-      const n = (d && d.count) || 0
-      badge.textContent = n
-      badge.style.display = n > 0 ? 'block' : 'none'
-    })
-
-    // Notifications badge: unread chat + alerts, relayed from the Cirqle view.
-    window.desk.onNotifBadge((n) => {
-      const badge = $('#notif-badge')
-      if (!badge) return
-      const c = n || 0
-      badge.textContent = c > 99 ? '99+' : c
-      badge.style.display = c > 0 ? 'block' : 'none'
-    })
-
-    // Receive state from main process
-    window.desk.onState((s) => {
-      lastState = s
-      const panes = s.panes || []
-
-      // 1. Update Layout Presets — highlight only when the split IS that preset.
-      document.querySelectorAll('[data-preset]').forEach((b) => b.classList.remove('on'))
-      let key = null
-      const waVisible = panes.some(p => p.startsWith('wa:'))
-      if (panes.length === 1) key = panes[0] === 'cirqle' ? 'hideWA' : (panes[0].startsWith('wa:') ? 'hideCirqle' : null)
-      else if (panes.length === 2 && panes[0] === 'cirqle' && waVisible)
-        key = s.ratio < 0.4 ? '25' : s.ratio > 0.6 ? '75' : '50'
-      const el = key && $('[data-preset="' + key + '"]')
-      if (el) el.classList.add('on')
-
-      // 1b. Offer Studio lights up while its pane is open, so the button says
-      // what pressing it again will do.
-      const studioBtn = $('#btn-studio')
-      if (studioBtn) {
-        const on = panes.includes('studio')
-        const two = panes.includes('studio2')
-        studioBtn.classList.toggle('active', on || two)
-        studioBtn.title = (on ? 'Close Offer Studio' : 'Offer Studio — open the flyer app beside Cirqle')
-          + (two ? '  ·  ⌥-click to close the 2nd pane' : '  ·  ⌥-click for a 2nd pane')
-      }
-
-      // 1b. Split button lights up whenever more than the basic pair is open.
-      const splitBtn = $('#btn-split')
-      if (splitBtn) splitBtn.classList.toggle('active', panes.includes('cirqle2') || panes.length > 2)
-
-      // 1c. Browser URL bar — shown while any browser pane is open.
-      const showWebBar = panes.some(p => p.startsWith('web:')) && s.activeWeb
-      webBar.style.display = showWebBar ? 'flex' : 'none'
-      if (showWebBar && document.activeElement !== webUrl) {
-        const tab = (s.webTabs || []).find(t => t.id === s.activeWeb)
-        if (tab) webUrl.value = tab.url || ''
-      }
-
-      // 2. Update WhatsApp Tabs
-      const tabsContainer = $('#wa-tabs')
-      tabsContainer.innerHTML = ''
-      if (s.waAccounts && s.waAccounts.length > 0) {
-        s.waAccounts.forEach(wa => {
-          const wrap = document.createElement('div')
-          wrap.className = 'wa-tab-wrap'
-
-          const btn = document.createElement('button')
-          btn.textContent = wa.label
-          btn.className = 'wa-tab has-close'
-          if (wa.paused) btn.classList.add('paused')
-          if (panes.includes('wa:' + wa.id)) {
-            btn.classList.add('on')
-          }
-          btn.title = wa.paused ? 'Paused — click to load' : ''
-          btn.onclick = () => window.desk.waSwitch(wa.id)
-          
-          // Inline Rename on Right-Click
-          btn.oncontextmenu = (e) => {
-            e.preventDefault()
-            const input = document.createElement('input')
-            input.type = 'text'
-            input.value = wa.label
-            input.style.width = '80px'
-            input.style.padding = '4px 8px'
-            input.style.fontSize = '12px'
-            input.style.border = '1px solid #4B5563'
-            input.style.borderRadius = '6px'
-            input.style.backgroundColor = '#1F2937'
-            input.style.color = 'white'
-            input.style.outline = 'none'
-            
-            const submit = () => {
-              if (input.value && input.value.trim() !== '' && input.value !== wa.label) {
-                window.desk.waRename(wa.id, input.value.trim())
-              } else {
-                wrap.replaceChild(btn, input)
-              }
-            }
-            input.onblur = submit
-            input.onkeydown = (e) => {
-              if (e.key === 'Enter') submit()
-              if (e.key === 'Escape') {
-                input.value = wa.label
-                submit()
-              }
-            }
-            wrap.replaceChild(input, btn)
-            input.focus()
-            input.select()
-          }
-          wrap.appendChild(btn)
-
-          // Mini actions: mute · pause · remove (revealed on hover)
-          const minis = document.createElement('div')
-          minis.className = 'minis'
-
-          const muteBtn = document.createElement('button')
-          muteBtn.className = 'wa-mini' + (wa.muted ? ' engaged' : '')
-          muteBtn.title = wa.muted ? 'Unmute notifications' : 'Mute — silence this account’s notification sounds'
-          muteBtn.innerHTML = wa.muted
-            ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M11 5 6 9H2v6h4l5 4V5zM23 9l-6 6M17 9l6 6"/></svg>'
-            : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M11 5 6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14"/></svg>'
-          muteBtn.onclick = (e) => { e.stopPropagation(); window.desk.waMute(wa.id, !wa.muted) }
-          minis.appendChild(muteBtn)
-
-          const pauseBtn = document.createElement('button')
-          pauseBtn.className = 'wa-mini' + (wa.paused ? ' engaged' : '')
-          pauseBtn.title = wa.paused ? 'Resume — load this account' : 'Pause — unload this account (no memory, no notifications)'
-          pauseBtn.innerHTML = wa.paused
-            ? '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>'
-            : '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>'
-          pauseBtn.onclick = (e) => { e.stopPropagation(); window.desk.waPause(wa.id, !wa.paused) }
-          minis.appendChild(pauseBtn)
-
-          if (s.waAccounts.length > 1) {
-            const closeBtn = document.createElement('button')
-            closeBtn.className = 'wa-mini'
-            closeBtn.title = 'Remove Account'
-            closeBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>'
-            closeBtn.onclick = (e) => {
-              e.stopPropagation()
-              if (confirm(`Remove WhatsApp account "${wa.label}"?`)) {
-                window.desk.waRemove(wa.id)
-              }
-            }
-            minis.appendChild(closeBtn)
-          }
-          wrap.appendChild(minis)
-
-          tabsContainer.appendChild(wrap)
-        })
-      }
-
-      // 3. Update App Logo — an empty logoUrl (workspace has no logo, or the
-      // stored one was cleared) resets to the bundled mark.
-      if (s.logoUrl && logoImg.src !== s.logoUrl) {
-        logoImg.src = s.logoUrl
-      } else if (!s.logoUrl && !logoImg.src.endsWith('assets/icon.png')) {
-        logoImg.src = DEFAULT_LOGO
-      }
-
-      // Layout may have shifted the toolbar → refresh the fly-animation target.
-      reportDlBtn()
-    })
-  </script>
+<div id="toolbar-row">
+<img id="app-logo" class="brand" src="../assets/icon.png" alt="Cirqle">
+<button id="cap" class="primary" title="Create a request from copied text">＋ New request</button>
+<button id="btn-back" aria-label="Go back in Cirqle">‹</button>
+<button id="btn-forward" aria-label="Go forward in Cirqle">›</button>
+<button id="btn-studio" title="Open Flyer Cirqle; Option-click opens a second Flyer">Flyer</button>
+<button id="btn-split" title="Add a pane">＋ Pane</button>
+<button id="btn-client" title="Choose a client and open their tasks, invoices and Flyers">Client workspace</button>
+<button id="btn-layouts" title="Choose or save a workspace layout">Layouts ▾</button>
+<form id="name-form"><input id="name-input" maxlength="60" aria-label="Name"><button type="submit">Save</button><button type="button" id="name-cancel" aria-label="Cancel">×</button></form>
+<div class="spacer"></div>
+<button id="btn-wa" title="Switch or manage WhatsApp accounts">WhatsApp ▾</button>
+<button id="btn-notifs" title="Notifications and chat" aria-label="Notifications"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21h4"/></svg><span id="notif-badge" class="badge"></span></button>
+<button id="btn-downloads" title="Common downloads" aria-label="Downloads">↓<span id="dl-badge" class="badge"></span></button>
+<button id="btn-more" title="Reload, equal widths, full screen, updates" aria-label="More options">•••</button>
+</div>
+<div id="pane-strip" aria-label="Open panes"></div>
+<div id="status-row">
+<div id="web-bar"><button id="web-back" aria-label="Browser back">‹</button><button id="web-forward" aria-label="Browser forward">›</button><button id="web-reload" aria-label="Reload browser">↻</button><input id="web-url" aria-label="Browser address" placeholder="Search or enter address" spellcheck="false"></div>
+<button id="btn-client-chat" style="display:none;padding:1px 7px;font-size:11px" title="Open a contact chat or copy the client name for WhatsApp search">Client chat</button>
+<span id="status-message" role="status" aria-live="polite">Ready</span>
+<button id="update-button">Update available</button>
+</div>
+<script>
+const $ = s => document.querySelector(s)
+let lastState = null, lastUpdate = null, messageTimer = null, promptAccount = null
+const logo = $('#app-logo'), defaultLogo = '../assets/icon.png'
+logo.onerror = () => { if (!logo.src.endsWith('assets/icon.png')) logo.src = defaultLogo }
+$('#cap').onclick = () => window.desk.capture()
+$('#btn-back').onclick = () => window.desk.goBack()
+$('#btn-forward').onclick = () => window.desk.goForward()
+$('#btn-split').onclick = () => window.desk.splitMenu()
+$('#btn-client').onclick = () => window.desk.selectClientWorkspace()
+$('#btn-client-chat').onclick = () => window.desk.clientChat()
+$('#btn-layouts').onclick = () => window.desk.workspaceMenu()
+$('#btn-wa').onclick = () => window.desk.waMenu()
+$('#btn-more').onclick = () => window.desk.moreMenu()
+$('#btn-notifs').onclick = () => window.desk.openNotifications()
+$('#btn-downloads').onclick = () => window.desk.toggleDownloads()
+$('#btn-studio').onclick = e => {
+ const pane = e.altKey ? 'studio2' : 'studio'
+ if (lastState?.panes.includes(pane)) window.desk.splitClose(pane)
+ else window.desk.splitAdd({kind:pane})
+}
+function showMessage(text, kind = '', duration = 12000) {
+ clearTimeout(messageTimer)
+ $('#status-message').textContent = text
+ $('#status-message').className = kind
+ messageTimer = setTimeout(() => { messageTimer = null; showDefaultMessage() },duration)
+}
+function showDefaultMessage() {
+ if (messageTimer) return
+ const cramped = lastState?.panes.length > 2 && innerWidth < 1150
+ $('#status-message').textContent = cramped ? 'Need more room? Use ↗ to expand a pane.' : 'Choose Layouts to save your workspace. Sharing opens a draft for review.'
+ $('#status-message').className = ''
+}
+function showNameForm(account = null) {
+ promptAccount = account
+ $('#name-form').style.display = 'flex'
+ $('#btn-layouts').style.display = 'none'
+ $('#btn-back').style.display = 'none'
+ $('#btn-forward').style.display = 'none'
+ $('#name-input').value = account?.label || ''
+ $('#name-input').placeholder = account ? 'Account name' : 'Layout name'
+ $('#name-input').setAttribute('aria-label', account ? 'Account name' : 'Layout name')
+ $('#name-input').focus()
+}
+function closeNameForm() {
+ $('#name-form').style.display = 'none'
+ $('#btn-layouts').style.display = ''
+ $('#btn-back').style.display = ''
+ $('#btn-forward').style.display = ''
+ $('#btn-layouts').focus()
+}
+$('#name-cancel').onclick = closeNameForm
+$('#name-input').onkeydown = e => { if (e.key === 'Escape') { e.preventDefault(); closeNameForm() } }
+$('#name-form').onsubmit = async e => {
+ e.preventDefault()
+ const name = $('#name-input').value.trim()
+ if (!name) { showMessage('Enter a name to save.', 'error'); return }
+ if (promptAccount) { window.desk.waRename(promptAccount.id,name); closeNameForm(); return }
+ try {
+ const result = await window.desk.saveWorkspace(name)
+ if (result?.ok) { showMessage('Layout saved: ' + result.name,'success'); closeNameForm() }
+ else showMessage(result?.reason || 'Could not save layout.', 'error')
+ } catch { showMessage('Could not save layout. Try again.', 'error') }
+}
+window.desk.onWorkspacePrompt(() => showNameForm())
+window.desk.onRenamePrompt(account => showNameForm(account))
+window.desk.onShareStatus(status => showMessage(status.message, status.ok === false ? 'error' : 'success', 20000))
+window.desk.onUpdateStatus(status => {
+ lastUpdate = status
+ $('#update-button').style.display = status.available ? 'block' : 'none'
+ $('#update-button').textContent = status.label || 'Update available'
+ if (status.message) showMessage(status.message, status.error ? 'error' : '')
+})
+$('#update-button').onclick = () => window.desk.updateAction(lastUpdate?.ready ? 'install' : 'check')
+for (const op of ['back','forward','reload']) $('#web-'+op).onclick = () => lastState?.activeWeb && window.desk.webNav(lastState.activeWeb,op)
+$('#web-url').onkeydown = e => { if (e.key === 'Enter' && lastState?.activeWeb) { window.desk.webNav(lastState.activeWeb,'url',e.target.value); e.target.blur() } }
+function badge(selector,count) {
+ const node = $(selector), value = Math.max(0,Number(count)||0)
+ node.textContent = value > 99 ? '99+' : String(value)
+ node.style.display = value > 0 ? 'inline-block' : 'none'
+}
+window.desk.onNotifBadge(n => badge('#notif-badge',n))
+window.desk.onDownloads(d => badge('#dl-badge',d?.count))
+window.desk.onDownloadsPulse(() => $('#btn-downloads').animate([{transform:'scale(1)'},{transform:'scale(1.2)'},{transform:'scale(1)'}],{duration:400}))
+function reportDlBtn() { const r = $('#btn-downloads').getBoundingClientRect(); window.desk.reportDownloadBtn({x:r.x,y:r.y,w:r.width,h:r.height}) }
+function paneName(pane,s) {
+ if (s.clientWorkspace?.roles?.[pane]) return s.clientWorkspace.roles[pane]
+ return ({cirqle:'Cirqle',cirqle2:'Cirqle · compare',studio:'Flyer Cirqle',studio2:'Flyer Cirqle · 2'})[pane]
+ || (pane.startsWith('wa:') ? 'WhatsApp · ' + (s.waAccounts.find(a => a.id === pane.slice(3))?.label || '') : s.webTabs.find(t => t.id === pane.slice(4))?.label || 'Browser')
+}
+window.desk.onState(s => {
+ lastState = s
+ $('#btn-client').textContent = s.clientWorkspace ? s.clientWorkspace.code || 'Client workspace' : 'Client workspace'
+ $('#btn-client').title = s.clientWorkspace ? 'Change client: '+s.clientWorkspace.name : 'Choose a client workspace'
+ $('#btn-client').classList.toggle('active',!!s.clientWorkspace)
+ $('#btn-client-chat').style.display = s.clientWorkspace ? '' : 'none'
+ const panes = s.panes || [], strip = $('#pane-strip')
+ strip.replaceChildren()
+ panes.forEach((pane,i) => {
+  const item = document.createElement('div')
+  item.className = 'pane-label' + (s.expandedPane && s.expandedPane !== pane ? ' dim' : '')
+  item.style.flex = String(s.sizes?.[i] || 1/panes.length)
+  item.dataset.pane = pane
+  const title = document.createElement('span'); title.className = 'pane-name'; title.textContent = paneName(pane,s); title.title = title.textContent
+  item.appendChild(title)
+  const health = s.paneStatus?.[pane], save = s.saveStatus?.[pane]
+  const status = health && health.state !== 'ready' ? health : save?.state !== 'idle' && save ? save : health
+  if (status && status.state !== 'ready') {
+   const text = document.createElement('span'); text.className = 'pane-state '+status.state
+   text.textContent = status.label || ({saving:'Saving…',saved:'Saved',error:'Not saved',conflict:'Review edits'})[status.state] || ''
+   text.title = text.textContent; item.appendChild(text)
+  }
+  if (health && ['error','offline'].includes(health.state)) {
+   const retry = document.createElement('button'); retry.textContent = 'Retry'; retry.className = 'retry'; retry.setAttribute('aria-label','Retry '+title.textContent)
+   retry.onclick = () => window.desk.retryPane(pane); item.appendChild(retry)
+  }
+  const expand = document.createElement('button'); expand.textContent = s.expandedPane === pane ? '↙' : '↗'
+  expand.title = (s.expandedPane === pane ? 'Restore layout' : 'Expand '+title.textContent)
+  expand.setAttribute('aria-label',expand.title); expand.setAttribute('aria-pressed',String(s.expandedPane === pane))
+  expand.onclick = () => window.desk.expandPane(pane); item.appendChild(expand)
+  const close = document.createElement('button'); close.textContent = '×'; close.title = 'Close '+title.textContent; close.setAttribute('aria-label',close.title)
+  close.disabled = panes.length === 1 && pane === 'cirqle'
+  close.onclick = () => window.desk.splitClose(pane); item.appendChild(close)
+  strip.appendChild(item)
+ })
+ const flyer = $('#btn-studio'); flyer.classList.toggle('active',panes.includes('studio')||panes.includes('studio2'))
+ flyer.title = (panes.includes('studio') ? 'Close Flyer Cirqle' : 'Open Flyer Cirqle') + ' · Option-click for a second Flyer'
+ const account = s.waAccounts?.find(a=>a.id===s.activeWa)
+ $('#btn-wa').textContent = 'WhatsApp · '+(account?.label || 'Accounts')+' ▾'
+ $('#btn-wa').title = 'Active sharing account: '+(account?.label || 'None')+'. Switch or manage accounts.'
+ if (s.logoUrl) logo.src = s.logoUrl
+ const showWeb = panes.some(p=>p.startsWith('web:')) && s.activeWeb
+ $('#web-bar').style.display = showWeb ? 'flex' : 'none'
+ if (showWeb && document.activeElement !== $('#web-url')) $('#web-url').value = s.webTabs.find(t=>t.id===s.activeWeb)?.url || ''
+ showDefaultMessage(); reportDlBtn()
+})
+window.addEventListener('resize',reportDlBtn)
+reportDlBtn()
+</script>
 </body>
 </html>

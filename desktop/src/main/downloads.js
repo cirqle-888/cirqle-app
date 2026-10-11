@@ -17,7 +17,7 @@ const { spawn } = require('child_process')
 const CH = require('../shared/ipc-channels')
 const { state } = require('./settings')
 
-const TOOLBAR_H = 48
+const TOOLBAR_H = 104
 const DL_PANEL_W = 380
 const DL_PANEL_H = 460
 
@@ -92,6 +92,8 @@ function downloadsForPanel() {
   }))
 }
 function uniquePath(dir, name) {
+  name = path.basename(String(name).replace(/\\/g, '/')).replace(/[\x00-\x1f]/g, '')
+  if (!name || name === '.' || name === '..') name = 'download.png'
   let p = path.join(dir, name)
   const ext = path.extname(name)
   const base = path.basename(name, ext)
@@ -204,7 +206,7 @@ function downloadsMenuTemplate() {
 function saveDataUrlToDownloads(dataUrl, filename) {
   try {
     const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl)
-    if (!m) return null
+    if (!m || !/^image\/(png|jpeg|webp)$/.test(m[1]) || m[2].length > 28 * 1024 * 1024) return null
     const dir = downloadsDir()
     fs.mkdirSync(dir, { recursive: true })
     const savePath = uniquePath(dir, filename || 'download.png')

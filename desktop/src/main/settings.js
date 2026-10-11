@@ -41,6 +41,7 @@ const state = Object.assign({
   sizes: null,
   webTabs: [],           // [{ id, label, url }] — built-in browser tabs
   webSeq: 1,             // next browser tab number (for ids + default labels)
+  savedWorkspaces: [],
   activeWeb: null,       // which web tab the toolbar URL bar targets
 }, loadSettings())
 
@@ -64,6 +65,19 @@ if (state.panes.includes('cirqle2')) {
   state.sizes = state.sizes.map(s => s / total)
 }
 
-const saveSettings = () => { try { fs.writeFileSync(settingsFile(), JSON.stringify(state)) } catch { /* best effort */ } }
+// Runtime pane state never belongs in the persisted workspace.
+state.clientWorkspace = null
+state.expandedPane = null
+state.paneStatus = {}
+state.saveStatus = {}
+if (!Array.isArray(state.savedWorkspaces)) state.savedWorkspaces = []
+const saveSettings = () => {
+  try {
+    const { clientWorkspace, expandedPane, paneStatus, saveStatus, ...persisted } = state
+    const temporary = settingsFile() + '.tmp'
+    fs.writeFileSync(temporary, JSON.stringify(persisted))
+    fs.renameSync(temporary, settingsFile())
+  } catch (err) { console.error('[settings] Could not save workspace:', err.message) }
+}
 
 module.exports = { state, saveSettings }
