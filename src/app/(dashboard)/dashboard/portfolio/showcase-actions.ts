@@ -36,7 +36,7 @@ const SETUP_HINT =
   'The website Supabase project is not configured yet. Add WEBSITE_SUPABASE_URL and WEBSITE_SUPABASE_SERVICE_ROLE_KEY, then reload.'
 
 const TABLE_HINT =
-  'The website database has no presentation table yet. Run cirqle-website/supabase/work-showcases.sql in the WEBSITE Supabase project’s SQL editor (not the Cirqle ERP one), then reload.'
+  'The website database needs the presentation table or its latest fields. Run cirqle-website/supabase/work-showcases.sql and work-showcase-hotspots.sql in the WEBSITE Supabase project’s SQL editor (not the Cirqle ERP one), then reload.'
 
 /** PostgREST says "schema cache" when a table or column is missing. */
 function isMissingTable(error: { code?: string; message?: string } | null): boolean {
@@ -119,6 +119,7 @@ export async function saveShowcase(
   const d = input.desktop
   const m = input.mobile
   const row = {
+    ...(input.hotspots !== undefined ? { hotspots: input.hotspots } : {}),
     slug,
     client_name: input.clientName.trim(),
     category: input.category.trim(),

@@ -1,3 +1,4 @@
+import { readHotspots, validHotspots, type PresentationHotspots } from './hotspots'
 /**
  * Website "Presentation" — the full-screen client showcase on cirqle.work/portfolio.
  *
@@ -68,6 +69,7 @@ export interface ShowcaseMedia {
 }
 
 export interface ShowcaseEntry {
+  hotspots?: PresentationHotspots
   id: string
   slug: string
   clientName: string
@@ -85,6 +87,7 @@ export interface ShowcaseEntry {
 
 /** `work_showcases` exactly as PostgREST returns it. */
 export interface ShowcaseRow {
+  hotspots?: PresentationHotspots
   id: string
   slug: string
   client_name: string
@@ -107,10 +110,8 @@ export interface ShowcaseRow {
 }
 
 /** Columns the dashboard reads. One list so list and write cannot drift. */
-export const SHOWCASE_COLUMNS =
-  'id, slug, client_name, category, description, media_type, media_url, poster_url, '
-  + 'mobile_media_url, mobile_media_type, mobile_poster_url, alt_text, focal_x, focal_y, '
-  + 'mobile_focal_x, mobile_focal_y, project_path, position, published'
+// Selecting the row also tolerates an older database before the additive migration.
+export const SHOWCASE_COLUMNS = '*'
 
 // ─── Numbers ────────────────────────────────────────────────────────────────
 
@@ -209,6 +210,7 @@ export function rowToEntry(row: ShowcaseRow, publicBase = ''): ShowcaseEntry {
   const hasMobile = !!row.mobile_media_url
   const pathOf = (url: string | null) => (publicBase ? pathFromPublicUrl(publicBase, 'work', url) : null)
   return {
+    hotspots: readHotspots(row.hotspots),
     id: row.id,
     slug: row.slug,
     clientName: row.client_name,
@@ -416,6 +418,7 @@ export interface ShowcaseMediaInput {
 }
 
 export interface ShowcaseInput {
+  hotspots?: PresentationHotspots
   /** Present when editing; absent when creating. */
   id?: string
   clientName: string
@@ -448,6 +451,7 @@ export function validateShowcaseInput(
   slug: string,
 ): { ok: true } | { ok: false; errors: string[] } {
   const errors: string[] = []
+  if (input.hotspots !== undefined && !validHotspots(input.hotspots)) errors.push("Check clickable areas: each needs a label, gallery link and a valid outline (3–16 points).")
 
   const name = input.clientName.trim()
   if (!name) errors.push('Give the presentation a client name.')

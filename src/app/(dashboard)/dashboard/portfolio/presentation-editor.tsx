@@ -15,6 +15,8 @@ import {
 } from '@/lib/portfolio/showcase'
 import { reserveShowcaseSlug, saveShowcase, setShowcasePublished } from './showcase-actions'
 import { uploadShowcaseMedia } from './showcase-upload'
+import HotspotEditor from './hotspot-editor'
+import { readHotspots, validHotspots } from '@/lib/portfolio/hotspots'
 import FocalPicker from './focal-picker'
 import ScreenPreview from './screen-preview'
 
@@ -57,6 +59,7 @@ interface Props {
 
 export default function PresentationEditor({ initial, onClose, onSaved }: Props) {
   const datalistId = useId()
+  const [hotspots, setHotspots] = useState(() => readHotspots(initial?.hotspots))
   const [clientName, setClientName] = useState(initial?.clientName ?? '')
   const [category, setCategory] = useState(initial?.category ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
@@ -145,6 +148,7 @@ export default function PresentationEditor({ initial, onClose, onSaved }: Props)
 
   async function save(publish: boolean) {
     setError(null)
+    if (!validHotspots(hotspots)) { setError('Each clickable area needs a label, a gallery and a valid outline.'); return }
     const name = clientName.trim()
     if (!name) { setError('Give the presentation a client name.'); return }
     if (!slotMedia(desktop)) { setError('Add the desktop image or video first.'); return }
@@ -198,6 +202,7 @@ export default function PresentationEditor({ initial, onClose, onSaved }: Props)
         desktop: desktopInput,
         mobile: mobileInput,
         published: publish,
+        hotspots,
       })
       if (!res.ok || !res.data) throw new Error(res.error ?? 'Could not save the presentation.')
 
@@ -361,6 +366,7 @@ export default function PresentationEditor({ initial, onClose, onSaved }: Props)
                     />
                   )}
                 </section>
+                <HotspotEditor value={hotspots} onChange={v => { setHotspots(v); setTouched(true) }} desktop={desktopView} mobile={mobileView} disabled={saving}/>
               </div>
 
               {/* ─── Right: live preview ───────────────────────────────── */}
