@@ -272,7 +272,7 @@ function floodMask(
  * boundary only, so a poster with a hole in it (a cut-out letter, a gap
  * between two bags) still yields one sane outline rather than several.
  */
-function traceBoundary(
+export function traceBoundary(
   mask: Uint8Array, width: number, height: number,
 ): [number, number][] {
   const at = (x: number, y: number) =>
@@ -384,6 +384,38 @@ export function simplifyToLimit(
   return simplified
 }
 
+/**
+ * Finish a traced boundary into storable points: percentages, rounded,
+ * de-duplicated, and refused when the result is degenerate.
+ *
+ * Shared by `magicSelect` and the mask reader so the two cannot disagree
+ * about what the stored format will accept.
+ */
+export function boundaryToPoints(
+  boundary: readonly [number, number][], width: number, height: number, maxPoints = MAX_POINTS,
+): HotspotPoint[] | null {
+  if (boundary.length < MIN_POINTS) return null
+  const simplified = simplifyToLimit(boundary, maxPoints)
+  if (simplified.length < MIN_POINTS) return null
+
+  // Pixel centres, so a region touching an edge reaches 0 or 100 rather than
+  // stopping half a pixel short.
+  const points = simplified.map(([px, py]) => [
+    roundPercent(clampPercent((px + 0.5) / width * 100)),
+    roundPercent(clampPercent((py + 0.5) / height * 100)),
+  ] as HotspotPoint)
+
+  // Consecutive duplicates survive rounding on a small region and would make
+  // the shape degenerate.
+  const deduped = points.filter((p, i) => {
+    const q = points[(i + points.length - 1) % points.length]
+    return p[0] !== q[0] || p[1] !== q[1]
+  })
+  if (deduped.length < MIN_POINTS) return null
+  if (polygonArea(deduped) <= MIN_AREA) return null
+  return deduped
+}
+
 export interface MagicSelectOptions {
   /**
    * 0–100. How far a colour may drift from the seed and still count as the
@@ -434,26 +466,5 @@ export function magicSelect(
   if (touchesEveryEdge(mask, width, height)) return null
 
   const boundary = traceBoundary(mask, width, height)
-  if (boundary.length < MIN_POINTS) return null
-
-  const simplified = simplifyToLimit(boundary, options.maxPoints ?? MAX_POINTS)
-  if (simplified.length < MIN_POINTS) return null
-
-  // Pixel centres, so a region touching an edge reaches 0 or 100 rather than
-  // stopping half a pixel short.
-  const points = simplified.map(([px, py]) => [
-    roundPercent(clampPercent((px + 0.5) / width * 100)),
-    roundPercent(clampPercent((py + 0.5) / height * 100)),
-  ] as HotspotPoint)
-
-  // Consecutive duplicates survive rounding on a small region and would make
-  // the shape degenerate.
-  const deduped = points.filter((p, i) => {
-    const q = points[(i + points.length - 1) % points.length]
-    return p[0] !== q[0] || p[1] !== q[1]
-  })
-  if (deduped.length < MIN_POINTS) return null
-  if (polygonArea(deduped) <= MIN_AREA) return null
-
-  return deduped
+  return boundaryToPoints(boundary, width, height, options.maxPoints ?? MAX_POINTS)
 }

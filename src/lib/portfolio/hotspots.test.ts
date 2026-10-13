@@ -1,5 +1,5 @@
 import {describe,it,expect} from 'vitest'
-import {coverBox,readHotspots,validHotspots,validGalleryPath,hotspotColour,HOTSPOT_COLOURS,DEFAULT_HOTSPOT_COLOUR} from './hotspots'
+import {coverBox,readHotspots,validHotspots,validGalleryPath,hotspotColour,hotspotGlow,hasGradient,normaliseGlowColour,HOTSPOT_COLOURS,DEFAULT_HOTSPOT_COLOUR} from './hotspots'
 const area={id:'one',label:'Roots social media',path:'/portfolio/social-media/roots',points:[[30,30],[70,30],[70,70],[30,70]]}
 describe('presentation hotspots',()=>{
  it('keeps independent mobile geometry and accepts original image coordinates',()=>{expect(validHotspots({desktop:[area],mobile:[]})).toBe(true)})
@@ -14,14 +14,37 @@ describe('presentation hotspots',()=>{
   // Absent is valid: every area saved before colours existed must stay loadable.
   expect(validHotspots({desktop:[{...area,color:null}],mobile:[]})).toBe(true)
   expect(validHotspots({desktop:[area],mobile:[]})).toBe(true)
-  // A free hex is refused at the door, because the value reaches CSS.
-  for(const bad of ['#fff','red','brand;--x:y','toString','__proto__',1])expect(validHotspots({desktop:[{...area,color:bad}],mobile:[]})).toBe(false)
+  // A custom hex is allowed, so the hex rule is what keeps CSS safe.
+  expect(validHotspots({desktop:[{...area,color:'#FF8800'}],mobile:[]})).toBe(true)
+  for(const bad of ['#fff','#12345g','red','rgb(1,2,3)','brand;--x:y','#7c5cff;background:url(x)','toString','__proto__',1])expect(validHotspots({desktop:[{...area,color:bad}],mobile:[]})).toBe(false)
+ })
+ it('accepts a gradient end and rejects a bad one',()=>{
+  expect(validHotspots({desktop:[{...area,color:'brand',colorTo:'cyan'}],mobile:[]})).toBe(true)
+  expect(validHotspots({desktop:[{...area,color:'#7c5cff',colorTo:'#4cc3ff'}],mobile:[]})).toBe(true)
+  expect(validHotspots({desktop:[{...area,colorTo:'javascript:alert(1)'}],mobile:[]})).toBe(false)
+ })
+ it('reads the two ends of the glow, and says when it is really a gradient',()=>{
+  expect(hotspotGlow({})).toEqual({from:'#7c5cff',to:'#7c5cff'})
+  expect(hasGradient({})).toBe(false)
+  expect(hotspotGlow({color:'brand',colorTo:'cyan'})).toEqual({from:'#7c5cff',to:'#4cc3ff'})
+  expect(hasGradient({color:'brand',colorTo:'cyan'})).toBe(true)
+  // Same colour at both ends is a flat glow, not a gradient.
+  expect(hasGradient({color:'#7C5CFF',colorTo:'#7c5cff'})).toBe(false)
+  // An unusable end falls back to a flat glow rather than to the brand.
+  expect(hotspotGlow({color:'cyan',colorTo:'nope'})).toEqual({from:'#4cc3ff',to:'#4cc3ff'})
+ })
+ it('normalises a hex and refuses anything that is not one',()=>{
+  expect(normaliseGlowColour('#AABBCC')).toBe('#aabbcc')
+  expect(normaliseGlowColour('cyan')).toBe('#4cc3ff')
+  for(const bad of ['#abc','#aabbccdd','white ','',null,undefined,{}])expect(normaliseGlowColour(bad)).toBeNull()
  })
  it('resolves any stored colour to a known hex, falling back to the brand',()=>{
   expect(hotspotColour('cyan')).toBe(HOTSPOT_COLOURS.cyan)
   // Cirqle brand violet — the site's theme-color and the colour of its focus rings.
   expect(HOTSPOT_COLOURS[DEFAULT_HOTSPOT_COLOUR]).toBe('#7c5cff')
-  for(const junk of [undefined,null,'','nope','constructor','#ff0000',{}])expect(hotspotColour(junk)).toBe('#7c5cff')
+  // '#ff0000' is now a real colour, so it is no longer in the junk list.
+  for(const junk of [undefined,null,'','nope','constructor','#f00',{}])expect(hotspotColour(junk)).toBe('#7c5cff')
+  expect(hotspotColour('#ff0000')).toBe('#ff0000')
  })
  it('tracks cover crops and focal positions exactly',()=>{
   expect(coverBox(400,800,1600,900,50,50)).toEqual({width:1600*800/900,height:800,left:(400-1600*800/900)/2,top:0})
