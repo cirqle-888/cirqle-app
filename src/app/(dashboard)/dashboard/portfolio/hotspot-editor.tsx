@@ -34,6 +34,9 @@ export default function HotspotEditor({value,onChange,desktop,mobile,disabled}:P
  const [full,setFull]=useState(false)
  const [busy,setBusy]=useState('')
  const maskInput=useRef<HTMLInputElement>(null)
+ const replaceMaskInput=useRef<HTMLInputElement>(null)
+ const importContext=useRef('')
+ const [previousOutline,setPreviousOutline]=useState<{id:string;side:'desktop'|'mobile';points:HotspotPoint[]}|null>(null)
  const bitmapRef=useRef<{url:string;bitmap:Bitmap}|null>(null)
  /**
   * Pointer capture keeps a drag alive when the cursor leaves the element, but
@@ -49,6 +52,8 @@ export default function HotspotEditor({value,onChange,desktop,mobile,disabled}:P
  const [dimensions,setDimensions]=useState({url:'',width:1,height:1})
  const media=side==='desktop'?desktop:mobile
  const rows=value[side], active=rows.find(r=>r.id===selected)
+ const contextKey=JSON.stringify([side,media?.url,value,selected])
+ useEffect(()=>{importContext.current=contextKey;return()=>{importContext.current=''}},[contextKey])
  useEffect(()=>{let live=true;void listPortfolio().then(r=>{if(!live)return;setLoadError(!r.ok);setGalleries((r.data||[]).flatMap(c=>[{label:c.title,path:`/portfolio/${c.slug}`},...c.brands.filter(b=>b.items.some(i=>i.published)).map(b=>({label:`${c.title} / ${b.name}`,path:`/portfolio/${c.slug}/${b.slug}`}))]));}).catch(()=>{if(live)setLoadError(true)});return()=>{live=false}},[attempt])
  useEffect(()=>{if(!media?.url)return;let live=true;const img=new Image();img.onload=()=>{if(live)setDimensions({url:media.url,width:img.naturalWidth,height:img.naturalHeight})};img.src=media.url;return()=>{live=false}},[media?.url])
  const changeRows=(next:PresentationHotspot[])=>onChange({...value,[side]:next})
@@ -89,20 +94,30 @@ export default function HotspotEditor({value,onChange,desktop,mobile,disabled}:P
   * coordinates it produces are percentages, so the two only have to share an
   * aspect ratio, not a pixel size. A mask exported at half scale works.
   */
- async function importMask(file: File) {
+ async function importMask(file: File, replaceId?: string) {
+  const startedContext=importContext.current
   setMagicNote('')
   setBusy('Reading the mask…')
   const maskUrl=URL.createObjectURL(file)
   try {
    const bitmap=await readBitmapFrom(maskUrl,true)
    if(!bitmap){setMagicNote('That file could not be read as an image.');return}
+   if(startedContext!==importContext.current){setMagicNote('The artwork or selection changed. Please upload the mask again.');return}
    if (dimensions.url !== media?.url || Math.abs((bitmap.width/bitmap.height)/(dimensions.width/dimensions.height)-1)>0.01) {setMagicNote('Export the mask with the same aspect ratio and full canvas as this artwork so its outline lines up.');return}
-   const room=8-rows.length
+   const room=replaceId?2:8-rows.length
    if(room<=0){setMagicNote('This view already has the maximum of 8 areas.');return}
    const {regions,ignoredSpecks,ignoredOverflow}=detectMaskRegions(bitmap,{maxRegions:room,maxPoints:256})
    if(regions.length===0){
     setMagicNote('No painted shapes found. Paint the areas in a flat colour that differs from the rest of the mask, or export with the background deleted.')
     return
+   }
+   if(replaceId){
+    if(regions.length!==1||ignoredOverflow){setMagicNote('Use a mask containing one connected object to replace this outline. Separate logo letters need separate areas.');return}
+    const original=rows.find(r=>r.id===replaceId)
+    if(!original)return
+    setPreviousOutline({id:replaceId,side,points:original.points})
+    changeRows(rows.map(r=>r.id===replaceId?{...r,points:regions[0]}:r))
+    stopEditing();setMagicNote('Outline replaced. Gallery, label and glow kept. Review the edge, then save.');return
    }
    const made=regions.map(points=>({id:crypto.randomUUID(),label:'Explore this work',path:'',points,color:null}))
    changeRows([...rows,...made])
@@ -110,7 +125,7 @@ export default function HotspotEditor({value,onChange,desktop,mobile,disabled}:P
    stopEditing()
    const extra=[ignoredOverflow&&`${ignoredOverflow} more did not fit`,ignoredSpecks&&`${ignoredSpecks} stray mark${ignoredSpecks===1?'':'s'} ignored`].filter(Boolean).join(' · ')
    setMagicNote(`Added ${made.length} area${made.length===1?'':'s'} from the mask.${extra?' '+extra+'.':''}`)
-  }finally{URL.revokeObjectURL(maskUrl);setBusy('')}
+  }catch{setMagicNote('Could not import this mask. Your existing areas are unchanged.')}finally{URL.revokeObjectURL(maskUrl);setBusy('')}
  }
 
  /**
@@ -151,7 +166,7 @@ export default function HotspotEditor({value,onChange,desktop,mobile,disabled}:P
     <button type="button" disabled={rows.length>=8} aria-pressed={mode==='magic'} onClick={()=>{stopEditing();setMode('magic');setPreview(false);setMagicNote('')}} className={`border rounded-lg px-3 py-2 ${mode==='magic'?'border-violet-400 bg-violet-500/15':''}`}>Pick element</button>
     <button type="button" disabled={rows.length>=8} aria-pressed={mode==='rect'} onClick={()=>{stopEditing();setMode('rect');setPreview(false)}} className={`border rounded-lg px-3 py-2 ${mode==='rect'?'border-violet-400 bg-violet-500/15':''}`}>Drag a box</button>
     <button type="button" disabled={rows.length>=8} aria-pressed={drawing} onClick={()=>{stopEditing();setDrawing(true);setPreview(false)}} className={`border rounded-lg px-3 py-2 ${drawing?'border-violet-400 bg-violet-500/15':''}`}>Draw outline</button>
-    <button type="button" disabled={rows.length>=8} onClick={()=>maskInput.current?.click()} className="border rounded-lg px-3 py-2">Upload mask</button>
+    <button type="button" disabled={!!busy||rows.length>=8} onClick={()=>maskInput.current?.click()} className="border rounded-lg px-3 py-2">Upload mask</button>
     <button type="button" onClick={()=>{stopEditing();setPreview(!preview)}} className="border rounded-lg px-3 py-2">{preview?'Edit on full image':'Preview website crop'}</button>
     <button type="button" aria-pressed={full} onClick={()=>setFull(f=>!f)} className={`border rounded-lg px-3 py-2 ${full?'border-violet-400 bg-violet-500/15':''}`}>{full?'Exit full screen':'Full screen'}</button>
    </div>
@@ -287,6 +302,10 @@ export default function HotspotEditor({value,onChange,desktop,mobile,disabled}:P
   </>:<p className="text-xs text-muted-foreground">Add a still image to place clickable areas. Video hotspots are disabled because moving artwork would leave a fixed outline behind.</p>}
   <div className="flex gap-2 flex-wrap">{rows.map((r,i)=><button key={r.id} type="button" aria-pressed={r.id===selected} className="text-xs border rounded px-2 py-1" onClick={()=>setSelected(r.id)}>{i+1}. {r.label}</button>)}</div>
   {active&&<div className="space-y-3 border-t border-border pt-3">
+   <button type="button" disabled={!!busy} onClick={()=>replaceMaskInput.current?.click()} className="rounded-lg border border-violet-400/50 px-3 py-2 text-xs">Replace outline from mask</button>
+   <input ref={replaceMaskInput} type="file" accept="image/*" className="hidden" onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void importMask(file,active.id)}}/>
+   <p className="text-xs text-muted-foreground">Use a full-canvas mask of one object to fix its edges. Your gallery, label and glow stay the same. Review, then save.</p>
+   {previousOutline?.id===active.id&&previousOutline.side===side&&<button type="button" className="text-xs underline" onClick={()=>{update({points:previousOutline.points});setPreviousOutline(null)}}>Undo outline replacement</button>}
    <label className="block text-xs">Hover label<input className="mt-1 w-full rounded border border-border bg-background p-2" maxLength={80} value={active.label} onChange={e=>update({label:e.target.value})}/></label>
    {(()=>{
     const glow=hotspotGlow(active)

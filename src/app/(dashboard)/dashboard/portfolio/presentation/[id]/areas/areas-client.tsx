@@ -143,6 +143,8 @@ export default function AreasClient({
 
   const bitmapRef = useRef<{ url: string; bitmap: Bitmap } | null>(null)
   const maskInput = useRef<HTMLInputElement>(null)
+  const replaceMaskInput = useRef<HTMLInputElement>(null)
+  const importContext = useRef('')
   const paintCanvas = useRef<HTMLCanvasElement>(null)
 
   const media: ResolvedMedia | null = useMemo(() => {
@@ -164,6 +166,8 @@ export default function AreasClient({
 
   const rows = hotspots[side]
   const active = rows.find(r => r.id === selected)
+  const contextKey = JSON.stringify([side, media?.url, hotspots, selected])
+  useEffect(() => { importContext.current = contextKey; return () => { importContext.current = '' } }, [contextKey])
 
   // ── Editing the areas, always through the history ────────────────────────
   const commit = useCallback((next: PresentationHotspots, tag?: string) => {
@@ -199,7 +203,7 @@ export default function AreasClient({
       const img = new Image()
       img.crossOrigin = 'anonymous'
       await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(new Error('load')); img.src = url })
-      const scale = Math.min(1, SAMPLE_MAX / Math.max(img.naturalWidth, img.naturalHeight))
+      const scale = Math.min(1, (skipCache ? 1600 : SAMPLE_MAX) / Math.max(img.naturalWidth, img.naturalHeight))
       const w = Math.max(1, Math.round(img.naturalWidth * scale))
       const h = Math.max(1, Math.round(img.naturalHeight * scale))
       const canvas = document.createElement('canvas')
@@ -283,22 +287,34 @@ export default function AreasClient({
     } finally { setBusy('') }
   }
 
-  async function importMask(file: File) {
+  async function importMask(file: File, replaceId?: string) {
+    const startedContext = importContext.current
     setNote('')
     setBusy('Reading the mask…')
     const url = URL.createObjectURL(file)
     try {
       const bitmap = await readBitmap(url, true)
       if (!bitmap) { setNote('That file could not be read as an image.'); return }
-      const { regions, ignoredSpecks, ignoredOverflow } = detectMaskRegions(bitmap, { maxRegions: MAX_AREAS - rows.length })
+      if (startedContext !== importContext.current) { setNote('The artwork or selection changed. Please upload the mask again.'); return }
+      if (dimensions.url !== media?.url || Math.abs((bitmap.width / bitmap.height) / (dimensions.width / dimensions.height) - 1) > 0.01) {
+        setNote('Use the full artwork canvas with the same aspect ratio. Do not crop the mask around the object.'); return
+      }
+      const { regions, ignoredSpecks, ignoredOverflow } = detectMaskRegions(bitmap, { maxRegions: replaceId ? 2 : MAX_AREAS - rows.length, maxPoints: 256 })
       if (!regions.length) {
         setNote('No painted shapes found. Paint the areas in a flat colour that differs from the rest, or export with the background deleted.')
+        return
+      }
+      if (replaceId) {
+        if (regions.length !== 1 || ignoredOverflow) { setNote('Use a mask containing one connected object to replace this outline. Separate logo letters need separate areas.'); return }
+        setRows(rows.map(row => row.id === replaceId ? { ...row, points: regions[0] } : row))
+        stopTool()
+        setNote('Outline replaced. Gallery, label and glow kept. Review the edge, then save. Use Undo to restore it.')
         return
       }
       const made = addAreas(regions)
       const extra = [ignoredOverflow && `${ignoredOverflow} more did not fit`, ignoredSpecks && `${ignoredSpecks} stray mark${ignoredSpecks === 1 ? '' : 's'} ignored`].filter(Boolean).join(' · ')
       setNote(`Added ${made} area${made === 1 ? '' : 's'} from the mask.${extra ? ' ' + extra + '.' : ''}`)
-    } finally { setBusy(''); URL.revokeObjectURL(url) }
+    } catch { setNote('Could not import this mask. Your existing areas are unchanged.'); } finally { setBusy(''); URL.revokeObjectURL(url) }
   }
 
   // ── Paint overlay ────────────────────────────────────────────────────────
@@ -438,7 +454,7 @@ export default function AreasClient({
             {toolButton('erase', 'Erase', Eraser)}
             {toolButton('rect', 'Box', Square)}
             {toolButton('outline', 'Outline', PenLine)}
-            <button type="button" disabled={rows.length >= MAX_AREAS} onClick={() => maskInput.current?.click()}
+            <button type="button" disabled={!!busy || rows.length >= MAX_AREAS} onClick={() => maskInput.current?.click()}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-xs hover:bg-secondary disabled:opacity-40">
               <Upload className="w-3.5 h-3.5" /> Mask
             </button>
@@ -573,7 +589,7 @@ export default function AreasClient({
                         }}
                         style={{ cursor: tool === 'none' ? 'move' : undefined }}
                         points={r.points.map(p => p.join(',')).join(' ')}
-                        fill={hotspotColour(r.color) + (r.id === selected ? '44' : '18')}
+                        fill="transparent" pointerEvents="all"
                         stroke={hasGradient(r) ? `url(#ag-${r.id})` : hotspotColour(r.color)}
                         strokeOpacity={r.id === selected ? 1 : 0.65}
                         strokeWidth={2} vectorEffect="non-scaling-stroke"
@@ -633,6 +649,11 @@ export default function AreasClient({
 
           {active && (
             <div className="space-y-3 border-t border-border pt-3">
+              <button type="button" disabled={!!busy} onClick={() => replaceMaskInput.current?.click()}
+                className="w-full rounded-lg border border-violet-400/50 px-3 py-2 text-xs hover:bg-violet-500/10 disabled:opacity-40">Replace outline from mask</button>
+              <input ref={replaceMaskInput} type="file" accept="image/*" className="hidden"
+                onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void importMask(file, active.id) }} />
+              <p className="text-xs text-muted-foreground">Fix rounded edges using a full-canvas mask of one object. Your gallery, label and glow stay the same. Review, then save.</p>
               <label className="block text-xs">Hover label
                 <input className="mt-1 w-full rounded border border-border bg-background p-2" maxLength={80}
                   value={active.label} onChange={e => update({ label: e.target.value })} />
