@@ -170,8 +170,24 @@ export function detectMaskRegions(
   if (width < 2 || height < 2 || maxRegions < 1) return empty
 
   const { painted, mode } = paintedMask(bmp)
-  const minPixels = Math.max(4, Math.floor(width * height * (options.minAreaFraction ?? MIN_REGION_FRACTION)))
+  return { ...regionsFromMask(painted, width, height, options), mode }
+}
 
+/**
+ * Trace every separate shape in a binary mask.
+ *
+ * Split out so a mask the user PAINTED with the brush and a mask they UPLOADED
+ * reach the areas through exactly the same code: the two differ only in where
+ * the 1s came from, and having two tracing paths is how they end up disagreeing
+ * about what counts as a shape.
+ */
+export function regionsFromMask(
+  painted: Uint8Array, width: number, height: number, options: MaskRegionOptions = {},
+): Omit<MaskRegionResult, 'mode'> {
+  const maxRegions = options.maxRegions ?? 8
+  if (width < 2 || height < 2 || maxRegions < 1) return { regions: [], ignoredSpecks: 0, ignoredOverflow: 0 }
+
+  const minPixels = Math.max(4, Math.floor(width * height * (options.minAreaFraction ?? MIN_REGION_FRACTION)))
   const all = components(painted, width, height)
   let ignoredSpecks = 0
   const regions: HotspotPoint[][] = []
@@ -187,12 +203,6 @@ export function detectMaskRegions(
     if (points) regions.push(points)
     else ignoredSpecks++
   }
-  const kept = regions.length
   const eligible = all.length - ignoredSpecks
-  return {
-    regions,
-    mode,
-    ignoredSpecks,
-    ignoredOverflow: Math.max(0, eligible - kept),
-  }
+  return { regions, ignoredSpecks, ignoredOverflow: Math.max(0, eligible - regions.length) }
 }

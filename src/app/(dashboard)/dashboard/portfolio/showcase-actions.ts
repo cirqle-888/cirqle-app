@@ -5,6 +5,7 @@ import { requirePermission, requireReadPermission } from '@/lib/permissions/chec
 import { PERMS } from '@/lib/permissions/keys'
 import { createWebsiteAdminClient, websiteSupabaseConfigured } from '@/lib/supabase/website-admin'
 import { logActivity } from '@/lib/activity/log'
+import { validHotspots, type PresentationHotspots } from '@/lib/portfolio/hotspots'
 import {
   SHOWCASE_COLUMNS, defaultAltText, isOwnStoragePath, nextPosition, pathFromPublicUrl,
   positionsFor, publicUrlFor, rowToEntry, uniqueShowcaseSlug, validateShowcaseInput, clampFocal,
@@ -177,6 +178,45 @@ export async function saveShowcase(
  * The files go to `showcase/<slug>/`, so the slug has to exist — and be
  * unique — before the first byte is sent.
  */
+/**
+ * Save only the clickable areas of one presentation.
+ *
+ * Deliberately not `saveShowcase`: that one takes the whole record, so an
+ * areas-only screen would have to resubmit the client name, category,
+ * description and both media descriptors it never touched — and would
+ * overwrite whatever somebody else changed in the meantime with whatever it
+ * happened to load. This writes one column.
+ *
+ * `validHotspots` runs before the write, so the column cannot take a shape the
+ * website would refuse to read back.
+ */
+export async function saveShowcaseHotspots(
+  id: string, hotspots: PresentationHotspots,
+): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!websiteSupabaseConfigured()) return { ok: false, error: SETUP_HINT }
+  if (!id) return { ok: false, error: 'No presentation given.' }
+  if (!validHotspots(hotspots)) {
+    return { ok: false, error: 'Those areas are not valid. Every area needs a gallery, a label and a real shape.' }
+  }
+
+  const site = createWebsiteAdminClient()
+  const { data, error } = await site.from(TABLE).update({ hotspots }).eq('id', id).select('slug, client_name').maybeSingle()
+  if (error) return { ok: false, error: friendly(error) }
+  if (!data) return { ok: false, error: 'That presentation no longer exists. Reload the page.' }
+
+  void logActivity({
+    actorId: guard.employeeId, entityType: 'setting', entityId: id, action: 'edited',
+    detail: {
+      label: `presentation areas: ${data.client_name}`,
+      desktop: hotspots.desktop.length, mobile: hotspots.mobile.length,
+    },
+  })
+  revalidatePath('/dashboard/portfolio')
+  return { ok: true }
+}
+
 export async function reserveShowcaseSlug(clientName: string): Promise<ActionResult<string>> {
   const guard = await requirePermission(PERMS.PORTFOLIO_MANAGE)
   if (!guard.ok) return { ok: false, error: guard.error }

@@ -15,6 +15,7 @@ import {
 } from '@/lib/portfolio/showcase'
 import { reserveShowcaseSlug, saveShowcase, setShowcasePublished } from './showcase-actions'
 import { uploadShowcaseMedia } from './showcase-upload'
+import Link from 'next/link'
 import HotspotEditor from './hotspot-editor'
 import { readHotspots, validHotspots } from '@/lib/portfolio/hotspots'
 import FocalPicker from './focal-picker'
@@ -367,6 +368,19 @@ export default function PresentationEditor({ initial, onClose, onSaved }: Props)
                   )}
                 </section>
                 <HotspotEditor value={hotspots} onChange={v => { setHotspots(v); setTouched(true) }} desktop={desktopView} mobile={mobileView} disabled={saving}/>
+                {/* The full editor. Outlining is a drawing job and this modal
+                    is the wrong shape for it — there the artwork gets the
+                    window. Only offered on a saved presentation, because the
+                    areas screen saves against an id. */}
+                {initial?.id && (
+                  <p className="text-xs text-muted-foreground">
+                    Need more room?{' '}
+                    <Link href={`/dashboard/portfolio/presentation/${initial.id}/areas`} className="underline">
+                      Open the full areas editor
+                    </Link>{' '}
+                    — brush, background removal, zoom and undo. Save here first; it opens the last saved areas.
+                  </p>
+                )}
               </div>
 
               {/* ─── Right: live preview ───────────────────────────────── */}
