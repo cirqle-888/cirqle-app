@@ -2,7 +2,7 @@
 
 import { resolveBrandingUrl } from '@/lib/utils/branding'
 
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useMemo, useEffect, useCallback, Fragment } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
@@ -11,11 +11,12 @@ import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry, fe
 import { SCOPE_FILTER_OPTIONS, matchesScopeFilter, getScopeFilterLabel, type ScopeFilterValue } from '@/components/ui/scope-filter'
 import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
-import { Plus, X, TrendingUp, TrendingDown, Minus, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, Landmark, CheckCircle, ArrowLeftRight, Copy, Users, Sparkles, ChevronDown, Repeat, ArrowUpRight } from 'lucide-react'
+import { Plus, X, TrendingUp, TrendingDown, Minus, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, Landmark, CheckCircle, ArrowLeftRight, Copy, Users, Sparkles, ChevronDown, Repeat, ArrowUpRight, CalendarDays } from 'lucide-react'
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
 import { SavedViews } from '@/components/ui/saved-views'
 import { useScrollRestore } from '@/lib/lists/use-scroll-restore'
 import { resolveFocus, focusNoticeLabel } from '@/lib/navigation/focus-record'
+import { groupByDay, dayGroupLabel } from '@/lib/cashbook/group-by-day'
 import { FocusedRecordNotice } from '@/components/ui/focused-record-notice'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
 import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
@@ -282,6 +283,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     try { const raw = searchParams.get('tags'); return raw ? JSON.parse(raw) : [] } catch { return [] }
   })
   const [sortDir, setSortDir] = useState(searchParams.get('sort') || 'desc') // date: desc = newest first
+  /** Day headings over the list. In the URL with the rest, so a saved view keeps it. */
+  const [groupByDate, setGroupByDate] = useState(searchParams.get('bydate') === '1')
   const [filterMinAmount, setFilterMinAmount] = useState(searchParams.get('min') || '')
   const [filterMaxAmount, setFilterMaxAmount] = useState(searchParams.get('max') || '')
 
@@ -300,6 +303,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     if (filterClient) params.set('client', filterClient); else params.delete('client')
     if (filterTags.length) params.set('tags', JSON.stringify(filterTags)); else params.delete('tags')
     if (sortDir && sortDir !== 'desc') params.set('sort', sortDir); else params.delete('sort')
+    if (groupByDate) params.set('bydate', '1'); else params.delete('bydate')
     if (filterMinAmount) params.set('min', filterMinAmount); else params.delete('min')
     if (filterMaxAmount) params.set('max', filterMaxAmount); else params.delete('max')
 
@@ -307,7 +311,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     if (newQueryString !== searchParams.toString()) {
       router.replace(`${pathname}?${newQueryString}`, { scroll: false })
     }
-  }, [filterType, filterMonth, searchFacets, filterCategory, filterScope, filterAllocStatus, filterClient, filterTags, sortDir, filterMinAmount, filterMaxAmount, pathname, router, searchParams])
+  }, [filterType, filterMonth, searchFacets, filterCategory, filterScope, filterAllocStatus, filterClient, filterTags, sortDir, groupByDate, filterMinAmount, filterMaxAmount, pathname, router, searchParams])
 
   // Deep-link focus (`?focus=<entryId>`, e.g. from an invoice's linked-payments
   // list). `focusId` is held in state rather than re-read from the URL at each
@@ -1095,6 +1099,49 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     return result
   }, [entries, filterType, filterMonth, activeFacets, filterCategory, filterScope, filterAllocStatus, filterClient, filterTags, sortDir, filterMinAmount, filterMaxAmount, invoiceCategoryId, salaryCategoryId])
 
+  /**
+   * Day headings over the list.
+   *
+   * Built from `filteredEntries`, so the grouping inherits the filters AND the
+   * sort direction rather than imposing an order of its own and disagreeing
+   * with the Date toggle beside it.
+   */
+  const dayGroups = useMemo(() => groupByDay(filteredEntries, {
+    date: e => e.entry_date,
+    // The base-currency figure, which is what the day totals must add up in —
+    // summing native amounts across currencies would produce a number that
+    // means nothing.
+    amount: e => e.amount_inr ?? e.amount ?? 0,
+    isInflow: e => e.type === 'inflow',
+  }), [filteredEntries])
+
+  /**
+   * What the two list views iterate over.
+   *
+   * Grouping off is ONE section holding everything, so neither view needs a
+   * second rendering path — the row markup below is identical either way, and
+   * duplicating it is how the card view and the table view drift apart.
+   */
+  const sections = useMemo(
+    () => groupByDate ? dayGroups : [{ key: '__all__', rows: filteredEntries, inflow: 0, outflow: 0, net: 0 }],
+    [groupByDate, dayGroups, filteredEntries],
+  )
+  /** Day heading. Totals only where this viewer may see them. */
+  const dayHeading = (group: typeof dayGroups[number]) => (
+    <>
+      <span className="font-semibold">{dayGroupLabel(group.key, todayISO())}</span>
+      <span className="text-muted-foreground">
+        {group.rows.length} {group.rows.length === 1 ? 'entry' : 'entries'}
+      </span>
+      {showAmounts && showTotals && (
+        <span className="ml-auto flex items-center gap-3 tabular-nums">
+          {group.inflow > 0 && <span className="text-emerald-500">+{formatCompact(group.inflow)}</span>}
+          {group.outflow > 0 && <span className="text-red-400">−{formatCompact(group.outflow)}</span>}
+        </span>
+      )}
+    </>
+  )
+
   // ── Where did the deep-linked entry end up? ───────────────────────────────
   // Three outcomes, and they used to be indistinguishable: on screen, loaded
   // but filtered out, or never loaded. Only the first one could ever scroll,
@@ -1532,6 +1579,20 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               Date {sortDir === 'desc' ? '↓ Newest' : '↑ Oldest'}
             </button>
 
+            <button
+              type="button"
+              aria-pressed={groupByDate}
+              onClick={() => setGroupByDate(g => !g)}
+              title="Break the list into days, each with its own totals"
+              className={`border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50 transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+                groupByDate
+                  ? 'bg-violet-500/15 border-violet-500/40 text-violet-700 dark:text-violet-300'
+                  : 'bg-background border-border hover:bg-secondary/50'
+              }`}
+            >
+              <CalendarDays className="w-3.5 h-3.5" /> Group: Date
+            </button>
+
             {/* Amount range */}
             <div className="flex items-center gap-1">
               <input
@@ -1596,7 +1657,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             {filteredEntries.length === 0 && (
               <div className="px-4 py-10 text-center text-sm text-muted-foreground">No entries found</div>
             )}
-            {filteredEntries.map(entry => {
+            {sections.map(group => (
+            <Fragment key={group.key}>
+            {groupByDate && (
+              <div className="flex items-center gap-2 px-4 py-2 bg-secondary/60 text-xs sticky top-0 z-10">
+                {dayHeading(group)}
+              </div>
+            )}
+            {group.rows.map(entry => {
               const isInvoice = entry.category_id === invoiceCategoryId
               const isSalary = entry.category_id === salaryCategoryId
               
@@ -1777,6 +1845,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 </div>
               )
             })}
+            </Fragment>
+            ))}
           </div>
 
           {/* Desktop Table View */}
@@ -1796,7 +1866,16 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               {filteredEntries.length === 0 && (
                 <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">No entries found</td></tr>
               )}
-              {filteredEntries.map(entry => {
+              {sections.map(group => (
+              <Fragment key={group.key}>
+              {groupByDate && (
+                <tr className="bg-secondary/60">
+                  <td colSpan={6} className="px-4 py-2">
+                    <div className="flex items-center gap-3 text-xs">{dayHeading(group)}</div>
+                  </td>
+                </tr>
+              )}
+              {group.rows.map(entry => {
                 const isInvoice = entry.category_id === invoiceCategoryId
                 const isSalary = entry.category_id === salaryCategoryId
                 
@@ -2014,6 +2093,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   </tr>
                 )
               })}
+              </Fragment>
+              ))}
             </tbody>
           </table>
           </div>
