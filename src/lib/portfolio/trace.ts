@@ -15,7 +15,7 @@
  *
  * ── WHAT THE FORMAT ALLOWS, AND WHY IT SHAPES ALL OF THIS ─────────────────
  *
- * `validHotspots` accepts 3 to 16 points, each 0–100 as a percentage of the
+ * `validHotspots` accepts 3 to 256 points (manual/magic outlines default to 16), each 0–100 as a percentage of the
  * ORIGINAL image, and rejects a shape whose shoelace area is 2 or less. A
  * traced boundary has hundreds of points, so simplification is not a nicety
  * here — an unsimplified trace is simply not storable. Everything below
@@ -367,7 +367,7 @@ export function simplifyToLimit(
   const ys = boundary.map(p => p[1])
   const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys))
 
-  let epsilon = Math.max(span / 200, 0.0001)
+  let epsilon = Math.max(span / (max > 16 ? 4000 : 200), 0.0001)
   let simplified = [...boundary]
   // Doubling converges in a handful of rounds for any real outline; the cap
   // is a guard, not an expected path.

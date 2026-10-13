@@ -451,7 +451,7 @@ export function validateShowcaseInput(
   slug: string,
 ): { ok: true } | { ok: false; errors: string[] } {
   const errors: string[] = []
-  if (input.hotspots !== undefined && !validHotspots(input.hotspots)) errors.push("Check clickable areas: each needs a label, gallery link and a valid outline (3–16 points).")
+  if (input.hotspots !== undefined && !validHotspots(input.hotspots)) errors.push("Check clickable areas: each needs a label, gallery link and a valid outline (3–256 points).")
 
   const name = input.clientName.trim()
   if (!name) errors.push('Give the presentation a client name.')

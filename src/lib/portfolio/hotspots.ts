@@ -84,7 +84,7 @@ export function validHotspots(value: unknown): value is PresentationHotspots {
  return ['desktop','mobile'].every(side => {
   const rows = (value as Record<string, unknown>)[side];
   return Array.isArray(rows) && rows.length <= 8 && new Set(rows.map(r=>r?.id)).size === rows.length && rows.every(r =>
-   r && typeof r.id === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(r.id) && typeof r.label === 'string' && r.label.trim().length > 0 && r.label.length <= 80 && validGalleryPath(r.path) && validHotspotColour(r.color) && validHotspotColour(r.colorTo) && Array.isArray(r.points) && r.points.length >= 3 && r.points.length <= 16 && r.points.every((p: unknown) => Array.isArray(p) && p.length === 2 && p.every(n=>typeof n==='number' && Number.isFinite(n) && n>=0 && n<=100)) && Math.abs(r.points.reduce((sum: number,p: HotspotPoint,i: number)=>{const q=r.points[(i+1)%r.points.length];return sum+p[0]*q[1]-q[0]*p[1];},0)) > 2);
+   r && typeof r.id === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(r.id) && typeof r.label === 'string' && r.label.trim().length > 0 && r.label.length <= 80 && validGalleryPath(r.path) && validHotspotColour(r.color) && validHotspotColour(r.colorTo) && Array.isArray(r.points) && r.points.length >= 3 && r.points.length <= 256 && r.points.every((p: unknown) => Array.isArray(p) && p.length === 2 && p.every(n=>typeof n==='number' && Number.isFinite(n) && n>=0 && n<=100)) && Math.abs(r.points.reduce((sum: number,p: HotspotPoint,i: number)=>{const q=r.points[(i+1)%r.points.length];return sum+p[0]*q[1]-q[0]*p[1];},0)) > 2);
  });
 }
 export function readHotspots(value: unknown): PresentationHotspots { return validHotspots(value) ? value : emptyHotspots(); }

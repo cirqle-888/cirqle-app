@@ -70,7 +70,7 @@ export default function HotspotEditor({value,onChange,desktop,mobile,disabled}:P
   try{
    const img=new Image();img.crossOrigin='anonymous'
    await new Promise<void>((resolve,reject)=>{img.onload=()=>resolve();img.onerror=()=>reject(new Error('load'));img.src=url})
-   const scale=Math.min(1,SAMPLE_MAX/Math.max(img.naturalWidth,img.naturalHeight))
+   const scale=Math.min(1,(skipCache?1600:SAMPLE_MAX)/Math.max(img.naturalWidth,img.naturalHeight))
    const w=Math.max(1,Math.round(img.naturalWidth*scale)),h=Math.max(1,Math.round(img.naturalHeight*scale))
    const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h
    const ctx=canvas.getContext('2d',{willReadFrequently:true});if(!ctx)return null
@@ -92,12 +92,14 @@ export default function HotspotEditor({value,onChange,desktop,mobile,disabled}:P
  async function importMask(file: File) {
   setMagicNote('')
   setBusy('Reading the mask…')
+  const maskUrl=URL.createObjectURL(file)
   try {
-   const bitmap=await readBitmapFrom(URL.createObjectURL(file),true)
+   const bitmap=await readBitmapFrom(maskUrl,true)
    if(!bitmap){setMagicNote('That file could not be read as an image.');return}
+   if (dimensions.url !== media?.url || Math.abs((bitmap.width/bitmap.height)/(dimensions.width/dimensions.height)-1)>0.01) {setMagicNote('Export the mask with the same aspect ratio and full canvas as this artwork so its outline lines up.');return}
    const room=8-rows.length
    if(room<=0){setMagicNote('This view already has the maximum of 8 areas.');return}
-   const {regions,ignoredSpecks,ignoredOverflow}=detectMaskRegions(bitmap,{maxRegions:room})
+   const {regions,ignoredSpecks,ignoredOverflow}=detectMaskRegions(bitmap,{maxRegions:room,maxPoints:256})
    if(regions.length===0){
     setMagicNote('No painted shapes found. Paint the areas in a flat colour that differs from the rest of the mask, or export with the background deleted.')
     return
@@ -108,7 +110,7 @@ export default function HotspotEditor({value,onChange,desktop,mobile,disabled}:P
    stopEditing()
    const extra=[ignoredOverflow&&`${ignoredOverflow} more did not fit`,ignoredSpecks&&`${ignoredSpecks} stray mark${ignoredSpecks===1?'':'s'} ignored`].filter(Boolean).join(' · ')
    setMagicNote(`Added ${made.length} area${made.length===1?'':'s'} from the mask.${extra?' '+extra+'.':''}`)
-  }finally{setBusy('')}
+  }finally{URL.revokeObjectURL(maskUrl);setBusy('')}
  }
 
  /**
@@ -260,7 +262,8 @@ export default function HotspotEditor({value,onChange,desktop,mobile,disabled}:P
          onPointerDown={e=>{if(drawing||disabled||preview||mode!=='none')return;e.stopPropagation();setSelected(r.id);const [x,y]=at(e as unknown as {clientX:number;clientY:number;currentTarget:Element});setDrag({kind:'shape',x,y})}}
          style={{cursor:!preview&&!drawing&&mode==='none'?'move':undefined}}
          points={r.points.map(p=>p.join(',')).join(' ')}
-         fill={hotspotColour(r.color)+(r.id===selected?'44':'18')}
+         fill="transparent"
+         pointerEvents="all"
          stroke={hasGradient(r)?`url(#grad-${r.id})`:hotspotColour(r.color)} strokeOpacity={r.id===selected?1:0.65}
          strokeWidth={2} vectorEffect="non-scaling-stroke"/>
         <text x={r.points[0][0]} y={r.points[0][1]} fill="white" fontSize="3" pointerEvents="none">{i+1}</text>

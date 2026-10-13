@@ -2,6 +2,11 @@ import {describe,it,expect} from 'vitest'
 import {coverBox,readHotspots,validHotspots,validGalleryPath,hotspotColour,hotspotGlow,hasGradient,normaliseGlowColour,HOTSPOT_COLOURS,DEFAULT_HOTSPOT_COLOUR} from './hotspots'
 const area={id:'one',label:'Roots social media',path:'/portfolio/social-media/roots',points:[[30,30],[70,30],[70,70],[30,70]]}
 describe('presentation hotspots',()=>{
+ it('accepts detailed mask contours but keeps the payload bounded',()=>{
+  const ring=(count:number)=>Array.from({length:count},(_,i)=>[50+20*Math.cos(i/count*2*Math.PI),50+20*Math.sin(i/count*2*Math.PI)])
+  expect(validHotspots({desktop:[{...area,points:ring(180)}],mobile:[]})).toBe(true)
+  expect(validHotspots({desktop:[{...area,points:ring(257)}],mobile:[]})).toBe(false)
+ })
  it('keeps independent mobile geometry and accepts original image coordinates',()=>{expect(validHotspots({desktop:[area],mobile:[]})).toBe(true)})
  it('rejects unsafe destinations, malformed points, excessive count and degenerate shapes',()=>{
   for(const path of ['https://evil.test','//evil.test','/portfolio/../admin','/portfolio/%2fadmin','/portfolio/a?redirect=https://evil.test'])expect(validGalleryPath(path)).toBe(false)
