@@ -280,7 +280,7 @@ export default function HotspotEditor({value,onChange,desktop,mobile,disabled}:P
          fill="transparent"
          pointerEvents="all"
          stroke={hasGradient(r)?`url(#grad-${r.id})`:hotspotColour(r.color)} strokeOpacity={r.id===selected?1:0.65}
-         strokeWidth={2.4*hotspotGlowStrength(r.glowStrength)} vectorEffect="non-scaling-stroke"/>
+         strokeWidth={1.6} vectorEffect="non-scaling-stroke"/>
         <text x={r.points[0][0]} y={r.points[0][1]} fill="white" fontSize="3" pointerEvents="none">{i+1}</text>
        </g>)}
        {/* Drag handles on the selected shape — the direct way to fix an edge
@@ -336,8 +336,11 @@ export default function HotspotEditor({value,onChange,desktop,mobile,disabled}:P
        value={Math.round(hotspotGlowStrength(active.glowStrength)*100)} onChange={e=>update({glowStrength:Number(e.target.value)/100})}
        className="block w-full mt-2 accent-violet-500" />
      </label>
-     <p className="text-muted-foreground">Lower softens the edge; higher makes it wider and brighter. Phone outlines stay visible without hovering. Desktop and Phone settings are separate.</p>
+     <p className="text-muted-foreground">Adjusts the soft outer halo. The solid outline stays thin at every strength. Phone outlines stay visible without hovering. Desktop and Phone settings are separate.</p>
      <button type="button" className="underline" onClick={()=>update({glowStrength:null})}>Reset glow strength</button>
+     <div className="flex items-center justify-center rounded-lg bg-black/60 py-7" aria-label="Outer glow sample">
+      <span className="rounded-lg px-4 py-2 text-xs" style={{border:`1px solid ${glow.from}`,boxShadow:`0 0 ${2*hotspotGlowStrength(active.glowStrength)}px ${glow.from}, 0 0 ${4*hotspotGlowStrength(active.glowStrength)}px ${glow.to}`}}>Glow preview</span>
+     </div>
      <span className="block">Glow colour</span>
      {swatches('color',glow.from)}
      <label className="flex items-center gap-2">
