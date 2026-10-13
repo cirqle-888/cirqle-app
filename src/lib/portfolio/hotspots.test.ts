@@ -2,6 +2,10 @@ import {describe,it,expect} from 'vitest'
 import {coverBox,readHotspots,validHotspots,validGalleryPath,hotspotColour,hotspotGlow,hasGradient,normaliseGlowColour,HOTSPOT_COLOURS,DEFAULT_HOTSPOT_COLOUR} from './hotspots'
 const area={id:'one',label:'Roots social media',path:'/portfolio/social-media/roots',points:[[30,30],[70,30],[70,70],[30,70]]}
 describe('presentation hotspots',()=>{
+ it('keeps legacy glow settings and validates per-area strength',()=>{
+  for(const glowStrength of [undefined,null,.25,1,3])expect(validHotspots({desktop:[{...area,glowStrength}],mobile:[]})).toBe(true)
+  for(const glowStrength of [0,-1,3.1,NaN,Infinity,'2'])expect(validHotspots({desktop:[{...area,glowStrength}],mobile:[]})).toBe(false)
+ })
  it('accepts detailed mask contours but keeps the payload bounded',()=>{
   const ring=(count:number)=>Array.from({length:count},(_,i)=>[50+20*Math.cos(i/count*2*Math.PI),50+20*Math.sin(i/count*2*Math.PI)])
   expect(validHotspots({desktop:[{...area,points:ring(180)}],mobile:[]})).toBe(true)

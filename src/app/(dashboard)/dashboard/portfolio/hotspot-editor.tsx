@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { type PresentationHotspot, type PresentationHotspots, type HotspotPoint, type HotspotColour, coverBox, hotspotColour, hotspotGlow, hasGradient, normaliseGlowColour, HOTSPOT_COLOURS, DEFAULT_HOTSPOT_COLOUR } from '@/lib/portfolio/hotspots'
+import { type PresentationHotspot, type PresentationHotspots, type HotspotPoint, type HotspotColour, coverBox, hotspotGlowStrength, hotspotColour, hotspotGlow, hasGradient, normaliseGlowColour, HOTSPOT_COLOURS, DEFAULT_HOTSPOT_COLOUR } from '@/lib/portfolio/hotspots'
 import { type ResolvedMedia } from '@/lib/portfolio/showcase'
 import { magicSelect, rectangleFromDrag, movePolygon, movePoint, type Bitmap } from '@/lib/portfolio/trace'
 import { detectMaskRegions } from '@/lib/portfolio/mask-regions'
@@ -280,7 +280,7 @@ export default function HotspotEditor({value,onChange,desktop,mobile,disabled}:P
          fill="transparent"
          pointerEvents="all"
          stroke={hasGradient(r)?`url(#grad-${r.id})`:hotspotColour(r.color)} strokeOpacity={r.id===selected?1:0.65}
-         strokeWidth={2} vectorEffect="non-scaling-stroke"/>
+         strokeWidth={2.4*hotspotGlowStrength(r.glowStrength)} vectorEffect="non-scaling-stroke"/>
         <text x={r.points[0][0]} y={r.points[0][1]} fill="white" fontSize="3" pointerEvents="none">{i+1}</text>
        </g>)}
        {/* Drag handles on the selected shape — the direct way to fix an edge
@@ -331,6 +331,13 @@ export default function HotspotEditor({value,onChange,desktop,mobile,disabled}:P
       className={`w-24 rounded border bg-background p-1 font-mono ${normaliseGlowColour(value)?'border-border':'border-destructive'}`}/>
     </div>
     return <div className="text-xs space-y-2">
+     <label className="block">Outer glow strength · {Math.round(hotspotGlowStrength(active.glowStrength)*100)}%
+      <input aria-label="Outer glow strength" type="range" min={25} max={300} step={5}
+       value={Math.round(hotspotGlowStrength(active.glowStrength)*100)} onChange={e=>update({glowStrength:Number(e.target.value)/100})}
+       className="block w-full mt-2 accent-violet-500" />
+     </label>
+     <p className="text-muted-foreground">Lower softens the edge; higher makes it wider and brighter. Phone outlines stay visible without hovering. Desktop and Phone settings are separate.</p>
+     <button type="button" className="underline" onClick={()=>update({glowStrength:null})}>Reset glow strength</button>
      <span className="block">Glow colour</span>
      {swatches('color',glow.from)}
      <label className="flex items-center gap-2">

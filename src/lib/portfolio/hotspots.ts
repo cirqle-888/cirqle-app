@@ -1,6 +1,6 @@
 /** Coordinates are percentages of the ORIGINAL image, never the cropped viewport. */
 export type HotspotPoint = [number, number];
-export interface PresentationHotspot { id: string; label: string; path: string; points: HotspotPoint[]; color?: string | null; colorTo?: string | null }
+export interface PresentationHotspot { id: string; label: string; path: string; points: HotspotPoint[]; color?: string | null; colorTo?: string | null; glowStrength?: number | null }
 /**
  * Neon glow colours for a clickable area.
  *
@@ -74,6 +74,13 @@ export function hasGradient(area: { color?: unknown; colorTo?: unknown }): boole
  const { from, to } = hotspotGlow(area);
  return from !== to;
 }
+/** Older areas keep their original glow. Strength is independently stored per viewport area. */
+export function hotspotGlowStrength(value: unknown): number {
+ return typeof value === 'number' && Number.isFinite(value) ? Math.max(0.25, Math.min(3, value)) : 1;
+}
+export function validGlowStrength(value: unknown): boolean {
+ return value === undefined || value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0.25 && value <= 3);
+}
 export interface PresentationHotspots { desktop: PresentationHotspot[]; mobile: PresentationHotspot[] }
 export const emptyHotspots = (): PresentationHotspots => ({ desktop: [], mobile: [] });
 export function validGalleryPath(path: unknown): path is string {
@@ -84,7 +91,7 @@ export function validHotspots(value: unknown): value is PresentationHotspots {
  return ['desktop','mobile'].every(side => {
   const rows = (value as Record<string, unknown>)[side];
   return Array.isArray(rows) && rows.length <= 8 && new Set(rows.map(r=>r?.id)).size === rows.length && rows.every(r =>
-   r && typeof r.id === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(r.id) && typeof r.label === 'string' && r.label.trim().length > 0 && r.label.length <= 80 && validGalleryPath(r.path) && validHotspotColour(r.color) && validHotspotColour(r.colorTo) && Array.isArray(r.points) && r.points.length >= 3 && r.points.length <= 256 && r.points.every((p: unknown) => Array.isArray(p) && p.length === 2 && p.every(n=>typeof n==='number' && Number.isFinite(n) && n>=0 && n<=100)) && Math.abs(r.points.reduce((sum: number,p: HotspotPoint,i: number)=>{const q=r.points[(i+1)%r.points.length];return sum+p[0]*q[1]-q[0]*p[1];},0)) > 2);
+   r && typeof r.id === 'string' && /^[a-zA-Z0-9-]{1,80}$/.test(r.id) && typeof r.label === 'string' && r.label.trim().length > 0 && r.label.length <= 80 && validGalleryPath(r.path) && validHotspotColour(r.color) && validHotspotColour(r.colorTo) && validGlowStrength(r.glowStrength) && Array.isArray(r.points) && r.points.length >= 3 && r.points.length <= 256 && r.points.every((p: unknown) => Array.isArray(p) && p.length === 2 && p.every(n=>typeof n==='number' && Number.isFinite(n) && n>=0 && n<=100)) && Math.abs(r.points.reduce((sum: number,p: HotspotPoint,i: number)=>{const q=r.points[(i+1)%r.points.length];return sum+p[0]*q[1]-q[0]*p[1];},0)) > 2);
  });
 }
 export function readHotspots(value: unknown): PresentationHotspots { return validHotspots(value) ? value : emptyHotspots(); }

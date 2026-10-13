@@ -37,7 +37,7 @@ import {
 } from '@/lib/portfolio/showcase'
 import {
   type PresentationHotspot, type PresentationHotspots, type HotspotPoint, type HotspotColour,
-  readHotspots, hotspotColour, hotspotGlow, hasGradient, normaliseGlowColour,
+  readHotspots, hotspotGlowStrength, hotspotColour, hotspotGlow, hasGradient, normaliseGlowColour,
   HOTSPOT_COLOURS, DEFAULT_HOTSPOT_COLOUR,
 } from '@/lib/portfolio/hotspots'
 import { magicSelect, rectangleFromDrag, movePolygon, movePoint, type Bitmap } from '@/lib/portfolio/trace'
@@ -592,7 +592,7 @@ export default function AreasClient({
                         fill="transparent" pointerEvents="all"
                         stroke={hasGradient(r) ? `url(#ag-${r.id})` : hotspotColour(r.color)}
                         strokeOpacity={r.id === selected ? 1 : 0.65}
-                        strokeWidth={2} vectorEffect="non-scaling-stroke"
+                        strokeWidth={2.4*hotspotGlowStrength(r.glowStrength)} vectorEffect="non-scaling-stroke"
                       />
                       <text x={r.points[0][0]} y={r.points[0][1]} fill="white" fontSize={3 / zoom} pointerEvents="none">{i + 1}</text>
                     </g>
@@ -692,7 +692,14 @@ export default function AreasClient({
                 )
                 return (
                   <div className="text-xs space-y-2">
-                    <span className="block">Glow colour</span>
+                    <label className="block">Outer glow strength · {Math.round(hotspotGlowStrength(active.glowStrength)*100)}%
+      <input aria-label="Outer glow strength" type="range" min={25} max={300} step={5}
+       value={Math.round(hotspotGlowStrength(active.glowStrength)*100)} onChange={e=>update({glowStrength:Number(e.target.value)/100})}
+       className="block w-full mt-2 accent-violet-500" />
+     </label>
+     <p className="text-muted-foreground">Lower softens the edge; higher makes it wider and brighter. Phone outlines stay visible without hovering. Desktop and Phone settings are separate.</p>
+     <button type="button" className="underline" onClick={()=>update({glowStrength:null})}>Reset glow strength</button>
+     <span className="block">Glow colour</span>
                     {swatches('color', glow.from)}
                     <label className="flex items-center gap-2">
                       <input type="checkbox" checked={gradient} className="accent-violet-500"
