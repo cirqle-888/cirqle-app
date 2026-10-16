@@ -38,7 +38,7 @@ export default async function StatementsPage() {
     )),
     fetchAll(stablePaginationQuery(
       supabase.from('cashbook_invoice_allocations')
-        .select('invoice_id, allocated_amount, deleted_at, cashbook_entry:cashbook_entries(entry_date, reference)')
+        .select('invoice_id, allocated_amount, deleted_at, cashbook_entry:cashbook_entries!cashbook_entry_id(entry_date, reference)')
     )),
     getCompanySettings(),
   ])

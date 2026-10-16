@@ -1478,7 +1478,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   ): Promise<boolean> {
     const { data: allocRows } = await supabase
       .from('cashbook_invoice_allocations')
-      .select('cashbook_entry_id, cashbook_entries!inner(entry_date, type, amount_inr, amount)')
+      .select('cashbook_entry_id, cashbook_entries!cashbook_entry_id!inner(entry_date, type, amount_inr, amount)')
       .eq('invoice_id', invoiceId)
     if (!allocRows || allocRows.length === 0) return false
     const targetInr = round2(pmt.amount_inr ?? pmt.amount ?? 0)
@@ -2503,7 +2503,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
 
   async function refreshInvoice(invoiceId: string) {
     const { data } = await supabase.from('invoices')
-      .select('*, client:clients(id,name,code,phone,email), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency,service:services!service_id(id,name)), service:services(id,name)), payments(*), cashbook_invoice_allocations(id, deleted_at, allocated_amount, cashbook_entry:cashbook_entries(id, reference, entry_date, description, receipt_number, bank_account:bank_accounts(name)))')
+      .select('*, client:clients(id,name,code,phone,email), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency,service:services!service_id(id,name)), service:services(id,name)), payments(*), cashbook_invoice_allocations(id, deleted_at, allocated_amount, cashbook_entry:cashbook_entries!cashbook_entry_id(id, reference, entry_date, description, receipt_number, bank_account:bank_accounts(name)))')
       .eq('id', invoiceId).single()
     if (data) {
       setInvoices(prev => prev.map(i => i.id === invoiceId ? data as any : i))

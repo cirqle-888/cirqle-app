@@ -30,16 +30,23 @@ interface ActionResult<T = void> {
 }
 
 // ─── Full entry select used for returning newly-created rows ──────────────────
+//
+// The allocation embeds NAME their relationship (`!cashbook_entry_id`). The
+// allocation tables also gained `released_by_entry_id`; while PostgREST sees a
+// second foreign key to cashbook_entries, an unhinted embed is ambiguous
+// (PGRST201) and the whole query fails — the Cash Book outage of 2026-10-16.
+// Every embed between cashbook_entries and an allocation table carries the
+// same hint, in both directions.
 
 const ENTRY_SELECT = `
   *,
   category:cashbook_categories(id, name, type),
   bank_account:bank_accounts(id, name),
-  allocations:cashbook_invoice_allocations(
+  allocations:cashbook_invoice_allocations!cashbook_entry_id(
     id, invoice_id, allocated_amount, deleted_at,
     invoice:invoices(invoice_number, status, due_date, total_amount, paid_amount, client:clients(name))
   ),
-  payroll_allocations:cashbook_payroll_allocations(
+  payroll_allocations:cashbook_payroll_allocations!cashbook_entry_id(
     id, payroll_id, allocated_amount, deleted_at,
     payroll:payroll(net_salary, status, employee:employees(name, cqid))
   )

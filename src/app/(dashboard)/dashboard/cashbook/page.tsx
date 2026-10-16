@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 const CORE_JOINS = `
   category:cashbook_categories(id, name, type),
   bank_account:bank_accounts(id, name),
-  allocations:cashbook_invoice_allocations(
+  allocations:cashbook_invoice_allocations!cashbook_entry_id(
     id,
     invoice_id,
     allocated_amount,
@@ -20,7 +20,7 @@ const CORE_JOINS = `
   direct_invoice:invoices!invoice_id(
     invoice_number, status, due_date, total_amount, paid_amount, total_amount_inr, exchange_rate, currency, client:clients(id, name)
   ),
-  payroll_allocations:cashbook_payroll_allocations(
+  payroll_allocations:cashbook_payroll_allocations!cashbook_entry_id(
     id,
     payroll_id,
     allocated_amount,

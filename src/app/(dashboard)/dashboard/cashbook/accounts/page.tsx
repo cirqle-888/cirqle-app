@@ -22,7 +22,7 @@ export default async function AccountsPage() {
         description, reference, bank_account_id,
         category:cashbook_categories(id, name, type),
         bank_account:bank_accounts(id, name, type),
-        allocations:cashbook_invoice_allocations(
+        allocations:cashbook_invoice_allocations!cashbook_entry_id(
           id, allocated_amount, deleted_at,
           invoice:invoices(invoice_number, client:clients(id, name))
         )
