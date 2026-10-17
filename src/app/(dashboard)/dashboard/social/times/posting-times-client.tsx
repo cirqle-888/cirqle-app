@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button'
 import { SocialTabs } from '@/components/social-hub/social-tabs'
 import {
   Clock, Plus, Trash2, Loader2, CalendarRange, Check, AlertTriangle,
-  Sparkles, ChevronRight, Info,
+  Sparkles, ChevronRight, Info, RefreshCw, ClipboardPaste,
 } from 'lucide-react'
 import {
   WEEKDAY_LABEL, WEEKDAY_SHORT, formatTime12, normalizeTime,
@@ -28,6 +28,7 @@ import {
 import {
   listSlots, saveSlot, deleteSlot, listBestTimes,
   planAssignment, applyAssignment,
+  syncOnlineFollowers, importBestTimesFromText,
   type SlotView, type AssignmentPreview,
 } from '@/lib/social/posting-actions'
 import { todayISO, addDaysISO } from '@/lib/utils/local-date'
@@ -118,7 +119,13 @@ export default function PostingTimesClient({ clients, ready, canManage, canPubli
               canManage={canManage}
               onChanged={() => refresh(clientId)}
             />
-            <Evidence best={best} slots={slots} />
+            <Evidence
+              best={best}
+              slots={slots}
+              clientId={clientId}
+              canManage={canManage}
+              onChanged={() => refresh(clientId)}
+            />
           </div>
 
           {canPublish && (
@@ -262,7 +269,13 @@ function SlotEditor({ clientId, slots, loading, canManage, onChanged }: {
 
 // ── Evidence ─────────────────────────────────────────────────────────────────
 
-function Evidence({ best, slots }: { best: BestTime[]; slots: SlotView[] }) {
+function Evidence({ best, slots, clientId, canManage, onChanged }: {
+  best: BestTime[]
+  slots: SlotView[]
+  clientId: string
+  canManage: boolean
+  onChanged: () => void
+}) {
   const top = useMemo(() => [...best].sort((a, b) => b.score - a.score).slice(0, 8), [best])
   const slotTimes = useMemo(() => new Set(slots.map(s => `${s.weekday}-${s.time.slice(0, 2)}`)), [slots])
 
@@ -277,10 +290,12 @@ function Evidence({ best, slots }: { best: BestTime[]; slots: SlotView[] }) {
         because a number can&apos;t know the client asked for 7pm.
       </p>
 
+      {canManage && <EvidenceSources clientId={clientId} onChanged={onChanged} />}
+
       {top.length === 0 ? (
         <p className="text-xs text-muted-foreground">
-          Nothing yet. Connect the client&apos;s Instagram for hourly follower data, or import a
-          screenshot of their dashboard.
+          Nothing yet. Pull it from a connected Instagram account, or paste the hours straight out
+          of any dashboard.
         </p>
       ) : (
         <ul className="space-y-1.5">
@@ -442,5 +457,93 @@ function BulkPlanner({ clientId, clientName, slotCount }: {
         </div>
       )}
     </section>
+  )
+}
+
+
+/**
+ * The two ways evidence gets in.
+ *
+ * Instagram's hourly figure is the measured one and is labelled as such.
+ * A paste is somebody reading a chart, and it is stored under a different
+ * source so the database never confuses the two — which matters the day
+ * somebody asks where a suggested time came from.
+ */
+function EvidenceSources({ clientId, onChanged }: { clientId: string; onChanged: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const [note, setNote] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [ignored, setIgnored] = useState<string[]>([])
+  const [busy, start] = useTransition()
+
+  function pull() {
+    setErr(null); setNote(null); setIgnored([])
+    start(async () => {
+      const res = await syncOnlineFollowers(clientId)
+      if (!res.ok) { setErr(res.error ?? 'Could not read Instagram.'); return }
+      setNote(`${res.data?.written ?? 0} hours from ${res.data?.account}, averaged over ${res.data?.days} days.`)
+      onChanged()
+    })
+  }
+
+  function paste() {
+    setErr(null); setNote(null); setIgnored([])
+    start(async () => {
+      const res = await importBestTimesFromText(clientId, text)
+      if (!res.ok) { setErr(res.error ?? 'Could not read that.'); return }
+      setNote(
+        `${res.data?.written ?? 0} hours saved` +
+        (res.data?.spread ? ' — one day\u2019s shape applied across the week.' : '.'),
+      )
+      setIgnored(res.data?.ignored ?? [])
+      setText('')
+      onChanged()
+    })
+  }
+
+  return (
+    <div className="mb-3 space-y-2">
+      <div className="flex flex-wrap gap-1.5">
+        <Button size="sm" variant="outline" onClick={pull} disabled={busy} className="gap-1.5 text-xs">
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          Pull from Instagram
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setOpen(o => !o)} className="gap-1.5 text-xs">
+          <ClipboardPaste className="w-3.5 h-3.5" /> Paste a dashboard
+        </Button>
+      </div>
+
+      {open && (
+        <div className="space-y-1.5">
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            rows={5}
+            placeholder={'19:00  1,240\n20:00  980\n21:00  610\n\nOr with days:\nMonday\n19:00  1,240'}
+            className="w-full rounded-lg border border-border bg-background p-2 text-xs font-mono"
+          />
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={paste} disabled={busy || !text.trim()} className="text-xs">
+              Read it
+            </Button>
+            <span className="text-[10px] text-muted-foreground">
+              Hours and numbers, one per line. Days optional.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {err && <p className="text-xs text-red-400">{err}</p>}
+      {note && <p className="text-xs text-green-500">{note}</p>}
+      {ignored.length > 0 && (
+        <details className="text-[11px] text-muted-foreground">
+          <summary className="cursor-pointer">{ignored.length} line{ignored.length === 1 ? '' : 's'} skipped</summary>
+          <ul className="mt-1 space-y-0.5 pl-3">
+            {ignored.slice(0, 12).map((l, i) => <li key={i} className="truncate">{l}</li>)}
+          </ul>
+        </details>
+      )}
+    </div>
   )
 }

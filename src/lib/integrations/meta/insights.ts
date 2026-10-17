@@ -33,7 +33,7 @@ function isoDate(d: Date): string {
 }
 
 /** Resolve the API token for a social account row (page token → connection user token). */
-async function resolveAccountToken(admin: SupabaseClient, account: any): Promise<string | null> {
+export async function resolveAccountToken(admin: SupabaseClient, account: any): Promise<string | null> {
   // IG accounts authenticate through their linked Page's token when present.
   if (account.platform === 'instagram' && account.linked_page_account_id) {
     const { data: page } = await admin

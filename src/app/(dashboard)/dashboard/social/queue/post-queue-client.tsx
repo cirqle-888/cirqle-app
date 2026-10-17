@@ -27,6 +27,7 @@ import {
   URGENCY_CHIP, cycleProgress, type PostStage,
 } from '@/lib/social-hub/post-queue'
 import type { QueueEntry } from '@/lib/social-hub/post-queue-load'
+import { postTiming, formatTime12, timeToMinutes, TIMING_LABEL } from '@/lib/social/posting-time'
 import { savePostContent, markAsPosted, unmarkPosted, myCalendarFeed, revokeMyCalendarFeed } from './actions'
 import { CalendarSubscribe } from '@/components/social-hub/calendar-subscribe'
 
@@ -62,7 +63,19 @@ export default function PostQueueClient({
   )
 
   const attention = visible.filter(r => r.attention)
-  const byStage = (s: PostStage) => visible.filter(r => r.stage === s)
+  // Within a lane: by day, then by the time of day. Sorting by date alone put
+  // a 9am post below a 9pm one on the same day, which is the wrong order for
+  // the one screen whose job is "what goes out next".
+  // A post with no time sorts LAST within its day, not first: timeToMinutes
+  // returns -1 for "unreadable", and letting that win would put every
+  // undecided post ahead of the one actually going out at 9am.
+  const ofDay = (r: QueueEntry) => {
+    const m = timeToMinutes(r.postingTime)
+    return m < 0 ? Number.MAX_SAFE_INTEGER : m
+  }
+  const byStage = (s: PostStage) =>
+    visible.filter(r => r.stage === s).sort((a, b) =>
+      a.plannedDate.localeCompare(b.plannedDate) || ofDay(a) - ofDay(b))
 
   /** Replace one row in place after an action, keeping scroll and filters. */
   const patch = (itemId: string, next: Partial<QueueEntry>) =>
@@ -257,9 +270,10 @@ function QueueCard({ row, onOpen }: { row: QueueEntry; onOpen: () => void }) {
       </div>
 
       <div className="mt-2 flex items-center justify-between gap-2">
-        <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-          <CalendarDays className="w-3 h-3" />
-          {formatDay(row.plannedDate)}
+        <span className="text-[11px] text-muted-foreground flex items-center gap-1 min-w-0">
+          <CalendarDays className="w-3 h-3 shrink-0" />
+          <span className="truncate">{formatDay(row.plannedDate)}</span>
+          <PostingClock row={row} />
         </span>
         <ChecklistDots checklist={row.checklist} />
       </div>
@@ -577,4 +591,56 @@ function formatDay(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number)
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   return `${d} ${MONTHS[m - 1]}${y !== new Date().getFullYear() ? ` ${y}` : ''}`
+}
+
+
+/**
+ * The time, and what the clock says about it.
+ *
+ * A date alone was never the thing being missed — a poster finished on the
+ * right day and published at 11pm missed its slot just as surely as one never
+ * made. So the time shows next to the date, and once it is within the
+ * reminder window it stops being grey text and starts being the loudest thing
+ * on the card.
+ *
+ * `due_now` opens at the 15-minute lead and stays open for 45 minutes past
+ * the slot, because the job is to catch somebody BEFORE the moment and keep
+ * asking until they confirm. A card that flips straight to "missed" at 19:31
+ * only tells them they have already failed.
+ */
+function PostingClock({ row }: { row: QueueEntry }) {
+  if (row.postedAt) {
+    return (
+      <span className="text-green-500 inline-flex items-center gap-0.5 shrink-0">
+        · <Check className="w-3 h-3" /> posted
+      </span>
+    )
+  }
+  if (row.postAsap) {
+    return <span className="text-amber-500 shrink-0">· ASAP</span>
+  }
+  if (!row.postingTime) {
+    return <span className="text-muted-foreground/60 shrink-0">· no time</span>
+  }
+
+  const timing = postTiming({
+    isoDate: row.plannedDate,
+    time: row.postingTime,
+    asap: row.postAsap,
+    posted: !!row.postedAt,
+  })
+  const tone =
+    timing === 'due_now' ? 'text-amber-400 font-medium'
+    : timing === 'overdue' ? 'text-red-400 font-medium'
+    : timing === 'today' ? 'text-blue-400'
+    : 'text-muted-foreground'
+
+  return (
+    <span className={`inline-flex items-center gap-0.5 shrink-0 ${tone}`}>
+      · <Clock className="w-3 h-3" /> {formatTime12(row.postingTime)}
+      {(timing === 'due_now' || timing === 'overdue') && (
+        <span className="ml-1">{TIMING_LABEL[timing]}</span>
+      )}
+    </span>
+  )
 }

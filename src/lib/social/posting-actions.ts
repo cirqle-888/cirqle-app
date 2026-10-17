@@ -485,3 +485,95 @@ export async function timeSuggestionsFor(
 
   return { ok: true, data: { slots: slotsRes.data ?? [], best: bestRes.data ?? [], taken } }
 }
+
+// ── Where evidence comes from ────────────────────────────────────────────────
+
+/**
+ * Pull hourly follower activity from a client's connected Instagram account.
+ *
+ * Soft everywhere. No connected account, a retired metric, an account too
+ * small for Meta to report on — each returns a sentence someone can act on
+ * rather than an error, because the client's own slots were always the
+ * authority and keep working regardless.
+ */
+export async function syncOnlineFollowers(clientId: string): Promise<ActionResult<{ written: number; days: number; account: string }>> {
+  const guard = await requirePermission(PERMS.SOCIAL_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  if (!(await tableExists(admin, 'social_best_times'))) return { ok: false, error: NOT_READY }
+
+  const { data: accounts } = await admin
+    .from('social_accounts')
+    .select('id, platform, external_id, name, status, insights_enabled')
+    .eq('client_id', clientId)
+    .eq('platform', 'instagram')
+    .neq('status', 'disconnected')
+  const account = (accounts ?? [])[0] as Row | undefined
+  if (!account) {
+    return { ok: false, error: 'No connected Instagram account for this client. Connect one, or paste the numbers instead.' }
+  }
+
+  // Reuse the sync's own resolver rather than re-deriving how tokens decrypt:
+  // two places that know that is one place to get it wrong.
+  const { resolveAccountToken } = await import('@/lib/integrations/meta/insights')
+  const token = await resolveAccountToken(admin, account)
+  if (!token) return { ok: false, error: 'That Instagram connection has no usable token — reconnect it in Accounts.' }
+
+  const { fetchOnlineFollowers } = await import('@/lib/integrations/meta/online-followers')
+  const result = await fetchOnlineFollowers(String(account.external_id), token)
+  if (!result.rows.length) {
+    return { ok: false, error: result.error ?? 'Instagram returned no hourly data for this account.' }
+  }
+
+  const written = await replaceBestTimes({
+    clientId,
+    accountId: String(account.id),
+    source: 'meta',
+    rows: result.rows.map(r => ({ weekday: r.weekday, hour: r.hour, score: r.score })),
+    note: `Instagram online_followers · ${result.days} days`,
+  })
+  if (!written.ok) return { ok: false, error: written.error }
+
+  return {
+    ok: true,
+    data: { written: written.data?.written ?? 0, days: result.days, account: String(account.name ?? 'Instagram') },
+  }
+}
+
+/**
+ * Read a pasted analytics dashboard into evidence.
+ *
+ * Stored as source 'screenshot' whether it came from an image or a paste, so
+ * a figure somebody eyeballed off a chart can never be mistaken in the
+ * database for one measured through the API.
+ */
+export async function importBestTimesFromText(
+  clientId: string,
+  text: string,
+): Promise<ActionResult<{ written: number; ignored: string[]; spread: boolean }>> {
+  const guard = await requirePermission(PERMS.SOCIAL_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!text.trim()) return { ok: false, error: 'Paste the hours and numbers from the dashboard first.' }
+
+  const { parseBestTimes, spreadAcrossWeek } = await import('./best-times-import')
+  const parsed = parseBestTimes(text)
+  if (!parsed.rows.length) {
+    return { ok: false, error: 'Could not find any hour-and-number rows in that. A line like "19:00  1,240" is what it is looking for.' }
+  }
+
+  const rows = spreadAcrossWeek(parsed.rows)
+  const written = await replaceBestTimes({
+    clientId,
+    accountId: null,
+    source: 'screenshot',
+    rows,
+    note: parsed.hasWeekdays ? 'Pasted dashboard, per weekday' : 'Pasted dashboard, one day applied across the week',
+  })
+  if (!written.ok) return { ok: false, error: written.error }
+
+  return {
+    ok: true,
+    data: { written: written.data?.written ?? 0, ignored: parsed.ignored, spread: !parsed.hasWeekdays },
+  }
+}

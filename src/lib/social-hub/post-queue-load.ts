@@ -16,6 +16,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { columnExists } from '@/lib/supabase/server'
 import { captionHtmlToText } from '@/lib/social/plan'
+import { normalizeTime } from '@/lib/social/posting-time'
 import {
   postStageOf, urgencyOf, needsAttention, postChecklist, checklistProgress,
   QUEUE_HIDDEN_ITEM_STATUSES, type PostStage, type UrgencyInfo, type ChecklistItem,
@@ -51,6 +52,12 @@ export interface QueueEntry {
   scheduledAt: string | null
   refNo: string | null
   taskNumber: number | null
+  /** Wall-clock posting time, 'HH:MM'. Null until somebody decides one. */
+  postingTime: string | null
+  /** Publish on approval — no slot, so it never waits for a clock. */
+  postAsap: boolean
+  /** Confirmed as actually published, which the pipeline could not tell before. */
+  postedAt: string | null
   stage: PostStage
   urgency: UrgencyInfo
   attention: boolean
@@ -98,11 +105,16 @@ export async function loadPostQueue(
   // ── The planned items ────────────────────────────────────────────────────
   // task_id needs 20260825120000; retry without it so a pending migration
   // still lists the queue rather than blanking the page.
+  //
+  // The posting-time columns (20261017090000) degrade the same way: each
+  // combination is tried in turn so a pending migration costs the feature,
+  // not the page.
   let items: Row[] = []
-  for (const withTask of [true, false]) {
+  for (const [withTask, withTime] of [[true, true], [true, false], [false, true], [false, false]] as const) {
     const cols = 'id, calendar_id, scheduled_date, title, content_type, platforms, ' +
       'caption, caption_canvas, status, request_id, service_id' +
-      (withTask ? ', task_id' : '')
+      (withTask ? ', task_id' : '') +
+      (withTime ? ', scheduled_time, post_asap, posted_at' : '')
     const { data, error } = await admin.from('social_calendar_items')
       .select(cols)
       .in('calendar_id', [...calById.keys()])
@@ -195,6 +207,9 @@ export async function loadPostQueue(
       scheduledAt: post?.scheduled_at ?? null,
       refNo: req?.ref_no != null ? String(req.ref_no) : null,
       taskNumber: task?.task_number ?? null,
+      postingTime: normalizeTime(it.scheduled_time),
+      postAsap: it.post_asap === true,
+      postedAt: it.posted_at ?? null,
       stage,
       urgency,
       attention: needsAttention(stage, urgency),
