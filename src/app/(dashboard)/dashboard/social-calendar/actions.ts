@@ -20,6 +20,7 @@ import { resolveImageExt, IMAGE_UPLOAD_ERROR, IMAGE_EXT_BY_TYPE, MAX_IMAGE_BYTES
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
+import { normalizeTime } from '@/lib/social/posting-time'
 import { logActivity } from '@/lib/activity/log'
 import { createManualRequest } from '@/app/(dashboard)/dashboard/requests/actions'
 import { setRequestStatus } from '@/lib/requests/core'
@@ -228,12 +229,24 @@ export interface ItemInput {
    *  request's assigned_employee_id, so the plan answers "who draws this?"
    *  without waiting for the Requests inbox. Null = decide later. */
   assignedEmployeeId?: string | null
+  /** Wall-clock posting time, 'HH:MM' on the India business calendar.
+   *  Optional throughout: a plan without a time is still a valid plan, and
+   *  demanding one would make this screen harder to use than the paper it
+   *  replaced. Null clears it. */
+  scheduledTime?: string | null
+  /** Trending content: publish as soon as it is approved, with no slot. A
+   *  flag rather than a sentinel time, so the bulk planner leaves it alone
+   *  instead of letting it occupy somebody's evening slot. */
+  postAsap?: boolean
+  /** Lower goes out first when a day holds more than one post. Distinct from
+   *  display_order, which is only how the planner arranges cards on screen. */
+  postingPriority?: number
 }
 
 /** Optional patch-migration columns (each added in a later migration). When a
  *  write fails on one, we retry WITHOUT that column only — stripping all of
  *  them would silently drop data for columns that DO exist. */
-const PATCH_COLUMNS = ['service_id', 'variants', 'reference_url', 'reference_urls', 'scheduled_end_date', 'caption_canvas', 'assigned_employee_id', 'links'] as const
+const PATCH_COLUMNS = ['service_id', 'variants', 'reference_url', 'reference_urls', 'scheduled_end_date', 'caption_canvas', 'assigned_employee_id', 'links', 'scheduled_time', 'post_asap', 'posting_priority'] as const
 
 /** Resolve WHICH patch column an error is about.
  *
@@ -440,6 +453,9 @@ export async function addCalendarItem(
     reference_url: refs[0] ?? null, // legacy single kept in sync with refs[0]
     caption_canvas: sanitizeCaptionCanvas(input.captionCanvas),
     assigned_employee_id: input.assignedEmployeeId || null,
+    scheduled_time: normalizeTime(input.scheduledTime),
+    post_asap: !!input.postAsap,
+    posting_priority: Number.isFinite(input.postingPriority) ? Math.trunc(input.postingPriority as number) : 0,
     links: cleanBriefLinks(input.links),
     // Who planned it — the planner's half of a contribution suggestion.
     created_by: guard.employeeId,
@@ -498,6 +514,9 @@ export async function updateCalendarItem(
     reference_url: refs[0] ?? null,
     caption_canvas: sanitizeCaptionCanvas(input.captionCanvas),
     assigned_employee_id: input.assignedEmployeeId || null,
+    scheduled_time: normalizeTime(input.scheduledTime),
+    post_asap: !!input.postAsap,
+    posting_priority: Number.isFinite(input.postingPriority) ? Math.trunc(input.postingPriority as number) : 0,
     links: cleanBriefLinks(input.links),
     updated_at: new Date().toISOString(),
   }

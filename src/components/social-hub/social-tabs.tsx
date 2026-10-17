@@ -22,12 +22,13 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { usePermissions } from '@/contexts/permission-context'
 import {
-  CalendarDays, Send, PenSquare, MessageCircle, Grid3x3, BarChart3,
+  CalendarDays, Send, PenSquare, MessageCircle, Grid3x3, BarChart3, Clock,
 } from 'lucide-react'
 
 const TABS = [
   { href: '/dashboard/social-calendar', label: 'Plan',     icon: CalendarDays,   perm: 'social.view' },
   { href: '/dashboard/social/queue',    label: 'To Post',  icon: Send,           perm: 'social.publish' },
+  { href: '/dashboard/social/times',    label: 'Times',    icon: Clock,          perm: 'social.view' },
   { href: '/dashboard/social/calendar', label: 'Compose',  icon: PenSquare,      perm: 'social.publish' },
   { href: '/dashboard/social/inbox',    label: 'Comments', icon: MessageCircle,  perm: 'social.publish' },
   { href: '/dashboard/social/feed',     label: 'Feed',     icon: Grid3x3,        perm: 'social.plan_feed' },

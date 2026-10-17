@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
 import { SocialTabs } from '@/components/social-hub/social-tabs'
+import { PostingTimeField } from '@/components/social-hub/posting-time-field'
 import Combobox from '@/components/ui/combobox'
 import dynamic from 'next/dynamic'
 import { usePermissions } from '@/contexts/permission-context'
@@ -68,6 +69,12 @@ interface ItemRow {
   scheduled_date: string | null
   /** end of a multi-day run (campaign/SEO); null for single-day items */
   scheduled_end_date?: string | null
+  /** Wall-clock posting time. Optional on the type as well as in the data:
+   *  the column arrives with a patch migration that may not have run. */
+  scheduled_time?: string | null
+  /** Publish on approval, with no slot. */
+  post_asap?: boolean | null
+  posting_priority?: number | null
   title: string
   content_type: string
   platforms: string[] | null
@@ -192,7 +199,7 @@ const fmtDay = (date: string) => {
 
 // serviceId deliberately absent: the server auto-assigns it from the content type.
 const EMPTY_ITEM: ItemInput = {
-  scheduledDate: '', scheduledEndDate: '', title: '', contentType: 'post', platforms: [], caption: '', notes: '', variants: [], referenceUrls: [], captionCanvas: null, assignedEmployeeId: null, links: [],
+  scheduledDate: '', scheduledEndDate: '', title: '', contentType: 'post', platforms: [], caption: '', notes: '', variants: [], referenceUrls: [], captionCanvas: null, assignedEmployeeId: null, links: [], scheduledTime: null, postAsap: false,
 }
 
 /** Effective reference list (array supersedes the legacy single field). */
@@ -584,6 +591,7 @@ export default function SocialCalendarClient({
     setShowAllDesigners(false)
     setItemForm({
       scheduledDate: it.scheduled_date ?? '', scheduledEndDate: it.scheduled_end_date ?? '',
+      scheduledTime: it.scheduled_time ?? null, postAsap: !!it.post_asap,
       title: it.title, contentType: it.content_type, platforms: it.platforms ?? [],
       assignedEmployeeId: it.assigned_employee_id ?? null,
       caption: it.caption ?? '', notes: it.notes ?? '',
@@ -1767,6 +1775,16 @@ export default function SocialCalendarClient({
                     onChange={e => setItemForm(p => ({ ...p, scheduledDate: e.target.value }))}
                     className="w-full h-10 bg-background border border-border rounded-lg px-3 text-sm focus:outline-none focus:border-violet-500/50 disabled:opacity-60"
                   />
+                  <div className="mt-3">
+                    <PostingTimeField
+                      clientId={selected?.client_id}
+                      isoDate={itemForm.scheduledDate || null}
+                      value={itemForm.scheduledTime}
+                      asap={itemForm.postAsap}
+                      disabled={editingFrozen}
+                      onChange={({ time, asap }) => setItemForm(p => ({ ...p, scheduledTime: time, postAsap: asap }))}
+                    />
+                  </div>
                 </div>
                 }
               >
