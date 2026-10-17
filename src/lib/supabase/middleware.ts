@@ -255,6 +255,12 @@ export async function updateSession(request: NextRequest) {
                                                          // monitor only ever sees the 307 to /login and reports "up"
                                                          // while the database is unreachable. Returns booleans only.
                   || pathname.startsWith('/api/shortcut') // iOS Shortcuts API — its own bearer-token auth
+                  || pathname.startsWith('/api/calendar/') // Subscribed posting calendars — the token in the URL IS the
+                                                         // auth (the route fails closed on an unknown one). A calendar
+                                                         // client sends no cookie and no header: iOS Calendar follows
+                                                         // the 307, gets /login's HTML, and silently shows an empty
+                                                         // calendar — the exact failure the whole feature exists to
+                                                         // prevent, and the same bug class as /api/cron/ below.
                   || pathname.startsWith('/api/cron/')  // Vercel Cron — its own CRON_SECRET bearer-token auth, no Supabase session.
                                                          // Pre-existing bug fixed here: this prefix was missing, so every cron
                                                          // request (including the original cleanup-product-images) was getting

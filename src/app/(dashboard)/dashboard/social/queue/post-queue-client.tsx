@@ -27,7 +27,8 @@ import {
   URGENCY_CHIP, cycleProgress, type PostStage,
 } from '@/lib/social-hub/post-queue'
 import type { QueueEntry } from '@/lib/social-hub/post-queue-load'
-import { savePostContent, markAsPosted, unmarkPosted } from './actions'
+import { savePostContent, markAsPosted, unmarkPosted, myCalendarFeed, revokeMyCalendarFeed } from './actions'
+import { CalendarSubscribe } from '@/components/social-hub/calendar-subscribe'
 
 interface Props {
   initialRows: QueueEntry[]
@@ -87,18 +88,21 @@ export default function PostQueueClient({
               : 'Finished artwork waiting to go out. Only clients whose social we run.'}
           </p>
         </div>
-        {!compact && clients.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            <FilterPill active={client === 'all'} onClick={() => setClient('all')}>
-              All clients
-            </FilterPill>
-            {clients.map(([id, name]) => (
-              <FilterPill key={id} active={client === id} onClick={() => setClient(id)}>
-                {name}
+        <div className="flex flex-wrap items-center gap-2">
+          {!compact && clients.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              <FilterPill active={client === 'all'} onClick={() => setClient('all')}>
+                All clients
               </FilterPill>
-            ))}
-          </div>
-        )}
+              {clients.map(([id, name]) => (
+                <FilterPill key={id} active={client === id} onClick={() => setClient(id)}>
+                  {name}
+                </FilterPill>
+              ))}
+            </div>
+          )}
+          {!compact && <CalendarSubscribe load={myCalendarFeed} revoke={revokeMyCalendarFeed} />}
+        </div>
       </div>
 
       {/* ── The alert the request was really about ─────────────────────── */}
