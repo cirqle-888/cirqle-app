@@ -331,16 +331,21 @@ export default function HotspotEditor({value,onChange,desktop,mobile,disabled}:P
       className={`w-24 rounded border bg-background p-1 font-mono ${normaliseGlowColour(value)?'border-border':'border-destructive'}`}/>
     </div>
     return <div className="text-xs space-y-2">
+     <div className="flex flex-wrap gap-2" role="group" aria-label="Glow presets">
+      {([['Subtle',.65],['Balanced',1.2],['Highlight',2.2]] as const).map(([label,strength])=><button key={label} type="button" aria-pressed={active.glowStrength===strength} onClick={()=>update({glowStrength:strength})} className={`rounded-md border px-2 py-1.5 ${active.glowStrength===strength?'border-violet-400 bg-violet-500/15':'border-border'}`}>{label}</button>)}
+     </div>
      <label className="block">Outer glow strength · {Math.round(hotspotGlowStrength(active.glowStrength)*100)}%
       <input aria-label="Outer glow strength" type="range" min={25} max={300} step={5}
        value={Math.round(hotspotGlowStrength(active.glowStrength)*100)} onChange={e=>update({glowStrength:Number(e.target.value)/100})}
        className="block w-full mt-2 accent-violet-500" />
      </label>
-     <p className="text-muted-foreground">Adjusts the soft outer halo. The solid outline stays thin at every strength. Phone outlines stay visible without hovering. Desktop and Phone settings are separate.</p>
+     <p className="text-muted-foreground">Adjusts the soft outer halo. The solid outline stays thin at every strength. A gentle pulse reveals the area on touch devices; desktop hover holds the glow steady. Desktop and Phone settings are separate.</p>
      <button type="button" className="underline" onClick={()=>update({glowStrength:null})}>Reset glow strength</button>
      <div className="flex items-center justify-center rounded-lg bg-black/60 py-7" aria-label="Outer glow sample">
-      <span className="rounded-lg px-4 py-2 text-xs" style={{border:`1px solid ${glow.from}`,boxShadow:`0 0 ${2*hotspotGlowStrength(active.glowStrength)}px ${glow.from}, 0 0 ${4*hotspotGlowStrength(active.glowStrength)}px ${glow.to}`}}>Glow preview</span>
+      <span className="rounded-lg px-4 py-2 text-xs" style={{border:`1px solid ${glow.from}`,boxShadow:`0 0 ${3*hotspotGlowStrength(active.glowStrength)}px ${glow.from}, 0 0 ${7*hotspotGlowStrength(active.glowStrength)}px ${glow.to}`}}>Glow preview</span>
      </div>
+     {rows.length>1&&<button type="button" className="block text-xs underline underline-offset-4" onClick={()=>changeRows(rows.map(r=>({...r,color:active.color,colorTo:active.colorTo,glowStrength:active.glowStrength})))}>Apply this glow to all areas in this view</button>}
+     <p className="text-muted-foreground">Presets change only glow strength. Apply to all copies colour and strength within the selected Desktop or Phone view; gallery links and outlines stay unchanged.</p>
      <span className="block">Glow colour</span>
      {swatches('color',glow.from)}
      <label className="flex items-center gap-2">
