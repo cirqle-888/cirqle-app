@@ -86,7 +86,7 @@ export function timelineHref(row: TimelineRowInput): string | null {
     case 'employee':     return id ? `/dashboard/employees/${id}` : null
     case 'payroll':      return '/dashboard/payroll'
     case 'invoice':      return '/dashboard/invoices'
-    case 'quotation':    return id ? `/dashboard/quotations?id=${encodeURIComponent(id)}` : '/dashboard/quotations'
+    case 'quotation':    return id ? `/dashboard/quotations/${encodeURIComponent(id)}` : '/dashboard/quotations'
     case 'cashbook':     return '/dashboard/cashbook'
     case 'client':       return '/dashboard/clients'
     case 'project':      return id ? `/dashboard/advertising/${id}` : '/dashboard/advertising'

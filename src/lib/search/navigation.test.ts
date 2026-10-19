@@ -33,7 +33,7 @@ describe('command palette access and navigation', () => {
 
   it('opens records using the destination pages’ supported links', () => {
     expect(searchResultHref('invoice', 'inv-1')).toBe('/dashboard/invoices?id=inv-1')
-    expect(searchResultHref('quotation', 'quo-1')).toBe('/dashboard/quotations?id=quo-1')
+    expect(searchResultHref('quotation', 'quo-1')).toBe('/dashboard/quotations/quo-1')
     expect(searchResultHref('client', 'client-1')).toBe('/dashboard/clients/client-1')
     expect(searchResultHref('project', 'project-1')).toBe('/dashboard/advertising/project-1')
     expect(searchResultHref('cashbook', 'entry-1')).toBe('/dashboard/cashbook?focus=entry-1')

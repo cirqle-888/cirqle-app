@@ -1,3 +1,4 @@
+// rls: browser-client — called from the Quotations pages with the browser client (scripts/rls-keep-list.mjs rule 4)
 /**
  * Quotation writes: create, edit (header + replace lines) and delete-a-draft.
  *
@@ -36,6 +37,7 @@ export type SavedQuotation = { id: string; quotation_number: string } & Record<s
 /** Postgres unique_violation. */
 const UNIQUE_VIOLATION = '23505'
 
+// Same columns as the pages read (app/(dashboard)/dashboard/quotations/types.ts).
 const QUOTATION_SELECT = '*, client:clients(id, name, code, phone, email, address), items:quotation_items(*)'
 
 /** The first unused number for this client and month (see nextQuotationNumber). */

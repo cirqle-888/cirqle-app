@@ -173,5 +173,5 @@ export function needsRenumber(status: string, currentNumber: string, newBase: st
 // ─── Links ────────────────────────────────────────────────────────────────────
 
 export function quotationLink(origin: string, id: string): string {
-  return `${origin.replace(/\/$/, '')}/dashboard/quotations?id=${encodeURIComponent(id)}`
+  return `${origin.replace(/\/$/, '')}/dashboard/quotations/${encodeURIComponent(id)}`
 }

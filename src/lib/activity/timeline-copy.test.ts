@@ -37,7 +37,7 @@ describe('timelineHref', () => {
     expect(timelineHref({ ...base, entity_type: 'project', action: 'created' })).toBe('/dashboard/advertising/abc')
   })
   it('opens the quotation itself', () => {
-    expect(timelineHref({ ...base, entity_type: 'quotation', action: 'created' })).toBe('/dashboard/quotations?id=abc')
+    expect(timelineHref({ ...base, entity_type: 'quotation', action: 'created' })).toBe('/dashboard/quotations/abc')
   })
   it('returns null for unknown types', () => {
     expect(timelineHref({ ...base, entity_type: 'mystery', action: 'created' })).toBeNull()

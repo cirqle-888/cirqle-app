@@ -1,32 +1,21 @@
+import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { getCompanySettings } from '@/lib/settings/company-settings'
 import QuotationsClient from './quotations-client'
+import { QUOTATION_SELECT } from './types'
 
 export const dynamic = 'force-dynamic'
 
-export default async function QuotationsPage() {
+export default async function QuotationsPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
+  // Links made before quotations had their own page used ?id=<id>.
+  const { id } = await searchParams
+  if (typeof id === 'string' && id) redirect(`/dashboard/quotations/${encodeURIComponent(id)}`)
+
   const supabase = await createClient()
 
-  const [quotationsRes, clientsRes, companySettings] = await Promise.all([
-    supabase
-      .from('quotations')
-      .select(`
-        *,
-        client:clients(id, name, code, phone, email, address),
-        items:quotation_items(*)
-      `)
-      .order('created_at', { ascending: false }),
-    supabase.from('clients').select('id, name, code').eq('is_active', true).order('name'),
-    // Branding for the client-facing preview / PDF, the same cached read the
-    // Invoices page uses.
-    getCompanySettings(),
-  ])
+  const quotationsRes = await supabase
+    .from('quotations')
+    .select(QUOTATION_SELECT)
+    .order('created_at', { ascending: false })
 
-  return (
-    <QuotationsClient
-      initialQuotations={quotationsRes.data || []}
-      clients={clientsRes.data || []}
-      companySettings={companySettings}
-    />
-  )
+  return <QuotationsClient initialQuotations={quotationsRes.data || []} />
 }

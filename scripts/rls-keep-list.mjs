@@ -15,6 +15,13 @@
 //   3. a SERVER module reads it through `await createClient()` — the
 //      cookie-session client, which connects as `authenticated`, NOT as the
 //      service role.
+//   4. a library module that the browser calls WITH its client (it takes the
+//      client as a parameter, so rule 1 cannot see it) declares so with the
+//      marker comment `// rls: browser-client` near the top. Its .from() calls
+//      are then counted like rule 1. Without the marker, moving a page's
+//      queries into lib/ makes those tables look unused, and the guard test
+//      would ask for a revoke that breaks the page (src/lib/quotations/save.ts
+//      was the first: quotation_items).
 // conversations/conversation_members are added because chat needs them
 // alongside the message tables it subscribes to.
 //
@@ -63,7 +70,9 @@ for (const f of files) {
   const isClient = /^\s*['"]use client['"]/m.test(src.slice(0, 400))
 
   // 1. Direct .from() calls, but only in modules that build the browser client.
-  if (isClient && src.includes('lib/supabase/client')) {
+  //    4. …or library modules that declare they run on it.
+  const browserLib = !isClient && /^\s*\/\/\s*rls:\s*browser-client\b/m.test(src.slice(0, 2000))
+  if ((isClient && src.includes('lib/supabase/client')) || browserLib) {
     for (const m of src.matchAll(/\.from\(['"]([a-zA-Z0-9_]+)['"]\)/g)) {
       if (!browser.has(m[1])) browser.set(m[1], new Set())
       browser.get(m[1]).add(f)

@@ -31,7 +31,7 @@ export function searchResultHref(kind: 'task' | 'invoice' | 'quotation' | 'clien
   switch (kind) {
     case 'task': return `/dashboard/tasks?q=${encodeURIComponent(label)}`
     case 'invoice': return `/dashboard/invoices?id=${encoded}`
-    case 'quotation': return `/dashboard/quotations?id=${encoded}`
+    case 'quotation': return `/dashboard/quotations/${encoded}`
     case 'client': return `/dashboard/clients/${encoded}`
     case 'project': return `/dashboard/advertising/${encoded}`
     case 'cashbook': return `/dashboard/cashbook?focus=${encoded}`

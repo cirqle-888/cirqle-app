@@ -136,7 +136,7 @@ describe('quotation numbers', () => {
 })
 
 describe('links', () => {
-  it('opens the quotation on the Quotations page', () => {
-    expect(quotationLink('https://app.cirqle.work/', 'q-1')).toBe('https://app.cirqle.work/dashboard/quotations?id=q-1')
+  it('opens the quotation’s own page', () => {
+    expect(quotationLink('https://app.cirqle.work/', 'q-1')).toBe('https://app.cirqle.work/dashboard/quotations/q-1')
   })
 })
