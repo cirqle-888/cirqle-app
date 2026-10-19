@@ -222,7 +222,8 @@ export interface InvoiceRenderOpts {
   // so a quote carries the company's branding without a second renderer. A
   // quotation swaps the labels (QUOTATION / Quotation No. / Valid Until /
   // Quote for), drops the Date column (its lines have no task dates), drops
-  // the UPI pay QR (nothing is payable before approval) and prints its Terms.
+  // the payment details, UPI pay QR and thank-you footer (nothing is payable
+  // or won before approval) and prints its Terms.
   kind?: DocumentKind
 }
 
@@ -842,7 +843,12 @@ export function buildInvoiceParts(
   </div>` : '')
 
   // ── FOOTER: payment info | QR | thank-you (pinned to page bottom) ──
-  const footerBlock = `
+  // A quotation has none of the three: nothing is payable before the client
+  // approves (bank details go out on the invoice it becomes), and thanking
+  // them "for your business" is premature. It keeps only the spacer, so the
+  // brand strip still sits at the foot of the page.
+  const footerBlock = isQuote ? `
+  <div style="margin-top:auto;padding-top:32px"></div>` : `
   <div style="margin-top:auto;padding-top:44px;padding-bottom:32px">
     <table style="width:100%;border-collapse:collapse">
       <tr>

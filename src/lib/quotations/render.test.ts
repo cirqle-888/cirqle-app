@@ -54,8 +54,13 @@ describe('the quotation document', () => {
     expect(html).toContain('Payment due within 7 days of approval.')
   })
 
-  it('offers no UPI pay QR for an unapproved quote', () => {
+  it('asks for no payment and thanks nobody for business not yet won', () => {
     expect(html).not.toContain('upi://pay')
+    expect(html).not.toContain('Payment&nbsp;Information')
+    expect(html).not.toContain('cirqle@upi')
+    expect(html).not.toContain('Thank you')
+    // The company strip still closes the page.
+    expect(html).toContain('Cirqle Works</div>')
   })
 
   it('leaves invoices exactly as they were', () => {
@@ -70,5 +75,7 @@ describe('the quotation document', () => {
     expect(inv).toContain('Total Amount Due')
     expect(inv).toContain('>Date</th>')
     expect(inv).not.toContain('not printed on invoices')
+    expect(inv).toContain('Payment&nbsp;Information')
+    expect(inv).toContain('Thank you')
   })
 })
