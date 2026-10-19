@@ -8,14 +8,10 @@ export function generateInvoiceNumber(date: Date, clientCode: string): string {
   return `INV-${yy}${mm}-${clientCode}`
 }
 
-/**
- * Generate quotation number: QUO-YYMM-ClientCode
- */
-export function generateQuotationNumber(date: Date, clientCode: string): string {
-  const yy = String(date.getFullYear()).slice(-2)
-  const mm = String(date.getMonth() + 1).padStart(2, '0')
-  return `QUO-${yy}${mm}-${clientCode}`
-}
+// Quotation numbers: see lib/quotations (allocateQuotationNumber). The old
+// generateQuotationNumber here returned QUO-YYMM-ClientCode with no suffix,
+// which collided on the UNIQUE quotation_number for a client's second
+// quotation in a month.
 
 /**
  * Check if invoice is overdue

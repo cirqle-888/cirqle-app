@@ -26,11 +26,12 @@ export function matchesNavSearch(item: NavItem, query: string): boolean {
   return terms.every(term => text.includes(term))
 }
 
-export function searchResultHref(kind: 'task' | 'invoice' | 'client' | 'project' | 'cashbook', id: string, label = '') {
+export function searchResultHref(kind: 'task' | 'invoice' | 'quotation' | 'client' | 'project' | 'cashbook', id: string, label = '') {
   const encoded = encodeURIComponent(id)
   switch (kind) {
     case 'task': return `/dashboard/tasks?q=${encodeURIComponent(label)}`
     case 'invoice': return `/dashboard/invoices?id=${encoded}`
+    case 'quotation': return `/dashboard/quotations?id=${encoded}`
     case 'client': return `/dashboard/clients/${encoded}`
     case 'project': return `/dashboard/advertising/${encoded}`
     case 'cashbook': return `/dashboard/cashbook?focus=${encoded}`

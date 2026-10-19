@@ -22,6 +22,7 @@ import {
   PDF_PAD_TOP,
   PDF_PAD_BOTTOM,
   type InvoiceRenderParts,
+  type DocumentKind,
 } from './render-html'
 
 // Vertical margins around the items table (must match itemsTable's
@@ -143,6 +144,8 @@ export function paginateRows(m: Measurements): number[][] {
 
 export interface DownloadPdfOpts {
   otherOutstanding?: number
+  /** 'quotation' prints the same layout as a quotation (see InvoiceRenderOpts.kind). */
+  kind?: DocumentKind
 }
 
 /** Build the paginated PDF and return the jsPDF document (caller saves it). */
@@ -154,6 +157,7 @@ export async function generateInvoicePdf(
   const parts: InvoiceRenderParts = buildInvoiceParts(inv, companySettings, {
     forRaster: true,
     otherOutstanding: opts?.otherOutstanding,
+    kind: opts?.kind,
   })
 
   // 1. Measure real block/row heights at page width

@@ -218,6 +218,19 @@ export interface InvoiceRenderOpts {
   // invoice), and printing those as amounts would both misstate the currency and
   // bill the client twice over for work the fee already paid for.
   agreements?: AgreementBreakdown[]
+  // kind: the same layout also prints quotations (see lib/quotations/render),
+  // so a quote carries the company's branding without a second renderer. A
+  // quotation swaps the labels (QUOTATION / Quotation No. / Valid Until /
+  // Quote for), drops the Date column (its lines have no task dates), drops
+  // the UPI pay QR (nothing is payable before approval) and prints its Terms.
+  kind?: DocumentKind
+}
+
+export type DocumentKind = 'invoice' | 'quotation'
+
+const DOC_LABELS: Record<DocumentKind, { title: string; number: string; due: string; to: string; total: string }> = {
+  invoice:   { title: 'INVOICE',   number: 'Invoice No.',   due: 'Due Date',    to: 'Bill to :',   total: 'Total Payable' },
+  quotation: { title: 'QUOTATION', number: 'Quotation No.', due: 'Valid Until', to: 'Quote for :', total: 'Quotation Total' },
 }
 
 /** Decorative layers can be viewport-fixed (print) or page-div-absolute (PDF pages). */
@@ -320,6 +333,11 @@ export function buildInvoiceParts(
   const totalPayable = inv.total_amount || 0
   const otherOutstanding = opts?.otherOutstanding || 0
   const forRaster = !!opts?.forRaster
+  const kind: DocumentKind = opts?.kind || 'invoice'
+  const isQuote = kind === 'quotation'
+  const L = DOC_LABELS[kind]
+  // Quotation lines are not tied to tasks, so they have no date to print.
+  const withDate = !isQuote
 
   // Format date as DD/MM/YYYY (header meta)
   function dd(d?: string) {
@@ -395,7 +413,7 @@ export function buildInvoiceParts(
     return `
       <tr style="background:${bg};height:${ROW_H}px">
         <td style="${td('border-left:none;text-align:center;color:#222')}">${idx + 1}</td>
-        <td style="${td('text-align:center;color:#222;white-space:nowrap')}">${taskDate}</td>
+        ${withDate ? `<td style="${td('text-align:center;color:#222;white-space:nowrap')}">${taskDate}</td>` : ''}
         <td style="${td('text-align:left;color:#222')}">${escapeHtml(it.description, true)}</td>
         ${withService ? `<td style="${td('text-align:left;color:#444')}">${escapeHtml(serviceNameOf(it), true)}</td>` : ''}
         <td style="${td('text-align:center;color:#222')}">${it.quantity}</td>
@@ -403,7 +421,7 @@ export function buildInvoiceParts(
         <td style="${td('text-align:right;color:#111;font-weight:700;white-space:nowrap')}">${inr(it.total)}</td>
       </tr>`
   })
-  const emptyRow = `<tr><td colspan="${withService ? 7 : 6}" style="padding:20px;text-align:center;color:#999;font-size:12px">No items</td></tr>`
+  const emptyRow = `<tr><td colspan="${5 + (withService ? 1 : 0) + (withDate ? 1 : 0)}" style="padding:20px;text-align:center;color:#999;font-size:12px">No items</td></tr>`
 
   // Expenses section block (separate from main item table in all modes)
   const expensesTotal = expenseItems.reduce((s: number, e: any) => s + (e.amount || 0), 0)
@@ -544,7 +562,7 @@ export function buildInvoiceParts(
 
   // QR (encodes the UPI pay link or uses a custom uploaded QR image)
   const customQr = resolveBrandingUrl(companySettings.invoice_qr_image_url)
-  const qrBlock = showQr
+  const qrBlock = showQr && !isQuote
     ? (customQr ? `<img src="${customQr}" alt="QR Code" crossorigin="anonymous" style="width:104px;height:104px;object-fit:contain;display:block;margin:0 auto"/>` : (upiString ? qrSvgBlock(upiString, NAVY_LIGHT) : ''))
     : ''
 
@@ -638,7 +656,7 @@ export function buildInvoiceParts(
         <!-- Invoice meta -->
         <table style="border-collapse:collapse;margin-top:18px">
           <tr>
-            <td style="font-size:13.5px;font-weight:700;color:#111;padding:2.5px 0;white-space:nowrap">Invoice No.</td>
+            <td style="font-size:13.5px;font-weight:700;color:#111;padding:2.5px 0;white-space:nowrap">${L.number}</td>
             <td style="font-size:13.5px;color:#222;padding:2.5px 12px">:</td>
             <td style="font-size:13.5px;color:#222;padding:2.5px 0">${escapeHtml(inv.invoice_number)}</td>
           </tr>
@@ -655,9 +673,9 @@ export function buildInvoiceParts(
           </tr>` : ''}
           ${inv.due_date ? `
           <tr>
-            <td style="font-size:12.5px;font-weight:700;color:#111;padding:2.5px 0">Due Date</td>
+            <td style="font-size:12.5px;font-weight:700;color:#111;padding:2.5px 0;white-space:nowrap">${L.due}</td>
             <td style="font-size:12.5px;color:#222;padding:2.5px 12px">:</td>
-            <td style="font-size:12.5px;font-weight:600;color:#b03030;padding:2.5px 0">${dd(inv.due_date)}</td>
+            <td style="font-size:12.5px;font-weight:600;color:${isQuote ? '#222' : '#b03030'};padding:2.5px 0">${dd(inv.due_date)}</td>
           </tr>` : ''}
         </table>
       </td>
@@ -665,12 +683,12 @@ export function buildInvoiceParts(
         <!-- INVOICE title — the accent rule is a separate bar (not border-bottom)
              so html2canvas renders it as a solid 4px block, not a thin underline. -->
         <div style="display:inline-block">
-          <div class="disp" style="font-size:33px;font-weight:800;color:#0f0f0f;letter-spacing:0.5px;line-height:1.1;padding-bottom:3px">INVOICE</div>
+          <div class="disp" style="font-size:33px;font-weight:800;color:#0f0f0f;letter-spacing:0.5px;line-height:1.1;padding-bottom:3px">${L.title}</div>
           <div style="height:4px;background:#0f0f0f;border-radius:1px;margin-top:8px"></div>
         </div>
         <!-- Bill To (below INVOICE in same td, aligned right then left for content) -->
         <div style="margin-top:16px;text-align:left">
-          <div style="font-size:14.5px;color:#222">Bill to :</div>
+          <div style="font-size:14.5px;color:#222">${L.to}</div>
           <div style="font-size:16px;font-weight:700;color:#111;margin-top:3px">${escapeHtml(inv.client?.name || '')}</div>
           ${inv.client?.address ? `<div style="font-size:13px;color:#222;margin-top:2px;line-height:1.5">${escapeHtml(inv.client.address, true)}</div>` : ''}
           ${inv.client?.phone   ? `<div style="font-size:13px;color:#222;margin-top:2px">${escapeHtml(inv.client.phone)}</div>` : ''}
@@ -695,13 +713,13 @@ export function buildInvoiceParts(
           </div>
         </td>
         <td style="vertical-align:middle;text-align:right;padding:0;white-space:nowrap">
-          <div class="disp" style="font-size:14.5px;font-weight:800;color:#0f0f0f;letter-spacing:0.4px">INVOICE <span style="font-weight:600;color:#777">(Continued)</span></div>
+          <div class="disp" style="font-size:14.5px;font-weight:800;color:#0f0f0f;letter-spacing:0.4px">${L.title} <span style="font-weight:600;color:#777">(Continued)</span></div>
           <div style="font-size:11px;color:#888;margin-top:3px">Page ${page} of ${totalPages}</div>
         </td>
       </tr>
     </table>
     <div style="display:flex;flex-wrap:wrap;gap:6px 26px;margin-top:12px;font-size:11.5px;color:#555">
-      <span style="white-space:nowrap"><span style="font-weight:700;color:#111">Invoice No.</span>&nbsp;&nbsp;${escapeHtml(inv.invoice_number)}</span>
+      <span style="white-space:nowrap"><span style="font-weight:700;color:#111">${L.number}</span>&nbsp;&nbsp;${escapeHtml(inv.invoice_number)}</span>
       <span style="white-space:nowrap"><span style="font-weight:700;color:#111">Client</span>&nbsp;&nbsp;${escapeHtml(inv.client?.name || '')}</span>
       <span style="white-space:nowrap"><span style="font-weight:700;color:#111">Date</span>&nbsp;&nbsp;${dd(inv.issue_date)}</span>
     </div>
@@ -725,8 +743,8 @@ export function buildInvoiceParts(
     <thead>
       <tr style="background:linear-gradient(180deg,${HEAD_TOP} 0%,${HEAD_BOT} 100%);height:${ROW_H}px">
         <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;width:38px">No.</th>
-        <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:96px">Date</th>
-        <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff">Jobs Done</th>
+        ${withDate ? `<th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:96px">Date</th>` : ''}
+        <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff">${isQuote ? 'Description' : 'Jobs Done'}</th>
         ${withService ? `<th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;width:${SERVICE_COL_W}px">Service</th>` : ''}
         <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;width:54px">Qty</th>
         <th class="disp" style="height:${ROW_H}px;padding:0 8px 8px 8px;line-height:${ROW_H - 8}px;text-align:center;color:#fff;font-size:13.5px;font-weight:700;border-left:2px solid #fff;white-space:nowrap;width:96px">Rate</th>
@@ -739,17 +757,21 @@ export function buildInvoiceParts(
   </table>`
 
   // ── TOTALS (right block, reference style) ──
+  // A quotation with no discount, tax or carried balance would print the same
+  // amount twice ("Subtotal" then "Total"), so it shows the total alone.
+  const showSubtotalRow = !isQuote || discount > 0 || taxAmt > 0 || prevBal > 0
   const totalsBlock = `
   <table style="width:100%;border-collapse:collapse;margin-top:6px">
     <tr>
       <td style="width:42%"></td>
       <td style="width:58%">
         <table style="width:100%;border-collapse:collapse">
+          ${showSubtotalRow ? `
           <tr>
-            <td style="padding:1px 8px 9px 8px;font-size:13.5px;color:#222;text-align:right">Total Amount Due</td>
+            <td style="padding:1px 8px 9px 8px;font-size:13.5px;color:#222;text-align:right">${isQuote ? 'Subtotal' : 'Total Amount Due'}</td>
             <td style="padding:1px 6px 9px 6px;font-size:13.5px;color:#222;width:14px">:</td>
             <td style="padding:1px 10px 9px 10px;font-size:13.5px;font-weight:700;color:#111;text-align:right;width:130px;white-space:nowrap">${inr(subtotal)}</td>
-          </tr>
+          </tr>` : ''}
           ${discount > 0 ? `
           <tr>
             <td style="padding:1px 8px 9px 8px;font-size:13.5px;color:#222;text-align:right">Discount</td>
@@ -772,7 +794,7 @@ export function buildInvoiceParts(
             <td colspan="3" style="border-top:1.5px solid #9a9a9a;padding:0;height:1px"></td>
           </tr>
           <tr>
-            <td class="disp" style="padding:2px 8px 6px 8px;font-size:15.5px;font-weight:700;color:#0f0f0f;text-align:right">Total Payable</td>
+            <td class="disp" style="padding:2px 8px 6px 8px;font-size:15.5px;font-weight:700;color:#0f0f0f;text-align:right">${L.total}</td>
             <td class="disp" style="padding:2px 6px 6px 6px;font-size:15.5px;font-weight:700;color:#0f0f0f">:</td>
             <td class="disp" style="padding:2px 10px 6px 10px;font-size:15.5px;font-weight:800;color:#0f0f0f;text-align:right;white-space:nowrap">${inr(totalPayable)}</td>
           </tr>
@@ -812,7 +834,12 @@ export function buildInvoiceParts(
     </tr>
   </table>`
 
-  const notesBlock = inv.notes ? `<div style="margin-top:14px;font-size:11.5px;color:#444;font-style:italic">${escapeHtml(inv.notes, true)}</div>` : ''
+  const notesBlock = (inv.notes ? `<div style="margin-top:14px;font-size:11.5px;color:#444;font-style:italic">${escapeHtml(inv.notes, true)}</div>` : '')
+    + (isQuote && inv.terms ? `
+  <div style="margin-top:14px">
+    <div style="font-weight:700;font-size:12px;color:${NAVY};margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em">Terms</div>
+    <div style="font-size:11.5px;color:#444;line-height:1.5">${escapeHtml(inv.terms, true)}</div>
+  </div>` : '')
 
   // ── FOOTER: payment info | QR | thank-you (pinned to page bottom) ──
   const footerBlock = `

@@ -7,9 +7,15 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { RequestApprovalDialog } from '@/components/approvals/request-approval-dialog'
 import { createClient } from '@/lib/supabase/client'
-import { getStatusColor, getStatusLabel, generateQuotationNumber } from '@/lib/utils/invoice'
+import { getStatusColor, getStatusLabel } from '@/lib/utils/invoice'
 import { formatCurrency } from '@/lib/calculations/currency'
-import { Plus, X, ChevronDown, ChevronRight, ExternalLink, FileText, ArrowRight, CheckCircle2 } from 'lucide-react'
+import { Plus, X, ChevronDown, ChevronRight, ExternalLink, FileText, ArrowRight, CheckCircle2, Pencil, Trash2, Eye, Link2, Lock, Printer, Download, Share2, RefreshCw, AlertCircle } from 'lucide-react'
+import {
+  canDeleteQuotation, isQuotationEditable, quotationLink, quotationLockReason, quotationToForm, sortQuotationLines,
+} from '@/lib/quotations/editing'
+import { createQuotation, deleteDraftQuotation, updateQuotation } from '@/lib/quotations/save'
+import { quotationDocument, renderQuotationHtml } from '@/lib/quotations/render'
+import { copyToClipboard } from '@/lib/clipboard'
 import type { Currency } from '@/types'
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
@@ -95,6 +101,7 @@ interface QuotationItem {
   quantity: number
   unit_price: number
   total: number
+  display_order?: number | null
 }
 
 interface Quotation {
@@ -108,7 +115,7 @@ interface Quotation {
   total_amount: number
   notes?: string
   terms?: string
-  client?: { id: string; name: string; code: string }
+  client?: { id: string; name: string; code: string; phone?: string | null; email?: string | null; address?: string | null }
   items?: QuotationItem[]
 }
 
@@ -121,6 +128,23 @@ interface ClientRow {
 interface Props {
   initialQuotations: Quotation[]
   clients: ClientRow[]
+  /** company_settings map — branding for the client-facing preview / PDF. */
+  companySettings: Record<string, string>
+}
+
+/** Whether this browser can hand a PDF to the system share sheet. */
+function canShareFiles(): boolean {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.canShare) return false
+    return navigator.canShare({ files: [new File([''], 'quotation.pdf', { type: 'application/pdf' })] })
+  } catch {
+    return false
+  }
+}
+
+/** A saved row as the page shows it: lines in the order they were entered. */
+function withSortedItems(q: Quotation): Quotation {
+  return { ...q, items: sortQuotationLines(q.items) }
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -224,7 +248,7 @@ async function generateInvoiceNumber(
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function QuotationsClient({ initialQuotations, clients: initialClients }: Props) {
+export default function QuotationsClient({ initialQuotations, clients: initialClients, companySettings }: Props) {
   // Coming back from a record lands where the list was left, not at the top.
   // See lib/lists/scroll-restore for the rules.
   useScrollRestore('quotations')
@@ -238,11 +262,16 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
 
   const [editClientId, setEditClientId] = useState<string | null>(null)
   const [approvalQuote, setApprovalQuote] = useState<{ id: string; quotation_number: string } | null>(null)
-  const [quotations, setQuotations] = useState<Quotation[]>(initialQuotations)
+  const [quotations, setQuotations] = useState<Quotation[]>(() => initialQuotations.map(withSortedItems))
   const [clients, setClients] = useState<ClientRow[]>(initialClients)
   const [showForm, setShowForm] = useState(false)
-  useCreateShortcut(can('billing.edit') && !permissionUser.isViewAs, () => setShowForm(true))
-  const [expanded, setExpanded] = useState<string | null>(null)
+  // The quotation the modal is editing; null while it creates a new one.
+  const [editing, setEditing] = useState<Quotation | null>(null)
+  const canEdit = can('billing.edit') && !permissionUser.isViewAs
+  useCreateShortcut(canEdit, () => openCreate())
+  // ?id=<quotation id> opens that quotation (⌘K, Copy link, the activity feed).
+  const idFromUrl = searchParams.get('id')
+  const [expanded, setExpanded] = useState<string | null>(idFromUrl)
   // Shared save/pending/error vocabulary — see lib/forms/submit-state. This
   // form previously tracked a bare `saving` boolean and, on a failed insert,
   // showed the user nothing at all.
@@ -268,7 +297,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
     }
   }, [searchFacets, pathname, router, searchParams])
   const [convertingId, setConvertingId] = useState<string | null>(null)
-  const [toast, setToast] = useState<{ message: string; show: boolean }>({ message: '', show: false })
+  const [toast, setToast] = useState<{ message: string; show: boolean; invoicesLink?: boolean; error?: boolean }>({ message: '', show: false })
 
   // New-client inline form state
   const [showNewClient, setShowNewClient] = useState(false)
@@ -288,16 +317,57 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
   // Autosave runs only while the modal is open, and submission is unchanged —
   // a restored draft still goes through the same insert and the same checks.
   const draft = useFormDraft<QuotationForm>('quotation.new', form, {
-    enabled: showForm,
+    // New quotations only: an edit starts from the saved quotation, and its
+    // unsaved changes must never resurface as a "new quotation" draft.
+    enabled: showForm && !editing,
     isMeaningful: quotationFormStarted,
   })
 
   const supabase = createClient()
 
   // ── Toast helper ──────────────────────────────────────────────────────────
-  function showToast(message: string) {
-    setToast({ message, show: true })
+  function showToast(message: string, opts: { invoicesLink?: boolean; error?: boolean } = {}) {
+    setToast({ message, show: true, ...opts })
     setTimeout(() => setToast({ message: '', show: false }), 4000)
+  }
+
+  // ── Open by link ──────────────────────────────────────────────────────────
+  // Expanding a row writes ?id= so the address bar is always a link to what
+  // is open. A link arriving from elsewhere expands that row and scrolls to
+  // it — the same contract as /dashboard/invoices?id=. `handledLinkId` is the
+  // last id acted on; our own writes set it first, so expanding a row by hand
+  // doesn't also scroll the page. (The link itself is handled during render,
+  // below the search code it depends on.)
+  const [handledLinkId, setHandledLinkId] = useState<string | null>(null)
+  const [linkMissing, setLinkMissing] = useState(false)
+  // A new object per request, so opening the same link twice scrolls twice.
+  const [scrollRequest, setScrollRequest] = useState<{ id: string } | null>(null)
+
+  function toggleExpanded(id: string) {
+    const next = expanded === id ? null : id
+    setExpanded(next)
+    setHandledLinkId(next)
+    const params = new URLSearchParams(searchParams.toString())
+    if (next) params.set('id', next); else params.delete('id')
+    const qs = params.toString()
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+  }
+
+  useEffect(() => {
+    if (!scrollRequest) return
+    // After the row has expanded and any scroll restore has run.
+    const t = window.setTimeout(() => {
+      // Not getElementById: the router keeps the previous visit of this page
+      // in the DOM, hidden, so the same row id can exist twice.
+      const rows = document.querySelectorAll<HTMLElement>(`[data-quotation-row="${CSS.escape(scrollRequest.id)}"]`)
+      Array.from(rows).find(el => el.offsetParent !== null)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    }, 150)
+    return () => window.clearTimeout(t)
+  }, [scrollRequest])
+
+  async function copyLink(quo: Quotation) {
+    const ok = await copyToClipboard(quotationLink(window.location.origin, quo.id))
+    showToast(ok ? `Link to ${quo.quotation_number} copied.` : 'Couldn’t copy the link.', { error: !ok })
   }
 
   // ── Seed smart sort on mount ──────────────────────────────────────────────
@@ -360,7 +430,36 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
     })
   }
 
+  function removeItem(i: number) {
+    setForm(prev => {
+      const items = prev.items.filter((_, idx) => idx !== i)
+      return { ...prev, items: items.length ? items : [{ description: '', quantity: 1, unit_price: 0, total: 0 }] }
+    })
+  }
+
   const totalAmount = form.items.reduce((s, i) => s + (i.total || 0), 0)
+
+  // ── Open / close the modal ───────────────────────────────────────────────
+  function openCreate() {
+    // Coming from an edit, the form still holds that quotation.
+    if (editing) { setEditing(null); setForm(emptyQuotationForm()) }
+    setSubmit(IDLE)
+    setShowForm(true)
+  }
+
+  function openEdit(quo: Quotation) {
+    if (!canEdit || !isQuotationEditable(quo.status)) return
+    setEditing(quo)
+    setForm(quotationToForm(quo))
+    setShowNewClient(false)
+    setSubmit(IDLE)
+    setShowForm(true)
+  }
+
+  function closeForm() {
+    setShowForm(false)
+    if (editing) { setEditing(null); setForm(emptyQuotationForm()) }
+  }
 
   // ── Submit new quotation ─────────────────────────────────────────────────
   /** Named so the message can quote the labels the form itself uses. */
@@ -380,47 +479,92 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
     }
 
     setSubmit(SAVING)
+    // An inactive client is missing from `clients`, but its quotations can still be edited.
     const client = clients.find(c => c.id === form.client_id)
-    const quotationNumber = generateQuotationNumber(new Date(form.issue_date), client?.code || '001')
+      ?? (editing?.client?.id === form.client_id ? editing.client : undefined)
+    const clientCode = client?.code || '001'
 
-    const { data: quo, error } = await supabase
-      .from('quotations')
-      .insert({
-        quotation_number: quotationNumber,
-        client_id: form.client_id,
-        status: 'draft',
-        issue_date: form.issue_date,
-        valid_until: form.valid_until || null,
-        currency: form.currency,
-        total_amount: totalAmount,
-        notes: form.notes,
-        terms: form.terms,
-      })
-      .select('*, client:clients(id, name, code)')
-      .single()
+    // Numbering, line clean-up and the edit's write order live in
+    // lib/quotations/save (tested there).
+    const res = editing
+      ? await updateQuotation(supabase, editing, form, clientCode)
+      : await createQuotation(supabase, form, clientCode)
 
-    if (!error && quo) {
-      const itemInserts = form.items
-        .filter(i => i.description)
-        .map(item => ({
-          quotation_id: quo.id,
-          description: item.description,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          total: item.total,
-          currency: form.currency,
-        }))
-      if (itemInserts.length) await supabase.from('quotation_items').insert(itemInserts)
-      setQuotations(prev => [{ ...quo, items: form.items }, ...prev])
-      setShowForm(false)
-      setForm(emptyQuotationForm())
+    // Previously a failed save was a silent no-op: the modal stayed open with
+    // no indication that anything had failed.
+    if (!res.ok) { setSubmit(failed(res.error)); return }
+
+    const saved = withSortedItems(res.value as unknown as Quotation)
+    if (editing) {
+      setQuotations(prev => prev.map(q => (q.id === saved.id ? saved : q)))
+      setEditing(null)
+      showToast(`Saved ${saved.quotation_number}.`)
+    } else {
+      setQuotations(prev => [saved, ...prev])
       draft.clear() // the quotation exists now; the draft would only confuse
-      setSubmit(IDLE)
-      return
     }
-    // Previously a silent no-op: the modal stayed open with no indication that
-    // anything had failed.
-    setSubmit(failed(error?.message))
+    setShowForm(false)
+    setForm(emptyQuotationForm())
+    setSubmit(IDLE)
+  }
+
+  // ── Delete (drafts only) ─────────────────────────────────────────────────
+  const [deleteConfirm, setDeleteConfirm] = useState<Quotation | null>(null)
+
+  async function deleteQuotation(quo: Quotation) {
+    const res = await deleteDraftQuotation(supabase, quo.id)
+    if (!res.ok) { showToast(res.error, { error: true }); return }
+    setQuotations(prev => prev.filter(q => q.id !== quo.id))
+    if (expanded === quo.id) toggleExpanded(quo.id) // collapses it and drops ?id=
+    showToast(`Deleted ${quo.quotation_number}.`)
+  }
+
+  // ── Client-facing preview / print / PDF / share ──────────────────────────
+  // The invoice document renderer, printed as a quotation (lib/quotations/render).
+  const [previewId, setPreviewId] = useState<string | null>(null)
+  const previewQuo = previewId ? quotations.find(q => q.id === previewId) ?? null : null
+  const [pdfBusy, setPdfBusy] = useState<'download' | 'share' | null>(null)
+
+  function printQuotation(quo: Quotation) {
+    const html = renderQuotationHtml(quo, companySettings, { autoprint: true })
+    const w = window.open('', '_blank', 'width=800,height=900')
+    if (w) { w.document.write(html); w.document.close() }
+  }
+
+  async function downloadQuotationPdf(quo: Quotation) {
+    setPdfBusy('download')
+    try {
+      const { downloadInvoicePdf } = await import('@/lib/invoices/download-pdf')
+      await downloadInvoicePdf(quotationDocument(quo), companySettings, { kind: 'quotation' })
+    } catch (e) {
+      console.error('Quotation PDF download failed', e)
+      showToast('Could not generate the PDF. Try Print instead.', { error: true })
+    } finally {
+      setPdfBusy(null)
+    }
+  }
+
+  /** The system share sheet with the PDF attached (phones, Safari, the desktop app). */
+  async function shareQuotationPdf(quo: Quotation) {
+    setPdfBusy('share')
+    try {
+      const { generateInvoicePdf } = await import('@/lib/invoices/download-pdf')
+      const pdf = await generateInvoicePdf(quotationDocument(quo), companySettings, { kind: 'quotation' })
+      const file = new File([pdf.output('blob')], `${quo.quotation_number}.pdf`, { type: 'application/pdf' })
+      await navigator.share({
+        files: [file],
+        title: quo.quotation_number,
+        text: `Quotation ${quo.quotation_number} from ${companySettings.company_name || 'Cirqle Works'}`,
+      })
+    } catch (e) {
+      // Closing the share sheet is not an error.
+      if ((e as Error)?.name !== 'AbortError') {
+        console.error('Quotation share failed', e)
+        showToast('Could not share the PDF. Download it instead.', { error: true })
+      }
+    } finally {
+      setPdfBusy(null)
+    }
   }
 
   // Approving or rejecting is an outcome, not a step: Approved unlocks
@@ -507,10 +651,10 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
       setQuotations(prev => prev.map(q => (q.id === quo.id ? { ...q, status: 'converted' } : q)))
 
       // 6. Show success toast
-      showToast('Invoice created! Go to Invoices to review.')
+      showToast('Invoice created! Go to Invoices to review.', { invoicesLink: true })
     } catch (err) {
       console.error('Failed to convert quotation to invoice:', err)
-      showToast('Failed to create invoice. Please try again.')
+      showToast('Failed to create invoice. Please try again.', { error: true })
     } finally {
       setConvertingId(null)
     }
@@ -528,8 +672,30 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
     ? quotations.filter(q => recordMatchesFacets(activeFacets, q, QUOTE_FIELDS, quoteGeneric))
     : quotations
 
+  // A link that arrived from elsewhere: adjust state while rendering, React's
+  // pattern for following an input that changed, rather than an effect.
+  if (idFromUrl && idFromUrl !== handledLinkId) {
+    setHandledLinkId(idFromUrl)
+    const target = quotations.find(q => q.id === idFromUrl)
+    setLinkMissing(!target)
+    if (target) {
+      setExpanded(idFromUrl)
+      setScrollRequest({ id: idFromUrl })
+      // A search that hides the linked quotation would make the link look broken.
+      if (activeFacets.length && !recordMatchesFacets(activeFacets, target, QUOTE_FIELDS, quoteGeneric)) {
+        setSearchFacets([])
+        setSearchDraft('')
+      }
+    }
+  }
+
   // ── Client combobox options ──────────────────────────────────────────────
   const clientOptions = clients.map(c => ({ id: c.id, label: c.name, sub: c.code }))
+  // The page lists active clients only; a quotation for one since deactivated
+  // must still show who it is for while it is being edited.
+  if (editing?.client && !clients.some(c => c.id === editing.client!.id)) {
+    clientOptions.unshift({ id: editing.client.id, label: editing.client.name, sub: editing.client.code })
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -539,7 +705,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
         subtitle={`${quotations.length} quotation${quotations.length !== 1 ? 's' : ''}`}
         actions={
           <button
-            onClick={() => setShowForm(true)}
+            onClick={openCreate}
             className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-3 py-2 rounded-lg hover:opacity-90 transition-opacity whitespace-nowrap"
           >
             <Plus className="w-4 h-4 shrink-0" />
@@ -550,15 +716,19 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
 
       {/* ── Toast notification ────────────────────────────────────────────── */}
       {toast.show && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-card text-foreground border border-foreground/15 rounded-2xl px-5 py-3 shadow-2xl text-sm font-medium animate-in fade-in slide-in-from-bottom-3">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[400] flex items-center gap-3 bg-card text-foreground border border-foreground/15 rounded-2xl px-5 py-3 shadow-2xl text-sm font-medium animate-in fade-in slide-in-from-bottom-3">
+          {toast.error
+            ? <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+            : <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
           <span>{toast.message}</span>
-          <button
-            onClick={() => router.push('/dashboard/invoices')}
-            className="ml-2 flex items-center gap-1 text-violet-400 hover:text-violet-700 dark:text-violet-300 transition-colors"
-          >
-            View Invoices <ArrowRight className="w-3.5 h-3.5" />
-          </button>
+          {toast.invoicesLink && (
+            <button
+              onClick={() => router.push('/dashboard/invoices')}
+              className="ml-2 flex items-center gap-1 text-violet-400 hover:text-violet-700 dark:text-violet-300 transition-colors"
+            >
+              View Invoices <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       )}
 
@@ -591,8 +761,21 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
             <div>Client</div>
             <div>Date</div>
             <div className="text-right">Amount</div>
-            <div className="w-[180px] text-right">Actions</div>
+            <div className="w-[236px] text-right">Actions</div>
           </div>
+
+          {linkMissing && (
+            <div className="flex items-center justify-between gap-3 px-6 py-3 border-b border-border text-sm text-muted-foreground bg-amber-500/10">
+              <span className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+                That quotation link doesn’t match any quotation here. It may have been deleted.
+              </span>
+              <button onClick={() => setLinkMissing(false)} aria-label="Dismiss"
+                className="p-1 rounded text-muted-foreground hover:text-foreground">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
           {filteredQuotations.length === 0 && activeFacets.length > 0 && (
             <div className="p-10 text-center text-sm text-muted-foreground">
@@ -610,7 +793,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                 Create your first quotation to start sending professional price proposals to clients.
               </p>
               <button
-                onClick={() => setShowForm(true)}
+                onClick={openCreate}
                 className="mt-4 flex items-center gap-2 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-xl hover:opacity-90"
               >
                 <Plus className="w-4 h-4" /> New Quotation
@@ -620,12 +803,12 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
 
           <div className="flex flex-col gap-3 p-4 md:p-0 md:divide-y md:divide-border/50 md:block">
             {filteredQuotations.map(quo => (
-              <div key={quo.id} className="group flex flex-col bg-card border border-border md:border-none rounded-xl md:rounded-none md:hover:bg-secondary/20 transition-colors">
+              <div key={quo.id} data-quotation-row={quo.id} className="group flex flex-col bg-card border border-border md:border-none rounded-xl md:rounded-none md:hover:bg-secondary/20 transition-colors scroll-mt-16">
                 
                 {/* ─── DESKTOP ROW ─── */}
                 <div
                   className={`hidden md:grid grid-cols-[auto_1fr_2fr_1fr_1.5fr_auto] gap-4 px-6 py-3 items-center cursor-pointer ${expanded === quo.id ? 'bg-secondary/30' : ''}`}
-                  onClick={() => setExpanded(expanded === quo.id ? null : quo.id)}
+                  onClick={() => toggleExpanded(quo.id)}
                 >
                   {/* Left: chevron */}
                   <div className="w-6 flex justify-center text-muted-foreground/50 group-hover:text-foreground/70 transition-colors">
@@ -662,7 +845,33 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                   </div>
 
                   {/* Actions */}
-                  <div className="w-[180px] flex items-center justify-end gap-2" onClick={e => e.stopPropagation()}>
+                  <div className="w-[236px] flex items-center justify-end gap-2" onClick={e => e.stopPropagation()}>
+                    <button
+                      onClick={() => setPreviewId(quo.id)}
+                      title="Preview, print or download the PDF"
+                      aria-label={`Preview ${quo.quotation_number}`}
+                      className="flex items-center justify-center w-8 h-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] transition-colors"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    {canEdit && (isQuotationEditable(quo.status) ? (
+                      <button
+                        onClick={() => openEdit(quo)}
+                        title="Edit quotation"
+                        aria-label={`Edit ${quo.quotation_number}`}
+                        className="flex items-center justify-center w-8 h-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] transition-colors"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                    ) : (
+                      <span
+                        title={quotationLockReason(quo.status) ?? undefined}
+                        aria-label={quotationLockReason(quo.status) ?? undefined}
+                        className="flex items-center justify-center w-8 h-8 text-muted-foreground/40"
+                      >
+                        <Lock className="w-3.5 h-3.5" />
+                      </span>
+                    ))}
                     {quo.status === 'approved' && (
                       <button
                         onClick={() => setConvertConfirm(quo)}
@@ -704,7 +913,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                 {/* ─── MOBILE CARD ─── */}
                 <div 
                   className="md:hidden flex flex-col p-4 cursor-pointer"
-                  onClick={() => setExpanded(expanded === quo.id ? null : quo.id)}
+                  onClick={() => toggleExpanded(quo.id)}
                 >
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex flex-col gap-1 min-w-0 pr-3">
@@ -730,6 +939,15 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                       {expanded === quo.id ? 'Hide details' : 'View details'}
                     </div>
                     <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                      {canEdit && isQuotationEditable(quo.status) && (
+                        <button
+                          onClick={() => openEdit(quo)}
+                          aria-label={`Edit ${quo.quotation_number}`}
+                          className="flex items-center justify-center w-8 h-8 rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       <AppSelect
                         value={quo.status}
                         onChange={e => requestStatus(quo, e.target.value)}
@@ -755,6 +973,31 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                       
                       {/* Actions Box */}
                       <div className="flex flex-col justify-center gap-2">
+                        <div className="flex flex-wrap gap-2">
+                          <Button type="button" variant="outline" size="sm" onClick={() => setPreviewId(quo.id)}>
+                            <Eye className="w-3.5 h-3.5" /> Preview / PDF
+                          </Button>
+                          <Button type="button" variant="outline" size="sm" onClick={() => void copyLink(quo)}>
+                            <Link2 className="w-3.5 h-3.5" /> Copy link
+                          </Button>
+                          {canEdit && isQuotationEditable(quo.status) && (
+                            <Button type="button" variant="outline" size="sm" onClick={() => openEdit(quo)}>
+                              <Pencil className="w-3.5 h-3.5" /> Edit
+                            </Button>
+                          )}
+                          {canEdit && canDeleteQuotation(quo.status) && (
+                            <Button type="button" variant="outline" size="sm" onClick={() => setDeleteConfirm(quo)}
+                              className="text-destructive hover:text-destructive">
+                              <Trash2 className="w-3.5 h-3.5" /> Delete draft
+                            </Button>
+                          )}
+                        </div>
+                        {quotationLockReason(quo.status) && (
+                          <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                            <Lock className="w-3.5 h-3.5 mt-px shrink-0" />
+                            <span>Read-only. {quotationLockReason(quo.status)}</span>
+                          </p>
+                        )}
                         {quo.status !== 'approved' && quo.status !== 'rejected' && (
                           <button
                             onClick={() => setApprovalQuote({ id: quo.id, quotation_number: quo.quotation_number })}
@@ -835,9 +1078,15 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                     )}
                     
                     {quo.notes && (
-                      <div className="mx-4 md:mx-0 bg-secondary/30 border border-border/50 rounded-lg p-3 text-sm text-muted-foreground">
+                      <div className="mx-4 md:mx-0 bg-secondary/30 border border-border/50 rounded-lg p-3 text-sm text-muted-foreground whitespace-pre-line">
                         <span className="font-semibold text-foreground text-xs uppercase tracking-wider block mb-1">Notes</span>
                         {quo.notes}
+                      </div>
+                    )}
+                    {quo.terms && (
+                      <div className="mx-4 md:mx-0 bg-secondary/30 border border-border/50 rounded-lg p-3 text-sm text-muted-foreground whitespace-pre-line">
+                        <span className="font-semibold text-foreground text-xs uppercase tracking-wider block mb-1">Terms</span>
+                        {quo.terms}
                       </div>
                     )}
                   </div>
@@ -850,13 +1099,15 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
 
       {/* ── New Quotation Modal ───────────────────────────────────────────── */}
       {showForm && (
-        <ModalOverlay onClose={() => setShowForm(false)} sheetOnMobile>
+        <ModalOverlay onClose={closeForm} sheetOnMobile>
           <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90dvh] overflow-y-auto">
             {/* Modal header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card rounded-t-2xl z-10">
-              <h2 className="font-semibold">New Quotation</h2>
+              <h2 className="font-semibold">
+                {editing ? <>Edit Quotation <span className="font-mono text-muted-foreground">{editing.quotation_number}</span></> : 'New Quotation'}
+              </h2>
               <button
-                onClick={() => setShowForm(false)}
+                onClick={closeForm}
                 aria-label="Close"
                 className="text-muted-foreground hover:text-foreground transition-colors"
               >
@@ -865,7 +1116,12 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
             </div>
 
             <form onSubmit={handleSubmit} className="p-6 space-y-6">
-              <DraftRecoveryBanner draft={draft} onRestore={setForm} label="Unsent quotation" />
+              {!editing && <DraftRecoveryBanner draft={draft} onRestore={setForm} label="Unsent quotation" />}
+              {editing?.status === 'sent' && (
+                <p className="text-xs text-muted-foreground bg-secondary/30 border border-border/50 rounded-lg px-3 py-2">
+                  Already sent to the client. It keeps the number {editing.quotation_number}; send them the updated PDF after saving.
+                </p>
+              )}
 
               {/* Client + Currency row */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1012,7 +1268,7 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                           onChange={e => updateItem(i, 'quantity', parseFloat(e.target.value) || 1)}
                         />
                       </div>
-                      <div className="sm:col-span-3">
+                      <div className="sm:col-span-2">
                         <Input
                           type="number"
                           min="0"
@@ -1024,6 +1280,18 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                       </div>
                       <div className="sm:col-span-2 text-sm font-medium sm:text-right px-1 tabular-nums mt-1 sm:mt-0">
                         {item.total > 0 ? item.total.toLocaleString('en-IN') : '—'}
+                      </div>
+                      <div className="sm:col-span-1 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => removeItem(i)}
+                          disabled={form.items.length === 1 && !item.description && !item.unit_price}
+                          aria-label={`Remove line ${i + 1}`}
+                          title="Remove line"
+                          className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -1073,13 +1341,13 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
               <div className="pt-4 border-t border-border space-y-2">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <FormStatus state={submit} />
-                  <DraftSavedHint draft={draft} />
+                  {!editing && <DraftSavedHint draft={draft} />}
                 </div>
                 <div className="flex gap-3">
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => setShowForm(false)}
+                    onClick={closeForm}
                     className="flex-1"
                   >
                     Cancel
@@ -1090,7 +1358,9 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
                     loading={submit.status === 'saving'}
                     className="flex-1 gradient-bg text-white"
                   >
-                    {submitLabel(submit, { idle: 'Create Quotation', saving: 'Creating…' })}
+                    {editing
+                      ? submitLabel(submit, { idle: 'Save Changes', saving: 'Saving…' })
+                      : submitLabel(submit, { idle: 'Create Quotation', saving: 'Creating…' })}
                   </Button>
                 </div>
               </div>
@@ -1124,6 +1394,73 @@ export default function QuotationsClient({ initialQuotations, clients: initialCl
           onConfirm={() => { const c = statusConfirm; setStatusConfirm(null); void updateStatus(c.quo.id, c.status) }}
           onCancel={() => setStatusConfirm(null)}
         />
+      )}
+
+      {deleteConfirm && (
+        <ConfirmDialog
+          title={`Delete draft ${deleteConfirm.quotation_number}?`}
+          body={`The draft for ${deleteConfirm.client?.name ?? 'this client'} (${formatCurrency(deleteConfirm.total_amount || 0, deleteConfirm.currency)}) and its lines are removed for good. Only drafts can be deleted.`}
+          confirmLabel="Delete draft"
+          danger
+          onConfirm={() => { const q = deleteConfirm; setDeleteConfirm(null); void deleteQuotation(q) }}
+          onCancel={() => setDeleteConfirm(null)}
+        />
+      )}
+
+      {/* ── Client-facing preview (the invoice document, as a quotation) ───── */}
+      {previewQuo && (
+        <ModalOverlay onClose={() => setPreviewId(null)} zIndex="z-[300]">
+          <div className="flex flex-col bg-secondary border border-foreground/15 rounded-2xl shadow-2xl overflow-hidden"
+            style={{ width: 'min(860px, 96vw)', height: 'min(92vh, 900px)' }}>
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-foreground/15 shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Eye className="w-4 h-4 text-violet-400 shrink-0" />
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-sm font-mono truncate">{previewQuo.quotation_number}</h3>
+                  <p className="text-[11px] text-muted-foreground truncate">{previewQuo.client?.name}</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button onClick={() => void copyLink(previewQuo)}
+                  title="Copy a link to this quotation in the app (for your team, not the client)"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 text-xs font-medium text-foreground transition-colors border border-foreground/15">
+                  <Link2 className="w-3.5 h-3.5" />Copy link
+                </button>
+                <button onClick={() => printQuotation(previewQuo)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 text-xs font-medium text-foreground transition-colors border border-foreground/15">
+                  <Printer className="w-3.5 h-3.5" />Print
+                </button>
+                <button onClick={() => void downloadQuotationPdf(previewQuo)} disabled={pdfBusy !== null}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 text-xs font-medium text-foreground transition-colors border border-foreground/15 disabled:opacity-50">
+                  {pdfBusy === 'download' ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}Download
+                </button>
+                {canShareFiles() && (
+                  <button onClick={() => void shareQuotationPdf(previewQuo)} disabled={pdfBusy !== null}
+                    title="Send the PDF through WhatsApp, Mail or any app on this device"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 text-xs font-medium text-foreground transition-colors border border-foreground/15 disabled:opacity-50">
+                    {pdfBusy === 'share' ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Share2 className="w-3.5 h-3.5" />}Share
+                  </button>
+                )}
+                <button onClick={() => setPreviewId(null)} aria-label="Close preview"
+                  className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-foreground/5 rounded-lg transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto bg-[#f5f7fa] rounded-b-2xl" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
+              <div style={{ minWidth: 680, height: '100%' }}>
+                <iframe
+                  key={previewQuo.id}
+                  srcDoc={renderQuotationHtml(previewQuo, companySettings)}
+                  className="w-full h-full border-0"
+                  style={{ minHeight: 600 }}
+                  title="Quotation Preview"
+                  sandbox="allow-same-origin"
+                />
+              </div>
+            </div>
+          </div>
+        </ModalOverlay>
       )}
 
       {convertConfirm && (

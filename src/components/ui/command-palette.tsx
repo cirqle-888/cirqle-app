@@ -289,7 +289,7 @@ export function CommandPalette() {
           kind: 'quotation',
           label: q.quotation_number,
           sublabel: `${client?.name ?? 'Unknown client'} · ${q.status}`,
-          href: `/dashboard/quotations`,
+          href: searchResultHref('quotation', q.id),
         })
       }
 
