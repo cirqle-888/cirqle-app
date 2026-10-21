@@ -43,14 +43,21 @@ function isCaseless(w: string): boolean {
 function caseWord(w: string, isFirst: boolean): string {
   if (!w) return w
   if (isCaseless(w)) return w
+  // Leading punctuation — "(new", "'quoted", "“Onam" — is not the word: the
+  // capital belongs on its first letter, and the checks below read past it.
+  // Without this, "Milkees (new brand)" came out "Milkees (new Brand)".
+  const lead = /^[^\p{L}\p{N}]*/u.exec(w)![0]
+  const core = w.slice(lead.length)
+  if (!core || isCaseless(core)) return w
   // Acronyms and format codes: CQID, A3, B.N.
-  if (w.length > 1 && w === w.toUpperCase()) return w
+  if (core.length > 1 && core === core.toUpperCase()) return w
   // Deliberate internal capitals: iPhone, eBay, McDonald's, JPEGs.
-  if (/[A-Z]/.test(w.slice(1))) return w
+  if (/[A-Z]/.test(core.slice(1))) return w
 
-  const lower = w.toLowerCase()
-  if (!isFirst && SMALL_WORDS.has(lower)) return lower
-  return lower.charAt(0).toUpperCase() + lower.slice(1)
+  const lower = core.toLowerCase()
+  // A joiner followed by punctuation ("for,") is still a joiner.
+  if (!isFirst && SMALL_WORDS.has(lower.replace(/[^\p{L}]+$/u, ''))) return lead + lower
+  return lead + lower.charAt(0).toUpperCase() + lower.slice(1)
 }
 
 /**

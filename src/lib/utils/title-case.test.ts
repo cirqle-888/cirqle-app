@@ -103,4 +103,15 @@ describe('cleanTitle / toTitleCase are usable on their own', () => {
   it('toTitleCase only cases, never tidies', () => {
     expect(toTitleCase('onam offer')).toBe('Onam Offer')
   })
+
+  it('capitalises a word after an opening bracket or quote', () => {
+    expect(normalizeTaskTitle('Milkees (new brand)')).toBe('Milkees (New Brand)')
+    expect(normalizeTaskTitle('"onam" offer poster')).toBe('"Onam" Offer Poster')
+    expect(normalizeTaskTitle('poster (A3) for diwali')).toBe('Poster (A3) for Diwali')
+    expect(normalizeTaskTitle('logo (iPhone mockup)')).toBe('Logo (iPhone Mockup)')
+  })
+
+  it('keeps a joiner lowercase when punctuation follows it', () => {
+    expect(normalizeTaskTitle('sale for, and offers')).toBe('Sale for, and Offers')
+  })
 })
