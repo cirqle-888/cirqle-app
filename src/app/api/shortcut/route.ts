@@ -49,7 +49,7 @@ async function nextTaskNumber(admin: Admin): Promise<number> {
 // ── Action handlers ────────────────────────────────────────────────────────
 
 async function createRequest(admin: Admin, p: { title?: string; client?: string; notes?: string; service?: string; dueDate?: string }) {
-  const title = (p.title || '').trim()
+  const title = normalizeTaskTitle(p.title)
   if (!title) return { ok: false, error: 'A title is required.' }
   const client = await findClient(admin, p.client)
   const service = await findService(admin, p.service)

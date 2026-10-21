@@ -14,6 +14,10 @@ interface Props {
   /** Past titles already loaded on the page — used for instant local matches
    *  before the server call returns. */
   localTitles?: string[]
+  disabled?: boolean
+  autoFocus?: boolean
+  /** e.g. Enter to save / Escape to cancel when used as an inline editor. */
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void
 }
 
 // ── Levenshtein distance (small, bounded) for "did you mean" ─────────────────
@@ -42,7 +46,7 @@ function norm(s: string): string {
 }
 
 
-export function TitleAutocomplete({ value, onChange, className, placeholder, required, localTitles = [] }: Props) {
+export function TitleAutocomplete({ value, onChange, className, placeholder, required, localTitles = [], disabled, autoFocus, onKeyDown }: Props) {
   const [open, setOpen] = useState(false)
   const [serverSugs, setServerSugs] = useState<{ title: string; count: number }[]>([])
   const [pool, setPool] = useState<string[]>([])
@@ -147,7 +151,13 @@ export function TitleAutocomplete({ value, onChange, className, placeholder, req
           const c = normalizeTaskTitle(value)
           if (c !== value) onChange(c)
         }}
+        onKeyDown={e => {
+          if (e.key === 'Escape') setOpen(false)
+          onKeyDown?.(e)
+        }}
         required={required}
+        disabled={disabled}
+        autoFocus={autoFocus}
         className={className}
         placeholder={placeholder}
         autoComplete="off"

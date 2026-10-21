@@ -19,6 +19,7 @@ import {
   setRequestStatus, logRequestActivity, requestStatusFromTask, type RequestStatus,
 } from '@/lib/requests/core'
 import { notifyRequesterStatus } from '@/lib/requests/notify'
+import { normalizeTaskTitle } from '@/lib/utils/title-case'
 import { aiParse, findClient, findService, normalizeDate } from '@/lib/ai/request-capture'
 import {
   REQUEST_KIND_CHECKLIST, REQUEST_KIND_REQUEST,
@@ -256,6 +257,43 @@ export async function updateInternalNotes(
 }
 
 /**
+ * Rename a request. The title is normalised exactly as a task title is
+ * (normalizeTaskTitle: spacing tidied, Title Case, acronyms and brand
+ * capitals kept), and the change is logged internally as old → new.
+ *
+ * A linked task keeps its own title: it may have been renamed on purpose,
+ * and its invoice line reads from it.
+ */
+export async function updateRequestTitle(
+  requestId: string, rawTitle: string,
+): Promise<ActionResult<{ title: string }>> {
+  const guard = await requirePermission(PERMS.REQUESTS_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const title = normalizeTaskTitle(rawTitle)
+  if (!title) return { ok: false, error: 'Title is required.' }
+
+  const admin = createAdminClient()
+  const { data: before, error: loadErr } = await admin.from('task_requests')
+    .select('id, title').eq('id', requestId).maybeSingle()
+  if (loadErr) return { ok: false, error: loadErr.message }
+  if (!before) return { ok: false, error: 'Request not found.' }
+  if (before.title === title) return { ok: true, data: { title } }
+
+  const { error } = await admin.from('task_requests')
+    .update({ title, updated_at: new Date().toISOString() })
+    .eq('id', requestId)
+  if (error) return { ok: false, error: error.message }
+
+  await logRequestActivity(admin, {
+    requestId, actorType: 'admin', actorId: guard.employeeId, actorLabel: 'Cirqle',
+    action: 'field_changed', visibility: 'internal',
+    detail: { field: 'title', from: before.title, to: title },
+  })
+  revalidatePath(REVALIDATE)
+  return { ok: true, data: { title } }
+}
+
+/**
  * Promotion (design §5): called AFTER the prefilled Add Task modal actually
  * creates the task. Links the request to the task, sets status = started,
  * logs the promotion (internal) + Started milestone (requester-visible),
@@ -396,7 +434,8 @@ export async function createManualRequest(input: {
 }): Promise<ActionResult<any>> {
   const guard = await requirePermission(PERMS.REQUESTS_MANAGE)
   if (!guard.ok) return { ok: false, error: guard.error }
-  const title = (input.title || '').trim()
+  // Same normalisation as a task title — a request usually becomes one.
+  const title = normalizeTaskTitle(input.title)
   if (!title) return { ok: false, error: 'Title is required.' }
   if (!input.clientId) return { ok: false, error: 'Pick a client — the request shows on their intake portal.' }
 

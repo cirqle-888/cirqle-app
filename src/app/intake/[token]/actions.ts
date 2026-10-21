@@ -14,6 +14,7 @@ import { logRequestActivity, bumpExternalActivity, type Visibility } from '@/lib
 import { notifyNewRequest } from '@/lib/requests/notify'
 import { columnExists } from '@/lib/supabase/server'
 import { REQUEST_KIND_CHECKLIST } from '@/lib/requests/kind'
+import { normalizeTaskTitle } from '@/lib/utils/title-case'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
@@ -114,7 +115,8 @@ export async function submitIntakeRequest(
   const link = await resolveToken(token)
   if (!link) return { ok: false, error: 'This link is no longer valid.' }
 
-  const title = (input.title || '').trim()
+  // Client-typed titles get the same professional formatting as staff ones.
+  const title = normalizeTaskTitle(input.title)
   if (!title) return { ok: false, error: 'Title is required.' }
   if (title.length > 300) return { ok: false, error: 'Title is too long.' }
 

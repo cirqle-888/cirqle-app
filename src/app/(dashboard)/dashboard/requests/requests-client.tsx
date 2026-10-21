@@ -35,8 +35,9 @@ import {
   Search, Plus, UserRound, List, LayoutGrid, Link as LinkIcon, Trash2,
   ExternalLink, GripVertical, Share2, RefreshCw, Sparkles,
   BadgePercent, Megaphone, ChevronDown, ListChecks, Building2, Tag,
-  FolderOpen, MoreHorizontal, Send,
+  FolderOpen, MoreHorizontal, Send, Pencil,
 } from 'lucide-react'
+import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
 import {
   CLIENT_STATUS_LABEL, STATUS_CHIP, PRIORITY_CHIP, refLabel, type RequestStatus,
 } from '@/lib/requests/core'
@@ -45,6 +46,7 @@ import {
   postExternalUpdate, updateInternalNotes, markRevisionAddressed, postRequestNote,
   assignRequestEmployee, createManualRequest, searchTasksForLink, linkRequestToTask,
   reorderStaffPriority, bulkSetRequestStatus, bulkAssignRequestEmployee,
+  updateRequestTitle,
 } from './actions'
 import { DiscussButton } from '@/components/chat/discuss-button'
 import { CampaignCard } from '@/components/campaigns/campaign-card'
@@ -377,6 +379,7 @@ export default function RequestsClient({
   // alone ⇒ every add is a draft; real clients need clients.create.
   const canAddRealClient = can('clients.create') || can('settings.access')
   const canAddClient = canAddRealClient || can('clients.create_draft')
+  const canManageRequests = can('requests.manage')
   const [addedClients, setAddedClients] = useState<NonNullable<typeof clientsProp>>([])
   const [quickClient, setQuickClient] = useState<string | null>(null)
   const clients = useMemo(() => [...addedClients, ...clientsProp], [addedClients, clientsProp])
@@ -384,6 +387,14 @@ export default function RequestsClient({
   const [requests, setRequests] = useState(initialRequests)
   const [tab, setTab] = useState('new')
   const [open, setOpen] = useState<any | null>(null)
+  // Inline title editing in the detail drawer: null = not editing.
+  const [titleDraft, setTitleDraft] = useState<string | null>(null)
+  const [savingTitle, setSavingTitle] = useState(false)
+  // Titles already on the page: instant suggestions and "Did you mean" for the
+  // title box, even for staff without the task permissions its server lookup needs.
+  const requestTitles = useMemo(
+    () => [...new Set(requests.map((r: any) => (r.title || '').trim()).filter(Boolean))] as string[],
+    [requests])
   const [timeline, setTimeline] = useState<any[]>([])
   const [revisions, setRevisions] = useState<any[]>([])
   const [tlLoading, setTlLoading] = useState(false)
@@ -680,7 +691,7 @@ export default function RequestsClient({
 
   async function openRequest(r: any) {
     setMoreOpen(false)
-    setOpen(r); setNotes(r.internal_notes || ''); setUpdateMsg('')
+    setOpen(r); setNotes(r.internal_notes || ''); setUpdateMsg(''); setTitleDraft(null)
     setLinkOpen(false); setLinkQ(''); setLinkResults(null)
     setTimeline([]); setRevisions([]); setTlLoading(true)
     // Clear the "new external activity" indicator.
@@ -723,6 +734,23 @@ export default function RequestsClient({
       const tl = await getRequestTimeline(open.id)
       if (tl.ok && tl.data) setTimeline(tl.data.rows)
     } else toastError('Could not post update', res.error)
+  }
+
+  async function doSaveTitle() {
+    if (!open || titleDraft === null) return
+    setSavingTitle(true)
+    const res = await updateRequestTitle(open.id, titleDraft)
+    setSavingTitle(false)
+    if (!res.ok || !res.data) { toastError('Could not rename request', res.error); return }
+    const title = res.data.title
+    setRequests(prev => prev.map(x => x.id === open.id ? { ...x, title } : x))
+    setOpen((o: any) => o && o.id === open.id ? { ...o, title } : o)
+    setTitleDraft(null)
+    if (title !== open.title) {
+      success('Title updated')
+      const tl = await getRequestTimeline(open.id)
+      if (tl.ok && tl.data) setTimeline(tl.data.rows)
+    }
   }
 
   async function doSaveNotes() {
@@ -1766,7 +1794,7 @@ export default function RequestsClient({
                     Discuss / Drive / More live up here as icons, so the body
                     starts with the one thing to do next. */}
                 <div className="flex items-start justify-between px-5 pt-4 pb-3 border-b border-border shrink-0 gap-3">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[11px] font-mono text-muted-foreground">{refLabel(open.ref_no)}</span>
                       <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${STATUS_CHIP[open.status] || ''}`}>{STATUS_LABEL[open.status] || open.status}</span>
@@ -1774,7 +1802,43 @@ export default function RequestsClient({
                         <span className={`inline-flex items-center gap-0.5 text-[11px] font-semibold capitalize ${PRIORITY_CHIP[open.priority]}`}><Flag className="w-3 h-3" />{open.priority}</span>
                       )}
                     </div>
-                    <h2 className="font-bold text-lg mt-1 leading-snug">{open.title}</h2>
+                    {titleDraft !== null ? (
+                      <div className="mt-1 flex items-center gap-1.5">
+                        <div className="flex-1 min-w-0">
+                          <TitleAutocomplete
+                            value={titleDraft}
+                            onChange={setTitleDraft}
+                            autoFocus
+                            disabled={savingTitle}
+                            localTitles={requestTitles}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') { e.preventDefault(); void doSaveTitle() }
+                              if (e.key === 'Escape') { e.stopPropagation(); setTitleDraft(null) }
+                            }}
+                            className="w-full bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-base font-bold focus:outline-none focus:ring-2 focus:ring-primary/40"
+                          />
+                        </div>
+                        <button onClick={() => void doSaveTitle()} disabled={savingTitle || !titleDraft.trim()}
+                          className="p-2 rounded-lg text-green-600 dark:text-green-400 hover:bg-green-500/10 disabled:opacity-40" title="Save title (Enter)" aria-label="Save title">
+                          {savingTitle ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                        </button>
+                        <button onClick={() => setTitleDraft(null)} disabled={savingTitle}
+                          className="p-2 rounded-lg text-muted-foreground hover:bg-secondary" title="Cancel (Esc)" aria-label="Cancel title edit">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="group/title flex items-start gap-1.5 mt-1">
+                        <h2 className="font-bold text-lg leading-snug">{open.title}</h2>
+                        {canManageRequests && (
+                          <button onClick={() => setTitleDraft(open.title || '')}
+                            className="mt-0.5 p-1 rounded-md text-muted-foreground/70 hover:text-foreground hover:bg-secondary sm:opacity-0 sm:group-hover/title:opacity-100 focus:opacity-100 transition-opacity"
+                            title="Edit title" aria-label="Edit title">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    )}
                     <div className="flex items-center gap-x-3 gap-y-0.5 mt-1 text-xs text-muted-foreground flex-wrap">
                       <span className="inline-flex items-center gap-1"><Building2 className="w-3.5 h-3.5" />{requesterOf(open)}</span>
                       {open.service?.name && <span className="inline-flex items-center gap-1 text-cyan-700 dark:text-cyan-400/80"><Tag className="w-3.5 h-3.5" />{open.service.name}</span>}
@@ -1782,7 +1846,9 @@ export default function RequestsClient({
                       {open.due_date && <span className="inline-flex items-center gap-1 font-medium text-foreground/80"><CalendarDays className="w-3.5 h-3.5" />Due {fmtDate(open.due_date)}</span>}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
+                  {/* Hidden while the title is being edited, so the editor gets the
+                      full width (Esc or ✕ brings them back). */}
+                  <div className={`flex items-center gap-1 shrink-0 ${titleDraft !== null ? 'hidden' : ''}`}>
                     <DiscussButton entityType="request" entityId={open.id} variant="icon" label="Discuss this request" panelTitle={open.title} />
                     {(driveLinkOf(open.client?.id) || open.drive_folder_link) && (
                       <a href={driveLinkOf(open.client?.id) || open.drive_folder_link} target="_blank" rel="noreferrer"
@@ -2178,6 +2244,8 @@ export default function RequestsClient({
                 value={newForm.brief}
                 onChange={brief => setNewForm(f => ({ ...f, brief }))}
                 titlePlaceholder="e.g. Onam campaign poster set"
+                smartTitle
+                titleSuggestions={requestTitles}
                 onError={(t, d) => toastError(t, d)}
                 showContentType={false}
               >

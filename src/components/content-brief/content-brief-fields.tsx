@@ -18,6 +18,7 @@ import { useState } from 'react'
 import { ChevronDown, Clipboard, Link2, Loader2, Plus, Trash2, Upload, X } from 'lucide-react'
 import AppSelect from '@/components/ui/app-select'
 import RichTextEditor, { readImageFromClipboard } from './rich-text-editor'
+import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
 import CaptionCanvasEditor from '@/app/(dashboard)/dashboard/social-calendar/caption-canvas'
 import { getBriefImageUploadUrl } from '@/app/(dashboard)/dashboard/content-brief-actions'
 import { CONTENT_TYPES, CONTENT_TYPE_LABEL, type CaptionCanvas } from '@/lib/social/plan'
@@ -78,6 +79,14 @@ export interface ContentBriefFieldsProps {
   children?: React.ReactNode
   titlePlaceholder?: string
   autoFocusTitle?: boolean
+  /**
+   * The task form's title box: past-title suggestions, "Did you mean",
+   * spacing clean-up, and Title Case applied on blur. Off by default so the
+   * Social Calendar keeps its plain field.
+   */
+  smartTitle?: boolean
+  /** Titles already on the page, for instant suggestions (with smartTitle). */
+  titleSuggestions?: string[]
   /** Reports upload problems to the page's toast. */
   onError?: (title: string, detail?: string) => void
 }
@@ -85,6 +94,7 @@ export interface ContentBriefFieldsProps {
 export default function ContentBriefFields({
   title, onTitleChange, value, onChange, disabled = false, contentTypeRequired = false,
   showContentType = true, typeSide, children, titlePlaceholder = 'e.g. Onam offer poster', autoFocusTitle, onError,
+  smartTitle = false, titleSuggestions,
 }: ContentBriefFieldsProps) {
   const set = (patch: Partial<ContentBriefDraft>) => onChange({ ...value, ...patch })
   const [copyTab, setCopyTab] = useState<'text' | 'canvas'>(value.captionCanvas?.blocks?.length && !value.caption ? 'canvas' : 'text')
@@ -136,8 +146,13 @@ export default function ContentBriefFields({
     <div className="space-y-4">
       <div>
         <label className={LABEL}>Title <span className="text-red-500">*</span></label>
-        <input value={title} disabled={disabled} autoFocus={autoFocusTitle}
-          onChange={e => onTitleChange(e.target.value)} placeholder={titlePlaceholder} className={FIELD} />
+        {smartTitle ? (
+          <TitleAutocomplete value={title} onChange={onTitleChange} disabled={disabled} autoFocus={autoFocusTitle}
+            placeholder={titlePlaceholder} className={FIELD} localTitles={titleSuggestions} required />
+        ) : (
+          <input value={title} disabled={disabled} autoFocus={autoFocusTitle}
+            onChange={e => onTitleChange(e.target.value)} placeholder={titlePlaceholder} className={FIELD} />
+        )}
       </div>
 
       {(showContentType || typeSide) && (
