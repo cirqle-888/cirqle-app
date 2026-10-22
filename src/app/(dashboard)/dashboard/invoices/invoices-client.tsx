@@ -269,7 +269,15 @@ function taskCountOf(inv: Invoice): number {
 }
 function invTotalInr(inv: Invoice): number { return inv.total_amount_inr ?? inv.total_amount ?? 0 }
 function invPaidInr(inv: Invoice): number { return inv.paid_amount_inr ?? inv.paid_amount ?? 0 }
-function balanceDueInr(inv: Invoice): number { return Math.max(0, invTotalInr(inv) - invPaidInr(inv)) }
+/**
+ * ₹ still owed. A PAID invoice owes nothing: a foreign invoice is settled in
+ * its own currency, and any gap between its ₹ snapshot and the ₹ that
+ * arrived is a realised FX gain/loss, not a balance (migration 20261022120000).
+ */
+function balanceDueInr(inv: Invoice): number {
+  if (inv.status === 'paid') return 0
+  return Math.max(0, invTotalInr(inv) - invPaidInr(inv))
+}
 // True when this invoice is paid through the cashbook-allocation path. Such an
 // invoice must not also take a direct "Record Payment" (the two would clobber).
 function hasActiveAllocations(inv: Invoice): boolean {

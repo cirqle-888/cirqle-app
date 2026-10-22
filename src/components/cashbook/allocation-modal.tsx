@@ -171,7 +171,17 @@ export default function AllocationModal({ entryId, entryDate, entryClientId, amo
   // allocations are denominated in. allocated_amount is always ₹, so we compare
   // against the invoice's INR balance (total_amount_inr − paid_amount_inr), NOT
   // its foreign-currency balance. Falls back to raw amounts for INR/pre-FX rows.
+  //
+  // Except when this payment is in the invoice's OWN foreign currency: then
+  // what's left is the invoice-currency balance at THIS payment's rate. 650 AED
+  // that arrived as ₹17,500 must allocate ₹17,500 to clear a 650 AED invoice
+  // booked at ₹16,838 — capping at the ₹ snapshot would leave it "partial".
+  // The ₹ difference is the realised FX gain/loss (migration 20261022120000).
   function outstandingInr(inv: any): number {
+    if (isForeignEntry && inv.currency === entryCurrency && amountInr > 0) {
+      const dueCcy = Number(inv.total_amount ?? 0) - Number(inv.paid_amount ?? 0)
+      return round2(dueCcy * amountInr / (entryForeignAmount as number))
+    }
     const total = inv.total_amount_inr ?? inv.total_amount ?? 0
     const paid = inv.paid_amount_inr ?? inv.paid_amount ?? 0
     return round2(total - paid)
