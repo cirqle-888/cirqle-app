@@ -71,6 +71,8 @@ export interface RunInput {
 
 export interface RunComputation {
   period: { start: string; end: string; months: string[] }
+  /** Own revenue recognised in the period, by the invoice it was applied to (null = no invoice). */
+  ownRevenueByInvoice: { invoiceId: string | null; amountInr: number }[]
   profit: {
     ownRevenueInr: number
     operatingPaymentsInr: number
@@ -388,6 +390,10 @@ export function computeRun(input: RunInput): RunComputation {
 
   return {
     period: { start, end, months },
+    ownRevenueByInvoice: [...recognition
+      .filter(r => r.kind === 'own_revenue' && r.date >= start && r.date <= end)
+      .reduce((m, r) => m.set(r.invoiceId ?? null, round2((m.get(r.invoiceId ?? null) ?? 0) + r.amountInr)), new Map<string | null, number>())]
+      .map(([invoiceId, amountInr]) => ({ invoiceId, amountInr })),
     profit: {
       ownRevenueInr: ownRevenue,
       operatingPaymentsInr: operating,

@@ -60,6 +60,7 @@ const ROUTE_LABELS: Record<string, string> = {
   'profit-sharing': 'Profit Sharing',
   investors:     'Investors & Capital',
   periods:       'Profit Periods',
+  departments:   'Departments',
   settlements:   'Settlements',
   devices:       'Device Valuation',
   history:       'Audit History',

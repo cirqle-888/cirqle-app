@@ -17,6 +17,7 @@ const TABS = [
   { href: '', label: 'Overview' },
   { href: '/investors', label: 'Investors & Capital' },
   { href: '/periods', label: 'Profit Periods' },
+  { href: '/departments', label: 'Departments' },
   { href: '/settlements', label: 'Settlements' },
   { href: '/devices', label: 'Device Valuation' },
   { href: '/settings', label: 'Settings' },

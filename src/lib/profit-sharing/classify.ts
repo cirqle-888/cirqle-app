@@ -87,6 +87,8 @@ export interface RecognitionEvent {
   source: string
   /** Derived from a client receipt applied to an invoice (or its reversal). */
   fromReceipt?: boolean
+  /** The invoice the receipt was applied to, for split events. */
+  invoiceId?: string
 }
 
 export interface ClassifyInput {
@@ -142,7 +144,7 @@ export function classifyEntries(input: ClassifyInput): ClassifyResult {
   const recognition: RecognitionEvent[] = []
   const pushSplit = (s: AllocationSplit, date: string, factor: number, source: string) => {
     const ev = (kind: RecognitionEvent['kind'], v: number) =>
-      recognition.push({ date, kind, amountInr: round2(v * factor), source, fromReceipt: true })
+      recognition.push({ date, kind, amountInr: round2(v * factor), source, fromReceipt: true, invoiceId: s.invoiceId })
     if (s.passInr) ev('pass_recovered', s.passInr)
     if (s.taxInr) ev('tax_collected', s.taxInr)
     if (s.ownInr) ev('own_revenue', s.ownInr)

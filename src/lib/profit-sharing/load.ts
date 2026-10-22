@@ -666,3 +666,77 @@ export function nextPeriodStart(runs: RunRow[]): string | null {
 }
 
 export { monthsOf, monthEnd }
+
+// ── Department view (analysis only) ──────────────────────────────────────────
+
+/** Rows for ids in chunks (PostgREST caps `.in()` lists). Throws on any error. */
+async function readIn(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: Admin, table: string, columns: string, column: string, ids: string[], label: string, extra?: (q: any) => any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<any[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const out: any[] = []
+  const unique = [...new Set(ids)]
+  for (let i = 0; i < unique.length; i += 200) {
+    const chunk = unique.slice(i, i + 200)
+    out.push(...await readAll((f, t) => {
+      let q = admin.from(table).select(columns).in(column, chunk)
+      if (extra) q = extra(q)
+      return q.order('id').range(f, t)
+    }, label))
+  }
+  return out
+}
+
+export interface DepartmentData {
+  invoiceLines: { invoiceId: string; deptId: string | null; amount: number }[]
+  contributions: { employeeId: string; taskId: string; deptId: string | null; earningsInr: number }[]
+  assignments: { employeeId: string; taskId: string; deptId: string | null }[]
+  departments: { id: string; name: string }[]
+  cqid: Record<string, string>
+}
+
+/**
+ * What the department view needs for [start, end]: each invoice line's
+ * department (task → service → category, or the line's own service), and the
+ * contribution earnings and assignments on the period's tasks. Employees are
+ * identified by CQID only.
+ */
+export async function loadDepartmentData(admin: Admin, start: string, end: string, invoiceIds: string[]): Promise<DepartmentData> {
+  const [lines, periodTasks, categories] = await Promise.all([
+    readIn(admin, 'invoice_items', 'id, invoice_id, total, task_id, service_id', 'invoice_id', invoiceIds, 'invoice lines'),
+    readAll((f, t) => admin.from('tasks').select('id, service_id, status')
+      .is('deleted_at', null).gte('task_date', start).lte('task_date', end).order('id').range(f, t), 'tasks'),
+    readAll((f, t) => admin.from('service_categories').select('id, name').order('id').range(f, t), 'departments'),
+  ])
+  const live = periodTasks.filter(t => t.status !== 'cancelled')
+  const lineTasks = await readIn(admin, 'tasks', 'id, service_id', 'id', lines.map(l => l.task_id).filter(Boolean), 'invoice tasks')
+  const serviceOfTask = new Map<string, string | null>([...live, ...lineTasks].map(t => [t.id, t.service_id ?? null]))
+  const serviceIds = [...new Set([...serviceOfTask.values(), ...lines.map(l => l.service_id)].filter(Boolean))] as string[]
+  const services = await readIn(admin, 'services', 'id, category_id', 'id', serviceIds, 'services')
+  const categoryOf = new Map<string, string | null>(services.map(s => [s.id, s.category_id ?? null]))
+  const deptOfService = (s: string | null | undefined) => (s ? categoryOf.get(s) ?? null : null)
+  const deptOfTask = (t: string) => deptOfService(serviceOfTask.get(t))
+
+  const taskIds = live.map(t => t.id)
+  const [scores, assigned] = await Promise.all([
+    readIn(admin, 'contribution_scores', 'id, task_id, employee_id, earnings_inr', 'task_id', taskIds, 'contributions'),
+    readIn(admin, 'task_assignments', 'id, task_id, employee_id', 'task_id', taskIds, 'assignments'),
+  ])
+  const people = [...new Set([...scores, ...assigned].map(r => r.employee_id).filter(Boolean))] as string[]
+  const emps = await readIn(admin, 'employees', 'id, cqid', 'id', people, 'employees')
+
+  return {
+    invoiceLines: lines.map(l => ({
+      invoiceId: l.invoice_id, amount: num(l.total),
+      deptId: l.task_id ? deptOfTask(l.task_id) ?? deptOfService(l.service_id) : deptOfService(l.service_id),
+    })),
+    contributions: scores.filter(s => s.employee_id).map(s => ({
+      employeeId: s.employee_id, taskId: s.task_id, deptId: deptOfTask(s.task_id), earningsInr: num(s.earnings_inr),
+    })),
+    assignments: assigned.filter(a => a.employee_id).map(a => ({ employeeId: a.employee_id, taskId: a.task_id, deptId: deptOfTask(a.task_id) })),
+    departments: categories.map(c => ({ id: c.id, name: c.name })),
+    cqid: Object.fromEntries(emps.map(e => [e.id, e.cqid])),
+  }
+}
