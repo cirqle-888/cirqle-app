@@ -349,6 +349,16 @@ export const PERMS = {
    *  incentives, bonuses). Exposes company profit and everyone's share. */
   PAYROLL_MANAGE_OWNERSHIP:     'payroll.manage_ownership',
 
+  // Profit Sharing (migration 20261022100000) — Admin only in this release:
+  // every page and action also requires isAdmin, so granting these to another
+  // designation by mistake still opens nothing.
+  /** See company cash profit, capital, entitlements and device valuations. */
+  PROFIT_SHARING_VIEW:          'profit_sharing.view',
+  /** Record investors, capital, reviews, devices and draft periods. */
+  PROFIT_SHARING_MANAGE:        'profit_sharing.manage',
+  /** Approve capital and agreements, confirm periods and valuations, settle, waive, change settings. */
+  PROFIT_SHARING_APPROVE:       'profit_sharing.approve',
+
   // Recruitment / Careers module
   RECRUITMENT_VIEW:      'recruitment.view',
   RECRUITMENT_EDIT:      'recruitment.edit',
@@ -449,6 +459,10 @@ export const CRITICAL_PERMS: ReadonlySet<string> = new Set<string>([
   // Ownership: sets what everyone earns from company revenue and profit, and
   // exposes the profit figure itself.
   PERMS.PAYROLL_MANAGE_OWNERSHIP,
+  // Profit sharing: company profit, every investor's capital and share.
+  PERMS.PROFIT_SHARING_VIEW,
+  PERMS.PROFIT_SHARING_MANAGE,
+  PERMS.PROFIT_SHARING_APPROVE,
   // Personal data (names are private by design; full profiles include them)
   PERMS.EMPLOYEES_REVEAL_NAMES,
   PERMS.EMPLOYEES_VIEW_FULL,

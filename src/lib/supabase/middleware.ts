@@ -54,6 +54,8 @@ const ROUTE_PERMS: Array<[RegExp, string | string[]]> = [
   [/^\/dashboard\/contributions/,           ['contributions.view_own', 'contributions.view_unit', 'contributions.view_all']],
   [/^\/dashboard\/partners/,                'finance.partner.view'],
   [/^\/dashboard\/payroll/,                 'payroll.view'],
+  // Admin only in this release; every page and action re-checks isAdmin too.
+  [/^\/dashboard\/finance\/profit-sharing/, 'profit_sharing.view'],
   [/^\/dashboard\/performance/,             'performance.manage'],
   [/^\/dashboard\/packages/,                'packages.view'],
   [/^\/dashboard\/invoices/,                'billing.view_invoices'],

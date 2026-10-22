@@ -56,6 +56,13 @@ const ROUTE_LABELS: Record<string, string> = {
   'role-earnings': 'Earnings by Role',
   import:        'Bulk Import',
   settings:      'Settings',
+  finance:       'Finance',
+  'profit-sharing': 'Profit Sharing',
+  investors:     'Investors & Capital',
+  periods:       'Profit Periods',
+  settlements:   'Settlements',
+  devices:       'Device Valuation',
+  history:       'Audit History',
   health:        'Business Health',
 }
 

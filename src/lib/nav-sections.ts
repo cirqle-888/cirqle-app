@@ -146,6 +146,9 @@ export const navSections: NavSection[] = [
       // The monthly control centre: profit composition, payroll status,
       // corrections and the lock action for each financial period.
       { label: 'Months',            href: '/dashboard/finance/months', icon: CalendarRange, requiredPerm: 'payroll.view', keywords: ['financial timeline', 'period', 'close', 'lock', 'profit', 'month end'] },
+      // Admin only in this release: company cash profit, capital and every
+      // investor's share. The route and every action re-check isAdmin.
+      { label: 'Profit Sharing',    href: '/dashboard/finance/profit-sharing', icon: PieChart, requiredPerm: 'profit_sharing.view', adminOnly: true, keywords: ['capital', 'investment', 'investor', 'founder', 'profit share', 'dividend', 'reserve', 'entitlement', 'payout', 'device'] },
     ],
   },
   {
