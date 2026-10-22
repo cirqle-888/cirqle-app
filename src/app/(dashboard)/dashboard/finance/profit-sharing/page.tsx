@@ -6,7 +6,8 @@ import {
 } from './_data'
 import { requireProfitSharingPage } from './_page'
 import { NotInstalled } from './_not-installed'
-import { Badge, Card, Stat, STATUS_TONE, Table, inr, periodLabel, td, tdNum } from './_components'
+import { Badge, Card, Stat, Table } from './_components'
+import { STATUS_TONE, inr, periodLabel, td, tdNum } from './_format'
 
 export const dynamic = 'force-dynamic'
 

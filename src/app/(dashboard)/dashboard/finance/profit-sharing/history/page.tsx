@@ -1,7 +1,8 @@
 import { loadEvents } from '../_data'
 import { requireProfitSharingPage } from '../_page'
 import { NotInstalled } from '../_not-installed'
-import { Card, Empty, Table, td } from '../_components'
+import { Card, Empty, Table } from '../_components'
+import { td } from '../_format'
 
 export const dynamic = 'force-dynamic'
 
