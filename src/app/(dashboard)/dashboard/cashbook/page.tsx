@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 
 // Shared join fragments used by both the full and legacy (pre-tags-migration) selects.
 const CORE_JOINS = `
-  category:cashbook_categories(id, name, type),
+  category:cashbook_categories(id, name, type, account_code),
   bank_account:bank_accounts(id, name),
   allocations:cashbook_invoice_allocations!cashbook_entry_id(
     id,

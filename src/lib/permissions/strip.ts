@@ -273,8 +273,25 @@ export function stripCashbookAmounts<T extends Record<string, any>>(
 const SALARY_CATEGORY_NAME = 'Salary'
 
 /**
- * A cashbook entry that pays, or adjusts, an employee's salary — by category,
- * or by carrying a live (non-deleted) link to a payroll record.
+ * Money paid to or taken back from a PERSON rather than spent on the business:
+ * credit lent to staff and its return, profit-share payouts, and the owner's
+ * own withdrawals. As personal as a salary, and hidden on the same axis
+ * (decided 2026-10-24: a billing/accounts role sees every other figure, but
+ * not what any employee was paid or lent).
+ */
+const PERSONAL_PAYMENT_ACCOUNTS = new Set([
+  'opex.salaries',
+  'financial.credit_given',
+  'financial.credit_return',
+  'excluded.profit_distribution',
+  'excluded.owner_drawings',
+  'excluded.capital_withdrawal',
+])
+
+/**
+ * A cashbook entry that pays, lends to, or settles with an employee — salary
+ * (by category or a live payroll link), credit given or returned, a profit
+ * share payout, or an owner withdrawal.
  *
  * Whoever cannot see payroll amounts must not see these entries AT ALL, not
  * see them with the ₹ figure blanked out. "Salary — CQID004 — July 2026"
@@ -282,10 +299,11 @@ const SALARY_CATEGORY_NAME = 'Salary'
  * does nothing to hide that. The description IS the leak.
  */
 export function isSalaryCashbookEntry(
-  entry: { category?: { name?: string | null } | null; payroll_allocations?: { deleted_at?: string | null }[] | null } | null | undefined,
+  entry: { category?: { name?: string | null; account_code?: string | null } | null; payroll_allocations?: { deleted_at?: string | null }[] | null } | null | undefined,
 ): boolean {
   if (!entry) return false
   if (entry.category?.name === SALARY_CATEGORY_NAME) return true
+  if (entry.category?.account_code && PERSONAL_PAYMENT_ACCOUNTS.has(entry.category.account_code)) return true
   const allocs = entry.payroll_allocations
   return Array.isArray(allocs) && allocs.some(a => !a?.deleted_at)
 }

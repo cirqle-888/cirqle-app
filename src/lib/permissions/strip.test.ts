@@ -64,6 +64,13 @@ describe('isSalaryCashbookEntry', () => {
     })).toBe(false)
   })
 
+  it('recognises credit, profit-share payouts and owner withdrawals by account code', () => {
+    for (const account_code of ['financial.credit_given', 'financial.credit_return', 'excluded.profit_distribution',
+      'excluded.owner_drawings', 'excluded.capital_withdrawal', 'opex.salaries'])
+      expect(isSalaryCashbookEntry({ category: { name: 'Renamed', account_code } })).toBe(true)
+    expect(isSalaryCashbookEntry({ category: { name: 'Software', account_code: 'opex.software' } })).toBe(false)
+  })
+
   it('is false for an ordinary entry', () => {
     expect(isSalaryCashbookEntry({ category: { name: 'Printing & Stationery' } })).toBe(false)
     expect(isSalaryCashbookEntry({})).toBe(false)
