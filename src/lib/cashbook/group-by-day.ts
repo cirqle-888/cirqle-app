@@ -40,6 +40,12 @@ export interface DayGroupFields<T> {
   amount: (row: T) => number
   /** Which side of the book the row is on. */
   isInflow: (row: T) => boolean
+  /**
+   * Overrides `amount` / `isInflow` for the TOTALS only — the row is still
+   * listed. Lets the caller apply cash-flow rules (a transfer adds nothing,
+   * a reversal subtracts from its original's side; see finance/cash-flow).
+   */
+  contribution?: (row: T) => { inflow: number; outflow: number }
 }
 
 /** Just the date part, so a timestamp groups with the day it falls on. */
@@ -73,6 +79,12 @@ export function groupByDay<T>(rows: readonly T[], fields: DayGroupFields<T>): Da
       groups.push(group)
     }
     group.rows.push(row)
+    if (fields.contribution) {
+      const c = fields.contribution(row)
+      group.inflow += c.inflow
+      group.outflow += c.outflow
+      continue
+    }
     // Magnitude, not sign: an outflow may be stored either way depending on
     // where the row came from, and `isInflow` is the authority on direction.
     const amount = Math.abs(Number(fields.amount(row)) || 0)

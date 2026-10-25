@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  recognisedRevenue, badDebtLoss, discountGiven, collectedAmount,
+  recognisedRevenue, badDebtLoss, discountGiven, collectedAmount, outstandingAmount,
   billedForCollection, isRevenueInvoice,
 } from './invoice-revenue'
 
@@ -90,5 +90,16 @@ describe('isRevenueInvoice', () => {
     expect(isRevenueInvoice(inv({ status: 'bad_debt' }))).toBe(true)
     expect(isRevenueInvoice(inv({ status: 'draft' }))).toBe(false)
     expect(isRevenueInvoice(inv({ status: 'cancelled' }))).toBe(false)
+  })
+})
+
+describe('outstandingAmount', () => {
+  it('counts only open invoices, in INR', () => {
+    expect(outstandingAmount({ status: 'partial', total_amount: 100, paid_amount: 40, total_amount_inr: 2300, paid_amount_inr: 920 })).toBe(1380)
+    expect(outstandingAmount({ status: 'sent', total_amount: 500, paid_amount: 0 })).toBe(500)
+  })
+  it('is zero for drafts, written-off, cancelled and paid invoices', () => {
+    for (const status of ['draft', 'reviewed', 'bad_debt', 'cancelled', 'paid'])
+      expect(outstandingAmount({ status, total_amount: 500, paid_amount: 100 })).toBe(0)
   })
 })

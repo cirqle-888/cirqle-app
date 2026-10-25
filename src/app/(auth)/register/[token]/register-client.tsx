@@ -8,6 +8,7 @@ import { AvatarPicker } from '@/components/ui/employee-avatar'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { todayISO } from '@/lib/utils/local-date'
 
 interface Props {
   token: string
@@ -179,7 +180,7 @@ export default function RegisterClient({ token, employee }: Props) {
                   value={dob}
                   onChange={e => setDob(e.target.value)}
                   required
-                  max={new Date().toISOString().slice(0, 10)}
+                  max={todayISO()}
                 />
               </div>
             </Section>

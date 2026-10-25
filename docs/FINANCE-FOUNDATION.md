@@ -53,6 +53,27 @@ always set scope explicitly — the trigger is a safety net, not an API.
   (`scope='company'`, `opex.marketing`) → wallet credit → campaign debit.
   Full budget/metrics/daily-report pipeline works; invoicing and service
   charge are structurally skipped.
+- **Internal transfers** (`transfer_ref`) are two rows — an outflow and an
+  inflow between the company's own accounts — created, edited and deleted
+  together. They are never income or expense: the journal drops them, and
+  every raw cash-flow total (Cash Book header, day totals, dashboard Income /
+  Outflow) goes through `lib/finance/cash-flow`, which skips them. Account
+  balances and bank reconciliation keep both legs. Across currencies each leg
+  is in its own account's currency; the INR gap is FX, not P&L.
+- **Returns / reversals** (`reversal_of`, migration 20261016100000). Money the
+  bank hands back — a bounced salary NEFT, a refunded receipt — is recorded as
+  the opposite entry on the same account and **same category**, so signed
+  category totals (P&L) net to zero by themselves. Cash-flow totals count it
+  against the original's side, never as new income. The original's invoice
+  and payroll allocations are released (stamped `released_by_entry_id`), so
+  the invoice is unpaid again and the payslip pending; deleting the reversal
+  restores exactly those.
+- **Credit Given / Credit Return are loans and advances, not returns.**
+  `financial.credit_given` is money lent out and expected back (an advance, a
+  float); `financial.credit_return` is that money coming back. Both stay out
+  of P&L and feed the credit ledger (Payroll → Credits), which tracks who owes
+  what. Never use Credit Return for a bounced or refunded payment — that reads
+  as a loan being repaid; use Return / Reverse on the original entry.
 - **Contribution → Payroll is unchanged.** It was already architecturally
   correct: per-task-per-client commission attribution for free.
 

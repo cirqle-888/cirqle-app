@@ -9,6 +9,7 @@
  * appsecret_proof, rate-limit handling).
  */
 
+import { parseMetaActions } from '@/lib/advertising/providers/meta-actions'
 import { metaGraphAll } from './client'
 
 export interface AdInsightRow {
@@ -25,19 +26,17 @@ export interface AdInsightRow {
   cpl: number | null
   roas: number | null
   conversions: number
+  messages: number
+  purchases: number
+  hasData: boolean
+  thumbnailUrl?: string | null
 }
 
 const INSIGHT_FIELDS = 'spend,impressions,reach,clicks,ctr,cpc,cpm,actions,purchase_roas'
 
 function parseInsight(node: { name?: string; id?: string }, ins: any): AdInsightRow {
-  let leads = 0
-  let conversions = 0
-  if (Array.isArray(ins?.actions)) {
-    for (const a of ins.actions) {
-      if (a.action_type === 'lead') leads += Number(a.value)
-      if (a.action_type === 'offsite_conversion.fb_pixel_purchase' || a.action_type === 'purchase') conversions += Number(a.value)
-    }
-  }
+  const actions = parseMetaActions(ins?.actions)
+  const leads = actions.leads, conversions = actions.purchases
   const spend = Number(ins?.spend ?? 0)
   const roasVal = Array.isArray(ins?.purchase_roas) && ins.purchase_roas[0] ? Number(ins.purchase_roas[0].value) : null
   return {
@@ -53,7 +52,7 @@ function parseInsight(node: { name?: string; id?: string }, ins: any): AdInsight
     leads,
     cpl: leads > 0 ? Math.round((spend / leads) * 100) / 100 : null,
     roas: roasVal,
-    conversions,
+    conversions, messages: actions.messages, purchases: actions.purchases, hasData: ins?.spend != null,
   }
 }
 
@@ -99,9 +98,9 @@ export async function getAdInsights(
   const edge = parent === 'campaign' ? 'ads' : 'ads'
   const ads = await metaGraphAll<any>(`${parentId}/${edge}`, {
     token,
-    params: { fields: `id,name,insights.time_range(${JSON.stringify({ since, until })}){${INSIGHT_FIELDS}}`, limit: 200 },
+    params: { fields: `id,name,creative{id,name,thumbnail_url},insights.time_range(${JSON.stringify({ since, until })}){${INSIGHT_FIELDS}}`, limit: 200 },
   })
-  return ads.map((ad) => parseInsight(ad, ad.insights?.data?.[0] ?? {}))
+  return ads.map((ad) => ({ ...parseInsight(ad, ad.insights?.data?.[0] ?? {}), thumbnailUrl: typeof ad.creative?.thumbnail_url === 'string' && ad.creative.thumbnail_url.startsWith('https://') ? ad.creative.thumbnail_url : null }))
 }
 
 /** Demographic / placement breakdown for a campaign. */

@@ -17,9 +17,13 @@ const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100
  * ignored.
  */
 export function buildTagSpend(lines: JournalLine[]): TagSpendRow[] {
+  // A returned payment was never really spent: an outflow whose money came
+  // back is not spend, and its reversal (an inflow) is ignored like any other.
+  const reversed = new Set(lines.map(l => l.reversalOf).filter((id): id is string => !!id))
   const byTag = new Map<string, TagSpendRow>()
   for (const line of lines) {
     if (!line.tags || line.tags.length === 0) continue
+    if (reversed.has(line.id)) continue
     const spend = Math.max(0, -line.amountInr)
     if (spend <= 0) continue
     for (const tag of line.tags) {

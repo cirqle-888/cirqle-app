@@ -18,6 +18,9 @@ export function generateInvoiceNumber(date: Date, clientCode: string): string {
  */
 export function isOverdue(dueDate: string, status: string, issueDate?: string): boolean {
   if (status === 'paid' || status === 'cancelled' || status === 'bad_debt') return false
+  // Not sent yet, so nothing is owed: a late draft belongs to "To send", not
+  // Overdue (it was being counted in both — audit 2026-10-23).
+  if (status === 'draft' || status === 'reviewed') return false
   const today = new Date(); today.setHours(0, 0, 0, 0)
   if (dueDate) {
     const due = new Date(dueDate)

@@ -48,7 +48,7 @@ export default function ReconciliationClient() {
           .is('deleted_at', null),
         supabase
           .from('cashbook_entries')
-          .select('id, amount, currency, reference, invoice_id, entry_date, description, deleted_at')
+          .select('id, amount, currency, reference, invoice_id, entry_date, description, deleted_at, transfer_ref')
           .not('deleted_at', 'is', null)
           .order('deleted_at', { ascending: false })
           .limit(100),
@@ -161,6 +161,19 @@ export default function ReconciliationClient() {
         .update({ deleted_at: null })
         .eq('id', entryId)
       if (error) throw error
+
+      // Rows deleted together come back together: a transfer's other leg,
+      // and a return deleted with the payment it returned (same timestamp).
+      const row = softDeleted.find((e: any) => e.id === entryId)
+      if (row?.deleted_at) {
+        if (row.transfer_ref) {
+          await supabase.from('cashbook_entries').update({ deleted_at: null })
+            .eq('transfer_ref', row.transfer_ref).eq('deleted_at', row.deleted_at)
+        }
+        // No-op (an ignored error) before migration 20261016100000.
+        await supabase.from('cashbook_entries').update({ deleted_at: null })
+          .eq('reversal_of', entryId).eq('deleted_at', row.deleted_at)
+      }
 
       // Log the restore event
       await supabase.from('cashbook_audit_log').insert({

@@ -20,7 +20,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { nextDueDate, type RecurringRule } from '@/lib/finance/recurring-schedule'
@@ -70,6 +70,9 @@ export interface RecurringExpenseRow {
 
 /** Rules with derived next-due / last-posted, for the panel. */
 export async function listRecurringExpenses(): Promise<ActionResult<RecurringExpenseRow[]>> {
+  // Read guard: this lists the company's standing payments with amounts.
+  const guard = await requireReadPermission(PERMS.CASHBOOK_VIEW)
+  if (!guard.ok) return { ok: false, error: guard.error }
   const admin = createAdminClient()
   const today = todayISO()
   try {

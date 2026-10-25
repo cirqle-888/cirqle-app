@@ -54,6 +54,8 @@ interface Props {
   }
   invoices: any[]; overdueInvoices: any[]; dueInvoices: any[]
   allCashbook: any[]; displayTasks: any[]; analyticsViewPromise: Promise<AnalyticsView>
+  departmentFactsPromise: Promise<import('@/lib/dashboard/department-facts').DepartmentFacts | null>
+  pendingPayPromise: Promise<Record<string, import('@/lib/dashboard/pending-pay').PendingPay>>
   todayTasks: any[]; unscoredDoneTasks: any[]; activeTasks: any[]; toBeInvoiced: any[]
   employees: any[]; scoresPromise: Promise<any[]>; payrollRecords: any[]
   /** Admin only — team earnings as cached aggregates, not score rows. */
@@ -270,7 +272,7 @@ export default function DashboardClient(props: Props) {
 // ─────────────────────────────────────────────────────────────────────────────
 function AdminDashboard({
   stats, invoices, overdueInvoices, dueInvoices, allCashbook,
-  analyticsViewPromise, todayTasks, unscoredDoneTasks,
+  analyticsViewPromise, departmentFactsPromise, pendingPayPromise, todayTasks, unscoredDoneTasks,
   activeTasks, toBeInvoiced, employees, earningsPromise, payrollRecords,
   todayStr, exchangeRates = [], followupCounts,
   notifications, pendingRequests, draftInvoicesSample = [], payrollPendingCount = 0,
@@ -605,6 +607,8 @@ function AdminDashboard({
         <Suspense fallback={<AnalyticsSkeleton />}>
           <DashboardAnalytics
             analyticsViewPromise={analyticsViewPromise}
+            departmentFactsPromise={departmentFactsPromise}
+            pendingPayPromise={pendingPayPromise}
             earningsPromise={earningsPromise}
             companyOps={companyOps}
             stats={effectiveStats}

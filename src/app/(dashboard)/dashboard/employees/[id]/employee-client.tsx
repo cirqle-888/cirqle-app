@@ -12,6 +12,7 @@ import type { CommissionAgreement } from '@/lib/agreements/resolve-earning'
 import { saveCommissionAgreement } from './actions'
 import { PresenceAvatar, PresenceBadge } from '@/components/ui/presence-dot'
 import { useEmployeePresence } from '@/contexts/presence-context'
+import { todayISO } from '@/lib/utils/local-date'
 
 export default function EmployeeProfileClient({ employee, agreements: initialAgreements, clients, services, canManageAgreements, canSeePay = false }: any) {
   const [activeTab, setActiveTab] = useState<'details' | 'agreements'>('details')
@@ -40,7 +41,7 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
       })
     } else {
       setEditingId(null)
-      const today = new Date().toISOString().slice(0, 10)
+      const today = todayISO()
       setForm({
         client_id: '',
         service_id: '',

@@ -26,8 +26,12 @@ const SCOPE_CATEGORY = `scope, category:cashbook_categories(id, name, statement_
 const LEGACY_CATEGORY = `category:cashbook_categories(id, name)`
 const TAGS_FRAGMENT = `tags:cashbook_entry_tags(tag:cashbook_tags(name))`
 
-function buildSelect(useScopeColumns: boolean, includeTags: boolean): string {
+// Migration 20261016100000. Its own degrade axis, like scope and tags.
+const REVERSAL_COLUMN = 'reversal_of'
+
+function buildSelect(useScopeColumns: boolean, includeTags: boolean, useReversal = true): string {
   const parts = [BASE_COLUMNS, useScopeColumns ? SCOPE_CATEGORY : LEGACY_CATEGORY]
+  if (useReversal) parts.push(REVERSAL_COLUMN)
   if (includeTags) parts.push(TAGS_FRAGMENT)
   return parts.join(', ')
 }
@@ -61,6 +65,7 @@ function toLine(r: any): JournalLine {
     amountInr: r.type === 'inflow' ? amountInr : -amountInr,
     description: r.description ?? null,
     isTransfer: r.transfer_ref != null,
+    reversalOf: r.reversal_of ?? null,
   }
   if (Array.isArray(r.tags)) {
     line.tags = r.tags.map((t: any) => t?.tag?.name).filter(Boolean)
@@ -93,12 +98,13 @@ export async function fetchJournalLines(
   const lines: JournalLine[] = []
   let hasScopeColumns = true
   let hasTagsTables = Boolean(filter.includeTags)
+  let hasReversal = true
 
   for (let offset = 0; ; offset += PAGE) {
     const build = () => {
       let q = admin
         .from('cashbook_entries')
-        .select(buildSelect(hasScopeColumns, hasTagsTables))
+        .select(buildSelect(hasScopeColumns, hasTagsTables, hasReversal))
         .is('deleted_at', null)
         .order('entry_date', { ascending: true })
         .order('id', { ascending: true })
@@ -113,6 +119,10 @@ export async function fetchJournalLines(
     let { data, error } = await build()
 
     // Degrade at most once per axis, then retry the same page.
+    if (error && hasReversal && isMissingColumn(error) && /reversal_of/.test(error.message ?? '')) {
+      hasReversal = false
+      ;({ data, error } = await build())
+    }
     if (error && hasScopeColumns && isMissingColumn(error)) {
       hasScopeColumns = false
       if (filter.scope && filter.scope !== 'untriaged') return []   // no real scope data exists

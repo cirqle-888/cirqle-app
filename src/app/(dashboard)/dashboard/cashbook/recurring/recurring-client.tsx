@@ -30,9 +30,10 @@ import {
 import {
   Plus, ChevronDown, Repeat, Pencil, Trash2, Pause, Play, ArrowLeft, Loader2,
 } from 'lucide-react'
+import { todayISO } from '@/lib/utils/local-date'
 
 const inr = (v: number) => `₹${Math.round(v).toLocaleString('en-IN')}`
-const today = () => new Date().toISOString().slice(0, 10)
+const today = () => todayISO()
 
 /** "1st", "2nd", "3rd", "21st" — reads like a person wrote it. */
 function ordinal(n: number): string {

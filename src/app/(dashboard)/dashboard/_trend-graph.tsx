@@ -10,6 +10,7 @@
 // unit-tested); this file is presentation only.
 
 import { useMemo, useState } from 'react'
+import { cashFlowContribution, isNonOperating } from '@/lib/finance/cash-flow'
 import {
   ComposedChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts'
@@ -17,6 +18,7 @@ import {
   resolveComparisonPeriods, buildTrendSeries, alignComparison, seriesTotals, pctChange,
   addDays, type ComparisonMode, type TrendCashPoint, type TrendTaskPoint,
 } from '@/lib/finance/trends'
+import { todayISO } from '@/lib/utils/local-date'
 
 // Theme-aware via CSS vars — the previous hardcoded dark values made the grid
 // invisible and the tooltip permanently dark on the light theme.
@@ -71,11 +73,11 @@ const MODES: { key: ComparisonMode; label: string; prevLabel: string }[] = [
 ]
 
 export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
-  cashbook: { type: string; amount_inr?: number; entry_date: string }[]
-  tasks: { task_date: string | null; billing_amount_inr?: number | null }[]
+  cashbook: { type: string; amount_inr?: number; entry_date: string; transfer_ref?: string | null; reversal_of?: string | null; category?: { statement_section?: string | null } | null }[]
+  tasks: { task_date: string | null; billing_amount_inr?: number | null; count?: number }[]
   fmt: (n: number) => string
 }) {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayISO()
   const [mode, setMode] = useState<ComparisonMode>('month')
   const [customFrom, setCustomFrom] = useState(addDays(today, -29))
   const [customTo, setCustomTo] = useState(today)
@@ -95,14 +97,25 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
   // Normalize once — the raw props come straight from the dashboard's existing
   // fetches (all-time cashbook, 36-month tasks); no extra queries needed.
   const inputs = useMemo(() => ({
+    // The full ledger, for the running balance. Inflow / Outflow go through
+    // cashFlowContribution like the cards: a transfer adds nothing, a reversal
+    // takes off the side it reverses (a negative amount), and credit, capital
+    // and drawings move the balance only.
     cash: cashbook
-      .filter(e => e.entry_date && (e.type === 'inflow' || e.type === 'outflow'))
-      .map(e => ({ date: e.entry_date, type: e.type, amountInr: Number(e.amount_inr || 0) })) as TrendCashPoint[],
+      .filter(e => e.entry_date)
+      .flatMap(e => {
+        const c = cashFlowContribution(e)
+        const balanceOnly = isNonOperating(e)
+        return [
+          ...(c.inflow ? [{ date: e.entry_date, type: 'inflow', amountInr: c.inflow, balanceOnly }] : []),
+          ...(c.outflow ? [{ date: e.entry_date, type: 'outflow', amountInr: c.outflow, balanceOnly }] : []),
+        ]
+      }) as TrendCashPoint[],
     // billing_amount_inr is already the task TOTAL (never a unit price) — every
     // other dashboard aggregate sums it raw, so "Job Value" here reconciles
     // with Total Billed on the same screen.
     tasks: tasks.filter(t => t.task_date).map(t => ({
-      date: t.task_date!, valueInr: Number(t.billing_amount_inr) || 0,
+      date: t.task_date!, valueInr: Number(t.billing_amount_inr) || 0, count: t.count,
     })) as TrendTaskPoint[],
   }), [cashbook, tasks])
 

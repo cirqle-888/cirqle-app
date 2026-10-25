@@ -1,0 +1,15 @@
+BEGIN;
+DROP FUNCTION IF EXISTS public.cirqle_undo_reversible_change(uuid, uuid);
+DROP FUNCTION IF EXISTS public.cirqle_apply_reversible_change(uuid, text, uuid, jsonb);
+DROP TRIGGER IF EXISTS productivity_assignment_revision ON public.task_assignments;
+DROP FUNCTION IF EXISTS public.cirqle_assignment_revision();
+DROP TRIGGER IF EXISTS productivity_revision ON public.clients;
+DROP TRIGGER IF EXISTS productivity_revision ON public.tasks;
+DROP TRIGGER IF EXISTS productivity_revision ON public.task_requests;
+DROP FUNCTION IF EXISTS public.cirqle_rotate_productivity_revision();
+ALTER TABLE public.clients DROP COLUMN IF EXISTS productivity_revision;
+ALTER TABLE public.tasks DROP COLUMN IF EXISTS productivity_revision;
+ALTER TABLE public.task_requests DROP COLUMN IF EXISTS productivity_revision;
+DROP TABLE IF EXISTS public.productivity_undo_receipts;
+DROP TABLE IF EXISTS public.employee_notification_snoozes;
+COMMIT;

@@ -65,6 +65,7 @@ import {
   CHECKLIST_HINT, CHECKLIST_LABEL,
   REQUEST_KIND_CHECKLIST, REQUEST_KIND_REQUEST, isChecklistRequest,
 } from '@/lib/requests/kind'
+import { todayISO } from '@/lib/utils/local-date'
 
 // Task-driven 5-stage flow. Request status mirrors the linked task (see
 // requestStatusFromTask): New → On Going → Under Review → Completed → Cancelled.
@@ -1061,7 +1062,7 @@ export default function RequestsClient({
       const url = canvas.toDataURL('image/png')
       const a = document.createElement('a')
       a.href = url
-      a.download = `cirqle-${(shareClientName || 'requests').toLowerCase().replace(/\s+/g, '-')}-${new Date().toISOString().slice(0, 10)}.png`
+      a.download = `cirqle-${(shareClientName || 'requests').toLowerCase().replace(/\s+/g, '-')}-${todayISO()}.png`
       a.click()
     } catch { /* silent */ }
     setShareGenerating(false)

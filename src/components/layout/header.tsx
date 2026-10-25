@@ -200,8 +200,10 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
       </button>
       )}
       <LiveClock className="mr-1" />
-      <CommandPaletteTrigger className="hidden md:flex w-52 lg:w-64" />
-      <CommandPaletteTrigger className="md:hidden" isCollapsed={true} />
+      {/* Full search bar only at xl: below that the sidebar leaves too little
+          room for it beside a page's own actions, and the icon does the same job. */}
+      <CommandPaletteTrigger className="hidden xl:flex w-64" />
+      <CommandPaletteTrigger className="xl:hidden" isCollapsed={true} />
       
       <AppLauncherTrigger />
       {/* Toggles the app-wide comms widget on its Chat tab — the same surface
@@ -279,7 +281,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
       ref={ref}
       className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 pr-3 md:px-5 border-b border-border/80 bg-background/95 supports-[backdrop-filter]:bg-background/60 backdrop-blur-md sticky top-0 z-30 transition-all ${isEmployee ? 'pl-3 py-2 sm:pl-16 sm:py-3.5' : 'pl-3 sm:pl-16 py-2.5 sm:py-3.5'}`}
     >
-      <div className="flex items-center justify-between w-full sm:w-auto sm:flex-1 min-w-0 gap-2">
+      <div className="flex items-center justify-between w-full sm:w-auto sm:flex-1 min-w-0 sm:min-w-[10rem] gap-2">
         {/* Left: Branding & Title */}
         <div className="flex flex-col min-w-0 flex-1 justify-center">
           <Breadcrumbs isEmployee={isEmployee} crumbLabel={crumbLabel} />
@@ -306,7 +308,9 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
 
       {/* Local Actions (Bottom Row on Mobile, Middle on Desktop) */}
       {actions && (
-        <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar w-full sm:w-auto shrink-0 [&>*]:shrink-0 pb-1 sm:pb-0">
+        // sm:shrink + min-w-0: beside the title and global actions this row
+        // scrolls inside its own slot rather than widening the page.
+        <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar w-full sm:w-auto shrink-0 sm:shrink min-w-0 [&>*]:shrink-0 pb-1 sm:pb-0">
           {actions}
         </div>
       )}

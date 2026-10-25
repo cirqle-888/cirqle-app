@@ -43,6 +43,7 @@ import { normalizeGroupWeights } from '@/lib/contributions/weights'
 import { isDesktop, getReceiptSharePref, setReceiptSharePref, RECEIPT_SHARE_LABELS, RECEIPT_SHARE_HINTS, type ReceiptShareAction } from '@/lib/desktop'
 import { buildInvoiceShareText } from '@/lib/invoices/share'
 import { buildReminderText } from '@/lib/followups/grouping'
+import { todayISO } from '@/lib/utils/local-date'
 
 const AllocationRebuildPanel = dynamic(
   () => import('@/components/cashbook/allocation-rebuild-panel'),
@@ -815,7 +816,7 @@ export default function SettingsClient(props: Props) {
   async function saveRate(currency: Currency, rate: number) {
     const res = await upsertExchangeRate(currency, rate)
     if (!res.ok) return
-    const today = new Date().toISOString().slice(0, 10)
+    const today = todayISO()
     setRates(prev => {
       const existing = prev.find(r => r.currency === currency)
       if (existing) return prev.map(r => r.currency === currency
@@ -3085,7 +3086,7 @@ export default function SettingsClient(props: Props) {
                       type="date"
                       value={form.date_of_birth || ''}
                       onChange={e => setForm(p => ({ ...p, date_of_birth: e.target.value || null }))}
-                      max={new Date().toISOString().slice(0, 10)}
+                      max={todayISO()}
                       className={inputCls}
                     />
                   </FieldRow>

@@ -39,6 +39,12 @@ export interface JournalLine {
   amountInr: number
   description: string | null
   isTransfer: boolean
+  /**
+   * Set on a REVERSAL: the id of the entry whose money was returned. Same
+   * category, opposite sign, so signed sums (the P&L) net on their own; only
+   * one-sided aggregations need it (see tags.ts, reversedLineIds).
+   */
+  reversalOf?: string | null
   /** Tag names on this entry — only populated when fetched with includeTags. */
   tags?: string[]
 }

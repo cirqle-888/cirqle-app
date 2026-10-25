@@ -48,6 +48,7 @@ import {
   Link as LinkIcon, Highlighter, Palette, Smile, Eraser,
   AlignLeft, AlignCenter, AlignRight, CalendarRange, ChevronDown, Undo2,
 } from 'lucide-react'
+import { todayISO } from '@/lib/utils/local-date'
 
 // ─── Types (mirror the page's selects) ────────────────────────────────────────
 
@@ -317,7 +318,7 @@ export default function SocialCalendarClient({
         // An item that already became a linked task is delivered, not planned.
         promotedTaskId: it.request?.promoted_task?.id ?? null,
       })),
-      today: new Date().toISOString().slice(0, 10),
+      today: todayISO(),
     })
   }, [selected?.month, packages, packageTasks, items])
 
@@ -341,7 +342,7 @@ export default function SocialCalendarClient({
   // ── New-plan modal ──────────────────────────────────────────────────────────
   const [showNewPlan, setShowNewPlan] = useState(false)
   const [planForm, setPlanForm] = useState({
-    clientId: '', month: new Date().toISOString().slice(0, 7), title: '', notes: '',
+    clientId: '', month: todayISO().slice(0, 7), title: '', notes: '',
   })
   const [savingPlan, setSavingPlan] = useState(false)
 
@@ -745,7 +746,7 @@ export default function SocialCalendarClient({
     setSavingPlan(false)
     if (!res.ok || !res.data) { toast.toastError('Could not create the plan', res.error); return }
     setShowNewPlan(false)
-    setPlanForm({ clientId: '', month: new Date().toISOString().slice(0, 7), title: '', notes: '' })
+    setPlanForm({ clientId: '', month: todayISO().slice(0, 7), title: '', notes: '' })
     toast.success('Plan created')
     router.push(`/dashboard/social-calendar?calendar=${res.data.id}`)
     router.refresh()
@@ -1006,7 +1007,7 @@ export default function SocialCalendarClient({
               // Grouped by relevance, not creation order: what's being planned
               // now sits on top; finished months sink but stay one scroll away
               // (search still reaches everything flat).
-              const thisMonth = new Date().toISOString().slice(0, 7)
+              const thisMonth = todayISO().slice(0, 7)
               const key = (c: (typeof calendars)[number]) => c.month.slice(0, 7)
               const live = calendars.filter(c => c.status !== 'archived')
               return [

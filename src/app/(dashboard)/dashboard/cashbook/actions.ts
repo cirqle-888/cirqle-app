@@ -15,11 +15,12 @@ import { PERMS } from '@/lib/permissions/keys'
 import { fetchRates } from '@/lib/fx/sync'
 import { syncDraftInvoiceExpenses } from '@/lib/sync/integrity'
 import type { MarkupType } from '@/lib/finance/markup'
-import { recomputeCampaignBilling } from '@/lib/advertising/billing'
 import { logActivity } from '@/lib/activity/log'
-import { retryWithoutScope, withoutScope, retryWithoutMissingColumns, withoutKeys, type FinanceScope } from '@/lib/finance/classify'
+import { retryWithoutMissingColumns, withoutKeys, type FinanceScope } from '@/lib/finance/classify'
 import { computeEqualSplit } from '@/lib/finance/splits'
 import { todayISO } from '@/lib/utils/local-date'
+import { ENTRY_SELECT } from '@/lib/cashbook/entry-select'
+import { releaseEntryFunding } from '@/lib/cashbook/release-funding'
 
 const REVALIDATE = '/dashboard/cashbook'
 
@@ -28,29 +29,6 @@ interface ActionResult<T = void> {
   error?: string
   data?: T
 }
-
-// ─── Full entry select used for returning newly-created rows ──────────────────
-//
-// The allocation embeds NAME their relationship (`!cashbook_entry_id`). The
-// allocation tables also gained `released_by_entry_id`; while PostgREST sees a
-// second foreign key to cashbook_entries, an unhinted embed is ambiguous
-// (PGRST201) and the whole query fails — the Cash Book outage of 2026-10-16.
-// Every embed between cashbook_entries and an allocation table carries the
-// same hint, in both directions.
-
-const ENTRY_SELECT = `
-  *,
-  category:cashbook_categories(id, name, type),
-  bank_account:bank_accounts(id, name),
-  allocations:cashbook_invoice_allocations!cashbook_entry_id(
-    id, invoice_id, allocated_amount, deleted_at,
-    invoice:invoices(invoice_number, status, due_date, total_amount, paid_amount, client:clients(name))
-  ),
-  payroll_allocations:cashbook_payroll_allocations!cashbook_entry_id(
-    id, payroll_id, allocated_amount, deleted_at,
-    payroll:payroll(net_salary, status, employee:employees(name, cqid))
-  )
-`.trim()
 
 // ─── Insert cashbook entry (possibly recurring) ───────────────────────────────
 
@@ -503,43 +481,82 @@ export async function updateCashbookEntry(
 
 // ─── Soft-delete cashbook entry ───────────────────────────────────────────────
 
-export async function softDeleteCashbookEntry(id: string): Promise<ActionResult> {
+/**
+ * Soft-delete an entry, and everything that only makes sense alongside it:
+ *
+ *   · a TRANSFER leg takes its other leg with it — half a transfer is a
+ *     one-sided movement that no account statement contains;
+ *   · an entry that has been REVERSED takes its reversal with it — the two
+ *     record one payment and its return, and a reversal left on its own
+ *     would net against nothing;
+ *   · deleting a REVERSAL undoes it: the allocations it released go back on
+ *     the original's invoice / payslip.
+ *
+ * Payroll allocations are released here as well as by the database cascade
+ * (migration 20261016100000), so a deleted salary payment stops counting
+ * toward its payslip whether or not that migration has been applied.
+ *
+ * Returns every id that was deleted, so the list can drop all of them.
+ */
+export async function softDeleteCashbookEntry(id: string): Promise<ActionResult<{ deletedIds: string[] }>> {
   const guard = await requirePermission(PERMS.CASHBOOK_EDIT)
   if (!guard.ok) return { ok: false, error: guard.error }
 
   const admin = createAdminClient()
+  const { data: entry, error: loadErr } = await admin
+    .from('cashbook_entries').select('*').eq('id', id).maybeSingle()
+  if (loadErr) return { ok: false, error: loadErr.message }
+  if (!entry) return { ok: false, error: 'Entry not found' }
+  const row = entry as { id: string; transfer_ref?: string | null; reversal_of?: string | null }
+
+  // Everything going together, found BEFORE anything is written.
+  const ids = new Set<string>([row.id])
+  if (row.transfer_ref) {
+    const { data: legs } = await admin.from('cashbook_entries')
+      .select('id').eq('transfer_ref', row.transfer_ref).is('deleted_at', null)
+    for (const l of (legs ?? []) as { id: string }[]) ids.add(l.id)
+  }
+  // Pre-migration the column does not exist and this simply finds nothing.
+  const { data: reversals, error: revErr } = await admin.from('cashbook_entries')
+    .select('id').in('reversal_of', [...ids]).is('deleted_at', null)
+  if (!revErr) for (const r of (reversals ?? []) as { id: string }[]) ids.add(r.id)
+
+  const now = new Date().toISOString()
+  const idList = [...ids]
   const { error } = await admin
     .from('cashbook_entries')
-    .update({ deleted_at: new Date().toISOString() })
-    .eq('id', id)
+    .update({ deleted_at: now })
+    .in('id', idList)
+    .is('deleted_at', null)
   if (error) return { ok: false, error: error.message }
 
-  // Release any campaign fund allocations backed by this entry and re-derive
-  // the affected campaigns' billing (best-effort — table may not be migrated).
-  try {
-    const { data: allocs } = await admin
-      .from('ad_fund_allocations').select('id, ad_project_id')
-      .eq('cashbook_entry_id', id).is('deleted_at', null)
-    if (allocs && allocs.length > 0) {
-      await admin.from('ad_fund_allocations')
-        .update({ deleted_at: new Date().toISOString() })
-        .eq('cashbook_entry_id', id).is('deleted_at', null)
-      const projectIds = [...new Set(allocs.map((a: any) => a.ad_project_id as string))]
-      for (const pid of projectIds) await recomputeCampaignBilling(admin, pid)
-    }
-  } catch { /* ad_fund_allocations not migrated */ }
+  await admin.from('cashbook_payroll_allocations')
+    .update({ deleted_at: now })
+    .in('cashbook_entry_id', idList)
+    .is('deleted_at', null)
 
-  // Release wallet credits funded by this entry (ledger rows stay for audit).
-  // Campaign debits are left untouched — committed money is a finance decision;
-  // any resulting negative wallet balance surfaces on the Advertising dashboard.
-  try {
-    await admin.from('ad_wallet_ledger')
-      .update({ deleted_at: new Date().toISOString() })
-      .eq('cashbook_entry_id', id).eq('direction', 'credit').is('deleted_at', null)
-  } catch { /* ad_wallet_ledger not migrated */ }
+  // Undoing a reversal whose original stays: put back what it released.
+  if (row.reversal_of && !ids.has(row.reversal_of)) {
+    await restoreReleasedAllocations(admin, row.id)
+    await syncDraftInvoiceExpenses(row.reversal_of)
+  }
+
+  for (const entryId of idList) await releaseEntryFunding(admin, entryId)
 
   revalidatePath(REVALIDATE)
-  return { ok: true }
+  return { ok: true, data: { deletedIds: idList } }
+}
+
+/** Re-attach the allocations a reversal took off its original. */
+async function restoreReleasedAllocations(
+  admin: ReturnType<typeof createAdminClient>,
+  reversalId: string,
+): Promise<void> {
+  for (const table of ['cashbook_invoice_allocations', 'cashbook_payroll_allocations'] as const) {
+    await admin.from(table)
+      .update({ deleted_at: null, released_by_entry_id: null })
+      .eq('released_by_entry_id', reversalId)
+  }
 }
 
 // ─── Toggle Review Status ─────────────────────────────────────────────────────
@@ -715,71 +732,6 @@ export async function saveClientTags(
 
   revalidatePath(REVALIDATE)
   return { ok: true, data: { saved } }
-}
-
-// ─── Internal account transfer ───────────────────────────────────────────────
-
-export interface TransferPayload {
-  from_account_id: string
-  to_account_id: string
-  amount: number
-  entry_date: string
-  description: string
-}
-
-/**
- * Creates a matched pair of cashbook entries (outflow + inflow) linked by a
- * shared transfer_ref UUID. Both entries use INR, no category, no invoice.
- */
-export async function insertTransfer(
-  payload: TransferPayload,
-): Promise<ActionResult<{ outflow: any; inflow: any }>> {
-  const guard = await requirePermission(PERMS.CASHBOOK_EDIT)
-  if (!guard.ok) return { ok: false, error: guard.error }
-
-  const admin = createAdminClient()
-
-  // Look up account names for auto-generated descriptions.
-  const { data: accounts } = await admin
-    .from('bank_accounts')
-    .select('id, name')
-    .in('id', [payload.from_account_id, payload.to_account_id])
-  const nameOf = (id: string) => accounts?.find((a: any) => a.id === id)?.name ?? 'Account'
-
-  const transferRef = crypto.randomUUID()
-  const baseFields = {
-    amount: payload.amount,
-    currency: 'INR',
-    amount_inr: payload.amount,
-    exchange_rate: 1,
-    rate_source: 'manual',
-    rate_date: payload.entry_date,
-    entry_date: payload.entry_date,
-    transfer_ref: transferRef,
-    scope: 'company' as const,   // account-to-account moves are Cirqle's own books
-  }
-
-  const outflowDesc = payload.description || `Transfer to ${nameOf(payload.to_account_id)}`
-  const inflowDesc  = payload.description || `Transfer from ${nameOf(payload.from_account_id)}`
-
-  // No `created_by` on either leg — deliberately. It marks hand-typed cash-book
-  // rows for the per-entry ownership basis, and one transfer writes two rows
-  // that are neither income nor expense; attributing them would pay twice for
-  // one action. (The counting query also excludes `transfer_ref` rows.)
-  const outRow = { ...baseFields, type: 'outflow', bank_account_id: payload.from_account_id, description: outflowDesc }
-  const inRow  = { ...baseFields, type: 'inflow',  bank_account_id: payload.to_account_id,   description: inflowDesc }
-  const [outRes, inRes] = await Promise.all([
-    retryWithoutScope(strip =>
-      admin.from('cashbook_entries').insert(strip ? withoutScope(outRow) : outRow).select(ENTRY_SELECT).single()),
-    retryWithoutScope(strip =>
-      admin.from('cashbook_entries').insert(strip ? withoutScope(inRow) : inRow).select(ENTRY_SELECT).single()),
-  ])
-
-  if (outRes.error) return { ok: false, error: outRes.error.message }
-  if (inRes.error) return { ok: false, error: inRes.error.message }
-
-  revalidatePath(REVALIDATE)
-  return { ok: true, data: { outflow: outRes.data, inflow: inRes.data } }
 }
 
 // ─── Live FX rate sync ────────────────────────────────────────────────────────

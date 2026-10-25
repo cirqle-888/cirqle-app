@@ -53,3 +53,15 @@ describe('buildTagSpend', () => {
     expect(buildTagSpend([])).toEqual([])
   })
 })
+
+describe('buildTagSpend — returned payments', () => {
+  it('does not count an outflow whose money the bank returned', () => {
+    const paid = line({ id: 'paid', amountInr: -1200, tags: ['Photoshop'] })
+    const rows = buildTagSpend([
+      paid,
+      line({ amountInr: 1200, reversalOf: 'paid' }),
+      line({ amountInr: -500, tags: ['Photoshop'] }),
+    ])
+    expect(rows).toEqual([{ tag: 'Photoshop', totalInr: 500, entryCount: 1 }])
+  })
+})

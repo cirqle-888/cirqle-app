@@ -83,7 +83,7 @@ export default async function CashBookPage() {
   const [entriesRes, categoriesRes, bankAccountsRes, exchangeRatesRes, dueInvoicesRes, employeesRes, clientsRes, creditsRes, pendingPayrollsRes, companySettingsRes, tagsRes] = await Promise.all([
     fetchCashbookEntries(supabase),
     supabase.from('cashbook_categories').select('*').order('type').order('name'),
-    supabase.from('bank_accounts').select('id, name, type, is_active, is_default').order('name'),
+    supabase.from('bank_accounts').select('id, name, type, is_active, is_default, currency').order('name'),
     supabase.from('exchange_rates').select('*'),
     // GATED AT THE QUERY. These three lists feed the entry form's allocation
     // pickers and every one of them carries money that this page's own
@@ -149,6 +149,8 @@ export default async function CashBookPage() {
   // them), but the cushion would be silently dropped — so the form hides the
   // section rather than taking an answer it cannot keep.
   const markupAvailable = await columnExists(supabase, 'cashbook_entries', 'markup_type')
+  // Return / Reverse needs migration 20261016100000; until then it is not offered.
+  const reversalsAvailable = await columnExists(supabase, 'cashbook_entries', 'reversal_of')
 
   return (
     <CashBookClient
@@ -165,6 +167,7 @@ export default async function CashBookPage() {
       showAmounts={vis.cashbookAmounts}
       showTotals={vis.cashbookTotals}
       markupAvailable={markupAvailable}
+      reversalsAvailable={reversalsAvailable}
       canEditEntries={hasPermission(me, PERMS.CASHBOOK_EDIT)}
       allTags={((tagsRes as any)?.data || []).map((t: any) => t.name as string)}
     />

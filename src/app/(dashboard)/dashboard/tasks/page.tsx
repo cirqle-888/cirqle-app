@@ -13,6 +13,7 @@ import { getPendingPricing } from '@/lib/pricing/pending'
 import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
 import { composeRequestDescription, sanitizeCaptionCanvas } from '@/lib/social/plan'
 import TasksClient from './tasks-client'
+import { toISODate } from '@/lib/utils/local-date'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,7 +50,7 @@ const TASKS_HISTORY_MONTHS = Number(process.env.TASKS_HISTORY_MONTHS) || 12
 function historyCutoffISO(months: number): string {
   const d = new Date()
   d.setMonth(d.getMonth() - months)
-  return d.toISOString().slice(0, 10)
+  return toISODate(d)
 }
 
 // Supabase enforces a server-side max-rows cap (default 1,000) that overrides

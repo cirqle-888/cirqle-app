@@ -35,14 +35,15 @@ import {
   Plus, X, Package as PackageIcon, Pencil, Trash2, Pause, Play,
   CheckCircle2, AlertTriangle, ExternalLink, ChevronLeft, ChevronRight, Receipt,
 } from 'lucide-react'
+import { todayISO } from '@/lib/utils/local-date'
 
 const CURRENCIES = ['INR', 'AED', 'USD', 'SAR', 'QAR', 'GBP', 'EUR']
 
 const money = (cur: string, n: number) =>
   cur === 'INR' ? `₹${Math.round(n).toLocaleString('en-IN')}` : `${cur} ${Math.round(n).toLocaleString('en-US')}`
 
-const thisMonth = () => new Date().toISOString().slice(0, 7)
-const today = () => new Date().toISOString().slice(0, 10)
+const thisMonth = () => todayISO().slice(0, 7)
+const today = () => todayISO()
 
 /** "2026-08" → "Aug 2026". Named explicitly so "this month" is never ambiguous. */
 function monthLabel(month: string): string {

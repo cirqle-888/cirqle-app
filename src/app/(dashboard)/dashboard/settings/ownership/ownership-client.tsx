@@ -22,6 +22,7 @@ import { saveProgram, setProgramActive, deleteProgram, saveRule, deleteRule, pre
 import { rateLabel, BASIS_CHOICE_LABEL as BASIS_LABEL, PER_UNIT_BASES, PER_PERSON_UNIT } from '@/lib/ownership/format'
 import { PER_PERSON_BASES, ruleEmployees } from '@/lib/ownership/types'
 import { activityKindLabel } from '@/lib/ownership/activity-kinds'
+import { todayISO } from '@/lib/utils/local-date'
 
 /** One tickable activity in a program: a built-in kind or a logged action type. */
 interface ActivityOption { key: string; label: string; builtIn: boolean; count: number | null }
@@ -35,7 +36,7 @@ const SCOPE_LABEL: Record<OwnershipScopeKind, string> = {
 }
 
 const inr = (v: number) => `₹${Math.round(v).toLocaleString('en-IN')}`
-const today = () => new Date().toISOString().slice(0, 10)
+const today = () => todayISO()
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 const pad2 = (n: number) => String(n).padStart(2, '0')

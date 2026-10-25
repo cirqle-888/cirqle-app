@@ -52,8 +52,17 @@ export async function fetchEmployeeCostSplits(
     `)
   if (error) return []   // table not migrated yet, or transient — degrade quietly
 
+  // An expense the bank returned was not spent on anybody. Reversals carry no
+  // split of their own, so the original is simply left out. (Before migration
+  // 20261016100000 the column is missing, the query errors, and nothing is.)
+  const { data: revRows, error: revErr } = await admin
+    .from('cashbook_entries').select('reversal_of')
+    .not('reversal_of', 'is', null).is('deleted_at', null)
+  const reversed = new Set<string>(revErr ? [] : (revRows || []).map((r: any) => r.reversal_of as string))
+
   return (data || [])
     .filter((r: any) => r.entry && !r.entry.deleted_at && r.employee?.id)
+    .filter((r: any) => !reversed.has(r.entry.id))
     // A COST is money spent ON somebody. An advance is money lent TO them:
     // it is not spent, it comes back, and the `financial` and `excluded`
     // sections are exactly where the ledger keeps things that are not

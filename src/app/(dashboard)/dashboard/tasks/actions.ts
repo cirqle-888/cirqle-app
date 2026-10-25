@@ -15,7 +15,7 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission, requireAnyReadPermission } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
 import { PERMS } from '@/lib/permissions/keys'
 import { revalidatePath } from 'next/cache'
@@ -547,6 +547,10 @@ export async function fetchClientPackages(
   clientId: string | null,
   taskDate: string | null,
 ): Promise<PackageOption[]> {
+  // A server action is callable by anyone who can reach the app; without this
+  // it handed any caller any client's package pricing (audit 2026-10-23).
+  const guard = await requireAnyReadPermission([PERMS.TASKS_CREATE, PERMS.TASKS_EDIT])
+  if (!guard.ok) return []
   const admin = createAdminClient()
   return activePackagesForClient(admin, clientId, taskDate)
 }

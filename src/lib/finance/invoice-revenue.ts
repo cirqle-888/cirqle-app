@@ -80,6 +80,18 @@ export function discountGiven(inv: RevenueInvoice, loggedTotal?: number): number
   return Math.max(fromLogs, Number(inv.discount_amount ?? 0))
 }
 
+/** Sent to the client and not yet settled, written off or cancelled. */
+export const OPEN_STATUSES = ['sent', 'partial', 'overdue']
+
+/**
+ * What the client still owes on this invoice, in INR. Zero unless it is open:
+ * a draft is not owed yet, a written-off or cancelled one no longer is.
+ */
+export function outstandingAmount(inv: RevenueInvoice): number {
+  if (!OPEN_STATUSES.includes(inv.status)) return 0
+  return Math.max(0, billedOf(inv) - paidOf(inv))
+}
+
 /** Cash actually received, including partial recoveries on written-off invoices. */
 export function collectedAmount(inv: RevenueInvoice): number {
   if (inv.status === CANCELLED_STATUS) return 0

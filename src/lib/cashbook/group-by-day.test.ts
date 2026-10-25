@@ -129,3 +129,26 @@ describe('dayGroupLabel', () => {
     expect(dayGroupLabel('2026-13-99')).toBe('2026-13-99')
   })
 })
+
+describe('groupByDay — cash-flow contribution', () => {
+  interface FlowRow extends Row { transfer_ref?: string | null; reversal_of?: string | null }
+
+  it('lists transfer legs but leaves them out of the day totals, and nets reversals', async () => {
+    const { cashFlowContribution } = await import('@/lib/finance/cash-flow')
+    const rows: FlowRow[] = [
+      { ...row('t-out', '2026-10-09', 50000), transfer_ref: 't' },
+      { ...row('t-in', '2026-10-09', 50000, 'inflow'), transfer_ref: 't' },
+      row('sal', '2026-10-09', 5353),
+      { ...row('sal-back', '2026-10-09', 5353, 'inflow'), reversal_of: 'sal' },
+      row('fee', '2026-10-09', 3),
+    ]
+    const [day] = groupByDay(rows, {
+      ...fields,
+      contribution: r => cashFlowContribution({ type: r.type, amount_inr: r.amount, transfer_ref: r.transfer_ref, reversal_of: r.reversal_of }),
+    })
+    expect(day.rows).toHaveLength(5)
+    expect(day.inflow).toBe(0)
+    expect(day.outflow).toBe(3)
+    expect(day.net).toBe(-3)
+  })
+})

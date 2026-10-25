@@ -25,6 +25,7 @@ import {
   saveCriterion, removeCriterion, createAssessment, saveScores,
   finalizeAssessment, reopenAssessment, deleteAssessment, applyToEmployee,
 } from '@/lib/performance/actions'
+import { todayISO } from '@/lib/utils/local-date'
 
 interface ScoreRow { assessment_id: string; criteria_id: string; value: number }
 
@@ -50,7 +51,7 @@ export default function PerformanceClient({
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [busy, setBusy] = useState(false)
   const [confirm, setConfirm] = useState<'finalize' | 'delete' | 'apply' | null>(null)
-  const [applyDate, setApplyDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [applyDate, setApplyDate] = useState(() => todayISO())
 
   // subject picker
   const [subject, setSubject] = useState('')       // "e:<id>" | "a:<id>"

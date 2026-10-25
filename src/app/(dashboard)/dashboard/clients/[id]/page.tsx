@@ -43,7 +43,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const [invoicesRes, tasksRes, pricingRes, servicesRes, partnerRes, socialRes] = await Promise.all([
     showAmounts
       ? fetchAll(supabase.from('invoices')
-          .select('id, invoice_number, status, total_amount, paid_amount, issue_date, due_date, created_at')
+          .select('id, invoice_number, status, total_amount, paid_amount, total_amount_inr, paid_amount_inr, issue_date, due_date, created_at')
           .eq('client_id', id).order('created_at', { ascending: false }))
       : Promise.resolve({ data: [] as any[] }),
     supabase.from('tasks')

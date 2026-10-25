@@ -344,12 +344,15 @@ export default function AccountsClient({ entries, accounts, isAdmin }: Props) {
                       {isOpen && (
                         <div className="overflow-x-auto">
                           <table className="w-full text-sm border-collapse">
+                            {/* Date · Description (flex) · Category · Amount · Running balance.
+                                Comments stay outside: the spaces before them become
+                                text nodes inside <colgroup>, which is a hydration error. */}
                             <colgroup>
-                              <col className="w-[110px]" />   {/* Date */}
-                              <col />                          {/* Description — flex */}
-                              <col className="w-[150px]" />   {/* Category */}
-                              <col className="w-[130px]" />   {/* Amount */}
-                              <col className="w-[140px]" />   {/* Running balance */}
+                              <col className="w-[110px]" />
+                              <col />
+                              <col className="w-[150px]" />
+                              <col className="w-[130px]" />
+                              <col className="w-[140px]" />
                             </colgroup>
                             <thead>
                               <tr className="border-b border-border/60 bg-secondary/15">

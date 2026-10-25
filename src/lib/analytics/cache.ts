@@ -175,7 +175,9 @@ export async function getHistoricalEarnings(
 
   const load = unstable_cache(
     async () => loadHistoricalEarnings(fromMonth, beforeMonth, daysFrom),
-    ['analytics-earnings', fromMonth, beforeMonth, daysFrom],
+    // v2: totals cached before deleted/cancelled tasks were excluded are wrong
+    // for up to a day; a new key drops them at once.
+    ['analytics-earnings-v2', fromMonth, beforeMonth, daysFrom],
     {
       revalidate: ANALYTICS_TTL_SECONDS,
       tags: [ANALYTICS_TAG, ...months.map(analyticsMonthTag)],
@@ -200,6 +202,11 @@ export async function loadHistoricalEarnings(
     .select('employee_id, score_percentage, earnings_inr, task:tasks!inner(id, quantity, task_date)')
     .gte('tasks.task_date', `${fromMonth}-01`)
     .lt('tasks.task_date', `${beforeMonth}-01`)
+    // Same rule as the task counts beside it: a deleted or cancelled task is
+    // not work done. Without this each person was credited a task, a creative
+    // and its earnings for work that had been trashed (audit 2026-10-24).
+    .is('tasks.deleted_at', null)
+    .not('tasks.status', 'eq', 'cancelled')
     // Newest first: `dedupeScores` keeps the first row it sees per
     // (employee, task), which must be the most recent calculation.
     .order('calculated_at', { ascending: false })

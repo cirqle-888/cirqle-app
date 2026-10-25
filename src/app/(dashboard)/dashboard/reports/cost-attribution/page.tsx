@@ -6,6 +6,7 @@ import { fetchJournalLines } from '@/lib/finance/journal'
 import { buildTagSpend } from '@/lib/finance/tags'
 import { fetchEmployeeCostSplits, buildEmployeeCostReport } from '@/lib/finance/employee-costs'
 import { Tag, Users } from 'lucide-react'
+import { monthStartISO } from '@/lib/utils/local-date'
 
 // Live financials — always read fresh.
 export const dynamic = 'force-dynamic'
@@ -43,9 +44,8 @@ export default async function CostAttributionPage({
   const windowMonths = Math.min(24, Math.max(1, parseInt(String(sp?.months ?? '6'), 10) || 6))
 
   const admin = createAdminClient()
-  const now = new Date()
-  const from = new Date(now.getFullYear(), now.getMonth() - (windowMonths - 1), 1)
-    .toISOString().slice(0, 10)
+  // India calendar: a local-midnight Date through toISOString is the day before.
+  const from = monthStartISO(-(windowMonths - 1))
 
   const [taggedLines, employeeSplits] = await Promise.all([
     fetchJournalLines(admin, { from, includeTags: true }),

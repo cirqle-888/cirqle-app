@@ -26,6 +26,7 @@ import {
 import { addDays } from '@/lib/profit-sharing/capital'
 import type { ReviewCategory } from '@/lib/profit-sharing/types'
 import { done, fail, guard, isDate, money, text, type Result } from './_shared'
+import { todayISO } from '@/lib/utils/local-date'
 
 // ═══ Members ════════════════════════════════════════════════════════════════
 
@@ -541,7 +542,7 @@ export async function deleteDraftRun(runId: string): Promise<Result> {
 
 /** Cash available right now (D13 recheck): the books up to today, every obligation, the reserve. */
 async function cashAvailableNow(admin: Admin, state: ModuleState): Promise<number> {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayISO()
   const input = await loadRunInput(admin, state, {
     id: 'now', periodStart: `${today.slice(0, 7)}-01`, periodEnd: today, openingLossInr: 0, openingLossEntered: true,
   })

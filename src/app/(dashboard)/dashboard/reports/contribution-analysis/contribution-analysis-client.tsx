@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { savePersonalReportLayout, saveSystemReportLayout } from './actions'
 import { readSortData, trackUsage, type SortEntry } from '@/lib/hooks/use-smart-sort'
+import { todayISO } from '@/lib/utils/local-date'
 
 // Persisted layout shape (stored as JSONB). All fields optional so older/newer
 // saved layouts stay forward-compatible. The index signature both allows future
@@ -930,7 +931,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = `contribution-analysis-${new Date().toISOString().slice(0, 10)}.csv`
+    a.download = `contribution-analysis-${todayISO()}.csv`
     a.click()
     URL.revokeObjectURL(a.href)
   }, [buildExportMatrix])
@@ -942,7 +943,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
       const ws = XLSX.utils.aoa_to_sheet(buildExportMatrix())
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, ws, 'Contribution Analysis')
-      XLSX.writeFile(wb, `contribution-analysis-${new Date().toISOString().slice(0, 10)}.xlsx`)
+      XLSX.writeFile(wb, `contribution-analysis-${todayISO()}.xlsx`)
     } finally {
       setExporting(false)
     }

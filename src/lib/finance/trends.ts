@@ -15,7 +15,11 @@ export type TrendGranularity = 'day' | 'month'
 
 export interface PeriodRange { from: string; to: string }   // inclusive bounds
 
-export interface TrendCashPoint { date: string; type: 'inflow' | 'outflow'; amountInr: number }
+export interface TrendCashPoint {
+  date: string; type: 'inflow' | 'outflow'; amountInr: number
+  /** Moves the bank balance but is not income or spending (credit, capital, drawings). */
+  balanceOnly?: boolean
+}
 /**
  * `valueInr` is the task's billing_amount_inr — already the TOTAL for the task,
  * never a unit price. Every other dashboard aggregation sums it raw (see
@@ -23,7 +27,11 @@ export interface TrendCashPoint { date: string; type: 'inflow' | 'outflow'; amou
  * disagree with "Total Billed" on the same screen. Optional: absent means 0,
  * which keeps callers that only track counts working unchanged.
  */
-export interface TrendTaskPoint { date: string; valueInr?: number }
+export interface TrendTaskPoint {
+  date: string; valueInr?: number
+  /** How many jobs this point stands for — a day total carries the day's count. Default 1. */
+  count?: number
+}
 
 export interface TrendBucket {
   key: string          // YYYY-MM-DD (day) or YYYY-MM (month)
@@ -183,6 +191,7 @@ export function buildTrendSeries(
   }]))
 
   let opening = 0
+  const balanceOnly = new Map<string, number>()
   for (const c of inputs.cash) {
     if (!c.date) continue
     const signed = c.type === 'inflow' ? c.amountInr : -c.amountInr
@@ -190,7 +199,8 @@ export function buildTrendSeries(
     if (c.date > period.to) continue
     const b = index.get(keyOf(c.date, granularity))
     if (!b) continue
-    if (c.type === 'inflow') b.inflowInr = r2(b.inflowInr + c.amountInr)
+    if (c.balanceOnly) balanceOnly.set(b.key, (balanceOnly.get(b.key) ?? 0) + signed)
+    else if (c.type === 'inflow') b.inflowInr = r2(b.inflowInr + c.amountInr)
     else b.outflowInr = r2(b.outflowInr + c.amountInr)
   }
 
@@ -198,7 +208,7 @@ export function buildTrendSeries(
     if (!t.date || t.date < period.from || t.date > period.to) continue
     const b = index.get(keyOf(t.date, granularity))
     if (!b) continue
-    b.jobs += 1
+    b.jobs += t.count ?? 1
     // Counted on the SAME pass as the job itself, so the two series can never
     // disagree about which tasks are in a bucket.
     b.jobValueInr = r2(b.jobValueInr + (Number(t.valueInr) || 0))
@@ -207,7 +217,7 @@ export function buildTrendSeries(
   let running = r2(opening)
   for (const k of keys) {
     const b = index.get(k)!
-    running = r2(running + b.inflowInr - b.outflowInr)
+    running = r2(running + b.inflowInr - b.outflowInr + (balanceOnly.get(k) ?? 0))
     b.balanceInr = running
   }
   return keys.map(k => index.get(k)!)

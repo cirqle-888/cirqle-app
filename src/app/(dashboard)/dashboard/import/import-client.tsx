@@ -1145,7 +1145,7 @@ export default function ImportClient({ clients, services, employees, groups, par
       const pct        = g(iPct)
       const total      = g(iTotal)
       const reason     = g(iReason)
-      const discountDate = normalizeDate(g(iDate)) || new Date().toISOString().slice(0, 10)
+      const discountDate = normalizeDate(g(iDate)) || todayISO()
 
       // Resolve invoice_id (optional)
       const isUUID = /^[0-9a-f-]{36}$/i.test(invoiceRef)

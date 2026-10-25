@@ -14,6 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import type { AutoMetric, AutoResult } from './types'
 import { toISODate } from '@/lib/utils/local-date'
+import { fetchAll, fetchAllIn } from '@/lib/supabase/server'
 
 /** Relative weights of each metric inside the composite (re-normalized over available ones). */
 const WEIGHTS: Record<string, number> = {
@@ -53,24 +54,29 @@ export async function computeAutoForEmployees(
   since.setMonth(since.getMonth() - WINDOW_MONTHS)
   const sinceDate =toISODate( since)
 
-  const [tasksRes, scoresRes, requestsRes, revisionsRes] = await Promise.all([
-    admin.from('tasks')
-      .select('id, status, variant_type, deleted_at')
-      .gte('task_date', sinceDate)
-      .is('deleted_at', null)
-      .then(r => r, () => ({ data: null })),
-    admin.from('contribution_scores')
-      .select('employee_id, task_id, score_percentage')
-      .then(r => r, () => ({ data: null })),
-    admin.from('task_requests')
+  // Every read is paged: PostgREST stops at 1,000 rows, and contribution_scores
+  // alone holds 5,597 — unpaged, the ratings came from an arbitrary thousand
+  // (audit 2026-10-23). Scores are read for the window's tasks only.
+  const tasksRes = await fetchAll(admin.from('tasks')
+    .select('id, status, variant_type, deleted_at')
+    .gte('task_date', sinceDate)
+    .is('deleted_at', null)
+    .order('id')).catch(() => ({ data: null }))
+  const windowTaskIds = ((tasksRes.data ?? []) as TaskRow[]).map(t => t.id)
+  const [scoresRes, requestsRes, revisionsRes] = await Promise.all([
+    fetchAllIn(ids => admin.from('contribution_scores')
+      .select('id, employee_id, task_id, score_percentage')
+      .in('task_id', ids)
+      .order('id'), windowTaskIds).catch(() => ({ data: null })),
+    fetchAll(admin.from('task_requests')
       .select('assigned_employee_id, due_date, status, status_updated_at')
       .not('assigned_employee_id', 'is', null)
       .gte('created_at', since.toISOString())
-      .then(r => r, () => ({ data: null })),
-    admin.from('request_revisions')
+      .order('id')).catch(() => ({ data: null })),
+    fetchAll(admin.from('request_revisions')
       .select('id, task_requests!inner(assigned_employee_id, created_at)')
       .gte('task_requests.created_at', since.toISOString())
-      .then(r => r, () => ({ data: null })),
+      .order('id')).catch(() => ({ data: null })),
   ])
 
   const tasks = new Map<string, TaskRow>(((tasksRes.data ?? []) as TaskRow[]).map(t => [t.id, t]))

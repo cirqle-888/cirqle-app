@@ -8,10 +8,13 @@ import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { insertCashbookEntries, updateCashbookEntry, softDeleteCashbookEntry, fetchLiveRate, toggleCashbookEntryReview } from './actions'
+import { cashFlowContribution, cashFlowTotals } from '@/lib/finance/cash-flow'
+import { indexTransfers, partnerLeg, transferLabel, legDescription, findTransferCounterparts, transferFxDifference } from '@/lib/cashbook/transfers'
+import { reverseBlocker, reversedIdsOf } from '@/lib/cashbook/reversal'
 import { SCOPE_FILTER_OPTIONS, matchesScopeFilter, getScopeFilterLabel, type ScopeFilterValue } from '@/components/ui/scope-filter'
 import { formatCompact, round2 } from '@/lib/calculations/currency'
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
-import { Plus, X, TrendingUp, TrendingDown, Minus, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, Landmark, CheckCircle, ArrowLeftRight, Copy, Users, Sparkles, ChevronDown, Repeat, ArrowUpRight, CalendarDays } from 'lucide-react'
+import { Plus, X, TrendingUp, TrendingDown, Minus, ShieldAlert, Trash2, Edit2, Link as LinkIcon, Save, Receipt, Landmark, CheckCircle, ArrowLeftRight, Copy, Users, Sparkles, ChevronDown, Repeat, ArrowUpRight, CalendarDays, Undo2 } from 'lucide-react'
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
 import { SavedViews } from '@/components/ui/saved-views'
 import { useScrollRestore } from '@/lib/lists/use-scroll-restore'
@@ -36,7 +39,7 @@ import { useCreateShortcut } from '@/lib/hooks/use-create-shortcut'
 import type { ReceiptInput } from '@/components/cashbook/receipt-modal'
 
 import Link from 'next/link'
-import { todayISO, formatISODateShort } from '@/lib/utils/local-date'
+import { formatISODateShort, todayISO } from '@/lib/utils/local-date'
 import { computeMarkup, markupLabel, type MarkupType } from '@/lib/finance/markup'
 import { suggestEntryDescription } from '@/lib/cashbook/describe-entry'
 
@@ -54,6 +57,14 @@ const PayrollAllocationModal = dynamic(
 // inflow entry. Lazy-loaded so jspdf stays out of the main bundle.
 const ReceiptModal = dynamic(
   () => import('@/components/cashbook/receipt-modal'),
+  { ssr: false },
+)
+const ReverseEntryModal = dynamic(
+  () => import('@/components/cashbook/reverse-entry-modal'),
+  { ssr: false },
+)
+const ConvertTransferModal = dynamic(
+  () => import('@/components/cashbook/convert-transfer-modal'),
   { ssr: false },
 )
 const TransferModal = dynamic(
@@ -89,6 +100,8 @@ interface Entry {
   rate_source?: string
   receipt_number?: string | null
   transfer_ref?: string | null
+  /** Set on a reversal: the entry whose money the bank returned. */
+  reversal_of?: string | null
   deleted_at?: string | null
   category?: { id: string; name: string; type: string }
   bank_account?: { id: string; name: string }
@@ -233,13 +246,15 @@ interface Props {
   markupAvailable: boolean
   /** `cashbook.edit` — may create or change entries. */
   canEditEntries: boolean
+  /** Migration 20261016100000 applied — Return / Reverse is offered. */
+  reversalsAvailable?: boolean
   /** All known tag names, for the TagPicker's autocomplete. */
   allTags: string[]
 }
 
 const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 
-export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts, showTotals, markupAvailable, canEditEntries, allTags }: Props) {
+export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts, showTotals, markupAvailable, canEditEntries, allTags, reversalsAvailable = false }: Props) {
   // Coming back from a record lands where the list was left, not at the top.
   // See lib/lists/scroll-restore for the rules.
   useScrollRestore('cashbook')
@@ -253,9 +268,19 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const maskEmployee = (e: { name?: string | null; cqid?: string | null } | null | undefined) =>
     displayEmployee({ name: e?.name ?? '', cqid: e?.cqid ?? '' }, { revealNames, canReveal: true })
   const [entries, setEntries] = useState<Entry[]>(initialEntries)
+  // transfer_ref → both legs, and the ids whose money came back. From ALL
+  // loaded entries, so a leg's partner is found even when filtered out.
+  const transferIndex = useMemo(() => indexTransfers(entries), [entries])
+  const reversedIds = useMemo(() => reversedIdsOf(entries), [entries])
   const [showForm, setShowForm] = useState(false)
   useCreateShortcut(canEditEntries && !permissionUser.isViewAs, () => setShowForm(true))
   const [showTransfer, setShowTransfer] = useState(false)
+  // Editing a transfer edits BOTH legs, in the transfer form — never one leg
+  // in the ordinary entry form.
+  const [editingTransfer, setEditingTransfer] = useState<Entry | null>(null)
+  const [transferPrefill, setTransferPrefill] = useState<{ outflow: Entry | null; inflow: Entry | null } | null>(null)
+  const [reversingEntry, setReversingEntry] = useState<Entry | null>(null)
+  const [convertingEntry, setConvertingEntry] = useState<Entry | null>(null)
   const [formEditingId, setFormEditingId] = useState<string | null>(null)   // non-null = editing existing
   const [saving, setSaving] = useState(false)
   const router = useRouter()
@@ -452,6 +477,16 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
   /** Open the Add form pre-filled from an existing entry but dated today (duplicate). */
   function openDuplicateForm(entry: Entry) {
+    // A transfer leg duplicates as a new TRANSFER (both legs), dated today.
+    if (entry.transfer_ref) {
+      const legs = transferIndex.get(entry.transfer_ref) ?? []
+      setTransferPrefill({
+        outflow: legs.find(l => l.type === 'outflow') ?? null,
+        inflow: legs.find(l => l.type === 'inflow') ?? null,
+      })
+      setShowTransfer(true)
+      return
+    }
     const cur = (entry.currency as Currency) ?? 'INR'
     const storedRate = entry.exchange_rate ?? (cur === 'INR' ? 1 : (rateMap[cur] || 1))
     setForm({
@@ -463,7 +498,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       rate:            cur === 'INR' ? '1' : String(storedRate),
       amountInr:       entry.amount_inr != null ? String(entry.amount_inr) : '',
       rateSource:      (entry.rate_source as RateSource) ?? (cur === 'INR' ? 'manual' : 'settings'),
-      entry_date:      new Date().toISOString().slice(0, 10),
+      entry_date:      todayISO(),
       description:     entry.description ?? '',
       reference:       '',
       allocations:     [],
@@ -488,6 +523,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
   /** Open the full Add/Edit form pre-filled with an existing entry's data. */
   function openEditForm(entry: Entry) {
+    // One leg is never edited alone: the transfer form rewrites both.
+    if (entry.transfer_ref) { setEditingTransfer(entry); return }
     const cur = (entry.currency as Currency) ?? 'INR'
     const storedRate = entry.exchange_rate ?? (cur === 'INR' ? 1 : (rateMap[cur] || 1))
     setForm({
@@ -499,7 +536,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       rate:            cur === 'INR' ? '1' : String(storedRate),
       amountInr:       entry.amount_inr != null ? String(entry.amount_inr) : '',
       rateSource:      (entry.rate_source as RateSource) ?? (cur === 'INR' ? 'manual' : 'settings'),
-      entry_date:      entry.entry_date ?? new Date().toISOString().slice(0, 10),
+      entry_date:      entry.entry_date ?? todayISO(),
       description:     entry.description ?? '',
       reference:       entry.reference ?? '',
       // Allocations are NOT edited here — updateCashbookEntry never touched
@@ -825,10 +862,103 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   async function handleSoftDelete(entryId: string) {
     const result = await softDeleteCashbookEntry(entryId)
     if (result.ok) {
-      // Remove from local list immediately (soft-deleted entries are hidden)
-      setEntries(prev => prev.filter(e => e.id !== entryId))
+      // Remove from local list immediately (soft-deleted entries are hidden).
+      // Linked rows go too: a transfer's other leg, or an entry's reversal.
+      const gone = new Set(result.data?.deletedIds ?? [entryId])
+      setEntries(prev => prev.filter(e => !gone.has(e.id)))
+      // Undoing a reversal re-attaches the original's allocations server-side.
+      if (entries.some(e => gone.has(e.id) && e.reversal_of)) router.refresh()
+    } else {
+      alert(result.error || 'Failed to delete entry')
     }
   }
+
+  /** What the delete confirmation must say for this entry. */
+  function deleteConfirmCopy(entryId: string): { title: string; body: string; label: string } {
+    const entry = entries.find(e => e.id === entryId)
+    const restore = 'It can be restored from the Reconciliation Toolkit.'
+    if (entry?.transfer_ref) {
+      return {
+        title: 'Delete this transfer?',
+        body: `${transferLabel(entry, transferIndex)}. Both legs are deleted together — one leg on its own would be money appearing or vanishing in one account. ${restore}`,
+        label: 'Delete both legs',
+      }
+    }
+    if (entry?.reversal_of) {
+      return {
+        title: 'Delete this return?',
+        body: 'This undoes the return: the original payment counts again, and any invoice or payslip it was allocated to is paid again.',
+        label: 'Delete return',
+      }
+    }
+    if (entry && reversedIds.has(entry.id)) {
+      return {
+        title: 'Delete this entry and its return?',
+        body: `This entry was returned by the bank. The return is deleted with it. ${restore}`,
+        label: 'Delete both',
+      }
+    }
+    return { title: 'Delete this entry?', body: `The entry is hidden from the Cash Book and its balances. ${restore}`, label: 'Delete entry' }
+  }
+
+  /** Category column: a transfer reads as its route, never as a category. */
+  const categoryText = (e: Entry) => e.transfer_ref ? transferLabel(e, transferIndex) : (e.category?.name || '—')
+  /** The description, minus the "Transfer to X" a note-less transfer leg is given. */
+  const descriptionText = (e: Entry) => {
+    if (!e.transfer_ref) return e.description || ''
+    const partner = partnerLeg(e, transferIndex)
+    return e.description === legDescription(e.type, partner?.bank_account?.name || '') ? '' : (e.description || '')
+  }
+
+  // Entries with a same-day, same-amount opposite entry on another account —
+  // legacy transfers typed in as two entries. Bucketed so the list does not
+  // compare every entry with every other on each render.
+  const convertibleIds = useMemo(() => {
+    const ids = new Set<string>()
+    const buckets = new Map<string, Entry[]>()
+    for (const e of entries) {
+      if (e.transfer_ref || e.reversal_of || !e.bank_account_id) continue
+      const key = `${e.entry_date}|${round2(e.amount_inr ?? 0)}`
+      buckets.set(key, [...(buckets.get(key) ?? []), e])
+    }
+    for (const rows of buckets.values()) {
+      if (rows.length < 2) continue
+      for (const e of rows) if (findTransferCounterparts(e, rows, reversedIds).length > 0) ids.add(e.id)
+    }
+    return ids
+  }, [entries, reversedIds])
+
+  const accountCodeOf = (e: Entry) =>
+    (categories.find((c: any) => c.id === e.category_id) as { account_code?: string | null } | undefined)?.account_code ?? null
+  const canReverse = (e: Entry) =>
+    reversalsAvailable && reverseBlocker(e as any, { reversedIds, accountCode: accountCodeOf(e) }) == null
+
+  /** "Reversed" — on the returned payment and on its return. */
+  const reversalBadge = (e: Entry, size: 'xs' | 'sm' = 'xs') => {
+    if (!e.reversal_of && !reversedIds.has(e.id)) return null
+    const title = e.reversal_of ? 'This entry records money the bank returned' : 'The bank returned this payment — see the linked return'
+    return (
+      <span title={title} className={`inline-flex items-center gap-1 bg-orange-500/10 text-orange-500 ${size === 'xs' ? 'text-[9px]' : 'text-[10px]'} px-1.5 py-0.5 rounded font-medium`}>
+        <Undo2 className={size === 'xs' ? 'w-2.5 h-2.5' : 'w-3 h-3'} />Reversed
+      </span>
+    )
+  }
+
+  /** Return / Reverse and Convert to transfer, shown only where they apply. */
+  const extraRowActions = (e: Entry, cls: string) => (
+    <>
+      {canReverse(e) && (
+        <button onClick={() => setReversingEntry(e)} className={`${cls} p-1.5 rounded-md hover:bg-orange-500/10 text-muted-foreground hover:text-orange-500`} title="Return / Reverse — the bank returned this money">
+          <Undo2 className="w-3.5 h-3.5" />
+        </button>
+      )}
+      {convertibleIds.has(e.id) && (
+        <button onClick={() => setConvertingEntry(e)} className={`${cls} p-1.5 rounded-md hover:bg-purple-500/10 text-muted-foreground hover:text-purple-400`} title="Convert to transfer — pair with the matching entry on another account">
+          <ArrowLeftRight className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </>
+  )
 
   const today = todayISO()
   // Pending invoices for the Invoice picker — narrowed to a single client when
@@ -1113,6 +1243,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     // means nothing.
     amount: e => e.amount_inr ?? e.amount ?? 0,
     isInflow: e => e.type === 'inflow',
+    // In / out, not movement: a transfer is neither, a return nets against
+    // what it returns (lib/finance/cash-flow).
+    contribution: e => cashFlowContribution({ ...e, amount_inr: e.amount_inr ?? e.amount ?? 0 }),
   }), [filteredEntries])
 
   /**
@@ -1172,9 +1305,24 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     setFilterMinAmount(''); setFilterMaxAmount(''); setFilterTags([])
   }
 
-  const totalInflow  = filteredEntries.filter(e => e.type === 'inflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
-  const totalOutflow = filteredEntries.filter(e => e.type === 'outflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
-  const net = totalInflow - totalOutflow
+  // Internal transfers are neither income nor expense, and a returned
+  // payment reduces the side it came from — see lib/finance/cash-flow.
+  const { inflow: totalInflow, outflow: totalOutflow, net } = cashFlowTotals(filteredEntries)
+
+
+  // Cross-currency transfers: the INR gap between what left and what arrived
+  // is FX, keyed by the OUTFLOW leg (one figure per transfer).
+  const transferFxByOutflowId = useMemo(() => {
+    const map = new Map<string, { diff: number; outflow: Entry; inflow: Entry }>()
+    for (const legs of transferIndex.values()) {
+      const outflow = legs.find(l => l.type === 'outflow')
+      const inflow = legs.find(l => l.type === 'inflow')
+      if (!outflow || !inflow || (outflow.currency || 'INR') === (inflow.currency || 'INR')) continue
+      const diff = transferFxDifference([outflow, inflow])
+      if (Math.abs(diff) >= 0.005) map.set(outflow.id, { diff, outflow, inflow })
+    }
+    return map
+  }, [transferIndex])
 
   // Per-account balances — computed from ALL (non-deleted) entries (not filtered)
   // so the balance is always the true running total regardless of active filters.
@@ -1185,13 +1333,17 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   // Negative = net loss.
   const realisedFxGainLoss = useMemo(() =>
     filteredEntries
-      .filter(e => e.type === 'inflow' && e.currency !== 'INR' && (e.amount ?? 0) > 0 && (e.amount_inr ?? 0) > 0)
+      .filter(e => e.type === 'inflow' && e.currency !== 'INR' && (e.amount ?? 0) > 0 && (e.amount_inr ?? 0) > 0
+        // Not a receipt: a transfer leg (its FX is added below), a returned
+        // payment, or a receipt the bank sent back.
+        && !e.transfer_ref && !e.reversal_of && !reversedIds.has(e.id))
       .reduce((sum, e) => {
         const bookRate = bookRateForEntry(e)   // frozen (invoice → entry), never live
         if (!bookRate) return sum
         return round2(sum + round2((e.amount_inr ?? 0) - round2((e.amount ?? 0) * bookRate)))
-      }, 0),
-    [filteredEntries, bookRateForEntry],
+      }, 0)
+      + filteredEntries.reduce((sum, e) => round2(sum + (transferFxByOutflowId.get(e.id)?.diff ?? 0)), 0),
+    [filteredEntries, bookRateForEntry, reversedIds, transferFxByOutflowId],
   )
 
   // ── FX Gain/Loss by period ────────────────────────────────────────────────────
@@ -1238,7 +1390,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         e.currency !== 'INR' &&
         (e.amount ?? 0) > 0 &&
         (e.amount_inr ?? 0) > 0 &&
-        !e.deleted_at,
+        !e.deleted_at &&
+        !e.transfer_ref && !e.reversal_of && !reversedIds.has(e.id),
       )
       .forEach(e => {
         const actualInr  = e.amount_inr ?? 0
@@ -1281,13 +1434,36 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         })
       })
 
+    // Cross-currency transfers: what arrived (at book rate) less what left.
+    for (const { diff, outflow, inflow } of transferFxByOutflowId.values()) {
+      const period = outflow.entry_date.slice(0, 7)
+      const [yr, mo] = period.split('-')
+      const label = new Date(Number(yr), Number(mo) - 1, 1)
+        .toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
+      if (!map[period]) map[period] = { period, label, fxDiff: 0, count: 0, entries: [] }
+      map[period].fxDiff = round2(map[period].fxDiff + diff)
+      map[period].count++
+      map[period].entries.push({
+        entryId:       outflow.id,
+        entryDate:     outflow.entry_date,
+        clientName:    transferLabel(outflow, transferIndex),
+        invoiceNumber: '',
+        foreignAmount: outflow.currency !== 'INR' ? (outflow.amount ?? 0) : (inflow.amount ?? 0),
+        currency:      `${outflow.currency || 'INR'}→${inflow.currency || 'INR'}`,
+        bookValueInr:  outflow.amount_inr ?? 0,
+        actualInr:     inflow.amount_inr ?? 0,
+        fxDiff:        diff,
+        rateSource:    'rateMap',
+      })
+    }
+
     return Object.values(map)
       .sort((a, b) => b.period.localeCompare(a.period))
       .map(row => ({
         ...row,
         entries: [...row.entries].sort((a, b) => b.fxDiff - a.fxDiff),
       }))
-  }, [entries, bookRateForEntry])
+  }, [entries, bookRateForEntry, reversedIds, transferFxByOutflowId, transferIndex])
 
   const fxByYear = useMemo(() => {
     const map: Record<string, { year: string; fxDiff: number; count: number; entries: FxEntryDetail[] }> = {}
@@ -1482,7 +1658,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         {/* Filters */}
         <div className="flex flex-col lg:flex-row gap-3 bg-secondary/20 p-3 rounded-xl border border-border">
           {/* Row 1: Search */}
-          <div className="w-full lg:flex-1 shrink-0">
+          <div className="w-full lg:flex-1 lg:min-w-[240px] shrink-0">
             <TokenizedSearch
               className="w-full"
               facets={searchFacets}
@@ -1501,8 +1677,10 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             />
           </div>
 
-          {/* Row 2: Filters */}
-          <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar w-full lg:w-auto shrink-0 pb-1 lg:pb-0 [&>*]:shrink-0">
+          {/* Row 2: Filters. Scrolls sideways on narrow screens; beside the
+              search it takes its share of the row and wraps — never its full
+              ~1,600px intrinsic width, which pushed the whole page sideways. */}
+          <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar w-full min-w-0 pb-1 lg:pb-0 lg:w-auto lg:flex-[2] lg:flex-wrap lg:overflow-visible [&>*]:shrink-0">
             <div className="flex gap-1.5">
               {['', 'inflow', 'outflow'].map(t => (
                 <button key={t} onClick={() => setFilterType(t)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filterType === t ? 'gradient-bg text-white' : 'bg-background text-muted-foreground border hover:text-foreground'}`}>
@@ -1686,7 +1864,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                           {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
                       ) : (
-                        <span className="text-sm font-medium">{entry.category?.name || '—'}</span>
+                        <span className="text-sm font-medium">{categoryText(entry)}</span>
                       )}
                     </div>
                     <div className={`text-right font-semibold ${entry.type === 'inflow' ? 'text-green-400' : 'text-red-400'}`}>
@@ -1718,9 +1896,10 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                       {isEditing ? (
                         <input type="text" value={editForm.description || ''} onChange={e => setEditForm(p => ({...p, description: e.target.value}))} className="w-full bg-background border rounded px-2 py-1 text-xs" placeholder="Description" />
                       ) : (
-                        entry.description || <span className="text-muted-foreground italic">No description</span>
+                        descriptionText(entry) || <span className="text-muted-foreground italic">No description</span>
                       )}
                       {entry.transfer_ref && <span className="inline-flex items-center gap-1 bg-purple-500/10 text-purple-400 text-[10px] px-1.5 py-0.5 rounded font-medium"><ArrowLeftRight className="w-3 h-3" />Internal Transfer</span>}
+                      {reversalBadge(entry, 'sm')}
                       {((entry.tags?.length ?? 0) > 0 || (entry.employee_splits?.length ?? 0) > 0) && (
                         <div className="flex flex-wrap gap-1">
                           {entry.tags?.map(t => (
@@ -1803,6 +1982,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                                 <LinkIcon className="w-3.5 h-3.5" />
                               </button>
                             )}
+                            {extraRowActions(entry, 'transition-colors')}
                             <button onClick={() => openDuplicateForm(entry)} className="p-1.5 rounded-md hover:bg-amber-500/10 text-muted-foreground hover:text-amber-500 transition-colors" title="Duplicate to today">
                               <Copy className="w-3.5 h-3.5" />
                             </button>
@@ -1827,7 +2007,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                     </div>
 
                     {/* Tags — single left-aligned wrapped row */}
-                    {(entry.transfer_ref || allocStatus || (entry.expense_billings || []).length > 0) && (
+                    {(entry.transfer_ref || entry.reversal_of || reversedIds.has(entry.id) || allocStatus || (entry.expense_billings || []).length > 0) && (
                       <div className="flex flex-wrap items-center gap-1 -mt-2">
                         {entry.transfer_ref && <span className="inline-flex items-center gap-1 bg-purple-500/10 text-purple-400 text-[9px] px-1.5 py-0.5 rounded font-medium"><ArrowLeftRight className="w-2.5 h-2.5" />Internal Transfer</span>}
                         {allocStatus === 'none' && <span className="inline-block bg-amber-500/10 text-amber-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Unallocated</span>}
@@ -1923,17 +2103,19 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                           <div className={cn(BRANDED_PILL_BASE_CLASS, 'flex-col items-start gap-0.5')}>
                             <div className="flex items-center gap-2">
                               <div className={`w-1.5 h-1.5 rounded-full ${entry.type === 'inflow' ? 'bg-green-400' : 'bg-red-400'}`} />
-                              <span className="font-medium text-foreground">{entry.category?.name}</span>
+                              <span className="font-medium text-foreground">{categoryText(entry)}</span>
                             </div>
-                            {entry.description && (
+                            {/* A transfer's note is in the Description column, not here. */}
+                            {entry.description && !entry.transfer_ref && (
                               <div className="text-xs text-muted-foreground opacity-70 truncate max-w-[200px] ml-3.5">
                                 {entry.description}
                               </div>
                             )}
                           </div>
-                          {(entry.transfer_ref || (allocStatus && allocStatus !== 'none') || allocStatus === 'none' || (entry.expense_billings || []).length > 0) && (
+                          {(entry.transfer_ref || entry.reversal_of || reversedIds.has(entry.id) || (allocStatus && allocStatus !== 'none') || allocStatus === 'none' || (entry.expense_billings || []).length > 0) && (
                             <div className="flex flex-wrap items-center gap-1 mt-1 ml-3.5">
                               {entry.transfer_ref && <span className="inline-flex items-center gap-1 bg-purple-500/10 text-purple-400 text-[9px] px-1.5 py-0.5 rounded font-medium"><ArrowLeftRight className="w-2.5 h-2.5" />Internal Transfer</span>}
+                              {reversalBadge(entry)}
                               {allocStatus === 'none'    && <span className="inline-block bg-amber-500/10  text-amber-500 text-[9px] px-1.5 py-0.5 rounded font-medium">Unallocated</span>}
                               {allocStatus === 'partial' && <span className="inline-block bg-blue-500/10   text-blue-400  text-[9px] px-1.5 py-0.5 rounded font-medium">Partially Allocated</span>}
                               {allocStatus === 'over'    && <span className="inline-block bg-red-500/10    text-red-500   text-[9px] px-1.5 py-0.5 rounded font-medium">Over-allocated!</span>}
@@ -1972,7 +2154,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                           placeholder="Description"
                         />
                       ) : (
-                        entry.description || '—'
+                        descriptionText(entry) || '—'
                       )}
                     </td>
 
@@ -2068,6 +2250,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                                 <LinkIcon className="w-3.5 h-3.5" />
                               </button>
                             )}
+                            {extraRowActions(entry, 'lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity')}
                             <button onClick={() => openDuplicateForm(entry)} className="lg:opacity-0 opacity-100 group-hover:opacity-100 transition-opacity p-1.5 rounded-md hover:bg-amber-500/10 text-muted-foreground hover:text-amber-500" title="Duplicate to today">
                               <Copy className="w-3.5 h-3.5" />
                             </button>
@@ -2105,10 +2288,55 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       {showTransfer && (
         <TransferModal
           bankAccounts={bankAccounts}
-          onClose={() => setShowTransfer(false)}
+          exchangeRates={exchangeRates}
+          prefill={transferPrefill}
+          onClose={() => { setShowTransfer(false); setTransferPrefill(null) }}
           onSaved={(outflow, inflow) => {
             setEntries(prev => [outflow, inflow, ...prev])
             setShowTransfer(false)
+            setTransferPrefill(null)
+          }}
+        />
+      )}
+      {editingTransfer?.transfer_ref && (
+        <TransferModal
+          bankAccounts={bankAccounts}
+          exchangeRates={exchangeRates}
+          editing={{
+            transferRef: editingTransfer.transfer_ref,
+            outflow: (transferIndex.get(editingTransfer.transfer_ref) ?? []).find(l => l.type === 'outflow') ?? null,
+            inflow: (transferIndex.get(editingTransfer.transfer_ref) ?? []).find(l => l.type === 'inflow') ?? null,
+          }}
+          onClose={() => setEditingTransfer(null)}
+          onSaved={(outflow, inflow) => {
+            setEntries(prev => prev.map(e => e.id === outflow.id ? outflow : e.id === inflow.id ? inflow : e))
+            setEditingTransfer(null)
+          }}
+        />
+      )}
+      {reversingEntry && (
+        <ReverseEntryModal
+          entry={reversingEntry}
+          categoryName={reversingEntry.category?.name ?? null}
+          onClose={() => setReversingEntry(null)}
+          onSaved={reversal => {
+            setEntries(prev => [reversal, ...prev])
+            setReversingEntry(null)
+            // The original's allocations were released server-side.
+            router.refresh()
+          }}
+        />
+      )}
+      {convertingEntry && (
+        <ConvertTransferModal
+          entry={convertingEntry}
+          candidates={findTransferCounterparts(convertingEntry, entries, reversedIds)}
+          onClose={() => setConvertingEntry(null)}
+          onSaved={(ids, transferRef) => {
+            setEntries(prev => prev.map(e => ids.includes(e.id)
+              ? { ...e, transfer_ref: transferRef, category_id: '', category: undefined, client_id: undefined }
+              : e))
+            setConvertingEntry(null)
           }}
         />
       )}
@@ -3106,9 +3334,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
 
       {deleteConfirmId && (
         <ConfirmDialog
-          title="Delete this entry?"
-          body="The entry is hidden from the Cash Book and its balances. It can be restored from the Reconciliation Toolkit."
-          confirmLabel="Delete entry"
+          title={deleteConfirmCopy(deleteConfirmId).title}
+          body={deleteConfirmCopy(deleteConfirmId).body}
+          confirmLabel={deleteConfirmCopy(deleteConfirmId).label}
           danger
           onConfirm={() => { const id = deleteConfirmId; setDeleteConfirmId(null); void handleSoftDelete(id) }}
           onCancel={() => setDeleteConfirmId(null)}

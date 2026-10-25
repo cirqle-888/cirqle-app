@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { collectedAmount, isRevenueInvoice, outstandingAmount, recognisedRevenue } from '@/lib/finance/invoice-revenue'
 import { createAdminClient, fetchAll, columnExists } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { financialVisibility } from '@/lib/permissions/strip'
@@ -55,7 +56,7 @@ export default async function ClientsPage() {
     })(),
     // Minimal columns — only what the outstanding rollup needs.
     showAmounts
-      ? fetchAll(supabase.from('invoices').select('client_id, total_amount, paid_amount, status'))
+      ? fetchAll(supabase.from('invoices').select('client_id, total_amount, paid_amount, total_amount_inr, paid_amount_inr, status'))
       : Promise.resolve({ data: [] as any[] }),
     // service_id so the task rollups can be filtered to the viewer's
     // departments — otherwise the counts leak cross-department volume.
@@ -93,14 +94,18 @@ export default async function ClientsPage() {
   // Per-client rollups computed server-side so the client component stays lean.
   const stats: Record<string, { billed: number; paid: number; outstanding: number; invoices: number; tasks: number; activeTasks: number; services: number }> = {}
   const ensure = (id: string) => (stats[id] ||= { billed: 0, paid: 0, outstanding: 0, invoices: 0, tasks: 0, activeTasks: 0, services: 0 })
+  // INR, by the same rules as the dashboard: billed is recognised revenue,
+  // outstanding is open invoices only. billed − paid used to report written-off
+  // and cancelled invoices as owed (12 clients, audit 2026-10-23) and added
+  // AED/QAR amounts as rupees.
   for (const inv of (invoicesRes.data || []) as any[]) {
-    if (!inv.client_id || inv.status === 'draft') continue
+    if (!inv.client_id || !isRevenueInvoice(inv)) continue
     const s = ensure(inv.client_id)
-    s.billed += inv.total_amount || 0
-    s.paid += inv.paid_amount || 0
+    s.billed += recognisedRevenue(inv)
+    s.paid += collectedAmount(inv)
+    s.outstanding += outstandingAmount(inv)
     s.invoices += 1
   }
-  for (const s of Object.values(stats)) s.outstanding = Math.max(0, s.billed - s.paid)
   for (const t of scopedTasks) {
     if (!t.client_id) continue
     const s = ensure(t.client_id)

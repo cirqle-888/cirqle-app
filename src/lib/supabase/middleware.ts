@@ -249,6 +249,7 @@ export async function updateSession(request: NextRequest) {
   const isPublic   = pathname === '/'
                   || pathname.startsWith('/portal')
                   || pathname.startsWith('/intake')   // client/agency request portal — tokenized, no login
+                  || pathname.startsWith('/reports/shared/') // scoped, expiring report token checked by route
                   || pathname.startsWith('/i/')        // public hosted invoice — tokenized, no login
                   || pathname.startsWith('/feed/')     // client feed approval — tokenized, no login
                   || pathname.startsWith('/start/')    // client hub — single link to all that client's intake apps

@@ -1,4 +1,4 @@
-import { createAdminClient, fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
+import { createAdminClient, fetchAll, stablePaginationQuery, columnExists } from '@/lib/supabase/server'
 import { buildCreditLedger, creditSalaryJournalLines, fetchCreditMovements } from '@/lib/finance/credit-ledger'
 import { getHistoricalAnalytics, getHistoricalEarnings } from '@/lib/analytics/cache'
 import { mergeEarnings, type EarningsAggregate, type ScoreRow } from '@/lib/analytics/earnings'
@@ -17,6 +17,9 @@ import { getMyNotifications } from '@/app/api/notifications/actions'
 import DashboardClient from './dashboard-client'
 import { toISODate, todayISO } from '@/lib/utils/local-date'
 import { buildActionQueue, type ActionQueueItem } from '@/lib/dashboard/action-queue'
+import { loadDepartmentFacts, type DepartmentFacts } from '@/lib/dashboard/department-facts'
+import { operatingRows } from '@/lib/finance/cash-flow'
+import { pendingPayByEmployee, type PendingPay } from '@/lib/dashboard/pending-pay'
 
 export const dynamic = 'force-dynamic'
 
@@ -171,6 +174,8 @@ export default async function DashboardPage() {
           .from('contribution_scores')
           .select('employee_id, score_percentage, earnings_inr, task:tasks!inner(id, quantity, task_date)')
           .gte('tasks.task_date', `${currentMonth}-01`)
+          .is('tasks.deleted_at', null)
+          .not('tasks.status', 'eq', 'cancelled')
           .order('calculated_at', { ascending: false })
           .order('id', { ascending: true })),
       ]).then(([historical, liveRes]) =>
@@ -188,6 +193,10 @@ export default async function DashboardPage() {
         .gte('calculated_at', analyticsFromStr)
         .order('calculated_at', { ascending: false })
         .order('id', { ascending: true })).then(r => r.data || [])
+
+  // Migration 20261016100000 — selecting a column that does not exist would
+  // fail the whole cash-book query, so ask first.
+  const hasReversalColumn = isAdmin && await columnExists(supabase, 'cashbook_entries', 'reversal_of')
 
   // Only fetch invoices, cashbook, and all payroll history if admin
   const [
@@ -217,10 +226,14 @@ export default async function DashboardPage() {
     // Cashbook — admin only, all-time for accurate bank balance calculation.
     // Filter out soft-deleted entries so deleted/edited entries don't appear
     // in the dashboard Cash Flow widget or distort the bank balance.
+    // transfer_ref / reversal_of let the Income and Outflow figures leave out
+    // internal transfers and net returned payments, and the category's
+    // statement section lets them leave out credit, capital and drawings
+    // (lib/finance/cash-flow). Bank balance still sums every row.
     isAdmin
       ? fetchAll(supabase
           .from('cashbook_entries')
-          .select('type, amount_inr, entry_date, description')
+          .select(`id, type, amount_inr, entry_date, description, transfer_ref${hasReversalColumn ? ', reversal_of' : ''}, category:cashbook_categories(statement_section)`)
           .is('deleted_at', null)
           .order('entry_date', { ascending: true })
           .order('id', { ascending: true }))
@@ -302,6 +315,33 @@ export default async function DashboardPage() {
 
   const today = new Date()
 
+  // Payslips generated but not yet paid, per employee — what the company still
+  // owes the team. A balance, not a period figure, so it ignores the date
+  // filter. Admin only; a failed read just hides the line.
+  const pendingPayPromise: Promise<Record<string, PendingPay>> = isAdmin
+    ? Promise.resolve(fetchAll(supabase.from('payroll')
+        .select('employee_id, month, year, payslip_number, net_salary, commission_earned, ownership_earned')
+        .eq('status', 'pending')
+        .order('year').order('month').order('id')))
+        .then(res => {
+          if (res.error) throw new Error(res.error.message)
+          return pendingPayByEmployee((res.data || []) as any[])
+        })
+        .catch(e => {
+          console.error('[dashboard] pending pay:', e instanceof Error ? e.message : e)
+          return {}
+        })
+    : Promise.resolve({})
+
+  // Department panel — streamed like the analytics view, so it never holds up
+  // the shell. Null (panel hidden) for non-admins or if a read fails.
+  const departmentFactsPromise: Promise<DepartmentFacts | null> = isAdmin
+    ? loadDepartmentFacts(supabase, operatingRows(allCashbook as any[]), analyticsFromStr).catch(e => {
+        console.error('[dashboard] department facts:', e instanceof Error ? e.message : e)
+        return null
+      })
+    : Promise.resolve(null)
+
   // ── Bank balance ────────────────────────────────────────────────────────────
   const bankBalance = allCashbook.reduce((s, e) =>
     e.type === 'inflow' ? s + (e.amount_inr || 0) : s - (e.amount_inr || 0), 0)
@@ -375,8 +415,10 @@ export default async function DashboardPage() {
     if (i.issue_date) { const d = new Date(i.issue_date); if (!isNaN(d.getTime())) { d.setDate(d.getDate() + 30); return d } }
     return new Date(8640000000000000) // far future — never overdue
   }
-  const closedStatuses = ['paid', 'cancelled', 'bad_debt']
-  const overdueInvoices  = invoices.filter(i => !closedStatuses.includes(i.status) && effectiveDue(i) < today)
+  // Only invoices the client has received can be overdue. A draft past its
+  // date is still To Be Invoiced; counting it here too put the same money in
+  // two cards (INV-2611-015, ₹7,750, 2026-10-23).
+  const overdueInvoices  = sentInvoices.filter(i => effectiveDue(i) < today)
   const dueInvoices      = invoices.filter(i => ['sent','partial'].includes(i.status) && effectiveDue(i) >= today)
 
   // ── Task stats ───────────────────────────────────────────────────────────────
@@ -435,11 +477,12 @@ export default async function DashboardPage() {
   let billingQueue = { overdue: 0, drafts: 0, overdueSample: [] as string[], draftSample: [] as string[] }
   if (!isAdmin && canSeeInvoices) {
     try {
-      const closed = ['paid', 'cancelled', 'written_off']
+      // Sent and part-paid only, as for admins: a draft is not overdue, and
+      // written-off invoices are `bad_debt` (there is no `written_off`).
       const [overdueRes, draftRes] = await Promise.all([
         supabase.from('invoices')
           .select('invoice_number, due_date', { count: 'exact' })
-          .not('status', 'in', `(${closed.join(',')})`)
+          .in('status', ['sent', 'partial', 'overdue'])
           .lt('due_date', todayStr)
           .order('due_date', { ascending: true })
           .limit(3),
@@ -559,6 +602,8 @@ export default async function DashboardPage() {
       allCashbook={allCashbook as any[]}
       displayTasks={displayTasks as any[]}
       analyticsViewPromise={analyticsViewPromise}
+      departmentFactsPromise={departmentFactsPromise}
+      pendingPayPromise={pendingPayPromise}
       todayTasks={todayTasks as any[]}
       unscoredDoneTasks={unscoredDoneTasks as any[]}
       activeTasks={activeTasks.slice(0, 12) as any[]}
@@ -578,7 +623,7 @@ export default async function DashboardPage() {
         outstandingThisMonth,
         bankBalance,
         overdueCount:        overdueInvoices.length,
-        overdueAmount:       overdueInvoices.reduce((s, i) => s + (invTotalInr(i) - invPaidInr(i)), 0),
+        overdueAmount:       overdueInvoices.reduce((s, i) => s + Math.max(0, invTotalInr(i) - invPaidInr(i)), 0),
         dueCount:            dueInvoices.length,
         dueAmount:           dueInvoices.reduce((s, i) => s + (invTotalInr(i) - invPaidInr(i)), 0),
         toBeInvoicedCount:   draftInvoices.length,

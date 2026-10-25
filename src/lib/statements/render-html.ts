@@ -8,6 +8,7 @@ import { buildPageDecor } from '@/lib/invoices/render-html'
 import { getCurrencySymbol } from '@/lib/calculations/currency'
 import type { StatementResult } from './build'
 import { unitPriceOf } from '@/lib/invoices/line-math'
+import { todayISO } from '@/lib/utils/local-date'
 
 export interface StatementParty {
   name: string
@@ -141,7 +142,7 @@ ${decor.bgTop('absolute')}${decor.bgBottom('absolute')}${decor.cornerSvg('absolu
     <div style="text-align:right">
       <div style="font-size:20px;font-weight:800;letter-spacing:-.02em;color:${NAVY}">STATEMENT OF ACCOUNT</div>
       <div style="font-size:10px;color:#64748b;margin-top:3px">${esc(opts.periodLabel)}</div>
-      <div style="font-size:9px;color:#94a3b8;margin-top:2px">Issued ${fmtDate(new Date().toISOString().slice(0, 10))}</div>
+      <div style="font-size:9px;color:#94a3b8;margin-top:2px">Issued ${fmtDate(todayISO())}</div>
     </div>
   </div>
 

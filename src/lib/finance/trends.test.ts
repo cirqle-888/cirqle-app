@@ -81,6 +81,21 @@ describe('buildTrendSeries', () => {
     expect(s[0].label).toBe('1 Jul')
   })
 
+  it('moves the balance, not inflow or outflow, for balance-only rows (credit, capital)', () => {
+    const credit = [...cash,
+      { date: '2026-07-02', type: 'outflow' as const, amountInr: 100000, balanceOnly: true },
+      { date: '2026-07-03', type: 'inflow' as const, amountInr: 50000, balanceOnly: true }]
+    const s = buildTrendSeries({ cash: credit, tasks }, { from: '2026-07-01', to: '2026-07-03' }, 'day')
+    expect(s[1]).toMatchObject({ inflowInr: 0, outflowInr: 0, balanceInr: -87000 })
+    expect(s[2]).toMatchObject({ inflowInr: 0, outflowInr: 1000, balanceInr: -38000 })
+  })
+
+  it('counts a day total as that many jobs', () => {
+    const s = buildTrendSeries({ cash: [], tasks: [{ date: '2026-07-01', valueInr: 900, count: 3 }, { date: '2026-07-03', count: 2 }] },
+      { from: '2026-07-01', to: '2026-07-31' }, 'month')
+    expect(s[0]).toMatchObject({ jobs: 5, jobValueInr: 900 })
+  })
+
   it('sums job VALUE into the same buckets as the job count', () => {
     // Same three in-window tasks, now carrying billing values. The out-of-window
     // one must contribute neither a count nor a rupee.

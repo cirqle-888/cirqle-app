@@ -7,6 +7,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { X, Plus, Trash2, Calendar, Percent, FileText } from 'lucide-react'
 import type { Employee, EmployeePerformanceHistory } from '@/types'
+import { todayISO } from '@/lib/utils/local-date'
 
 export function PerformanceHistoryModal({ employee, onClose }: { employee: Employee; onClose: () => void }) {
   const { dn } = usePrivacy()
@@ -22,7 +23,7 @@ export function PerformanceHistoryModal({ employee, onClose }: { employee: Emplo
 
   // New entry form state
   const [form, setForm] = useState({
-    effective_from: new Date().toISOString().slice(0, 10),
+    effective_from: todayISO(),
     performance_rating: employee.performance_rating || 70,
     reason: ''
   })

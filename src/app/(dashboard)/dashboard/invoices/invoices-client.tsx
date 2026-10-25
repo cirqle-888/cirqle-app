@@ -84,6 +84,7 @@ const ReceiptModal = dynamic(
 )
 import type { ReceiptInput } from '@/components/cashbook/receipt-modal'
 import { addDaysISO, lastDayOfMonthISO, monthStartISO, todayISO } from '@/lib/utils/local-date'
+import { outstandingAmount, UNSENT_STATUSES } from '@/lib/finance/invoice-revenue'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface StatementLedgerRow {
@@ -805,8 +806,12 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
 
   // Summary stats
   const stats = useMemo(() => {
-    const active = invoices.filter(i => !['paid', 'cancelled', 'bad_debt'].includes(i.status))
-    const drafts = invoices.filter(i => i.status === 'draft')
+    // Outstanding is what clients owe: sent and part-paid invoices only, the
+    // same figure as the dashboard. Drafts (and reviewed, also unsent) are not
+    // owed yet — they were inflating this by their whole value; they are shown
+    // on their own beside it.
+    const active = invoices.filter(i => outstandingAmount(i) > 0)
+    const drafts = invoices.filter(i => UNSENT_STATUSES.includes(i.status))
     // Counted over every invoice, not the filtered view — the pill has to show
     // the size of the job even while a different filter is on.
     const dueToSend = invoices.filter(i => isDueToSend(i, todayISO()))
@@ -814,7 +819,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     return {
       // Company-wide KPI cards are shown in ₹ — sum the INR snapshots, not the
       // raw invoice-currency amounts (which would mix SAR/USD/INR together).
-      outstanding: active.reduce((s, i) => s + balanceDueInr(i), 0),
+      outstanding: active.reduce((s, i) => s + outstandingAmount(i), 0),
       overdueAmt: overdue.reduce((s, i) => s + balanceDueInr(i), 0),
       draftCount: drafts.length,
       draftTotal: drafts.reduce((s, i) => s + invTotalInr(i), 0),
@@ -1747,7 +1752,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.setAttribute('download', `invoices_export_${new Date().toISOString().slice(0, 10)}.csv`)
+    link.setAttribute('download', `invoices_export_${todayISO()}.csv`)
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -4837,7 +4842,11 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     ).sort((a: any, b: any) => b.unpaid - a.unpaid)
 
     // ── Overdue aging tab data ─────────────────────────────────────────────
-    const overdueInvs = invoices.filter(i => isOverdue(i.due_date || '', i.status, i.issue_date) && i.status !== 'paid')
+    // Sent and part-paid only (a draft is not overdue), and every amount below
+    // in INR: the buckets used to add AED invoices as rupees while the total
+    // beside them converted, so the two disagreed (audit 2026-10-23).
+    const overdueInvs = invoices.filter(i => ['sent', 'partial', 'overdue'].includes(i.status)
+      && isOverdue(i.due_date || '', i.status, i.issue_date))
     const today       = new Date()
     function ageBucket(dueDate: string) {
       const days = Math.floor((today.getTime() - new Date(dueDate + 'T00:00:00').getTime()) / 86400000)
@@ -4852,14 +4861,14 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     const overdueByAge  = overdueFiltered.reduce((map: any, inv) => {
       const b = ageBucket(inv.due_date || '').label
       if (!map[b]) map[b] = { ...ageBucket(inv.due_date || ''), total: 0, count: 0 }
-      map[b].total += Math.max(0, (inv.total_amount || 0) - (inv.paid_amount || 0))
+      map[b].total += balanceDueInr(inv)
       map[b].count += 1; return map
     }, {})
     const overdueByClient = Object.values(
       overdueFiltered.reduce((map: any, inv) => {
         const id = inv.client_id
         if (!map[id]) map[id] = { name: inv.client?.name || '—', total: 0, oldest: inv.due_date || '', invoices: [] }
-        map[id].total += Math.max(0, (inv.total_amount || 0) - (inv.paid_amount || 0))
+        map[id].total += balanceDueInr(inv)
         if ((inv.due_date || '') < map[id].oldest) map[id].oldest = inv.due_date || ''
         map[id].invoices.push(inv); return map
       }, {})
@@ -5621,7 +5630,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
               <>
                 <span className="text-muted-foreground/30">·</span>
                 <span className="font-semibold text-amber-400 flex items-center gap-1">
-                  <Zap className="w-2.5 h-2.5" />{stats.draftCount} drafts
+                  <Zap className="w-2.5 h-2.5" />{stats.draftCount} drafts · {fmt(stats.draftTotal)} not sent
                 </span>
               </>
             )}
@@ -5806,7 +5815,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
             const blob = new Blob([csv], { type: 'text/csv' })
             const url = URL.createObjectURL(blob)
             const a = document.createElement('a'); a.href = url
-            a.download = `invoices-${new Date().toISOString().slice(0, 10)}.csv`
+            a.download = `invoices-${todayISO()}.csv`
             a.click(); URL.revokeObjectURL(url)
           }}
           className="mb-1 flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground border border-border/40 hover:border-border/70 rounded-lg px-2.5 py-1 transition-colors bg-foreground/[0.02] hover:bg-foreground/[0.05]">

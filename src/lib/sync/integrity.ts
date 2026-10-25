@@ -470,7 +470,12 @@ export async function syncDraftInvoices(taskId: string) {
  * `cushionEdited` says the rebill cushion itself was changed on this save, so
  * it replaces whatever cushion the line carries (see cushionForLine).
  */
-export async function syncDraftInvoiceExpenses(entryId: string, opts: { cushionEdited?: boolean } = {}) {
+/**
+ * `opts.released`: the entry's money came back (it has a live reversal), so
+ * it is treated like a deleted entry — taken off a DRAFT invoice it was
+ * rebilled on. A non-draft invoice is never touched here.
+ */
+export async function syncDraftInvoiceExpenses(entryId: string, opts: { cushionEdited?: boolean; released?: boolean } = {}) {
   const supabase = createTypedAdminClient()
 
   // 1. Get the entry
@@ -495,7 +500,7 @@ export async function syncDraftInvoiceExpenses(entryId: string, opts: { cushionE
     .eq('cashbook_entry_id', entryId)
     .maybeSingle()
 
-  if (!entry || entry.deleted_at || entry.type !== 'outflow' || !entry.client_id || !entry.entry_date) {
+  if (!entry || entry.deleted_at || opts.released || entry.type !== 'outflow' || !entry.client_id || !entry.entry_date) {
     if (existingExp) {
       const { data: inv } = await supabase.from('invoices').select('status').eq('id', existingExp.invoice_id).single()
       if (inv && inv.status === 'draft') {

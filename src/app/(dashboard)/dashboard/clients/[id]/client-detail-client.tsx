@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { collectedAmount, outstandingAmount, recognisedRevenue, UNSENT_STATUSES } from '@/lib/finance/invoice-revenue'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
@@ -68,17 +69,20 @@ export default function ClientDetailClient({
   const router = useRouter()
 
   const kpi = useMemo(() => {
-    let billed = 0, paid = 0, drafts = 0
+    // INR, by the dashboard's rules: written-off and cancelled invoices are
+    // not owed, drafts are not billed yet (lib/finance/invoice-revenue).
+    let billed = 0, paid = 0, outstanding = 0, drafts = 0
     for (const inv of invoices) {
-      if (inv.status === 'draft') { drafts += 1; continue }
-      billed += inv.total_amount || 0
-      paid += inv.paid_amount || 0
+      if (UNSENT_STATUSES.includes(inv.status)) { drafts += 1; continue }
+      billed += recognisedRevenue(inv)
+      paid += collectedAmount(inv)
+      outstanding += outstandingAmount(inv)
     }
-    const openInvoices = invoices.filter(i => i.status !== 'draft' && (i.paid_amount || 0) < (i.total_amount || 0))
+    const openInvoices = invoices.filter(i => outstandingAmount(i) > 0)
     const activeTasks = tasks.filter(t => ['pending', 'in_progress'].includes(t.status))
     return {
       billed, paid, drafts,
-      outstanding: Math.max(0, billed - paid),
+      outstanding,
       openInvoices,
       activeTasks: activeTasks.length,
       totalTasks: tasks.length,
@@ -176,8 +180,8 @@ export default function ClientDetailClient({
                       </div>
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize shrink-0 ${INVOICE_STATUS_STYLE[inv.status] || INVOICE_STATUS_STYLE.sent}`}>{inv.status}</span>
                       <div className="text-right shrink-0 w-28">
-                        <p className="text-sm font-semibold">{inr((inv.total_amount || 0) - (inv.paid_amount || 0))}</p>
-                        <p className="text-[10px] text-muted-foreground">of {inr(inv.total_amount || 0)}</p>
+                        <p className="text-sm font-semibold">{inr(outstandingAmount(inv))}</p>
+                        <p className="text-[10px] text-muted-foreground">of {inr(inv.total_amount_inr ?? inv.total_amount ?? 0)}</p>
                       </div>
                     </div>
                   ))}

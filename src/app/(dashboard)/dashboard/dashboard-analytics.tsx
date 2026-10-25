@@ -16,7 +16,7 @@
 // data-fetch timing changed.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useState, useMemo, use } from 'react'
+import { Suspense, useState, useMemo, use } from 'react'
 import Link from 'next/link'
 import { matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
 import { sliceView, type AnalyticsView } from '@/lib/analytics/view'
@@ -35,6 +35,11 @@ import {
   WEEKDAY, MONTH_NAMES, FULL_MONTHS,
 } from './dashboard-utils'
 import type { Granularity, PulseTab, DrawerType } from './dashboard-utils'
+import { cashFlowContribution, cashFlowTotals, operatingRows } from '@/lib/finance/cash-flow'
+import { DepartmentFlowsPanel } from './_department-flows'
+import { PendingPayPanel } from './_pending-pay-panel'
+import { monthStartISO, monthEndISO, todayISO } from '@/lib/utils/local-date'
+import type { DepartmentFacts } from '@/lib/dashboard/department-facts'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
@@ -42,6 +47,8 @@ import type { Granularity, PulseTab, DrawerType } from './dashboard-utils'
 interface DashboardAnalyticsProps {
   // Heavy, deferred queries — passed as unresolved promises, unwrapped with use()
   analyticsViewPromise: Promise<AnalyticsView>
+  departmentFactsPromise: Promise<DepartmentFacts | null>
+  pendingPayPromise: Promise<Record<string, import('@/lib/dashboard/pending-pay').PendingPay>>
   earningsPromise: Promise<EarningsAggregate>
   // Light data (already awaited on the server, needed for the analytics widgets)
   stats: {
@@ -69,7 +76,7 @@ interface DashboardAnalyticsProps {
 // Main streamed component
 // ─────────────────────────────────────────────────────────────────────────────
 export default function DashboardAnalytics({
-  analyticsViewPromise, earningsPromise,
+  analyticsViewPromise, departmentFactsPromise, pendingPayPromise, earningsPromise,
   stats, invoices, overdueInvoices, dueInvoices, allCashbook,
   activeTasks, toBeInvoiced, employees, payrollRecords,
   dateFilter, granularity, setDrawer, displayFull,
@@ -80,6 +87,7 @@ export default function DashboardAnalytics({
   // seam is sealed in buildView, so nothing below knows which half it reads.
   const view = use(analyticsViewPromise)
   const earnings          = use(earningsPromise)
+  const pendingPay        = use(pendingPayPromise)
 
   const f = displayFull ? fmtFull : fmt
 
@@ -94,20 +102,26 @@ export default function DashboardAnalytics({
     return allCashbook.filter(e => matchesDateFilter(e.entry_date, dateFilter))
   }, [allCashbook, dateFilter])
 
-  const periodInflow  = filteredCashbook.filter(e => e.type === 'inflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
-  const periodOutflow = filteredCashbook.filter(e => e.type === 'outflow').reduce((s, e) => s + (e.amount_inr || 0), 0)
-  const netCash = periodInflow - periodOutflow
+  // Income / outflow, not movement: internal transfers count as neither, a
+  // returned payment nets against what it returns, and credit given/returned,
+  // capital and drawings are not income or spending (lib/finance/cash-flow).
+  // The Cash Flow list still shows every entry.
+  const opCashbook = useMemo(() => operatingRows(allCashbook), [allCashbook])
+  const opFiltered = useMemo(() => operatingRows(filteredCashbook), [filteredCashbook])
+  const { inflow: periodInflow, outflow: periodOutflow, net: netCash } = cashFlowTotals(opFiltered)
+  const deptWindow = useMemo(() => dateFilterWindow(dateFilter), [dateFilter])
 
   // ── Trend chart data ───────────────────────────────────────────────────────
   const trendData = useMemo(() => {
     const map: Record<string, { inflow: number; outflow: number; taskValue: number; taskCount: number }> = {}
-    const src = dateFilter ? filteredCashbook : allCashbook
+    const src = dateFilter ? opFiltered : opCashbook
     src.forEach(e => {
       const k = getPeriodKey(e.entry_date, granularity)
       if (!k) return
       if (!map[k]) map[k] = { inflow: 0, outflow: 0, taskValue: 0, taskCount: 0 }
-      if (e.type === 'inflow')  map[k].inflow  += e.amount_inr || 0
-      else                      map[k].outflow += e.amount_inr || 0
+      const c = cashFlowContribution(e)
+      map[k].inflow  += c.inflow
+      map[k].outflow += c.outflow
     })
     // Day totals, not task rows — same buckets, a fraction of the payload.
     const daySrc = dateFilter ? view.days.filter(d => matchesDateFilter(d.date, dateFilter)) : view.days
@@ -127,7 +141,7 @@ export default function DashboardAnalytics({
         taskValue: Math.round(v.taskValue), taskCount: v.taskCount,
       }))
       .slice(-24) // last 24 periods
-  }, [allCashbook, filteredCashbook, view, dateFilter, granularity])
+  }, [opCashbook, opFiltered, view, dateFilter, granularity])
 
   // ── Current period vs previous comparison ─────────────────────────────────
   const periodComparison = useMemo(() => {
@@ -158,9 +172,10 @@ export default function DashboardAnalytics({
     const inflowDays = new Set<string>()
     let totalInflow = 0
 
-    for (const e of allCashbook) {
-      if (e.type !== 'inflow') continue
-      const amt = e.amount_inr || 0
+    for (const e of opCashbook) {
+      // Income only: not a transfer leg, and a refunded receipt subtracts.
+      const amt = cashFlowContribution(e).inflow
+      if (amt === 0) continue
       if (amt > 0) inflowDays.add(e.entry_date)
       totalInflow += amt
       const monthKey = e.entry_date?.slice(0, 7)
@@ -191,7 +206,7 @@ export default function DashboardAnalytics({
     const avgDailyIncome = inflowDays.size > 0 ? totalInflow / inflowDays.size : 0
 
     return { bestMonth, bestWeekday, avgDailyIncome }
-  }, [allCashbook])
+  }, [opCashbook])
   const { bestMonth, bestWeekday, avgDailyIncome } = cashbookInsights
 
   // ── Task insights: top clients and revenue by work type ────────────────────
@@ -217,15 +232,17 @@ export default function DashboardAnalytics({
       .sort((a, b) => b.revenue - a.revenue)
   }, [view])
 
-  // Client outstanding (from invoices)
+  // Client outstanding — the same invoices and INR figures as the Outstanding
+  // card: sent and part-paid only (a draft is not owed yet, a written-off or
+  // cancelled one no longer is), foreign currency at its INR snapshot.
   const clientDues = useMemo(() => {
     const map: Record<string, { name: string; outstanding: number; invoiceCount: number }> = {}
     invoices.forEach(inv => {
-      if (inv.status === 'paid') return
+      if (!['sent', 'partial', 'overdue'].includes(inv.status)) return
       const id = inv.client?.id; const name = inv.client?.name
       if (!id || !name) return
       if (!map[id]) map[id] = { name, outstanding: 0, invoiceCount: 0 }
-      map[id].outstanding += (inv.total_amount || 0) - (inv.paid_amount || 0)
+      map[id].outstanding += Math.max(0, (inv.total_amount_inr ?? inv.total_amount ?? 0) - (inv.paid_amount_inr ?? inv.paid_amount ?? 0))
       map[id].invoiceCount++
     })
     return Object.values(map).filter(c => c.outstanding > 0).sort((a, b) => b.outstanding - a.outstanding)
@@ -246,12 +263,13 @@ export default function DashboardAnalytics({
     })
     // Group inflow/outflow by month
     const cashMap: Record<string, { inflow: number; outflow: number }> = {}
-    allCashbook.forEach(e => {
+    opCashbook.forEach(e => {
       const k = e.entry_date?.slice(0, 7)
       if (!k) return
       if (!cashMap[k]) cashMap[k] = { inflow: 0, outflow: 0 }
-      if (e.type === 'inflow')  cashMap[k].inflow  += e.amount_inr || 0
-      else                      cashMap[k].outflow += e.amount_inr || 0
+      const c = cashFlowContribution(e)
+      cashMap[k].inflow  += c.inflow
+      cashMap[k].outflow += c.outflow
     })
     // Merge all months
     const months = new Set([...Object.keys(taskMap), ...Object.keys(payMap), ...Object.keys(cashMap)])
@@ -283,13 +301,16 @@ export default function DashboardAnalytics({
       }
     })
     return rows
-  }, [view, payrollRecords, allCashbook])
+  }, [view, payrollRecords, opCashbook])
 
   // ── Team earnings for period ───────────────────────────────────────────────
   // The deduplication (newest calculation per employee+task) and the
   // task_date-only rule now live in `aggregateEarnings`, where they are held by
   // tests, rather than being re-derived here over 5,000 rows on every filter
   // change. Creatives credited = Σ (quantity × score% ÷ 100), unchanged.
+  const thisMonthKey = todayISO().slice(0, 7)
+  const monthLabel = `${MONTH_NAMES[parseInt(thisMonthKey.slice(5, 7)) - 1]} ${thisMonthKey.slice(0, 4)}`
+  const monthSlice = useMemo(() => sliceEarnings(earnings, { from: monthStartISO(), to: monthEndISO() }), [earnings])
   const teamEarnings = useMemo(() => {
     const slice = sliceEarnings(earnings, dateFilterWindow(dateFilter))
     return employees.map(emp => {
@@ -299,9 +320,17 @@ export default function DashboardAnalytics({
         earnings: t?.earningsInr ?? 0,
         taskCount: t?.taskCount ?? 0,
         creatives: t?.creatives ?? 0,
+        // To be paid: unpaid payslips plus this month's earnings so far. A balance
+        // owed today, so neither follows the period filter.
+        pendingSlipsInr: pendingPay[emp.id]?.slipsTotalInr ?? 0,
+        thisMonthInr: monthSlice.byEmployee.get(emp.id)?.earningsInr ?? 0,
       }
     })
-  }, [employees, earnings, dateFilter])
+  }, [employees, earnings, dateFilter, pendingPay, monthSlice])
+  const toPay = (e: { pendingSlipsInr: number; thisMonthInr: number }) => e.pendingSlipsInr + e.thisMonthInr
+  const totalPendingPay = teamEarnings.reduce((s, e) => s + toPay(e), 0)
+  const [payOpen, setPayOpen] = useState<string | null>(null)
+  const payEmp = teamEarnings.find(e => e.id === payOpen) ?? null
 
   // ── Admin production totals (per-period across the whole company) ──────────
   // Studio output, not employee credit — independent of contribution scores.
@@ -329,12 +358,22 @@ export default function DashboardAnalytics({
       {/* Jobs / inflow / outflow / bank balance with per-series toggles and a
           period-over-period comparison overlay. Fed entirely from the two
           datasets already on the page (all-time cashbook + analytics tasks). */}
-      {/* Day totals stand in for task rows: the graph only ever reads a date
-          and a value, and one row per DAY draws the identical wave. */}
+      {/* Day totals stand in for task rows: each carries the day's value and
+          its job count (without the count, every DAY counted as one job). */}
       <DashboardTrendGraph
         cashbook={allCashbook}
-        tasks={view.days.map(d => ({ task_date: d.date, billing_amount_inr: d.value }))}
+        tasks={view.days.map(d => ({ task_date: d.date, billing_amount_inr: d.value, count: d.count }))}
         fmt={f} />
+
+      {/* ── Departments: job value, billed, inflow, outflow by service category ── */}
+      <Suspense fallback={null}>
+        <DepartmentFlowsPanel
+          factsPromise={departmentFactsPromise}
+          window={deptWindow}
+          outflowInr={periodOutflow}
+          periodLabel={periodLabel}
+          fmt={f} />
+      </Suspense>
 
       {/* ── Company Ops (Finance Engine) ───────────────── */}
       {/* Company-scoped money only — fully separate from client billing above. */}
@@ -667,7 +706,7 @@ export default function DashboardAnalytics({
           {employees.length > 0 && (
             <div className="bg-card border border-border rounded-xl shadow-sm">
               <div className="px-4 py-3.5 border-b border-border flex items-center justify-between">
-                <div><h2 className="font-semibold text-sm">Team Earnings</h2><p className="text-[11px] text-muted-foreground mt-0.5 font-medium">{periodLabel}</p></div>
+                <div><h2 className="font-semibold text-sm">Team Earnings</h2><p className="text-[11px] text-muted-foreground mt-0.5 font-medium">{periodLabel}{totalPendingPay > 0 && <> · <span className="text-amber-500">{f(totalPendingPay)} to be paid</span></>}</p></div>
                 <Link href="/dashboard/reports" className="text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors">Reports <BarChart2 className="w-3 h-3" /></Link>
               </div>
               <div className="p-3 flex flex-wrap gap-2.5">
@@ -683,6 +722,13 @@ export default function DashboardAnalytics({
                         <p className={`text-[11px] font-bold leading-tight mt-0.5 ${emp.earnings > 0 ? 'text-green-500' : 'text-muted-foreground'}`}>
                           {emp.earnings > 0 ? f(emp.earnings) : emp.taskCount > 0 ? `${emp.taskCount} tasks` : 'No data'}
                         </p>
+                        {toPay(emp) > 0 && (
+                          <button type="button" onClick={() => setPayOpen(payOpen === emp.id ? null : emp.id)}
+                            className="text-[11px] font-semibold leading-tight mt-1 text-amber-500 hover:underline text-left"
+                            title="Click to see what makes up this amount">
+                            {f(toPay(emp))} to be paid ▾
+                          </button>
+                        )}
                         {emp.taskCount > 0 && (
                           <p className="text-[10px] text-muted-foreground leading-tight mt-0.5 font-medium">
                             {emp.taskCount} task{emp.taskCount === 1 ? '' : 's'} · {emp.creatives.toLocaleString('en-IN', { maximumFractionDigits: 1 })} creative{emp.creatives === 1 ? '' : 's'}
@@ -693,6 +739,10 @@ export default function DashboardAnalytics({
                   )
                 })}
               </div>
+              {payEmp && (
+                <PendingPayPanel who={dn(payEmp)} pending={pendingPay[payEmp.id]} thisMonthInr={payEmp.thisMonthInr}
+                  monthLabel={monthLabel} fmt={f} onClose={() => setPayOpen(null)} />
+              )}
             </div>
           )}
         </div>

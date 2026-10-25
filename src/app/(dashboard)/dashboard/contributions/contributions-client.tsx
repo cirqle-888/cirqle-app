@@ -44,7 +44,7 @@ const ActivityPanel = dynamic(() => import('@/components/activity/activity-panel
 // Matches the loading strategy the task modal already uses for this button.
 const DiscussButton = dynamic(() => import('@/components/chat/discuss-button').then(m => m.DiscussButton), { ssr: false })
 import { PageShell, PageContent, StickyToolbar, PageChrome } from '@/components/layout/page-shell'
-import { todayISO, toISODate } from '@/lib/utils/local-date'
+import { toISODate, todayISO } from '@/lib/utils/local-date'
 
 // Heavy task editor — only mount when opened; bundle splits off the
 // contributions route chunk.
@@ -922,7 +922,7 @@ export default function ContributionsClient({
 
   // For employee/view_only role, only show their assigned tasks — then apply quick sort
   const myVisibleTasks = useMemo(() => {
-    const today = new Date().toISOString().slice(0, 10)
+    const today = todayISO()
     if (sortBy === 'today_first') {
       const todayTasks = filteredTasks.filter(t => t.task_date === today)
       const rest = filteredTasks.filter(t => t.task_date !== today).sort((a, b) => (b.task_date || '').localeCompare(a.task_date || ''))

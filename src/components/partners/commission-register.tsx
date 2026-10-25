@@ -18,6 +18,7 @@ import AppSelect from '@/components/ui/app-select'
 import { recordCommissionPayment, deleteCommissionPayment } from '@/app/(dashboard)/dashboard/partners/actions'
 import type { CommissionPayment } from '@/lib/partners/queries'
 import { formatDate } from '@/lib/utils/format-date'
+import { todayISO } from '@/lib/utils/local-date'
 
 const fmt = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
 const fmtDate = formatDate
@@ -41,7 +42,7 @@ export default function CommissionRegister({
 }) {
   const [open, setOpen] = useState(false)
   const [amount, setAmount] = useState('')
-  const [paidOn, setPaidOn] = useState(() => new Date().toISOString().slice(0, 10))
+  const [paidOn, setPaidOn] = useState(() => todayISO())
   const [method, setMethod] = useState('bank_transfer')
   const [reference, setReference] = useState('')
   const [notes, setNotes] = useState('')

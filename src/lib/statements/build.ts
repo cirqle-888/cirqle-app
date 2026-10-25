@@ -19,6 +19,7 @@
  *    already uses to find a payment's cashbook entry.
  */
 import { round2 } from '@/lib/calculations/currency'
+import { todayISO } from '@/lib/utils/local-date'
 
 export type Currency = string
 
@@ -255,7 +256,7 @@ export function buildStatement(input: BuildStatementInput): StatementResult {
 
   // ── Aging ─────────────────────────────────────────────────────────────────
   // Per invoice: what is still owed on it, bucketed by how long it has been due.
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayISO()
   const asOf = input.asOf ?? (to > today ? today : to)
 
   // What each invoice has actually received, from its dated credits.

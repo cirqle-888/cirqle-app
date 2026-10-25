@@ -18,6 +18,7 @@ import {
 } from '@/lib/requests/my-work'
 import { moveMyWork, moveTeamWork, type MyWorkRow, type TeamMemberLoad } from './actions'
 import { CHECKLIST_LABEL, CHECKLIST_HINT } from '@/lib/requests/kind'
+import { todayISO } from '@/lib/utils/local-date'
 
 const DiscussButton = dynamicImport(
   () => import('@/components/chat/discuss-button').then(m => m.DiscussButton),
@@ -45,7 +46,6 @@ interface Props {
   myEmployeeId?: string
 }
 
-const todayISO = () => new Date().toLocaleDateString('en-CA')
 
 function dueLabel(due: string | null): { text: string; tone: string } | null {
   if (!due) return null
@@ -502,7 +502,7 @@ export default function MyWorkClient({ initialRows, firstName, team = [], viewin
 
 /** Month grid of due dates — "when is this wanted", not "what stage is it". */
 function CalendarView({ rows }: { rows: MyWorkRow[] }) {
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7))
+  const [month, setMonth] = useState(() => todayISO().slice(0, 7))
   const [y, m] = month.split('-').map(Number)
   const first = new Date(y, m - 1, 1)
   const start = new Date(first)
