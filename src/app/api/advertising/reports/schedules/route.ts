@@ -7,8 +7,9 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
-import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
+import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
 import { computeNextRun } from '@/lib/reporting/scheduler-utils'
+import { parseScheduleFields, resolveReportScope } from '@/lib/reporting/config'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,10 +17,8 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   try {
-    const me = await loadCurrentUser().catch(() => null)
-    if (!me || !hasPermission(me, 'advertising.view_reports')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
-    }
+    const guard = await requireReadPermission('advertising.view_reports')
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: 403 })
 
     const projectId = req.nextUrl.searchParams.get('projectId')
     if (!projectId) return NextResponse.json({ error: 'Missing projectId' }, { status: 400 })
@@ -42,35 +41,41 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const me   = await loadCurrentUser().catch(() => null)
-    if (!me || !hasPermission(me, 'advertising.edit')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+    const guard = await requirePermission('advertising.edit')
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: 403 })
+    const body = await req.json().catch(() => null)
+    if (!body || typeof body.project_id !== 'string') {
+      return NextResponse.json({ error: 'Select a campaign.' }, { status: 400 })
     }
-    const body = await req.json()
 
-    if (!body.project_id) return NextResponse.json({ error: 'Missing project_id' }, { status: 400 })
-    if (!body.client_id)  return NextResponse.json({ error: 'Missing client_id' }, { status: 400 })
-
-    const nextRun = computeNextRun(body.frequency ?? 'weekly', body.delivery_hour ?? 7)
+    const fields = parseScheduleFields(body)
+    if (!fields.ok) return NextResponse.json({ error: fields.error }, { status: 400 })
 
     const admin = createAdminClient()
+    // The client comes from the campaign row; a mismatching client_id is refused.
+    const scope = await resolveReportScope(admin, body.project_id, body.client_id)
+    if (!scope.ok) return NextResponse.json({ error: scope.error }, { status: 400 })
+
+    const f = fields.value
+    const nextRun = computeNextRun(f.frequency, f.delivery_hour, f.delivery_timezone)
+
     const { data, error } = await admin
       .from('ad_report_schedules')
       .insert({
-        project_id:        body.project_id,
-        client_id:         body.client_id,
-        frequency:         body.frequency         ?? 'weekly',
+        project_id:        scope.value.projectId,
+        client_id:         scope.value.clientId,
+        frequency:         f.frequency,
         cron_expression:   body.cron_expression   ?? null,
-        delivery_hour:     body.delivery_hour      ?? 7,
-        delivery_timezone: body.delivery_timezone  ?? 'UTC',
-        report_type:       body.report_type        ?? 'weekly',
-        template:          body.template           ?? 'performance',
-        formats:           body.formats            ?? ['pdf'],
+        delivery_hour:     f.delivery_hour,
+        delivery_timezone: f.delivery_timezone,
+        report_type:       f.report_type,
+        template:          f.template,
+        formats:           f.formats,
         include_comparison: body.include_comparison ?? true,
-        recipients:        body.recipients         ?? [],
+        recipients:        f.recipients,
         is_active:         body.is_active          ?? true,
         next_run_at:       nextRun,
-        created_by:        me.employeeId || null,
+        created_by:        guard.employeeId || null,
       })
       .select()
       .single()

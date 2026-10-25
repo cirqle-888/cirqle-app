@@ -10,15 +10,19 @@
  */
 
 import sharp from 'sharp'
+import { malayalamSummary } from './summary-language'
 import { fetchReportData } from './data-engine'
 import { buildKPIData } from './kpi-engine'
 import { resolveTemplate } from './template-engine'
-import { getBenchmarks } from '@/lib/advertising/ai/benchmarks'
+import { getBenchmarksWithSource } from '@/lib/advertising/ai/benchmarks'
+import { todayISO } from '@/lib/utils/local-date'
 import { generateForecast } from '@/lib/advertising/ai/forecasting'
-import { calculateWeightedHealthScore } from '@/lib/advertising/ai/scoring'
+import { assessCampaignHealth } from './campaign-health'
+import { resolveBrandingUrl } from '@/lib/utils/branding'
 import { buildAINarrative } from './ai-engine'
 import type {
   ReportConfig, RenderData, BenchmarkSummary, ForecastBundle, HealthSummary, TemplateConfig,
+  ReportRawData, CampaignBreakdownRow,
 } from './types'
 
 /**
@@ -32,6 +36,7 @@ export async function buildRenderData(config: ReportConfig): Promise<RenderData>
   // ── 1. Raw data (DB fetch) ───────────────────────────────────────────────
   const raw = await fetchReportData({
     projectId: config.projectId,
+    projectIds: config.projectIds,
     clientId: config.clientId,
     dateFrom: config.dateFrom,
     dateTo: config.dateTo,
@@ -43,11 +48,20 @@ export async function buildRenderData(config: ReportConfig): Promise<RenderData>
   // Satori (image/PDF rasteriser) is most reliable with a data URI rather than
   // a remote URL. Convert the company logo once; store it on the brand so all
   // exporters reuse it.
+  // Branding images can be stored as `storage:bucket/path` references, which
+  // the rasteriser rejects ("Image source must be an absolute URL") — that
+  // failed EVERY PDF and image export while Excel/CSV still worked. Resolve
+  // them like the rest of the app does, embed them, and drop any image that
+  // cannot be fetched rather than fail the whole export.
   const brand = { ...raw.branding }
-  if (brand.agencyLogoUrl && /^https?:\/\//.test(brand.agencyLogoUrl)) {
-    const dataUrl = await logoToDataUrl(brand.agencyLogoUrl)
-    if (dataUrl) brand.agencyLogoUrl = dataUrl
-  }
+  const logoSrc = brand.agencyLogoUrl ? resolveBrandingUrl(brand.agencyLogoUrl) : ''
+  brand.agencyLogoUrl = logoSrc && /^https?:\/\//.test(logoSrc) ? await logoToDataUrl(logoSrc) : embeddable(logoSrc)
+  const [bgTop, bgBottom] = await Promise.all([
+    embedBackground(brand.bgImageTopUrl),
+    embedBackground(brand.bgImageBottomUrl),
+  ])
+  brand.bgImageTopUrl = bgTop
+  brand.bgImageBottomUrl = bgBottom
 
   // ── 2. Template config ───────────────────────────────────────────────────
   // Merge any per-section overrides the user supplied in ReportConfig.sections
@@ -57,29 +71,32 @@ export async function buildRenderData(config: ReportConfig): Promise<RenderData>
     : baseTemplate
 
   // ── 3. KPI data ──────────────────────────────────────────────────────────
-  const kpi = buildKPIData(raw.metrics, raw.comparisonMetrics, raw.project)
+  const kpi = buildKPIData(raw.metrics, raw.comparisonMetrics, raw.project, {
+    period: raw.periodReach,
+    comparison: raw.comparisonPeriodReach,
+  })
 
   // ── 4. Benchmarks ────────────────────────────────────────────────────────
-  const bmRaw = await getBenchmarks(
+  const bm = await getBenchmarksWithSource(
     config.projectId,
     config.clientId,
     raw.project.campaignType ?? 'general',
   )
+  // Placeholder ('global') benchmarks are shown with their real label but never
+  // compared or graded against; every comparison also needs the metric to
+  // exist (no CPL comparison with zero leads).
+  const usable = bm.source !== 'global'
+  const bmRaw = bm.metrics
+  const vs = (value: number, bench: number, available: boolean) =>
+    usable && available && bench > 0 ? ((value - bench) / bench) * 100 : 0
+  const p0 = kpi.primary
   const benchmarks: BenchmarkSummary = {
     metrics: bmRaw,
-    source: 'agency',       // getBenchmarks already applies the fallback chain
-    roasVsBenchmark: bmRaw.roas > 0
-      ? ((kpi.primary.roas - bmRaw.roas) / bmRaw.roas) * 100
-      : 0,
-    ctrVsBenchmark: bmRaw.ctr > 0
-      ? ((kpi.primary.ctr - bmRaw.ctr) / bmRaw.ctr) * 100
-      : 0,
-    cpcVsBenchmark: bmRaw.cpc > 0
-      ? ((kpi.primary.cpc - bmRaw.cpc) / bmRaw.cpc) * 100
-      : 0,
-    cplVsBenchmark: bmRaw.cpa > 0
-      ? ((kpi.primary.cpl - bmRaw.cpa) / bmRaw.cpa) * 100
-      : 0,
+    source: bm.source,
+    roasVsBenchmark: vs(p0.roas, bmRaw.roas, p0.revenue > 0),
+    ctrVsBenchmark:  vs(p0.ctr, bmRaw.ctr, p0.impressions > 0),
+    cpcVsBenchmark:  vs(p0.cpc, bmRaw.cpc, p0.clicks > 0),
+    cplVsBenchmark:  vs(p0.cpl, bmRaw.cpa, p0.leads > 0),
   }
 
   // ── 5. Forecasts ─────────────────────────────────────────────────────────
@@ -99,28 +116,38 @@ export async function buildRenderData(config: ReportConfig): Promise<RenderData>
     roas30d:  generateForecast(roasPoints, 30),
   }
 
-  // ── 6. Health score ──────────────────────────────────────────────────────
-  const healthResult = calculateWeightedHealthScore(
-    {
-      spend:           kpi.primary.spend,
-      budget:          raw.project.adBudget,
-      roas:            kpi.primary.roas,
-      ctr:             kpi.primary.ctr,
-      cpc:             kpi.primary.cpc,
-      cpa:             kpi.primary.cpa,
-      conversion_rate: kpi.derived.conversionRate,
-    },
-    bmRaw,
-    { roas: forecasts.roas30d, spend: forecasts.spend30d },
-  )
+  // ── 6. Health score (shared rules — campaign-health.ts) ─────────────────
+  const healthResult = assessCampaignHealth({
+    spend:          kpi.primary.spend,
+    revenue:        kpi.primary.revenue,
+    roas:           kpi.primary.roas,
+    ctr:            kpi.primary.ctr,
+    cpc:            kpi.primary.cpc,
+    conversionRate: kpi.derived.conversionRate,
+    results:        kpi.derived.results ?? null,
+    costPerResult:  kpi.derived.costPerResult,
+    budget:         raw.project.adBudget,
+    campaignStart:  raw.project.startDate,
+    campaignEnd:    raw.project.endDate,
+    periodFrom:     config.dateFrom,
+    periodTo:       config.dateTo,
+    today:          todayISO(),
+    benchmarks:     bmRaw,
+    benchmarkSource: bm.source,
+    forecasts:      { roas: forecasts.roas30d, spend: forecasts.spend30d },
+  })
 
   const health: HealthSummary = {
     result:  healthResult,
     grade:   healthResult.grade,
     risk:    healthResult.risk,
     score:   healthResult.score,
-    verdict: gradeVerdict(healthResult.grade, healthResult.score),
+    verdict: healthResult.insufficientData
+      ? 'Not enough data to grade yet'
+      : gradeVerdict(healthResult.grade, healthResult.score),
   }
+
+  const campaigns = raw.campaigns && raw.campaigns.length > 1 ? campaignBreakdown(raw.campaigns) : undefined
 
   // ── 7. AI Narrative ──────────────────────────────────────────────────────
   const ai = await buildAINarrative({
@@ -131,7 +158,12 @@ export async function buildRenderData(config: ReportConfig): Promise<RenderData>
     forecasts,
     health,
     project: raw.project,
+    dataQuality: raw.dataQuality,
+    campaigns,
   })
+
+  if (config.language === 'ml') ai.executiveSummary = malayalamSummary({ config, project: raw.project, kpi, campaigns })
+  if (config.summaryOverride) ai.executiveSummary = config.summaryOverride
 
   return {
     config,
@@ -143,17 +175,62 @@ export async function buildRenderData(config: ReportConfig): Promise<RenderData>
     forecasts,
     health,
     ai,
+    ...(raw.dataQuality ? { dataQuality: raw.dataQuality } : {}),
+    ...(campaigns ? { campaigns } : {}),
     generatedAt: new Date().toISOString(),
   }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Per-campaign lines for a client report, each under its own objective. */
+function campaignBreakdown(campaigns: NonNullable<ReportRawData['campaigns']>): CampaignBreakdownRow[] {
+  return campaigns.map(({ project, metrics }) => {
+    const k = buildKPIData(metrics, [], project)
+    const def = k.derived.result
+    return {
+      projectId: project.id,
+      campaignName: project.campaignName,
+      objective: project.campaignType,
+      resultLabel: def?.metric ? def.label : null,
+      costLabel: def?.metric ? def.costLabel : null,
+      results: def?.metric ? k.derived.results ?? null : null,
+      costPerResult: def?.metric ? k.derived.costPerResult : null,
+      spend: k.primary.spend,
+      impressions: k.primary.impressions,
+      clicks: k.primary.clicks,
+    }
+  })
+}
+
 /**
  * Fetches a remote logo and returns a resized PNG data URI (or null on failure).
  * Mirrors the payslip renderer so report branding is consistent and never
  * depends on a live network fetch at raster time.
  */
+/** A src the rasteriser accepts as-is (data URI), else null. */
+function embeddable(src: string | null | undefined): string | null {
+  return src && src.startsWith('data:image/') ? src : null
+}
+
+/** Resolve + embed a full-width page background; null when unavailable. */
+async function embedBackground(value: string | null | undefined): Promise<string | null> {
+  const src = value ? resolveBrandingUrl(value) : ''
+  if (!src) return null
+  if (!/^https?:\/\//.test(src)) return embeddable(src)
+  try {
+    const res = await fetch(src)
+    if (!res.ok) return null
+    const png = await sharp(Buffer.from(await res.arrayBuffer()))
+      .resize({ width: 1600, withoutEnlargement: true })
+      .png({ compressionLevel: 9 })
+      .toBuffer()
+    return 'data:image/png;base64,' + png.toString('base64')
+  } catch {
+    return null
+  }
+}
+
 async function logoToDataUrl(url: string): Promise<string | null> {
   try {
     const res = await fetch(url)

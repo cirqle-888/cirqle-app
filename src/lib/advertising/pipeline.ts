@@ -22,6 +22,11 @@ export interface IngestRow {
   clicks: number
   reach: number
   leads: number
+  /** Optional action counts. Undefined = this source does not report it, and
+   *  the column is left untouched rather than overwritten. */
+  messages?: number
+  purchases?: number
+  landingPageViews?: number
   adCurrency?: string
 }
 
@@ -105,7 +110,20 @@ export async function ingestMetrics(
     }
 
     const adCur = r.adCurrency || 'INR'
-    const rateToBase = adCur === 'INR' ? 1.0 : (fxMap.get(adCur) || 1.0)
+    // A missing rate used to fall back to 1.0, silently booking e.g. USD 100
+    // as ₹100. The row is refused instead (it imports on the next sync once
+    // the rate exists) and the error names the currency.
+    const fxRate = adCur === 'INR' ? 1.0 : fxMap.get(adCur)
+    if (!fxRate || !Number.isFinite(fxRate) || fxRate <= 0) {
+      // Undo the imported/updated count taken above.
+      if (existing) result.updated--
+      else result.imported--
+      result.failed++
+      const msg = `No ${adCur}→INR exchange rate; ${r.metricDate} not imported.`
+      if (!result.errors.includes(msg)) result.errors.push(msg)
+      continue
+    }
+    const rateToBase = fxRate
     const rateToBilling = rateToBase 
 
     upsertPayloads.push({
@@ -117,6 +135,9 @@ export async function ingestMetrics(
       clicks: r.clicks,
       reach: r.reach,
       leads: r.leads,
+      ...(r.messages !== undefined ? { messages: r.messages } : {}),
+      ...(r.purchases !== undefined ? { purchases: r.purchases } : {}),
+      ...(r.landingPageViews !== undefined ? { landing_page_views: r.landingPageViews } : {}),
       source,
       sync_state: syncState,
       version: (existing?.version || 0) + 1,

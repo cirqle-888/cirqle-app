@@ -22,7 +22,18 @@ export interface AdMetricsResponse {
   clicks: number
   reach?: number
   leads?: number
+  /** Messaging conversations started. */
+  messages?: number
+  purchases?: number
+  landing_page_views?: number
   revenue?: number
+}
+
+/** Unique reach over a whole date range (not a sum of daily reach). */
+export interface AdPeriodReachResponse {
+  reach: number
+  /** Average impressions per person over the range, when the provider reports it. */
+  frequency?: number
 }
 
 export interface AdProvider {
@@ -82,6 +93,19 @@ export interface AdProvider {
     startDate: string,
     endDate: string
   ): Promise<AdMetricsResponse[]>
+
+  /**
+   * Optional: unique reach for one campaign over the whole range, computed by
+   * the provider. Daily reach rows cannot be summed into this — the same
+   * person reached on two days would count twice.
+   */
+  getCampaignPeriodReach?(
+    accountId: string,
+    accessToken: string,
+    providerMetadata: any,
+    startDate: string,
+    endDate: string
+  ): Promise<AdPeriodReachResponse | null>
 
   /**
    * Optional: Refresh OAuth token

@@ -2,7 +2,7 @@
  * Excel Exporter
  *
  * Generates a multi-sheet .xlsx workbook from RenderData using the xlsx package.
- * Sheets: Summary | Daily Breakdown | Weekly | Forecast | AI Narrative
+ * Sheets: Summary | Campaigns (client reports) | Daily Breakdown | Weekly | Forecast | AI Narrative
  */
 
 import * as XLSX from 'xlsx'
@@ -15,6 +15,7 @@ export function generateExcel(data: RenderData): Buffer {
   const wb = XLSX.utils.book_new()
 
   addSummarySheet(wb, data)
+  addCampaignsSheet(wb, data)
   addDailySheet(wb, data)
   addWeeklySheet(wb, data)
   addForecastSheet(wb, data)
@@ -41,7 +42,7 @@ function addSummarySheet(wb: XLSX.WorkBook, d: RenderData) {
     [''],
     ['HEALTH SCORE', '', '', ''],
     ['Score', d.health.score],
-    ['Grade', d.health.grade],
+    ['Grade', d.health.result?.insufficientData ? 'Not graded' : d.health.grade],
     ['Risk', d.health.risk],
     ['Verdict', d.health.verdict],
     [''],
@@ -49,7 +50,7 @@ function addSummarySheet(wb: XLSX.WorkBook, d: RenderData) {
     ['Spend (₹)', p.spend, '', ''],
     ['Revenue (₹)', p.revenue, '', ''],
     ['Budget (₹)', d.project.adBudget, '', ''],
-    ['Budget Utilisation (%)', derived.budgetUtilisation, '', ''],
+    ['Allocation used to date (%)', derived.budgetUtilisation, '', ''],
     ['Remaining Budget (₹)', derived.remainingBudget, '', ''],
     ['ROAS', p.roas, bm.roas, d.benchmarks.roasVsBenchmark],
     ['CTR (%)', p.ctr, bm.ctr, d.benchmarks.ctrVsBenchmark],
@@ -57,11 +58,14 @@ function addSummarySheet(wb: XLSX.WorkBook, d: RenderData) {
     ['CPM (₹)', p.cpm, bm.cpm, 0],
     ['CPL (₹)', p.cpl, bm.cpa, d.benchmarks.cplVsBenchmark],
     ['Impressions', p.impressions, '', ''],
-    ['Reach', p.reach, '', ''],
+    ...(d.kpi.periodReach?.available
+      ? [['Reach (unique, period)', d.kpi.periodReach.value, '', ''] as (string | number)[]]
+      : []),
+    ['Reach (sum of daily)', p.reach, '', ''],
     ['Clicks', p.clicks, '', ''],
     ['Leads', p.leads, '', ''],
     ['Conversions', p.conversions, '', ''],
-    ['Profit (₹)', derived.profit, '', ''],
+    ['Revenue minus ad spend (₹)', derived.profit, '', ''],
     ['Margin (%)', derived.margin, '', ''],
     ['ROI (%)', derived.roi, '', ''],
     ['Conversion Rate (%)', derived.conversionRate, bm.conversion_rate, ''],
@@ -158,10 +162,26 @@ function addAISheet(wb: XLSX.WorkBook, d: RenderData) {
   XLSX.utils.book_append_sheet(wb, ws, 'AI Narrative')
 }
 
+/** Client report: one row per campaign, each under its own objective. */
+function addCampaignsSheet(wb: XLSX.WorkBook, d: RenderData) {
+  if (!d.campaigns || d.campaigns.length < 2) return
+  const rows: (string | number)[][] = [
+    ['Campaign', 'Objective', 'Result', 'Results', 'Cost per result (₹)', 'Spend (₹)', 'Impressions', 'Clicks (all)'],
+    ...d.campaigns.map(c => [
+      c.campaignName, c.objective ?? '—', c.resultLabel ?? '—',
+      c.results ?? '—', c.costPerResult == null ? '—' : round2(c.costPerResult),
+      round2(c.spend), c.impressions, c.clicks,
+    ]),
+  ]
+  const ws = XLSX.utils.aoa_to_sheet(rows)
+  ws['!cols'] = [{ wch: 40 }, { wch: 14 }, { wch: 16 }, { wch: 10 }, { wch: 18 }, { wch: 12 }, { wch: 12 }, { wch: 12 }]
+  XLSX.utils.book_append_sheet(wb, ws, 'Campaigns')
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // Canonical money rounding — a local Math.round(n * 100) / 100 disagrees at
 // the .xx5 midpoints (1.005 -> 1.00 instead of 1.01) and would drift from
 // the finance engines. See currency.ts round2.
 import { round2 } from '@/lib/calculations/currency'
-const deltaStr = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
+const deltaStr = (v: number | null) => v == null ? 'not comparable' : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`

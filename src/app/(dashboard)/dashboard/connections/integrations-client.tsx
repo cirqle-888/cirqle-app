@@ -171,7 +171,7 @@ export function IntegrationsClient({
 
           {/* Google */}
           <button
-            onClick={() => openClientSelector('google')}
+            disabled aria-describedby="google-ads-capability"
             className="flex items-center gap-3 rounded-xl border border-border bg-secondary/30 p-4 hover:border-pink-500/40 hover:bg-secondary/60 transition-all text-left group"
           >
             <div className="h-10 w-10 rounded-xl bg-green-500/10 flex items-center justify-center shrink-0">
@@ -184,7 +184,7 @@ export function IntegrationsClient({
             </div>
             <div>
               <div className="font-medium text-sm">Google Ads</div>
-              <div className="text-xs text-muted-foreground">Search, Display &amp; YouTube campaigns</div>
+              <div id="google-ads-capability" className="text-xs text-muted-foreground">Sync unavailable — Google Ads integration is not ready</div>
             </div>
             <Plus className="h-4 w-4 text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
           </button>
@@ -210,7 +210,7 @@ export function IntegrationsClient({
                         </div>
                       </div>
                       <Badge variant={conn.status === 'active' && !isExpired ? 'default' : 'danger'}>
-                        {isExpired ? 'Expired' : conn.status}
+                        {conn.provider === 'google' ? 'Sync unavailable' : isExpired ? 'Expired' : conn.status}
                       </Badge>
                     </div>
                     <div className="text-xs space-y-1.5 text-muted-foreground">
@@ -243,7 +243,7 @@ export function IntegrationsClient({
                       variant="outline"
                       size="sm"
                       onClick={() => handleRefreshAccounts(conn.id)}
-                      disabled={isRefreshing === conn.id}
+                      disabled={isRefreshing === conn.id || conn.provider === 'google'}
                     >
                       {isRefreshing === conn.id
                         ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
@@ -270,7 +270,7 @@ export function IntegrationsClient({
 
       {connections.length === 0 && (
         <div className="py-10 text-center text-sm text-muted-foreground border border-dashed rounded-xl">
-          No ad providers connected yet — use the buttons above to link Meta or Google Ads.
+          No ad providers connected yet — connect Meta Ads to start syncing. Google Ads sync is not available yet.
         </div>
       )}
 

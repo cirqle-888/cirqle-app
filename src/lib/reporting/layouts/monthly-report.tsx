@@ -14,7 +14,9 @@ import {
   PURPLE, NAVY, INK, GREY_PILL, RED_PILL, SAFE_AREA,
   PageChrome, CirqleLogo, MetaLogo, MetaLine, KpiCircle, KpiDivider, Pill, TableRow,
   capitalize, longDate, num, money, monthLabel, truncate, computeCampaignMeta,
+  rupeesOrDash, openingBalanceOf, headlineReach, DataNote,
 } from './shared'
+import { costPerSelectedResult } from '../result-type'
 import { AD_SPEND_GST_RATE } from '@/lib/advertising/budget'
 
 export interface MonthlyRowWithBalance {
@@ -22,7 +24,9 @@ export interface MonthlyRowWithBalance {
   monthLabel: string  // "Feb 2026"
   spend: number; gstAmount: number; actualCost: number
   reach: number; impressions: number; clicks: number; leads: number; revenue: number
-  roas: number; ctr: number; cpr: number
+  roas: number; ctr: number
+  /** Spend ÷ the month's objective results; null when unavailable. */
+  cpr: number | null
   balance: number      // terminal remainingAllocation as of the last day in that month
   days: number         // count of daily rows folded in
 }
@@ -40,6 +44,18 @@ function sum(rows: DailyRowWithBalance[], pick: (r: DailyRowWithBalance) => numb
  * low-spend days). `balance` is the terminal (last-day) running balance for
  * that month, not summed.
  */
+/**
+ * A month's result count: the objective's daily results summed. Snapshots
+ * made before result definitions existed count leads only — never clicks
+ * under a results label.
+ */
+function monthResults(data: RenderData, rows: { results?: number | null }[], leads: number): number | null {
+  const def = data.kpi.derived.result
+  if (!def) return leads
+  if (!def.metric) return null
+  return rows.reduce((t, r) => t + (r.results ?? 0), 0)
+}
+
 export function computeMonthlyRows(data: RenderData): MonthlyRowWithBalance[] {
   const daily = computeDailyRows(data)
   const groups = new Map<string, DailyRowWithBalance[]>()
@@ -66,7 +82,7 @@ export function computeMonthlyRows(data: RenderData): MonthlyRowWithBalance[] {
         spend, gstAmount, actualCost, reach, impressions, clicks, leads, revenue,
         roas: spend > 0 ? revenue / spend : 0,
         ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
-        cpr: (leads || clicks) > 0 ? spend / (leads || clicks) : 0,
+        cpr: costPerSelectedResult(spend, monthResults(data, rows, leads)),
         balance: rows[rows.length - 1].balance,
         days: rows.length,
       }
@@ -83,7 +99,7 @@ function monthlyRowCells(r: MonthlyRowWithBalance): string[] {
     `₹${money(r.gstAmount)}`,
     num(r.reach),
     num(r.impressions),
-    `₹${money(r.cpr)}`,
+    rupeesOrDash(r.cpr),
     `₹${money(r.balance)}`,
   ]
 }
@@ -175,7 +191,7 @@ export function buildMonthlyReportElement(data: RenderData, opts: LayoutOpts) {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', marginBottom: `${30 * s}px` }}>
-              <KpiCircle s={s} label="Reach"       value={num(p.reach)}        grad={['#8B5CF6', '#6D28D9']} icon="users" />
+              <KpiCircle s={s} label={headlineReach(data).label} value={headlineReach(data).value} grad={['#8B5CF6', '#6D28D9']} icon="users" />
               <KpiDivider s={s} />
               <KpiCircle s={s} label="Impressions" value={num(p.impressions)}  grad={['#6366F1', '#4F46E5']} icon="eye" />
               <KpiDivider s={s} />
@@ -183,13 +199,14 @@ export function buildMonthlyReportElement(data: RenderData, opts: LayoutOpts) {
               <KpiDivider s={s} />
               <KpiCircle s={s} label="Meta Spend"  value={`₹${money(d.actualCost)}`} grad={['#A855F7', '#7C3AED']} icon="rupee" />
               <KpiDivider s={s} />
-              <KpiCircle s={s} label="CPR"         value={`₹${money(d.costPerResult)}`} grad={['#FB923C', '#EF4444']} icon="percent" />
+              <KpiCircle s={s} label="CPR"         value={rupeesOrDash(d.costPerResult)} grad={['#FB923C', '#EF4444']} icon="percent" />
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'center', gap: `${20 * s}px`, marginBottom: `${36 * s}px`, flexWrap: 'wrap' }}>
-              <Pill s={s} bg={RED_PILL}  label="Total Remaining Amount" value={`₹${money(project.walletAllocation - (p.spend * (1 + AD_SPEND_GST_RATE)))}`} />
+              <Pill s={s} bg={RED_PILL}  label="Total Remaining Amount" value={`₹${money(openingBalanceOf(project) - (p.spend * (1 + AD_SPEND_GST_RATE)))}`} />
               <Pill s={s} bg={GREY_PILL} label="Remaining Days" value={`${remainingDays} Days`} />
             </div>
+          <DataNote s={s} data={data} />
           </div>
         )}
 
@@ -207,7 +224,8 @@ export function buildMonthlyReportElement(data: RenderData, opts: LayoutOpts) {
             </span>
           </div>
 
-          <TableRow s={s} cells={['Month', 'Meta Spend', 'GST', 'Reach', 'Impressions', 'CPR', 'Remaining Amount']} header />
+          {/* A month's reach is the sum of its daily reach, not unique people. */}
+          <TableRow s={s} cells={['Month', 'Meta Spend', 'GST', 'Reach (sum)', 'Impressions', 'CPR', 'Remaining Amount']} header />
           {tableRows.length === 0 ? (
             probe ? null : <div style={{ display: 'flex', padding: `${24 * s}px`, color: '#9CA3AF', fontSize: `${22 * s}px` }}>
               No monthly metrics recorded for this period.

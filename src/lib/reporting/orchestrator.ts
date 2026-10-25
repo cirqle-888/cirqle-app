@@ -1,233 +1,152 @@
-/**
- * Report Orchestrator
- *
- * The single entry-point for generating a complete report. Called by:
- *   • Background worker  (advertising_generate_report job)
- *   • API route          (POST /api/advertising/reports/generate)
- *
- * Steps:
- *   1. Create db record (status=generating)
- *   2. Build RenderData (data + KPI + branding + benchmarks + forecasts + health + AI)
- *   3. Run requested exporters in parallel (PDF, Excel, CSV, Image)
- *   4. Upload exports to Supabase Storage
- *   5. Deliver via email (if recipients provided)
- *   6. Update db record (status=ready, URLs, render_data, ai_narrative)
- *   7. Track analytics event
- *
- * On any failure the record is updated with status=failed + error_message.
- */
-
-import { createTypedAdminClient } from '@/lib/supabase/server'
-import { logger } from '@/lib/logger'
+/** Stable report runs: persist the snapshot before exporting, retain successful
+ * formats on retry, and never repeat an accepted or uncertain email attempt. */
+import { createHash, randomUUID } from 'node:crypto'
+import { createAdminClient } from '@/lib/supabase/server'
+import { syncBeforeReport } from './sync-before-report'
+import { snapshotProblem } from './snapshot'
 import { buildRenderData } from './render-engine'
-import { generatePDF } from './exporters/pdf'
+import { generatePDF, generateImageBundle } from './exporters/pdf'
 import { generateExcel } from './exporters/excel'
 import { generateCSV } from './exporters/csv'
 import { generateImagePortrait, generateImageSquare } from './exporters/image'
-import { uploadExport, sendReportEmail } from './delivery-engine'
-import type {
-  ReportConfig, RenderData, OrchestrationResult, ExportResult, DeliveryResult, ReportFormat,
-} from './types'
+import { uploadExport, sendReportEmail, signDownloadUrl } from './delivery-engine'
+import type { ReportConfig, RenderData, OrchestrationResult, ExportResult, DeliveryResult, ReportFormat, ExportFailure } from './types'
 
-/**
- * Generates a full report. Creates and manages the ad_reports db record.
- * Returns OrchestrationResult with all export URLs.
- */
-export async function generateReport(config: ReportConfig): Promise<OrchestrationResult> {
-  const admin = createTypedAdminClient()
-  const t0 = Date.now()
-  let reportId = ''
+export interface QueuedReport { reportId: string; jobId: string; status: string }
 
-  // ── 1. Create report record ────────────────────────────────────────────
-  const { data: reportRow, error: insertErr } = await admin
-    .from('ad_reports')
-    .insert({
-      project_id:     config.projectId,
-      client_id:      config.clientId,
-      report_type:    config.reportType,
-      template:       config.template,
-      date_from:      config.dateFrom,
-      date_to:        config.dateTo,
-      comparison_from: config.comparisonFrom ?? null,
-      comparison_to:   config.comparisonTo ?? null,
-      status:         'generating',
-      generated_by:   config.generatedBy ?? null,
-      schedule_id:    config.scheduleId ?? null,
-    })
-    .select('id')
-    .single()
+export async function enqueueReportGeneration(config: ReportConfig, requestKey?: string): Promise<QueuedReport> {
+  const admin = createAdminClient()
+  // Schedule retries share one logical run; user actions use a client request ID.
+  const key = config.scheduleId
+    ? `schedule:${config.scheduleId}:${config.dateFrom}:${config.dateTo}:v1`
+    : `manual:${config.generatedBy ?? 'server'}:${requestKey ?? randomUUID()}`
+  const { data, error } = await admin.rpc('queue_ad_report', { p_config: config, p_request_key: key })
+  if (error || !data) throw new Error('Could not queue the report. Please try again.')
+  return data as QueuedReport
+}
 
-  if (insertErr || !reportRow) {
-    throw new Error(`Failed to create report record: ${insertErr?.message}`)
+export async function generateReport(input: ReportConfig): Promise<OrchestrationResult> {
+  const admin = createAdminClient()
+  const started = Date.now()
+  let reportId = input.reportId
+  if (!reportId) {
+    // Compatibility for old queued jobs: the worker supplies its own stable ID.
+    const { data, error } = await admin.from('ad_reports').insert({
+      project_id: input.projectId, client_id: input.clientId, report_type: input.reportType,
+      template: input.template, date_from: input.dateFrom, date_to: input.dateTo,
+      comparison_from: input.comparisonFrom ?? null, comparison_to: input.comparisonTo ?? null,
+      generated_by: input.generatedBy ?? null, schedule_id: input.scheduleId ?? null,
+      status: 'pending', config: input,
+    }).select('id').single()
+    if (error || !data) throw new Error('Could not create report.')
+    reportId = data.id as string
   }
-  reportId = reportRow.id
-
+  const id = reportId
+  const save = async (values: Record<string, unknown>) => {
+    const { error } = await admin.from('ad_reports').update(values).eq('id', id)
+    if (error) throw new Error('Could not save report progress.')
+  }
+  const { data: row, error } = await admin.from('ad_reports').select('*').eq('id', id).single()
+  if (error || !row) throw new Error('Report not found.')
+  const config = (row.config ?? input) as ReportConfig
+  if (row.project_id !== input.projectId || row.client_id !== input.clientId) throw new Error('Report scope mismatch.')
+  const exports: ExportResult[] = row.export_results ?? []
+  const delivery: DeliveryResult[] = row.delivery_results ?? []
+  const failedFormats: ExportFailure[] = []
+  const result = (status: OrchestrationResult['status'], message?: string): OrchestrationResult => ({
+    reportId: id, status, generationTimeMs: Date.now() - started, formats: config.formats,
+    exports, failedFormats, delivery, ...(message ? { error: message } : {}),
+  })
+  if (row.status === 'ready') return result('ready')
   try {
-    // ── 2. Build RenderData ────────────────────────────────────────────
-    let renderData: RenderData
-    try {
-      renderData = await buildRenderData(config)
-    } catch (err: any) {
-      await markFailed(admin, reportId, `Render failed: ${err.message}`)
-      return { reportId, status: 'failed', generationTimeMs: Date.now() - t0, formats: [], exports: [], delivery: [], error: err.message }
+    await save({ status: 'generating', stage: row.render_data ? 'exporting' : 'gathering_data', error_message: null })
+    if (!row.render_data) {
+      await save({ stage: 'syncing' })
+      await syncBeforeReport(config, id)
     }
-
-    // ── 3. Run exporters ───────────────────────────────────────────────
-    const formats = config.formats
-    const exports: ExportResult[] = []
-
-    // Generate each format; failures are logged but don't abort others
-    const exportJobs = formats.map(async (format): Promise<ExportResult | null> => {
+    const renderData: RenderData = row.render_data ?? await buildRenderData(config)
+    const problem = snapshotProblem(renderData)
+    if (problem && !config.allowIncomplete) {
+      await save({ status: 'failed', stage: 'failed', error_message: problem })
+      return result('failed', problem)
+    }
+    // Once stored, every format/retry uses exactly these figures and narrative.
+    await save({ render_data: renderData, ai_narrative: renderData.ai, stage: 'exporting' })
+    for (const format of config.formats) {
+      if (exports.some(e => e.format === format)) continue
+      let exported: ExportResult
       try {
         const buffer = await runExporter(format, renderData)
-        const result = await uploadExport(reportId, format, buffer, renderData)
-        return result
-      } catch (err: any) {
-        logger.error(`[Orchestrator] Export ${format} failed`, err)
-        return null
+        exported = await uploadExport(id, format, buffer, renderData)
+      } catch {
+        failedFormats.push({ format, error: 'Could not create this format. Retry to try again.' })
+        await save({ export_failures: failedFormats })
+        continue
       }
-    })
-
-    const exportResults = await Promise.all(exportJobs)
-    for (const r of exportResults) {
-      if (r) exports.push(r)
+      exports.push(exported)
+      // Persist before starting another exporter or any external delivery.
+      await save({ export_results: exports })
     }
-
-    // ── 4. Build URL map for db update ────────────────────────────────
-    const urlMap: Record<string, string | null> = {
-      pdf_url:            null,
-      xlsx_url:           null,
-      csv_url:            null,
-      image_url_portrait: null,
-      image_url_square:   null,
-    }
-    for (const ex of exports) {
-      if (ex.format === 'pdf')            urlMap.pdf_url            = ex.publicUrl
-      if (ex.format === 'xlsx')           urlMap.xlsx_url           = ex.publicUrl
-      if (ex.format === 'csv')            urlMap.csv_url            = ex.publicUrl
-      if (ex.format === 'image_portrait') urlMap.image_url_portrait = ex.publicUrl
-      if (ex.format === 'image_square')   urlMap.image_url_square   = ex.publicUrl
-    }
-
-    // ── 5. Email delivery ─────────────────────────────────────────────
-    const delivery: DeliveryResult[] = []
-    if (config.recipients && config.recipients.length > 0) {
-      const { delivered, failed } = await sendReportEmail(renderData, exports, config.recipients)
-      for (const ex of exports) {
-        delivery.push({
-          format: ex.format,
-          export: ex,
-          emailDelivered: delivered.length > 0,
-          emailRecipients: delivered,
-          error: failed.length > 0 ? `Failed: ${failed.join(', ')}` : undefined,
-        })
-      }
-
-      // Track email events
-      if (delivered.length > 0) {
-        await admin.from('ad_report_analytics').insert(
-          delivered.map(email => ({
-            report_id:       reportId,
-            event:           'email_delivered',
-            recipient_email: email,
-            metadata:        { formats: formats },
-          }))
-        )
-      }
-      if (failed.length > 0) {
-        await admin.from('ad_report_analytics').insert(
-          failed.map(email => ({
-            report_id:       reportId,
-            event:           'email_failed',
-            recipient_email: email,
-          }))
-        )
+    const status = exports.length === 0 ? 'failed' : failedFormats.length ? 'partial' : 'ready'
+    const urls: Record<string, string> = {}
+    const columns: Record<ReportFormat, string> = { pdf: 'pdf_url', xlsx: 'xlsx_url', csv: 'csv_url', image_portrait: 'image_url_portrait', image_square: 'image_url_square', image_bundle: 'image_bundle_url' }
+    for (const ex of exports) urls[columns[ex.format]] = ex.publicUrl
+    // Partial reports are available for download, but aren't automatically sent.
+    if (status === 'ready' && row.review_status === 'approved' && !config.allowIncomplete && config.recipients?.length) {
+      await save({ stage: 'delivery' })
+      const freshExports = await Promise.all(exports.map(async ex => ({ ...ex, publicUrl: await signDownloadUrl(ex.storageKey) })))
+      for (const recipient of config.recipients) {
+        const previous = delivery.find(d => d.email.toLowerCase() === recipient.email.toLowerCase())
+        // An interrupted send is ambiguous. Do not risk sending it twice.
+        if (previous) continue
+        const attempt: DeliveryResult = { email: recipient.email, status: 'sending' }
+        delivery.push(attempt)
+        await save({ delivery_results: delivery })
+        const key = createHash('sha256').update(`${id}:${recipient.email.toLowerCase()}`).digest('hex')
+        const outcome = await sendReportEmail(renderData, freshExports, [recipient], `report-${key}`)
+        Object.assign(attempt, outcome.accepted.length
+          ? { status: 'accepted', providerId: outcome.accepted[0].providerId }
+          : { status: 'failed', error: outcome.failed[0]?.error ?? 'Email was not accepted.' })
+        await save({ delivery_results: delivery })
+        // Keep historical analytics consumers working; metadata distinguishes
+        // provider acceptance from actual delivery.
+        await admin.from('ad_report_analytics').insert({
+          report_id: id,
+          event: attempt.status === 'accepted' ? 'email_delivered' : 'email_failed',
+          recipient_email: recipient.email,
+          metadata: { state: attempt.status === 'accepted' ? 'provider_accepted' : 'failed', provider_id: attempt.providerId ?? null },
+        }).then(() => undefined, () => undefined)
       }
     }
-
-    // ── 6. Update report record ────────────────────────────────────────
-    const generationTimeMs = Date.now() - t0
-    const { error: updateErr } = await admin
-      .from('ad_reports')
-      .update({
-        status:            'ready',
-        generation_time_ms: generationTimeMs,
-        generated_at:       new Date().toISOString(),
-        render_data:        renderData as any,
-        ai_narrative:       renderData.ai as any,
-        ...urlMap,
-      })
-      .eq('id', reportId)
-
-    if (updateErr) logger.error('[Orchestrator] Failed to update report record', new Error(updateErr.message))
-
-    // ── 7. Track generated event ───────────────────────────────────────
-    // Use .then(null, () => {}) instead of .catch() — Supabase returns a
-    // PromiseLike (has .then) but not a full Promise (no .catch).
-    void admin.from('ad_report_analytics').insert({
-      report_id: reportId,
-      event:     'generated',
-      user_id:   config.generatedBy ?? null,
-      metadata:  { formats, generation_time_ms: generationTimeMs },
-    }).then(null, () => {}) // Non-critical
-
-    return {
-      reportId,
-      status:            'ready',
-      generationTimeMs,
-      formats,
-      exports,
-      delivery,
+    if (status === 'ready' && row.review_status === 'approved' && config.supersedesId) {
+      await admin.from('ad_reports').update({ review_status: 'superseded' }).eq('id', config.supersedesId).eq('client_id', config.clientId)
     }
-  } catch (err: any) {
-    logger.error('[Orchestrator] Fatal error', err)
-    await markFailed(admin, reportId, err.message)
-    return {
-      reportId,
-      status: 'failed',
-      generationTimeMs: Date.now() - t0,
-      formats: config.formats,
-      exports: [],
-      delivery: [],
-      error: err.message,
-    }
+    await admin.rpc('reconcile_report_delivery_events', { p_report_id: id })
+    const warning = failedFormats.length ? `Could not produce: ${failedFormats.map(f => f.format).join(', ')}.` :
+      config.recipients?.length && row.review_status !== 'approved' ? 'Review and approve this report before sending email.' :
+      delivery.some(d => !['accepted', 'delivered'].includes(d.status)) ? 'Some email attempts failed or need review. They will not be resent automatically.' : null
+    await save({ status, stage: status, error_message: warning, export_results: exports,
+      export_failures: failedFormats, generation_time_ms: Date.now() - started,
+      generated_at: new Date().toISOString(), ...urls })
+    await admin.from('ad_report_analytics').insert({
+      report_id: id, event: 'generated', user_id: config.generatedBy ?? null,
+      metadata: { formats: config.formats, status, generation_time_ms: Date.now() - started },
+    }).then(() => undefined, () => undefined)
+    return result(status, status === 'failed' ? warning ?? 'No files were produced.' : undefined)
+  } catch {
+    const message = 'Report generation was interrupted. Retry to continue from saved progress.'
+    await save({ status: 'failed', stage: 'failed', error_message: message }).catch(() => undefined)
+    return result('failed', message)
   }
 }
-
-/**
- * Enqueues a report generation job without waiting for it to complete.
- * Use from API routes — the background worker picks it up.
- */
-export async function enqueueReportGeneration(config: ReportConfig): Promise<string> {
-  const { enqueueJob } = await import('@/lib/jobs/engine')
-  return enqueueJob({
-    job_type: 'advertising_generate_report',
-    payload:  config,
-    priority: 'normal',
-  })
-}
-
-// ─── Exporter dispatch ────────────────────────────────────────────────────────
 
 async function runExporter(format: ReportFormat, data: RenderData): Promise<Buffer> {
   switch (format) {
-    case 'pdf':            return generatePDF(data)
-    case 'xlsx':           return generateExcel(data)
-    case 'csv':            return generateCSV(data)
+    case 'image_bundle': return generateImageBundle(data)
+    case 'pdf': return generatePDF(data)
+    case 'xlsx': return generateExcel(data)
+    case 'csv': return generateCSV(data)
     case 'image_portrait': return generateImagePortrait(data)
-    case 'image_square':   return generateImageSquare(data)
-    default: throw new Error(`Unknown export format: ${format}`)
+    case 'image_square': return generateImageSquare(data)
   }
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-async function markFailed(admin: ReturnType<typeof createTypedAdminClient>, reportId: string, message: string) {
-  try {
-    await admin.from('ad_reports').update({
-      status:        'failed',
-      error_message: message.slice(0, 1000),
-      generated_at:  new Date().toISOString(),
-    }).eq('id', reportId)
-  } catch { /* Non-critical */ }
 }

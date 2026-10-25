@@ -33,7 +33,7 @@ export async function GET(
         'id, project_id, client_id, report_type, template, date_from, date_to, ' +
         'comparison_from, comparison_to, status, error_message, generation_time_ms, ' +
         'pdf_url, xlsx_url, csv_url, image_url_portrait, image_url_square, ' +
-        'ai_narrative, generated_by, schedule_id, created_at, generated_at'
+        'ai_narrative, generated_by, schedule_id, created_at, generated_at, stage'
       )
       .eq('id', id)
       .maybeSingle()
@@ -42,13 +42,13 @@ export async function GET(
     if (!data)  return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
     // Track viewed event (fire-and-forget)
-    void admin.from('ad_report_analytics').insert({
+    if (req.nextUrl.searchParams.get('poll') !== '1') void admin.from('ad_report_analytics').insert({
       report_id: id,
       event:     'viewed',
       user_id:   me.employeeId || null,
     }).then(null, () => {})
 
-    return NextResponse.json(data)
+    return NextResponse.json(data, { headers: { 'Cache-Control': 'private, no-store' } })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 })
   }
@@ -74,9 +74,11 @@ export async function DELETE(
 
     const admin = createAdminClient()
     const { error: lookupErr, data: report } = await admin
-      .from('ad_reports').select('id').eq('id', id).maybeSingle()
+      .from('ad_reports').select('id, status').eq('id', id).maybeSingle()
     if (lookupErr) return NextResponse.json({ error: lookupErr.message }, { status: 500 })
     if (!report)   return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+    if (['pending', 'generating'].includes(report.status)) return NextResponse.json({ error: 'Wait until generation finishes before deleting this report.' }, { status: 409 })
 
     const result = await deleteReportStorageAndRow(admin, id)
     if (result.error) return NextResponse.json({ error: result.error }, { status: 500 })

@@ -7,25 +7,45 @@
  * spend / GST diff) → campaign cards (allocated, billing, KPIs). A view toggle
  * keeps the old flat "All Campaigns" grid available. Wallet money moves only
  * via ledger transactions (ad_wallet_ledger) — balances are always derived.
+ *
+ * Client-first (plan Phase 3): a period selector (kept in the URL) drives
+ * every spend/result number; results are grouped by objective instead of a
+ * single cross-campaign ROAS/Leads total; a "Needs attention" queue sits on
+ * top; each card leads with its objective's result and says how fresh its
+ * data is.
  */
 
 import { useMemo, useState } from 'react'
+import { usePathname, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
   Megaphone, Plus, TrendingUp, Target, Wallet, ArrowRight, Inbox, Play,
-  Loader2, Link2, BarChart3, MousePointerClick, Users, Zap, AlertTriangle,
+  Loader2, Link2, BarChart3, Zap, AlertTriangle,
   Clock, ChevronRight, ChevronDown, History, Trash2, ArrowDownLeft, ArrowUpRight, ArrowLeft,
+  Search, RefreshCw, BellOff, CheckCircle2, Info,
 } from 'lucide-react'
 import {
   AD_STATUS_CHIP, STATUS_LABEL, PLATFORM_LABEL, CAMPAIGN_TYPE_LABEL, STATUSES, type AdProjectRow,
 } from '@/lib/advertising/types'
 import { remainingBudget } from '@/lib/advertising/metrics'
 import { aggregateMetrics } from '@/lib/advertising/reporting'
-import { healthScore } from '@/lib/advertising/health'
+import type { BenchmarkResult } from '@/lib/advertising/ai/benchmarks'
+import type { HealthScoreResult } from '@/lib/advertising/ai/scoring'
+import { assessCampaignHealth } from '@/lib/reporting/campaign-health'
+import { resultDefinitionFor, resultCount, costPerSelectedResult } from '@/lib/reporting/result-type'
+import { todayISO, addDaysISO } from '@/lib/utils/local-date'
+import { PERIODS, DEFAULT_PERIOD, isPeriodKey, periodRange, rowsInPeriod, type PeriodKey } from '@/lib/advertising/period'
+import { objectiveStats, type StatTile } from '@/lib/advertising/objective-stats'
+import { syncFreshness } from '@/lib/advertising/freshness'
+import {
+  buildAttentionItems, withoutSnoozed,
+  type AttentionItem, type AttentionConnection, type AttentionReport,
+} from '@/lib/advertising/attention'
+import type { ResultDefinition } from '@/lib/reporting/result-type'
 import { computeServiceCharge, spendWithGst } from '@/lib/advertising/budget'
-import { startAdvertisingRequest, addClientFund, addCompanyFund, removeWalletTransaction } from './actions'
+import { startAdvertisingRequest, addClientFund, addCompanyFund, removeWalletTransaction, snoozeAttention } from './actions'
 import { DiscussButton } from '@/components/chat/discuss-button'
 
 interface PendingRequest {
@@ -66,10 +86,26 @@ export interface FundCandidate {
 
 type ProjectRow = AdProjectRow & { client?: { id: string; name: string; code: string } | null }
 
+/** Server-loaded inputs for the Needs-attention queue (page.tsx). */
+export interface AttentionData {
+  connections: AttentionConnection[]
+  failedReports: AttentionReport[]
+  failedEmails: { reportId: string; recipient: string; at: string }[]
+  /** created_by employee id → CQID (names never reach the browser). */
+  ownerCqids: Record<string, string>
+  /** alert key → snoozed until (ISO). */
+  snoozes: Record<string, string>
+  /** false until migration 20261025180000_ad_attention_snoozes is applied. */
+  snoozeSupported: boolean
+}
+
 interface Props {
   migrated: boolean
   initialProjects: ProjectRow[]
   metricsByProject: Record<string, any[]>
+  /** Report benchmark tiers per project (missing = none available). */
+  benchmarksByProject?: Record<string, BenchmarkResult>
+  attention?: AttentionData
   pendingRequests: PendingRequest[]
   clients: { id: string; name: string; code: string }[]
   walletSupported: boolean
@@ -82,6 +118,9 @@ const inr = (v: number | null | undefined, dp = 0) =>
   v == null ? '—' : `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: dp })}`
 const round2 = (v: number) => Math.round(v * 100) / 100
 
+/** How fresh a card's data is (shared wording: lib/advertising/freshness.ts). */
+const freshness = (p: ProjectRow) => syncFreshness(p)
+
 function daysRemaining(endDate: string | null): number | null {
   if (!endDate) return null
   const end = new Date(endDate).getTime()
@@ -89,23 +128,27 @@ function daysRemaining(endDate: string | null): number | null {
   return Math.ceil((end - Date.now()) / 86_400_000)
 }
 
-function HealthBadge({ score, label }: { score: number; label: string }) {
+/** Health under the shared rules: a letter grade, or "Not graded" (with the
+ *  reason on hover) when performance cannot be judged yet. */
+export function HealthBadge({ health }: { health: HealthScoreResult }) {
+  const ungraded = health.insufficientData === true
   const { bg, text, dot } =
-    score >= 80 ? { bg: 'bg-emerald-500/10', text: 'text-emerald-700 dark:text-emerald-400', dot: 'bg-emerald-500' }
-    : score >= 60 ? { bg: 'bg-green-500/10', text: 'text-green-700 dark:text-green-400', dot: 'bg-green-500' }
-    : score >= 40 ? { bg: 'bg-amber-500/10', text: 'text-amber-700 dark:text-amber-400', dot: 'bg-amber-500' }
-    : label === 'Unknown' ? { bg: 'bg-muted/60', text: 'text-muted-foreground', dot: 'bg-muted-foreground/40' }
+    ungraded ? { bg: 'bg-muted/60', text: 'text-muted-foreground', dot: 'bg-muted-foreground/40' }
+    : health.grade === 'A' || health.grade === 'B' ? { bg: 'bg-emerald-500/10', text: 'text-emerald-700 dark:text-emerald-400', dot: 'bg-emerald-500' }
+    : health.grade === 'C' ? { bg: 'bg-green-500/10', text: 'text-green-700 dark:text-green-400', dot: 'bg-green-500' }
+    : health.grade === 'D' ? { bg: 'bg-amber-500/10', text: 'text-amber-700 dark:text-amber-400', dot: 'bg-amber-500' }
     : { bg: 'bg-red-500/10', text: 'text-red-700 dark:text-red-400', dot: 'bg-red-500' }
+  const why = health.explanations.find(e => !e.startsWith('Not enough data')) ?? ''
 
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ${bg} ${text}`}>
+    <span title={why} className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ${bg} ${text}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
-      {label}
+      {ungraded ? 'Not graded' : `Grade ${health.grade} · ${health.score}`}
     </span>
   )
 }
 
-function KpiCard({
+export function KpiCard({
   icon: Icon, label, value, sub, accent = false,
 }: {
   icon: typeof Wallet
@@ -143,7 +186,7 @@ function BudgetBar({ spent, total }: { spent: number; total: number }) {
   )
 }
 
-function MiniStat({ label, value }: { label: string; value: string }) {
+export function MiniStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg bg-secondary/50 px-2 py-1.5 text-center min-w-0">
       <div className="text-[9px] uppercase tracking-wide text-muted-foreground font-medium">{label}</div>
@@ -154,10 +197,17 @@ function MiniStat({ label, value }: { label: string; value: string }) {
 
 // ─── Card data assembly ───────────────────────────────────────────────────────
 
-interface CardData {
+export interface CardData {
   p: ProjectRow
+  /** Lifetime totals (funding, health). */
   agg: ReturnType<typeof aggregateMetrics>
-  health: ReturnType<typeof healthScore>
+  /** Totals for the selected period (headline numbers). */
+  periodAgg: ReturnType<typeof aggregateMetrics>
+  definition: ResultDefinition
+  /** Objective results in the selected period (null = none / not recorded). */
+  periodResults: number | null
+  stats: StatTile[]
+  health: HealthScoreResult
   remaining: number | null
   days: number | null
   allocated: number
@@ -175,13 +225,119 @@ interface ClientGroup {
   metaSpend: number
 }
 
+/** One card per campaign: lifetime + period totals, objective stats, health. */
+export function buildCampaignCards(
+  initialProjects: ProjectRow[],
+  metricsByProject: Record<string, any[]>,
+  allocatedByProject: Record<string, number>,
+  benchmarksByProject: Record<string, BenchmarkResult>,
+  range: ReturnType<typeof periodRange>,
+): CardData[] {
+  const today = todayISO()
+  return initialProjects.map(p => {
+    const rows = metricsByProject[p.id] || []
+    const agg = aggregateMetrics(rows)
+    // Lifetime health under the shared rules (campaign-health.ts) — the same
+    // verdict the campaign page and its reports give. No ROAS forecast here:
+    // without revenue it is never used, and the list stays cheap.
+    const definition = resultDefinitionFor(p.campaign_type, { leads: agg.leads })
+    const results = resultCount(definition, agg)
+    const firstDate = rows.reduce<string | null>((m, r) => (!m || r.metric_date < m ? r.metric_date : m), null)
+    const bm = benchmarksByProject[p.id]
+    const health = assessCampaignHealth({
+      spend: agg.spend, revenue: agg.revenue, roas: agg.roas, ctr: agg.ctr, cpc: agg.cpc,
+      conversionRate: agg.clicks > 0 ? (agg.leads / agg.clicks) * 100 : 0,
+      results, costPerResult: costPerSelectedResult(agg.spend, results),
+      budget: Number(p.ad_budget_amount || 0),
+      campaignStart: p.start_date, campaignEnd: p.end_date,
+      periodFrom: p.start_date ?? firstDate ?? today, periodTo: today, today,
+      benchmarks: bm?.metrics ?? null, benchmarkSource: bm?.source ?? null,
+    })
+    const allocated = allocatedByProject[p.id] || 0
+    const billing = computeServiceCharge(
+      allocated,
+      p.service_charge_type, Number(p.service_charge_value || 0),
+    )
+    const periodAgg = aggregateMetrics(rowsInPeriod(rows, range))
+    return {
+      p, agg, periodAgg, definition, health,
+      periodResults: resultCount(definition, periodAgg),
+      stats: objectiveStats(definition, periodAgg),
+      remaining: remainingBudget(p.ad_budget_amount, agg.spend),
+      days: daysRemaining(p.end_date),
+      allocated, billing,
+    }
+  })
+}
+
+/** Σ campaign-allocation debits per project. */
+export function allocationsByProject(ledger: LedgerRowView[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const r of ledger) {
+    if (r.direction === 'debit' && r.ad_project_id) {
+      out[r.ad_project_id] = round2((out[r.ad_project_id] || 0) + Number(r.amount_inr || 0))
+    }
+  }
+  return out
+}
+
+/** Needs-attention items for a set of cards (rules: lib/advertising/attention.ts). */
+export function computeAttentionItems(
+  attention: AttentionData | undefined,
+  cards: CardData[],
+  metricsByProject: Record<string, any[]>,
+  walletSupported: boolean,
+): AttentionItem[] {
+  if (!attention) return []
+  const today = todayISO()
+  const recentDates = [addDaysISO(today, -1), addDaysISO(today, -2)]
+  const items = buildAttentionItems({
+    today, now: new Date(),
+    campaigns: cards.map(c => {
+      const rows = metricsByProject[c.p.id] || []
+      const recentSpendByDate: Record<string, number> = {}
+      for (const r of rows) if (recentDates.includes(r.metric_date)) recentSpendByDate[r.metric_date] = Number(r.spend || 0)
+      return {
+        id: c.p.id, name: c.p.campaign_name, clientName: c.p.client?.name ?? null,
+        owner: c.p.created_by ? attention.ownerCqids[c.p.created_by] ?? null : null,
+        status: c.p.status, archived: !!c.p.archived_at,
+        syncEnabled: !!c.p.sync_enabled, syncStatus: c.p.sync_status ?? null,
+        lastSyncAt: c.p.last_sync_at ?? null, lastSyncError: c.p.last_sync_error ?? null,
+        hasAdAccount: !!c.p.ad_account_id, endDate: c.p.end_date,
+        recentSpendByDate,
+        unspentAllocation: walletSupported && c.allocated > 0 ? round2(c.allocated - spendWithGst(c.agg.spend || 0)) : null,
+        allocated: walletSupported ? c.allocated : null,
+        spendInclGst: spendWithGst(c.agg.spend || 0),
+      }
+    }),
+    connections: attention.connections,
+    failedReports: attention.failedReports,
+    failedEmails: attention.failedEmails,
+  })
+  return withoutSnoozed(items, attention.snoozes, new Date())
+}
+
 type ViewMode = 'clients' | 'all'
 type BalanceFilter = 'all' | 'positive' | 'low' | 'negative'
 
 export default function AdvertisingClient({
-  migrated, initialProjects, metricsByProject, pendingRequests, clients,
+  migrated, initialProjects, metricsByProject, benchmarksByProject = {}, attention, pendingRequests, clients,
   walletSupported, ledger, fundCandidates, perms,
 }: Props) {
+  // Period lives in the URL (?period=30d) so it survives reloads and links.
+  const searchParams = useSearchParams()
+  const pathname = usePathname()
+  const rawPeriod = searchParams.get('period')
+  const period: PeriodKey = isPeriodKey(rawPeriod) ? rawPeriod : DEFAULT_PERIOD
+  const range = useMemo(() => periodRange(period, todayISO()), [period])
+  function setPeriod(next: PeriodKey) {
+    const q = new URLSearchParams(searchParams.toString())
+    if (next === DEFAULT_PERIOD) q.delete('period'); else q.set('period', next)
+    // Native history: updates useSearchParams without a server round trip
+    // (Next.js integrates replaceState with the router).
+    window.history.replaceState(null, '', q.size ? `${pathname}?${q}` : pathname)
+  }
+  const [search, setSearch] = useState('')
   const [view, setView] = useState<ViewMode>('clients')
   const [fClient, setFClient] = useState('')
   const [fStatus, setFStatus] = useState('')
@@ -190,16 +346,7 @@ export default function AdvertisingClient({
   const [fBalance, setFBalance] = useState<BalanceFilter>('all')
   const [fArchived, setFArchived] = useState(false)
 
-  // Σ campaign-allocation debits per project.
-  const allocatedByProject = useMemo(() => {
-    const out: Record<string, number> = {}
-    for (const r of ledger) {
-      if (r.direction === 'debit' && r.ad_project_id) {
-        out[r.ad_project_id] = round2((out[r.ad_project_id] || 0) + Number(r.amount_inr || 0))
-      }
-    }
-    return out
-  }, [ledger])
+  const allocatedByProject = useMemo(() => allocationsByProject(ledger), [ledger])
 
   // Wallet summary per client (credits − debits).
   const walletByClient = useMemo(() => {
@@ -220,28 +367,15 @@ export default function AdvertisingClient({
     return out
   }, [ledger])
 
-  const cards: CardData[] = useMemo(() => initialProjects.map(p => {
-    const agg = aggregateMetrics(metricsByProject[p.id] || [])
-    const health = healthScore({
-      adBudget: p.ad_budget_amount, totalSpend: agg.spend,
-      startDate: p.start_date, endDate: p.end_date,
-      roas: agg.roas, ctr: agg.ctr, status: p.status,
-    })
-    const allocated = allocatedByProject[p.id] || 0
-    const billing = computeServiceCharge(
-      allocated,
-      p.service_charge_type, Number(p.service_charge_value || 0),
-    )
-    return {
-      p, agg, health,
-      remaining: remainingBudget(p.ad_budget_amount, agg.spend),
-      days: daysRemaining(p.end_date),
-      allocated, billing,
-    }
-  }), [initialProjects, metricsByProject, allocatedByProject])
+  const cards: CardData[] = useMemo(
+    () => buildCampaignCards(initialProjects, metricsByProject, allocatedByProject, benchmarksByProject, range),
+    [initialProjects, metricsByProject, allocatedByProject, benchmarksByProject, range],
+  )
 
   // Card-level filters (shared by both views).
+  const q = search.trim().toLowerCase()
   const cardMatches = (c: CardData) => {
+    if (q && !c.p.campaign_name.toLowerCase().includes(q) && !(c.p.client?.name ?? '').toLowerCase().includes(q)) return false
     if (fStatus && c.p.status !== fStatus) return false
     if (fPlatform && c.p.platform !== fPlatform) return false
     if (fClient && c.p.client?.id !== fClient) return false
@@ -253,7 +387,7 @@ export default function AdvertisingClient({
     return true
   }
   const filteredCards = cards.filter(cardMatches)
-  const cardFiltersActive = Boolean(fStatus || fPlatform || fMonth)
+  const cardFiltersActive = Boolean(fStatus || fPlatform || fMonth || q)
 
   // Group by client (clients with wallet activity but no campaigns still show).
   const groups: ClientGroup[] = useMemo(() => {
@@ -305,24 +439,42 @@ export default function AdvertisingClient({
     [initialProjects],
   )
 
-  // Aggregate totals for the KPI strip.
+  // Totals for the KPI strip — for the selected period, excluding archived.
+  // Results are grouped by objective result: a cross-campaign "Leads" or
+  // "ROAS" total mixed lead, messaging and awareness campaigns into one
+  // misleading number.
   const totals = useMemo(() => {
-    const totalSpend = cards.reduce((s, c) => s + (c.agg.spend || 0), 0)
-    const totalRev = cards.reduce((s, c) => s + (c.agg.revenue || 0), 0)
-    const totalImpr = cards.reduce((s, c) => s + (c.agg.impressions || 0), 0)
-    const totalClicks = cards.reduce((s, c) => s + (c.agg.clicks || 0), 0)
-    const totalLeads = cards.reduce((s, c) => s + (c.agg.leads || 0), 0)
+    const live = cards.filter(c => !c.p.archived_at)
+    const spend = live.reduce((s, c) => s + (c.periodAgg.spend || 0), 0)
+    const revenue = live.reduce((s, c) => s + (c.periodAgg.revenue || 0), 0)
+    const byResult = new Map<string, { label: string; costLabel: string; count: number; spend: number }>()
+    for (const c of live) {
+      const m = c.definition.metric
+      if (!m) continue
+      const n = c.periodResults
+      if (n == null) continue
+      const g = byResult.get(m) ?? { label: c.definition.label, costLabel: c.definition.costLabel, count: 0, spend: 0 }
+      g.count += n
+      g.spend += c.periodAgg.spend || 0
+      byResult.set(m, g)
+    }
+    const synced = live.filter(c => c.p.sync_enabled && c.p.ad_account_id && c.p.status === 'active')
+    const stale = synced.filter(c => freshness(c.p).stale).length
     const walletBalance = Object.values(walletByClient).reduce((s, w) => s + w.balance, 0)
     return {
-      totalSpend, totalRev,
-      roas: totalSpend > 0 ? (totalRev / totalSpend).toFixed(2) + '×' : '—',
-      ctr: totalImpr > 0 ? ((totalClicks / totalImpr) * 100).toFixed(2) + '%' : '—',
-      cpc: totalClicks > 0 ? inr(totalSpend / totalClicks) : '—',
-      leads: totalLeads.toLocaleString('en-IN'),
-      active: cards.filter(c => c.p.status === 'active').length,
+      spend, revenue,
+      results: [...byResult.values()],
+      synced: synced.length, stale,
+      active: live.filter(c => c.p.status === 'active').length,
       walletBalance: round2(walletBalance),
     }
   }, [cards, walletByClient])
+
+  // Needs attention: rules in lib/advertising/attention.ts.
+  const attentionItems = useMemo(
+    () => computeAttentionItems(attention, cards, metricsByProject, walletSupported),
+    [attention, cards, metricsByProject, walletSupported],
+  )
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 space-y-6">
@@ -397,19 +549,49 @@ export default function AdvertisingClient({
            viewport — the whole row (and every child in it) silently grew
            past the screen edge on phones. Same root cause as the campaign-
            card grid below. */
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-          <KpiCard icon={Zap} label="Active" value={totals.active} sub={`of ${cards.length} campaigns`} accent />
-          {/* Wallet balance is wallet-layer data (view_financials); without it
-              the tile falls back to total spend — same as pre-wallet days. */}
-          {walletSupported && perms.viewFinancials
-            ? <KpiCard icon={Wallet} label="Wallet Balance" value={inr(totals.walletBalance)} sub="across all clients" />
-            : <KpiCard icon={Wallet} label="Total Spend" value={inr(totals.totalSpend)} />}
-          <KpiCard icon={TrendingUp} label="Revenue" value={inr(totals.totalRev)} />
-          <KpiCard icon={BarChart3} label="Avg ROAS" value={totals.roas} />
-          <KpiCard icon={MousePointerClick} label="Avg CTR" value={totals.ctr} />
-          <KpiCard icon={Target} label="Avg CPC" value={totals.cpc} />
-          <KpiCard icon={Users} label="Total Leads" value={totals.leads} />
+        <div className="space-y-3">
+          {/* Period selector — drives every spend/result number below. */}
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Reporting period">
+            {PERIODS.map(p => (
+              <button
+                key={p.key}
+                onClick={() => setPeriod(p.key)}
+                aria-pressed={period === p.key}
+                className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${
+                  period === p.key ? 'border-pink-500/40 bg-pink-500/10 text-pink-600 dark:text-pink-400' : 'border-border bg-card text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+            <span className="text-xs text-muted-foreground">{range.from ? `${range.from} → ${range.to}` : `up to ${range.to}`}</span>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <KpiCard icon={Zap} label="Active" value={totals.active} sub={`of ${cards.filter(c => !c.p.archived_at).length} campaigns`} accent />
+            <KpiCard icon={Wallet} label="Spend" value={inr(totals.spend)} sub={`${range.label} · excl. GST`} />
+            {totals.results.length > 0
+              ? totals.results.slice(0, 3).map(r => (
+                  <KpiCard key={r.label} icon={Target} label={r.label} value={r.count.toLocaleString('en-IN')}
+                    sub={r.count > 0 ? `${r.costLabel} ${inr(r.spend / r.count, 2)}` : 'none in this period'} />
+                ))
+              : <KpiCard icon={Target} label="Results" value="—" sub="No objective results in this period" />}
+            {totals.revenue > 0 && (
+              <KpiCard icon={TrendingUp} label="Revenue" value={inr(totals.revenue)} sub={`ROAS ${(totals.revenue / Math.max(totals.spend, 1)).toFixed(2)}× · platform-attributed`} />
+            )}
+            <KpiCard icon={RefreshCw} label="Data freshness"
+              value={totals.synced === 0 ? '—' : totals.stale === 0 ? 'Up to date' : `${totals.stale} stale`}
+              sub={totals.synced === 0 ? 'No auto-synced active campaigns' : `${totals.synced} auto-synced active campaign${totals.synced === 1 ? '' : 's'}`} />
+            {/* Wallet balance is wallet-layer data (view_financials). */}
+            {walletSupported && perms.viewFinancials && (
+              <KpiCard icon={Wallet} label="Wallet Balance" value={inr(totals.walletBalance)} sub="across all clients" />
+            )}
+          </div>
         </div>
+      )}
+
+      {/* ── Needs attention ── */}
+      {migrated && attention && cards.length > 0 && (
+        <AttentionPanel items={attentionItems} canSnooze={perms.edit && attention.snoozeSupported} />
       )}
 
       {/* ── Pending requests ── */}
@@ -439,6 +621,15 @@ export default function AdvertisingClient({
             ))}
           </div>
 
+          <label className="relative">
+            <span className="sr-only">Search campaigns or clients</span>
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="search" value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Search campaigns or clients"
+              className="w-56 max-w-full rounded-lg border border-border bg-card py-1.5 pl-7 pr-2.5 text-xs"
+            />
+          </label>
           <select value={fClient} onChange={e => setFClient(e.target.value)}
             className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs">
             <option value="">All clients</option>
@@ -478,9 +669,9 @@ export default function AdvertisingClient({
           >
             {fArchived ? 'Viewing Archived' : 'Show Archived'}
           </button>
-          {(fClient || fStatus || fPlatform || fMonth || fBalance !== 'all' || fArchived) && (
+          {(q || fClient || fStatus || fPlatform || fMonth || fBalance !== 'all' || fArchived) && (
             <button
-              onClick={() => { setFClient(''); setFStatus(''); setFPlatform(''); setFMonth(''); setFBalance('all'); setFArchived(false) }}
+              onClick={() => { setSearch(''); setFClient(''); setFStatus(''); setFPlatform(''); setFMonth(''); setFBalance('all'); setFArchived(false) }}
               className="text-xs text-muted-foreground hover:text-foreground underline"
             >
               Clear filters
@@ -547,10 +738,99 @@ export default function AdvertisingClient({
   )
 }
 
+// ─── Needs attention ─────────────────────────────────────────────────────────
+
+const SEVERITY_STYLE = {
+  critical: { dot: 'bg-red-500', text: 'Critical' },
+  warning:  { dot: 'bg-amber-500', text: 'Warning' },
+  info:     { dot: 'bg-sky-500', text: 'Info' },
+} as const
+
+export function AttentionPanel({ items, canSnooze }: { items: AttentionItem[]; canSnooze: boolean }) {
+  const router = useRouter()
+  const [expanded, setExpanded] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const shown = expanded ? items : items.slice(0, 5)
+
+  async function snooze(key: string, days: number) {
+    setBusy(key); setError(null)
+    const res = await snoozeAttention(key, days)
+    setBusy(null)
+    if (res.ok) router.refresh()
+    else setError(res.error ?? 'Could not snooze.')
+  }
+
+  if (items.length === 0) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
+        <CheckCircle2 className="h-4 w-4 text-emerald-500" /> Nothing needs attention right now.
+      </div>
+    )
+  }
+
+  return (
+    <section aria-labelledby="needs-attention" className="rounded-xl border border-amber-500/30 bg-amber-500/[0.04]">
+      <div className="flex items-center justify-between gap-2 border-b border-amber-500/20 px-4 py-3">
+        <h2 id="needs-attention" className="flex items-center gap-2 text-sm font-semibold">
+          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+          Needs attention <span className="text-xs font-normal text-muted-foreground">({items.length})</span>
+        </h2>
+        {error && <span role="alert" className="text-xs text-red-500">{error}</span>}
+      </div>
+      <ul className="divide-y divide-border">
+        {shown.map(i => (
+          <li key={i.key} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${SEVERITY_STYLE[i.severity].dot}`} aria-hidden />
+                <span className="sr-only">{SEVERITY_STYLE[i.severity].text}:</span>
+                {i.title}
+                {(i.clientName || i.campaignName) && (
+                  <span className="text-xs font-normal text-muted-foreground truncate">
+                    {[i.clientName, i.campaignName].filter(Boolean).join(' · ')}
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {i.reason}{i.owner ? <> · Owner {i.owner}</> : null}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Link href={i.href} className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium hover:border-pink-500/40">
+                {i.action} <ArrowRight className="h-3 w-3" />
+              </Link>
+              {canSnooze && (
+                <button
+                  onClick={() => snooze(i.key, 3)} disabled={busy === i.key}
+                  title="Hide for 3 days"
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+                >
+                  {busy === i.key ? <Loader2 className="h-3 w-3 animate-spin" /> : <BellOff className="h-3 w-3" />} Snooze
+                </button>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {items.length > 5 && (
+        <button onClick={() => setExpanded(v => !v)} className="w-full border-t border-border px-4 py-2 text-xs text-muted-foreground hover:text-foreground">
+          {expanded ? 'Show fewer' : `Show all ${items.length}`}
+        </button>
+      )}
+      {!canSnooze && (
+        <p className="flex items-center gap-1 border-t border-border px-4 py-2 text-[11px] text-muted-foreground">
+          <Info className="h-3 w-3" /> Items clear by themselves once the underlying issue is fixed.
+        </p>
+      )}
+    </section>
+  )
+}
+
 // ─── Client section (wallet + campaigns) ─────────────────────────────────────
 
 /** Synthetic group key for Cirqle's own (company) wallet + internal campaigns. */
-const COMPANY_KEY = '__company__'
+export const COMPANY_KEY = '__company__'
 
 function ClientSection({ group, history, candidates, walletSupported, canManage, viewFinancials, viewBilling }: {
   group: ClientGroup
@@ -574,7 +854,9 @@ function ClientSection({ group, history, candidates, walletSupported, canManage,
       <div className="border-b border-border bg-muted/30 px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="font-semibold truncate">{group.name}</span>
+            {group.clientId === COMPANY_KEY
+              ? <span className="font-semibold truncate">{group.name}</span>
+              : <Link href={`/dashboard/advertising/clients/${group.clientId}`} className="font-semibold truncate hover:underline">{group.name}</Link>}
             {group.code && <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">{group.code}</span>}
             <span className="text-xs text-muted-foreground">· {group.cards.length} campaign{group.cards.length === 1 ? '' : 's'}</span>
           </div>
@@ -646,7 +928,7 @@ function ClientSection({ group, history, candidates, walletSupported, canManage,
   )
 }
 
-function WalletStat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' }) {
+export function WalletStat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'bad' }) {
   return (
     <div className="rounded-lg bg-card border border-border px-3 py-2">
       <div className="text-[10px] text-muted-foreground">{label}</div>
@@ -657,7 +939,7 @@ function WalletStat({ label, value, tone }: { label: string; value: string; tone
   )
 }
 
-function AddFundsForm({ clientId, candidates, onDone }: {
+export function AddFundsForm({ clientId, candidates, onDone }: {
   /** null = the COMPANY wallet (internal campaigns). */
   clientId: string | null
   candidates: FundCandidate[]
@@ -724,7 +1006,7 @@ function AddFundsForm({ clientId, candidates, onDone }: {
   )
 }
 
-function LedgerHistory({ rows, canManage, onChange }: {
+export function LedgerHistory({ rows, canManage, onChange }: {
   rows: LedgerRowView[]
   canManage: boolean
   onChange: () => void
@@ -787,8 +1069,9 @@ function LedgerHistory({ rows, canManage, onChange }: {
 
 // ─── Campaign card ────────────────────────────────────────────────────────────
 
-function CampaignCard({ card, walletOn, showBilling }: { card: CardData; walletOn: boolean; showBilling: boolean }) {
-  const { p, agg, health, days, allocated, billing } = card
+export function CampaignCard({ card, walletOn, showBilling }: { card: CardData; walletOn: boolean; showBilling: boolean }) {
+  const { p, agg, health, days, allocated, billing, stats } = card
+  const fresh = freshness(p)
   return (
     <Link
       href={`/dashboard/advertising/${p.id}`}
@@ -847,17 +1130,17 @@ function CampaignCard({ card, walletOn, showBilling }: { card: CardData; walletO
         )}
       </div>
 
-      {/* KPI grid */}
+      {/* Objective-led KPIs for the selected period (objective-stats.ts) */}
       <div className="grid grid-cols-4 gap-2">
-        <MiniStat label="ROAS" value={agg.roas != null ? `${agg.roas.toFixed(2)}×` : '—'} />
-        <MiniStat label="CTR" value={agg.ctr != null ? `${agg.ctr.toFixed(2)}%` : '—'} />
-        <MiniStat label="CPC" value={agg.spend && agg.clicks ? inr(agg.spend / agg.clicks) : '—'} />
-        <MiniStat label="Leads" value={agg.leads ? agg.leads.toLocaleString('en-IN') : '—'} />
+        {stats.map(t => <MiniStat key={t.label} label={t.label} value={t.value} />)}
       </div>
 
       {/* Footer */}
-      <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
-        <HealthBadge score={health.score} label={health.label} />
+      <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3">
+        <HealthBadge health={health} />
+        <span className={`text-[10px] flex items-center gap-1 ${fresh.stale ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
+          <RefreshCw className="h-3 w-3" />{fresh.text}
+        </span>
         <span className="text-xs text-muted-foreground flex items-center gap-1">
           <Clock className="h-3 w-3" />
           {days == null ? 'No end date' : days < 0 ? 'Ended' : `${days}d left`}

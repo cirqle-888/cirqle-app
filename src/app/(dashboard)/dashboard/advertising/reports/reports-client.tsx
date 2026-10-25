@@ -11,21 +11,26 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   FileText, Plus, Calendar, Download, Clock, CheckCircle, XCircle, Loader2,
-  BarChart2, ChevronDown, Eye,
+  BarChart2,
 } from 'lucide-react'
-import WebReportViewer from './components/WebReportViewer'
-import type { RenderData } from '@/lib/reporting/types'
+import { ReportComposer } from '@/components/reporting/report-composer'
+import type { ClientReportPreferences } from '@/lib/reporting/preferences'
+
+/** Opens a report file via the authorised, freshly-signing download route. */
+function reportDownloadHref(reportId: string, format: string): string {
+  return `/api/advertising/reports/${reportId}/download?format=${format}&redirect=1`
+}
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
-interface Report {
+export interface Report {
   id: string
   project_id: string
   report_type: string
   template: string
   date_from: string
   date_to: string
-  status: 'pending' | 'generating' | 'ready' | 'failed'
+  status: 'pending' | 'generating' | 'partial' | 'ready' | 'failed'
   error_message?: string | null
   generation_time_ms?: number | null
   pdf_url?: string | null
@@ -52,6 +57,9 @@ interface Schedule {
   is_active: boolean
   next_run_at?: string | null
   last_run_at?: string | null
+  last_enqueued_at?: string | null
+  last_generated_at?: string | null
+  last_delivered_at?: string | null
   project?: {
     id: string
     campaign_name: string
@@ -66,25 +74,34 @@ interface Project {
   platform: string
   client_id: string | null
   client?: { id: string; name: string; code: string } | null
+  status?: string | null
+  archived_at?: string | null
+  campaign_type?: string | null
+  start_date?: string | null
 }
 
 interface Props {
   reports: Report[]
   schedules: Schedule[]
   projects: Project[]
+  /** Opens "Prepare report" prefilled for this client (?client=). */
+  initialClientId?: string
+  preferences?: Record<string, ClientReportPreferences>
+  preferencesSupported?: boolean
   canEdit: boolean
+  pagination: { page: number; pageSize: number; total: number; query: string; status: string }
 }
 
 type Tab = 'history' | 'generate' | 'schedules'
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
-export default function ReportsClient({ reports, schedules, projects, canEdit }: Props) {
-  const [tab, setTab] = useState<Tab>('history')
+export default function ReportsClient({ reports, schedules, projects, initialClientId, preferences, preferencesSupported, canEdit, pagination }: Props) {
+  const [tab, setTab] = useState<Tab>(initialClientId ? 'generate' : 'history')
 
   const tabs: { key: Tab; label: string; count?: number }[] = [
-    { key: 'history',   label: 'Report History', count: reports.length },
-    { key: 'generate',  label: 'Generate Report' },
+    { key: 'history',   label: 'Report History', count: pagination.total },
+    { key: 'generate',  label: 'Prepare report' },
     { key: 'schedules', label: 'Schedules', count: schedules.length },
   ]
 
@@ -98,7 +115,7 @@ export default function ReportsClient({ reports, schedules, projects, canEdit }:
           </div>
           <div>
             <h1 className="text-lg font-semibold text-foreground">Reports</h1>
-            <p className="text-sm text-muted-foreground">Generate, schedule, and download campaign reports</p>
+            <p className="text-sm text-muted-foreground">Prepare client reports, schedule them, and download past ones</p>
           </div>
         </div>
 
@@ -125,8 +142,28 @@ export default function ReportsClient({ reports, schedules, projects, canEdit }:
       </div>
 
       <div className="p-6">
-        {tab === 'history'   && <HistoryTab reports={reports} />}
-        {tab === 'generate'  && <GenerateTab projects={projects} canEdit={canEdit} />}
+        {tab === 'history' && <div className="space-y-4">
+          <form action="/dashboard/advertising/reports" className="flex flex-wrap gap-3">
+            <input name="q" aria-label="Search report campaign" placeholder="Search campaign…" defaultValue={pagination.query} className="rounded-lg border bg-background px-3 py-2 text-sm" />
+            <select name="status" aria-label="Report status" defaultValue={pagination.status} className="rounded-lg border bg-background px-3 py-2 text-sm">
+              <option value="">All statuses</option>
+              {['pending', 'generating', 'partial', 'ready', 'failed'].map(status => <option key={status} value={status}>{status === 'pending' ? 'Queued' : status}</option>)}
+            </select>
+            <button className="rounded-lg border px-4 py-2 text-sm" type="submit">Search</button>
+          </form>
+          <HistoryTab reports={reports} />
+          <nav aria-label="Report history pages" className="flex flex-wrap items-center gap-4 text-sm">
+            <span>{pagination.total} reports · Page {pagination.page + 1}</span>
+            {pagination.page > 0 && <Link className="underline" href={`?${new URLSearchParams({ q: pagination.query, status: pagination.status, page: String(pagination.page - 1) })}`}>Previous</Link>}
+            {(pagination.page + 1) * pagination.pageSize < pagination.total && <Link className="underline" href={`?${new URLSearchParams({ q: pagination.query, status: pagination.status, page: String(pagination.page + 1) })}`}>Next</Link>}
+          </nav>
+        </div>}
+        {tab === 'generate'  && (
+          <div className="max-w-4xl">
+            <ReportComposer projects={projects} initialClientId={initialClientId}
+              preferences={preferences} preferencesSupported={preferencesSupported} canEdit={canEdit} />
+          </div>
+        )}
         {tab === 'schedules' && <SchedulesTab schedules={schedules} projects={projects} canEdit={canEdit} />}
       </div>
     </div>
@@ -155,25 +192,29 @@ function HistoryTab({ reports }: { reports: Report[] }) {
   )
 }
 
-function ReportCard({ report: r }: { report: Report }) {
+export function ReportCard({ report: r }: { report: Report }) {
   const statusIcon = {
     pending:    <Clock className="h-4 w-4 text-muted-foreground" />,
     generating: <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />,
+    partial:    <Clock className="h-4 w-4 text-amber-600" />,
     ready:      <CheckCircle className="h-4 w-4 text-green-500" />,
     failed:     <XCircle className="h-4 w-4 text-red-500" />,
   }[r.status]
 
+  // Links go through /download, which re-checks access and signs a fresh URL.
+  // The stored URLs are signed for 7 days, so linking them directly broke
+  // every report older than a week.
   const formats: { key: string; url: string | null | undefined; label: string }[] = [
-    { key: 'pdf',  url: r.pdf_url,           label: 'PDF' },
-    { key: 'xlsx', url: r.xlsx_url,          label: 'Excel' },
-    { key: 'csv',  url: r.csv_url,           label: 'CSV' },
-    { key: 'img',  url: r.image_url_portrait, label: 'Image' },
+    { key: 'pdf',            url: r.pdf_url,            label: 'PDF' },
+    { key: 'xlsx',           url: r.xlsx_url,           label: 'Excel' },
+    { key: 'csv',            url: r.csv_url,            label: 'CSV' },
+    { key: 'image_portrait', url: r.image_url_portrait, label: 'Image' },
   ].filter(f => f.url)
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4 flex items-center justify-between gap-4">
+    <div className="rounded-xl border border-border bg-card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div className="flex items-center gap-3 min-w-0">
-        <div className="flex-shrink-0">{statusIcon}</div>
+        <div className="flex-shrink-0" aria-label={r.status}>{statusIcon}</div>
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <Link href={`/dashboard/advertising/reports/${r.id}`} className="font-medium text-sm text-foreground hover:underline truncate max-w-[280px]">
@@ -181,6 +222,7 @@ function ReportCard({ report: r }: { report: Report }) {
             </Link>
             <span className="rounded-full bg-muted px-2 py-0.5 text-xs capitalize">{r.template}</span>
             <span className="rounded-full bg-muted px-2 py-0.5 text-xs capitalize">{r.report_type}</span>
+            <span className="text-xs capitalize">{r.status === 'pending' ? 'Queued' : r.status}</span>
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
             <span>{r.project?.client?.name ?? ''}</span>
@@ -188,7 +230,7 @@ function ReportCard({ report: r }: { report: Report }) {
             <span>{r.date_from} → {r.date_to}</span>
             {r.generation_time_ms && <><span>·</span><span>{(r.generation_time_ms / 1000).toFixed(1)}s</span></>}
           </div>
-          {r.status === 'failed' && r.error_message && (
+          {(r.status === 'failed' || r.status === 'partial') && r.error_message && (
             <p className="text-xs text-red-500 mt-0.5 truncate max-w-[400px]">{r.error_message}</p>
           )}
         </div>
@@ -196,11 +238,11 @@ function ReportCard({ report: r }: { report: Report }) {
 
       {/* Download links */}
       {formats.length > 0 && (
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
           {formats.map(f => (
             <a
               key={f.key}
-              href={f.url!}
+              href={reportDownloadHref(r.id, f.key)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
@@ -209,333 +251,6 @@ function ReportCard({ report: r }: { report: Report }) {
               {f.label}
             </a>
           ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Generate Tab ─────────────────────────────────────────────────────────────
-
-// ─── Section toggles config ───────────────────────────────────────────────────
-
-const SECTION_OPTIONS = [
-  { key: 'executiveSummary',    label: 'Executive Summary',    desc: 'AI-written overview paragraph' },
-  { key: 'dailyBreakdown',      label: 'Daily Breakdown',      desc: 'Date-by-date spend, reach, impressions table' },
-  { key: 'campaignHealth',      label: 'Campaign Health Score', desc: 'Health grade & risk level' },
-  { key: 'forecast',            label: 'Forecast',             desc: '7/30-day spend & leads forecast' },
-  { key: 'aiInsights',          label: 'AI Insights',          desc: 'Key insights, risks & opportunities' },
-  { key: 'budgetAnalysis',      label: 'Budget Analysis',      desc: 'Remaining budget & utilisation' },
-  { key: 'recommendations',     label: 'Recommendations',      desc: 'AI-recommended actions' },
-  { key: 'benchmarkComparison', label: 'Benchmark Comparison', desc: 'Performance vs industry benchmarks' },
-] as const
-
-type SectionKey = typeof SECTION_OPTIONS[number]['key']
-
-// Default sections per template (must match template-engine.ts).
-// Uses Record<string, boolean> to include kpiScorecard (always-on, not user-toggleable).
-const TEMPLATE_DEFAULTS: Record<string, Record<string, boolean>> = {
-  daily:       { kpiScorecard: true, dailyBreakdown: true, budgetAnalysis: true },
-  monthly:     { kpiScorecard: true, dailyBreakdown: true, budgetAnalysis: true },
-  performance: { executiveSummary: true, kpiScorecard: true, dailyBreakdown: true, campaignHealth: true, benchmarkComparison: true, forecast: true, aiInsights: true, budgetAnalysis: true, recommendations: true },
-  executive:   { executiveSummary: true, kpiScorecard: true, campaignHealth: true, benchmarkComparison: true, forecast: true, aiInsights: true, budgetAnalysis: true, recommendations: true },
-  marketing:   { executiveSummary: true, kpiScorecard: true, dailyBreakdown: true, campaignHealth: true, benchmarkComparison: true, forecast: true, aiInsights: true, recommendations: true },
-  lead_gen:    { executiveSummary: true, kpiScorecard: true, dailyBreakdown: true, campaignHealth: true, benchmarkComparison: true, forecast: true, aiInsights: true, budgetAnalysis: true, recommendations: true },
-  ecommerce:   { executiveSummary: true, kpiScorecard: true, dailyBreakdown: true, campaignHealth: true, benchmarkComparison: true, forecast: true, aiInsights: true, budgetAnalysis: true, recommendations: true },
-  agency:      { executiveSummary: true, kpiScorecard: true, dailyBreakdown: true, campaignHealth: true, benchmarkComparison: true, forecast: true, aiInsights: true, budgetAnalysis: true, recommendations: true },
-}
-
-// ─── Generate Tab ─────────────────────────────────────────────────────────────
-
-function GenerateTab({ projects, canEdit }: { projects: Project[]; canEdit: boolean }) {
-  const router = useRouter()
-  const [projectId, setProjectId] = useState('')
-  const [reportType, setReportType] = useState('custom')
-  const [template, setTemplate] = useState('daily')
-  const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10)
-  })
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10))
-  const [formats, setFormats] = useState<string[]>(['pdf'])
-  const [withComparison, setWithComparison] = useState(false)
-  const [sections, setSections] = useState<Partial<Record<SectionKey, boolean>>>({})
-  const [showSections, setShowSections] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
-  const [previewData, setPreviewData] = useState<RenderData | null>(null)
-  const [previewing, setPreviewing] = useState(false)
-
-  const selectedProject = projects.find(p => p.id === projectId)
-
-  // Effective section state = template defaults merged with user overrides
-  const effectiveSections = { ...(TEMPLATE_DEFAULTS[template] ?? {}), ...sections }
-
-  const toggleFormat = (f: string) =>
-    setFormats(prev => prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f])
-
-  const toggleSection = (key: SectionKey) =>
-    setSections(prev => ({ ...prev, [key]: !effectiveSections[key] }))
-
-  // When template changes, reset overrides so defaults take effect
-  function onTemplateChange(t: string) {
-    setTemplate(t)
-    setSections({})
-  }
-
-  async function onGenerate() {
-    if (!projectId) { setError('Select a campaign'); return }
-    if (!dateFrom || !dateTo) { setError('Select a date range'); return }
-    if (formats.length === 0) { setError('Select at least one format'); return }
-
-    setLoading(true); setError(null); setSuccess(null)
-
-    try {
-      const body: any = {
-        projectId,
-        clientId: selectedProject?.client_id ?? '',
-        reportType,
-        template,
-        dateFrom,
-        dateTo,
-        formats,
-        sections: Object.keys(sections).length > 0 ? sections : undefined,
-      }
-
-      if (withComparison) {
-        const from = new Date(dateFrom)
-        const to   = new Date(dateTo)
-        const days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1
-        const compTo = new Date(from); compTo.setDate(compTo.getDate() - 1)
-        const compFrom = new Date(compTo); compFrom.setDate(compFrom.getDate() - days + 1)
-        body.comparisonFrom = compFrom.toISOString().slice(0, 10)
-        body.comparisonTo   = compTo.toISOString().slice(0, 10)
-      }
-
-      const res = await fetch('/api/advertising/reports/generate?sync=true', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error ?? 'Failed')
-
-      setSuccess('Report generated successfully.')
-      router.refresh()
-    } catch (err: any) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function onPreview() {
-    if (!projectId) { setError('Select a campaign'); return }
-    if (!dateFrom || !dateTo) { setError('Select a date range'); return }
-
-    setPreviewing(true); setError(null); setSuccess(null)
-
-    try {
-      const body: any = {
-        projectId,
-        clientId: selectedProject?.client_id ?? '',
-        reportType,
-        template,
-        dateFrom,
-        dateTo,
-        formats,
-        sections: Object.keys(sections).length > 0 ? sections : undefined,
-      }
-
-      if (withComparison) {
-        const from = new Date(dateFrom)
-        const to   = new Date(dateTo)
-        const days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1
-        const compTo = new Date(from); compTo.setDate(compTo.getDate() - 1)
-        const compFrom = new Date(compTo); compFrom.setDate(compFrom.getDate() - days + 1)
-        body.comparisonFrom = compFrom.toISOString().slice(0, 10)
-        body.comparisonTo   = compTo.toISOString().slice(0, 10)
-      }
-
-      const res = await fetch('/api/advertising/reports/preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error ?? 'Failed to preview')
-
-      setPreviewData(json)
-    } catch (err: any) {
-      setError(err.message)
-    } finally {
-      setPreviewing(false)
-    }
-  }
-
-  return (
-    <div className="max-w-xl space-y-5">
-      <h2 className="font-semibold text-foreground">Generate a New Report</h2>
-
-      {/* Campaign selector */}
-      <div>
-        <label className="block text-sm font-medium text-foreground mb-1.5">Campaign</label>
-        <select
-          value={projectId}
-          onChange={e => setProjectId(e.target.value)}
-          className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm"
-        >
-          <option value="">Select a campaign…</option>
-          {projects.map(p => (
-            <option key={p.id} value={p.id}>
-              {p.campaign_name} ({p.platform}) — {p.client?.name ?? ''}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Date range */}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="block text-sm font-medium text-foreground mb-1.5">From</label>
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-            className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-foreground mb-1.5">To</label>
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-            className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm" />
-        </div>
-      </div>
-
-      {/* Template */}
-      <div>
-        <label className="block text-sm font-medium text-foreground mb-1.5">Template</label>
-        <select value={template} onChange={e => onTemplateChange(e.target.value)}
-          className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm">
-          <option value="daily">Daily Report — Cirqle style (Reach · Impressions · Clicks · Spend · CPR)</option>
-          <option value="monthly">Monthly Report — Cirqle style (month-by-month rollup)</option>
-          <option value="performance">Performance Report</option>
-          <option value="executive">Executive Summary</option>
-          <option value="marketing">Marketing Performance</option>
-          <option value="lead_gen">Lead Generation</option>
-          <option value="ecommerce">E-commerce</option>
-          <option value="agency">Agency Report</option>
-        </select>
-      </div>
-
-      {/* Section toggles */}
-      <div>
-        <button
-          type="button"
-          onClick={() => setShowSections(v => !v)}
-          className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ChevronDown className={`h-4 w-4 transition-transform ${showSections ? 'rotate-180' : ''}`} />
-          Customise sections
-        </button>
-
-        {showSections && (
-          <div className="mt-3 rounded-xl border border-border bg-card/50 p-4 space-y-2.5">
-            {SECTION_OPTIONS.map(opt => (
-              <label key={opt.key} className="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={!!effectiveSections[opt.key]}
-                  onChange={() => toggleSection(opt.key)}
-                  className="mt-0.5 rounded border-border"
-                />
-                <div>
-                  <div className="text-sm font-medium text-foreground">{opt.label}</div>
-                  <div className="text-xs text-muted-foreground">{opt.desc}</div>
-                </div>
-              </label>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Formats */}
-      <div>
-        <label className="block text-sm font-medium text-foreground mb-1.5">Export Formats</label>
-        <div className="flex flex-wrap gap-2">
-          {[
-            { key: 'pdf', label: 'PDF' },
-            { key: 'xlsx', label: 'Excel' },
-            { key: 'csv', label: 'CSV' },
-            { key: 'image_portrait', label: 'Image (Portrait)' },
-            { key: 'image_square', label: 'Image (Square)' },
-          ].map(f => (
-            <button
-              key={f.key}
-              type="button"
-              onClick={() => toggleFormat(f.key)}
-              className={[
-                'rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors',
-                formats.includes(f.key)
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-border bg-card text-muted-foreground hover:text-foreground',
-              ].join(' ')}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Comparison period */}
-      <label className="flex items-center gap-2 cursor-pointer">
-        <input type="checkbox" checked={withComparison} onChange={e => setWithComparison(e.target.checked)}
-          className="rounded border-border" />
-        <span className="text-sm text-foreground">Include comparison with previous period</span>
-      </label>
-
-      {error && <p className="text-sm text-red-500 bg-red-50 dark:bg-red-950/20 rounded-lg px-3 py-2">{error}</p>}
-      {success && <p className="text-sm text-green-600 bg-green-50 dark:bg-green-950/20 rounded-lg px-3 py-2">{success}</p>}
-
-      <div className="flex gap-3">
-        <button
-          onClick={onGenerate}
-          disabled={loading || previewing || !canEdit}
-          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
-        >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-          {loading ? 'Generating…' : 'Generate Report'}
-        </button>
-        <button
-          onClick={onPreview}
-          disabled={loading || previewing || !canEdit}
-          className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50 transition-colors"
-        >
-          {previewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
-          Preview
-        </button>
-      </div>
-
-      {previewData && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-background">
-          <div className="flex items-center justify-between p-4 border-b border-border bg-card">
-            <h2 className="text-lg font-semibold">Report Preview</h2>
-            <div className="flex gap-3">
-              <button
-                onClick={() => { setPreviewData(null); onGenerate(); }}
-                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-              >
-                Generate Report
-              </button>
-              <button
-                onClick={() => setPreviewData(null)}
-                className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted transition-colors"
-              >
-                Close Preview
-              </button>
-            </div>
-          </div>
-          <div className="flex-1 overflow-auto">
-            <WebReportViewer data={previewData} />
-          </div>
         </div>
       )}
     </div>
@@ -708,7 +423,7 @@ function SchedulesTab({ schedules, projects, canEdit }: { schedules: Schedule[];
       )}
 
       {schedules.map(s => (
-        <div key={s.id} className="rounded-xl border border-border bg-card p-4 flex items-center justify-between gap-4">
+        <div key={s.id} className="rounded-xl border border-border bg-card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
               <span className="font-medium text-sm">{s.project?.campaign_name ?? 'Unknown'}</span>
@@ -717,10 +432,13 @@ function SchedulesTab({ schedules, projects, canEdit }: { schedules: Schedule[];
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
               <span>{s.project?.client?.name ?? ''}</span>
-              {s.next_run_at && <><span>·</span><span>Next: {new Date(s.next_run_at).toLocaleDateString()}</span></>}
+              {s.next_run_at && <><span>·</span><span>Next: {new Date(s.next_run_at).toLocaleString()}</span></>}
               <span>·</span>
               <span className="capitalize">{(s.formats as string[]).join(', ')}</span>
             </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Queued: {s.last_enqueued_at ? new Date(s.last_enqueued_at).toLocaleString() : '—'} · Generated: {s.last_generated_at ? new Date(s.last_generated_at).toLocaleString() : '—'} · Delivered: {s.last_delivered_at ? new Date(s.last_delivered_at).toLocaleString() : '—'}
+            </p>
           </div>
           {canEdit && (
             <button onClick={() => onDeactivate(s.id)}

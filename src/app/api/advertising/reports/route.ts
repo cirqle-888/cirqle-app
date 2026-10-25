@@ -19,8 +19,8 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = req.nextUrl
     const projectId = searchParams.get('projectId')
-    const limit     = Math.min(Number(searchParams.get('limit') ?? 20), 100)
-    const page      = Math.max(Number(searchParams.get('page') ?? 0), 0)
+    const limit     = Math.max(1, Math.min(100, Math.floor(Number(searchParams.get('limit')) || 20)))
+    const page      = Math.max(0, Math.min(100000, Math.floor(Number(searchParams.get('page')) || 0)))
 
     if (!projectId) return NextResponse.json({ error: 'Missing projectId' }, { status: 400 })
 

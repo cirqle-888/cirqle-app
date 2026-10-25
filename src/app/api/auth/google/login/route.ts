@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { loadCurrentUser } from '@/lib/permissions/check'
+import { requirePermission, loadCurrentUser } from '@/lib/permissions/check'
 import { signOAuthState } from '@/lib/oauth/state'
 
 export async function GET(req: NextRequest) {
@@ -7,6 +7,12 @@ export async function GET(req: NextRequest) {
   const user = await loadCurrentUser().catch(() => null)
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const guard = await requirePermission('advertising.edit')
+  if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: 403 })
+  if (!googleAdsSyncAvailable()) {
+    return NextResponse.json({ error: 'Google Ads sync is not available yet.' }, { status: 501 })
   }
 
   // 2. Fetch credentials
@@ -35,3 +41,6 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.redirect(authUrl)
 }
+
+// Enable only after a real provider is registered and verified end-to-end.
+function googleAdsSyncAvailable(): boolean { return false }

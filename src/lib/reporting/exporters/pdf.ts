@@ -11,6 +11,7 @@
  */
 
 import { jsPDF } from 'jspdf'
+import { supplementElements } from '../layouts/client-supplement'
 import type { RenderData } from '../types'
 import { LAYOUT_KIND } from '../layouts/registry'
 import { getReportFonts } from '../layouts/fonts'
@@ -22,16 +23,16 @@ const RASTER_H = 1754
 const PAGE_W_MM = 210
 const PAGE_H_MM = 297
 
-export async function generatePDF(data: RenderData): Promise<Buffer> {
+export async function generatePDF(data: RenderData, onPage?: (png: Buffer) => void): Promise<Buffer> {
   if (LAYOUT_KIND[data.template.name] === 'daily-style') {
     if (data.template.name === 'monthly') {
       const { computeMonthlyRows, buildMonthlyReportElement, buildMonthlyRowElement } = await import('../layouts/monthly-report')
-      return generatePagedRasterPDF(data, { computeRows: computeMonthlyRows, buildElement: buildMonthlyReportElement, buildRowElement: buildMonthlyRowElement, rowNoun: 'Month' })
+      return generatePagedRasterPDF(data, { computeRows: computeMonthlyRows, buildElement: buildMonthlyReportElement, buildRowElement: buildMonthlyRowElement, rowNoun: 'Month' }, onPage)
     }
     const { computeDailyRows, buildDailyReportElement, buildDailyRowElement } = await import('../layouts/daily-report')
-    return generatePagedRasterPDF(data, { computeRows: computeDailyRows, buildElement: buildDailyReportElement, buildRowElement: buildDailyRowElement, rowNoun: 'Day' })
+    return generatePagedRasterPDF(data, { computeRows: computeDailyRows, buildElement: buildDailyReportElement, buildRowElement: buildDailyRowElement, rowNoun: 'Day' }, onPage)
   }
-  return generateCardsStylePDF(data)
+  return generateCardsStylePDF(data, onPage)
 }
 
 /**
@@ -104,6 +105,7 @@ interface RasterSource<Row> {
 async function generatePagedRasterPDF<Row extends { date: string }>(
   data: RenderData,
   source: RasterSource<Row>,
+  onPage?: (png: Buffer) => void,
 ): Promise<Buffer> {
   // Rows come back oldest → newest; reverse to newest-first so the report
   // reads like a statement, matching the WhatsApp/PNG export's own ordering.
@@ -135,11 +137,13 @@ async function generatePagedRasterPDF<Row extends { date: string }>(
 
     const element = source.buildElement(data, { width: RASTER_W, height: RASTER_H, rows, continuation, tableHeading })
     const dataUrl = await rasterToDataUrl(element)
+    onPage?.(Buffer.from(dataUrl.split(',')[1], 'base64'))
 
     if (i > 0) doc.addPage()
     doc.addImage(dataUrl, 'PNG', 0, 0, PAGE_W_MM, PAGE_H_MM, undefined, 'FAST')
   }
 
+  await appendSupplement(doc, data, onPage)
   return Buffer.from(doc.output('arraybuffer'))
 }
 
@@ -147,7 +151,7 @@ async function generatePagedRasterPDF<Row extends { date: string }>(
 // E-commerce, Agency) — same branded system, content-card pages instead of a
 // day-by-day table, plus trailing table pages when `dailyBreakdown` is on.
 
-async function generateCardsStylePDF(data: RenderData): Promise<Buffer> {
+async function generateCardsStylePDF(data: RenderData, onPage?: (png: Buffer) => void): Promise<Buffer> {
   const { paginateCardsForPDF, buildCardsPage } = await import('../layouts/report-cards')
 
   const cardPages = await paginateCardsForPDF(data, { width: RASTER_W, height: RASTER_H, fonts: getReportFonts() })
@@ -157,6 +161,7 @@ async function generateCardsStylePDF(data: RenderData): Promise<Buffer> {
     const { continuation, keys } = cardPages[i]
     const element = buildCardsPage(data, { width: RASTER_W, height: RASTER_H, continuation, cardKeys: keys })
     const dataUrl = await rasterToDataUrl(element)
+    onPage?.(Buffer.from(dataUrl.split(',')[1], 'base64'))
     if (i > 0) doc.addPage()
     doc.addImage(dataUrl, 'PNG', 0, 0, PAGE_W_MM, PAGE_H_MM, undefined, 'FAST')
   }
@@ -191,10 +196,29 @@ async function generateCardsStylePDF(data: RenderData): Promise<Buffer> {
         titleOverride: `${data.template.displayName} — Daily Breakdown`,
       })
       const dataUrl = await rasterToDataUrl(element)
+    onPage?.(Buffer.from(dataUrl.split(',')[1], 'base64'))
       doc.addPage()
       doc.addImage(dataUrl, 'PNG', 0, 0, PAGE_W_MM, PAGE_H_MM, undefined, 'FAST')
     }
   }
 
+  await appendSupplement(doc, data, onPage)
   return Buffer.from(doc.output('arraybuffer'))
+}
+
+async function appendSupplement(doc: jsPDF, data: RenderData, onPage?: (png: Buffer) => void) {
+  for (const element of supplementElements(data, RASTER_W, RASTER_H)) {
+    const url = await rasterToDataUrl(element)
+    onPage?.(Buffer.from(url.split(',')[1], 'base64'))
+    doc.addPage(); doc.addImage(url, 'PNG', 0, 0, PAGE_W_MM, PAGE_H_MM, undefined, 'FAST')
+  }
+}
+
+/** Every PDF page as a readable PNG, packed for manual device/WhatsApp sharing. */
+export async function generateImageBundle(data: RenderData): Promise<Buffer> {
+  const { default: JSZip } = await import('jszip')
+  const zip = new JSZip()
+  let page = 0
+  await generatePDF(data, png => { zip.file(`report-${String(++page).padStart(3, '0')}.png`, png) })
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
 }

@@ -8,7 +8,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 const BUCKET = 'ad-reports'
 // Folder slugs uploadExport() writes under reports/{id}/ — one per format.
-const FORMAT_SLUGS = ['pdf', 'xlsx', 'csv', 'image-portrait', 'image-square']
+const FORMAT_SLUGS = ['pdf', 'xlsx', 'csv', 'image-portrait', 'image-square', 'image_bundle']
 
 export interface DeleteReportResult {
   filesRemoved: number

@@ -5,8 +5,9 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
-import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
+import { requirePermission } from '@/lib/permissions/check'
 import { computeNextRun } from '@/lib/reporting/scheduler-utils'
+import { parseScheduleFields } from '@/lib/reporting/config'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,30 +16,28 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const me = await loadCurrentUser().catch(() => null)
-    if (!me || !hasPermission(me, 'advertising.edit')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
-    }
+    const guard = await requirePermission('advertising.edit')
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: 403 })
 
     const { id } = await params
-    const body   = await req.json()
+    const body   = await req.json().catch(() => null)
+    if (!body || typeof body !== 'object') return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
     const admin  = createAdminClient()
 
-    const updates: Record<string, any> = {}
-    const allowed = [
-      'frequency', 'cron_expression', 'delivery_hour', 'delivery_timezone',
-      'report_type', 'template', 'formats', 'include_comparison', 'recipients', 'is_active',
-    ]
-    for (const key of allowed) {
+    const fields = parseScheduleFields(body, true)
+    if (!fields.ok) return NextResponse.json({ error: fields.error }, { status: 400 })
+    const updates: Record<string, any> = { ...fields.value }
+    for (const key of ['cron_expression', 'include_comparison', 'is_active']) {
       if (key in body) updates[key] = body[key]
     }
 
-    // Recompute next_run if frequency or hour changed
-    if ('frequency' in updates || 'delivery_hour' in updates) {
-      const { data: existing } = await admin.from('ad_report_schedules').select('frequency, delivery_hour').eq('id', id).maybeSingle()
+    // Recompute next_run if anything that decides it changed
+    if ('frequency' in updates || 'delivery_hour' in updates || 'delivery_timezone' in updates) {
+      const { data: existing } = await admin.from('ad_report_schedules').select('frequency, delivery_hour, delivery_timezone').eq('id', id).maybeSingle()
       const freq = updates.frequency ?? existing?.frequency ?? 'weekly'
       const hour = updates.delivery_hour ?? existing?.delivery_hour ?? 7
-      updates.next_run_at = computeNextRun(freq, hour)
+      const tz   = updates.delivery_timezone ?? existing?.delivery_timezone ?? 'UTC'
+      updates.next_run_at = computeNextRun(freq, hour, tz)
     }
 
     const { data, error } = await admin
@@ -60,10 +59,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const me = await loadCurrentUser().catch(() => null)
-    if (!me || !hasPermission(me, 'advertising.edit')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
-    }
+    const guard = await requirePermission('advertising.edit')
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: 403 })
 
     const { id } = await params
     const admin  = createAdminClient()

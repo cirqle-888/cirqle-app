@@ -29,23 +29,39 @@ export function generateCSV(data: RenderData): Buffer {
   lines.push(`Total Spend (₹),${p.spend.toFixed(2)}`)
   lines.push(`Total Revenue (₹),${p.revenue.toFixed(2)}`)
   lines.push(`Budget (₹),${data.project.adBudget.toFixed(2)}`)
-  lines.push(`Budget Utilisation (%),${d.budgetUtilisation.toFixed(1)}`)
+  lines.push(`Allocation used to date (%),${d.budgetUtilisation.toFixed(1)}`)
   lines.push(`ROAS,${p.roas.toFixed(2)}`)
   lines.push(`CTR (%),${p.ctr.toFixed(2)}`)
   lines.push(`CPC (₹),${p.cpc.toFixed(2)}`)
   lines.push(`CPM (₹),${p.cpm.toFixed(2)}`)
   lines.push(`Impressions,${Math.round(p.impressions)}`)
-  lines.push(`Reach,${Math.round(p.reach)}`)
+  if (data.kpi.periodReach?.available) lines.push(`Reach (unique; period),${Math.round(data.kpi.periodReach.value)}`)
+  lines.push(`Reach (sum of daily),${Math.round(p.reach)}`)
   lines.push(`Clicks,${Math.round(p.clicks)}`)
   lines.push(`Leads,${Math.round(p.leads)}`)
   lines.push(`CPL (₹),${p.cpl.toFixed(2)}`)
-  lines.push(`Profit (₹),${d.profit.toFixed(2)}`)
+  lines.push(`Revenue minus ad spend (₹),${d.profit.toFixed(2)}`)
   lines.push(`Margin (%),${d.margin.toFixed(1)}`)
   lines.push(`ROI (%),${d.roi.toFixed(1)}`)
   lines.push(`Conversion Rate (%),${d.conversionRate.toFixed(2)}`)
   lines.push(`Health Score,${data.health.score}`)
-  lines.push(`Health Grade,${data.health.grade}`)
+  lines.push(`Health Grade,${data.health.result?.insufficientData ? 'Not graded' : data.health.grade}`)
   lines.push('')
+
+  // ── Campaigns (client reports) ───────────────────────────────────────────
+  if (data.campaigns && data.campaigns.length > 1) {
+    const q = (v: string) => `"${v.replace(/"/g, '""')}"`
+    lines.push('## CAMPAIGNS')
+    lines.push('Campaign,Objective,Result,Results,Cost per result (₹),Spend (₹),Impressions,Clicks (all)')
+    for (const c of data.campaigns) {
+      lines.push([
+        q(c.campaignName), q(c.objective ?? '—'), q(c.resultLabel ?? '—'),
+        c.results ?? '—', c.costPerResult == null ? '—' : c.costPerResult.toFixed(2),
+        c.spend.toFixed(2), Math.round(c.impressions), Math.round(c.clicks),
+      ].join(','))
+    }
+    lines.push('')
+  }
 
   // ── Daily breakdown ──────────────────────────────────────────────────────
   lines.push('## DAILY BREAKDOWN')

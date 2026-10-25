@@ -1,21 +1,28 @@
 'use client'
 
 /**
- * Advertising project detail — tabbed view over one campaign.
- * Overview · Daily Performance · Tasks · Budget · Notes.
+ * Advertising project detail — one campaign in four tabs:
+ * Overview (results, health, activity) · Performance (daily rows) ·
+ * Funds & billing · Reports. Sync & connection settings sit behind the
+ * header's settings button. The tab lives in the URL (?tab=); the old tab
+ * names (daily, budget, notes, timeline, integrations) still resolve.
  *
  * All money/metric math comes from the shared pure helpers (aggregateMetrics,
- * deriveMetrics, computeBudgetTotals, healthScore). Mutations go through the
+ * deriveMetrics, computeBudgetTotals, assessCampaignHealth). Mutations go through the
  * guarded server actions; after each, router.refresh() re-pulls server data.
  */
 
-import React, { useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import React, { useEffect, useMemo, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import { CreativePerformance } from '@/components/reporting/creative-performance'
+import { CampaignReviewTools } from '@/components/reporting/campaign-review-tools'
+import { ReportComposer, type ComposerProject } from '@/components/reporting/report-composer'
+import type { ClientReportPreferences } from '@/lib/reporting/preferences'
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
-  Megaphone, ArrowLeft, Loader2, Plus, Check, Trash2, FileText, ExternalLink, BarChart2,
-  Download, Calendar, CheckCircle, XCircle, Clock,
+  Megaphone, ArrowLeft, Loader2, Plus, Check, Trash2, FileText, ExternalLink,
+  Download, Calendar, CheckCircle, XCircle, Clock, Settings2, RefreshCw,
 } from 'lucide-react'
 import {
   AD_STATUS_CHIP, STATUS_LABEL, STATUSES, PLATFORM_LABEL, CAMPAIGN_TYPE_LABEL, adRefLabel,
@@ -23,7 +30,6 @@ import {
 } from '@/lib/advertising/types'
 import { deriveMetrics, remainingBudget } from '@/lib/advertising/metrics'
 import { aggregateMetrics } from '@/lib/advertising/reporting'
-import { healthScore } from '@/lib/advertising/health'
 import BudgetFields, { emptyBudget, resolveBudget, type BudgetValue } from '../budget-fields'
 import {
   updateAdStatus, saveAdBudget, upsertDailyMetric, approveDailyMetric, deleteDailyMetric,
@@ -38,6 +44,14 @@ import { FavoriteToggle } from '@/components/ui/favorite-toggle'
 import { TimelineTab } from '@/components/activity/timeline-tab'
 import { DiscussButton } from '@/components/chat/discuss-button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { todayISO } from '@/lib/utils/local-date'
+import { CIRQLE_CAMPAIGN_TYPES } from '@/lib/advertising/campaign-objective'
+import type { BenchmarkMetrics, BenchmarkSource } from '@/lib/advertising/ai/benchmarks'
+import type { HealthScoreResult } from '@/lib/advertising/ai/scoring'
+import { generateForecast } from '@/lib/advertising/ai/forecasting'
+import { assessCampaignHealth, healthLabel } from '@/lib/reporting/campaign-health'
+import { resultDefinitionFor, resultCount, costPerSelectedResult, type ResultDefinition } from '@/lib/reporting/result-type'
+import { syncFreshness } from '@/lib/advertising/freshness'
 
 type Project = AdProjectRow & { 
   client?: { id: string; name: string; code: string } | null,
@@ -72,6 +86,14 @@ interface Props {
   allocations?: CampaignAllocation[]
   wallet?: WalletSummaryView | null
   allocSupported?: boolean
+  /** Report benchmark tiers for this campaign (null when unavailable). */
+  benchmarks?: { metrics: BenchmarkMetrics; source: BenchmarkSource } | null
+  /** The client's campaigns, for the report composer (this one included). */
+  clientCampaigns?: ComposerProject[]
+  reportPreferences?: Record<string, ClientReportPreferences>
+  reportPreferencesSupported?: boolean
+  /** Platform-side status (may lag) and Ads Manager deep link; null = not linked. */
+  platform?: { provider: string | null; status: string | null; statusSeenAt: string | null; adsManagerUrl: string | null } | null
   perms: { edit: boolean; manageBudget: boolean; enterMetrics: boolean; approveMetrics: boolean; viewFinancials: boolean; viewBilling: boolean }
 }
 
@@ -81,20 +103,74 @@ const num = (v: number | null | undefined) =>
   v == null ? '—' : Number(v).toLocaleString('en-IN')
 const round2 = (v: number) => Math.round(v * 100) / 100
 
-type Tab = 'overview' | 'daily' | 'budget' | 'notes' | 'integrations' | 'reports' | 'timeline'
+type Tab = 'overview' | 'performance' | 'funds' | 'reports'
 
-export default function ProjectDetailClient({ project, metrics, tasks, notes, invoice, services, servicePricing, allocations = [], wallet = null, allocSupported = false, perms }: Props) {
+/** Old tab names (bookmarks, alert links) → the merged tabs. */
+const LEGACY_TAB: Record<string, Tab> = {
+  overview: 'overview', notes: 'overview', timeline: 'overview', integrations: 'overview',
+  daily: 'performance', performance: 'performance',
+  budget: 'funds', funds: 'funds',
+  reports: 'reports',
+}
+
+export default function ProjectDetailClient({ project, metrics, tasks, notes, invoice, services, servicePricing, allocations = [], wallet = null, allocSupported = false, benchmarks = null, platform = null, clientCampaigns = [], reportPreferences = {}, reportPreferencesSupported = false, perms }: Props) {
   const router = useRouter()
-  const [tab, setTab] = useState<Tab>('overview')
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const requested = searchParams.get('tab') ?? 'overview'
+  const canSeeFunds = perms.viewFinancials || perms.viewBilling
+  const resolvedTab: Tab = LEGACY_TAB[requested] ?? 'overview'
+  const [tab, setTabState] = useState<Tab>(resolvedTab === 'funds' && !canSeeFunds ? 'overview' : resolvedTab)
+  const [showSettings, setShowSettings] = useState(requested === 'integrations')
+  const [showTimeline, setShowTimeline] = useState(requested === 'timeline')
+  function setTab(next: Tab) {
+    setTabState(next)
+    const q = new URLSearchParams(searchParams.toString())
+    if (next === 'overview') q.delete('tab'); else q.set('tab', next)
+    // Native history: updates useSearchParams without a server round trip
+    // (Next.js integrates replaceState with the router).
+    window.history.replaceState(null, '', q.size ? `${pathname}?${q}` : pathname)
+  }
+  const fresh = syncFreshness(project)
+  // Old ?tab=notes / ?tab=timeline links land on the Activity section.
+  useEffect(() => {
+    if (requested === 'notes' || requested === 'timeline') {
+      document.getElementById('activity')?.scrollIntoView({ block: 'start' })
+    }
+  }, [requested])
   const [status, setStatus] = useState(project.status)
 
   const agg = useMemo(() => aggregateMetrics(metrics), [metrics])
   const remaining = remainingBudget(project.ad_budget_amount, agg.spend)
-  const health = useMemo(() => healthScore({
-    adBudget: project.ad_budget_amount, totalSpend: agg.spend,
-    startDate: project.start_date, endDate: project.end_date,
-    roas: agg.roas, ctr: agg.ctr, status: project.status,
-  }), [project, agg])
+  // The objective's result (conversations, purchases, leads…) and its cost —
+  // the same definitions reports use (result-type.ts).
+  const result = useMemo(() => {
+    const definition = resultDefinitionFor(project.campaign_type, { leads: agg.leads })
+    const count = resultCount(definition, agg)
+    return { definition, count, cost: costPerSelectedResult(agg.spend, count) }
+  }, [project.campaign_type, agg])
+
+  // Lifetime health under the report's rules (campaign-health.ts).
+  const health = useMemo(() => {
+    const today = todayISO()
+    const dates = metrics.map(m => m.metric_date).sort()
+    const roasPoints = [...metrics]
+      .sort((a, b) => a.metric_date.localeCompare(b.metric_date))
+      .map(m => ({ date: m.metric_date, value: Number(m.spend) > 0 ? Number(m.revenue || 0) / Number(m.spend) : 0 }))
+    return assessCampaignHealth({
+      spend: agg.spend, revenue: agg.revenue, roas: agg.roas, ctr: agg.ctr, cpc: agg.cpc,
+      conversionRate: agg.clicks > 0 ? (agg.leads / agg.clicks) * 100 : 0,
+      results: result.count, costPerResult: result.cost,
+      budget: Number(project.ad_budget_amount || 0),
+      campaignStart: project.start_date, campaignEnd: project.end_date,
+      periodFrom: project.start_date ?? dates[0] ?? today,
+      periodTo: today,
+      today,
+      benchmarks: benchmarks?.metrics ?? null,
+      benchmarkSource: benchmarks?.source ?? null,
+      forecasts: agg.revenue > 0 && roasPoints.length > 1 ? { roas: generateForecast(roasPoints, 30) } : undefined,
+    })
+  }, [project, agg, metrics, result, benchmarks])
 
   const [deleting, setDeleting] = useState(false)
   const [archiving, setArchiving] = useState(false)
@@ -133,16 +209,14 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
-    { key: 'daily', label: `Daily Performance${metrics.length ? ` (${metrics.length})` : ''}` },
-    // Budget is the money-management tab (service charge config, wallet
-    // allocation, invoicing) — needs at least one money layer; a plain
+    { key: 'performance', label: `Performance${metrics.length ? ` (${metrics.length})` : ''}` },
+    // Funds & billing is the money-management tab (service charge config,
+    // wallet allocation, invoicing) — needs at least one money layer; a plain
     // handler sees allocations in the Overview instead.
-    ...(perms.viewFinancials || perms.viewBilling ? [{ key: 'budget', label: 'Budget' } as const] : []),
-    { key: 'notes', label: 'Notes' },
-    { key: 'integrations', label: 'Integrations' },
+    ...(canSeeFunds ? [{ key: 'funds', label: 'Funds & billing' } as const] : []),
     { key: 'reports', label: 'Reports' },
-    { key: 'timeline', label: 'Timeline' },
   ]
+  const def = result.definition
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 space-y-6">
@@ -173,8 +247,47 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
               {adRefLabel(project.id)} · {project.client?.name || 'No client'} · {PLATFORM_LABEL[project.platform] || project.platform}
               {project.campaign_type ? ` · ${CAMPAIGN_TYPE_LABEL[project.campaign_type] || project.campaign_type}` : ''}
             </p>
+            {/* The campaign in one line: objective result, cost, dates, freshness. */}
+            <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+              {def.metric ? (
+                <span><strong className="tabular-nums">{num(result.count)}</strong> {def.label.toLowerCase()}
+                  {result.cost != null && <> · <strong className="tabular-nums">{inr(result.cost, 2)}</strong> {def.costLabel.toLowerCase().replace('cost per', 'per')}</>}
+                </span>
+              ) : (
+                <span className="text-muted-foreground">{def.unavailableReason ?? 'No result metric for this objective'}</span>
+              )}
+              <span className="text-muted-foreground">
+                <Calendar className="mr-1 inline h-3.5 w-3.5" />{project.start_date || '—'} → {project.end_date || 'ongoing'}
+              </span>
+              <span className={fresh.stale ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}>
+                <RefreshCw className="mr-1 inline h-3.5 w-3.5" />{fresh.text}
+              </span>
+              {platform?.adsManagerUrl && (
+                <a href={platform.adsManagerUrl} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-pink-600 hover:underline dark:text-pink-400">
+                  Open in Ads Manager <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
+            </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Two statuses, kept apart: Meta's delivery status (read-only,
+                as last seen by discovery) and Cirqle's own workflow status. */}
+            {platform?.status && (
+              <span
+                title={platform.statusSeenAt ? `Status on ${PLATFORM_LABEL[platform.provider ?? ''] || platform.provider} as of ${new Date(platform.statusSeenAt).toLocaleString('en-IN')}` : undefined}
+                className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted-foreground"
+              >
+                {PLATFORM_LABEL[platform.provider ?? ''] || 'Platform'}: {platform.status.toLowerCase().replace(/_/g, ' ')}
+              </span>
+            )}
+            <button
+              onClick={() => setShowSettings(v => !v)}
+              aria-expanded={showSettings}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-secondary"
+            >
+              <Settings2 className="h-3.5 w-3.5" /> Sync &amp; connection
+            </button>
             {perms.edit ? (
               <select
                 value={status}
@@ -225,11 +338,19 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
         </div>
       </div>
 
+      {showSettings && (
+        <section aria-label="Sync and connection" className="rounded-xl border border-border bg-card p-4">
+          <IntegrationsTab project={project} canEdit={perms.edit} onChange={() => router.refresh()} />
+        </section>
+      )}
+
       {/* Tabs */}
-      <div className="flex flex-wrap gap-1 border-b border-border">
+      <div className="flex flex-wrap gap-1 border-b border-border" role="tablist">
         {tabs.map(t => (
           <button
             key={t.key}
+            role="tab"
+            aria-selected={tab === t.key}
             onClick={() => setTab(t.key)}
             className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
               tab === t.key ? 'border-pink-500 text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -241,16 +362,30 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
       </div>
 
       {tab === 'overview' && (
-        <OverviewTab
-          project={project} agg={agg} remaining={remaining} health={health}
-          allocations={allocations} wallet={wallet} allocSupported={allocSupported}
-          campaignTask={tasks[0] ?? null} invoice={invoice} perms={perms}
-        />
+        <>
+          <OverviewTab
+            project={project} agg={agg} remaining={remaining} health={health} result={result}
+            allocations={allocations} wallet={wallet} allocSupported={allocSupported}
+            campaignTask={tasks[0] ?? null} invoice={invoice} perms={perms}
+          />
+          {/* Activity = notes + the full event timeline (formerly two tabs). */}
+          <section id="activity" aria-labelledby="activity-heading" className="space-y-3 border-t border-border pt-4">
+            <div className="flex items-center justify-between gap-2">
+              <h2 id="activity-heading" className="text-sm font-semibold">Activity</h2>
+              <button onClick={() => setShowTimeline(v => !v)} aria-expanded={showTimeline}
+                className="text-xs text-muted-foreground hover:text-foreground">
+                {showTimeline ? 'Hide full timeline' : 'Show full timeline'}
+              </button>
+            </div>
+            <NotesTab projectId={project.id} notes={notes} canEdit={perms.edit} onChange={() => router.refresh()} />
+            {showTimeline && <TimelineTab scope={{ projectId: project.id }} />}
+          </section>
+        </>
       )}
-      {tab === 'daily' && (
-        <DailyTab projectId={project.id} campaignType={project.campaign_type} metrics={metrics} perms={perms} onChange={() => router.refresh()} />
+      {tab === 'performance' && (
+        <><CreativePerformance projectId={project.id} /><CampaignReviewTools projectId={project.id} /><DailyTab projectId={project.id} campaignType={project.campaign_type} metrics={metrics} perms={perms} onChange={() => router.refresh()} /></>
       )}
-      {tab === 'budget' && (
+      {tab === 'funds' && canSeeFunds && (
         <BudgetTab
           project={project} invoice={invoice} canManage={perms.manageBudget} onChange={() => router.refresh()}
           services={services} servicePricing={servicePricing}
@@ -259,17 +394,9 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
           viewBilling={perms.viewBilling}
         />
       )}
-      {tab === 'notes' && (
-        <NotesTab projectId={project.id} notes={notes} canEdit={perms.edit} onChange={() => router.refresh()} />
-      )}
-      {tab === 'integrations' && (
-        <IntegrationsTab project={project} canEdit={perms.edit} onChange={() => router.refresh()} />
-      )}
       {tab === 'reports' && (
-        <ProjectReportsTab projectId={project.id} clientId={project.client_id ?? ''} canEdit={perms.edit} />
-      )}
-      {tab === 'timeline' && (
-        <TimelineTab scope={{ projectId: project.id }} />
+        <ProjectReportsTab projectId={project.id} clientId={project.client_id ?? ''} canEdit={perms.edit}
+          composerProjects={clientCampaigns} preferences={reportPreferences} preferencesSupported={reportPreferencesSupported} />
       )}
       {confirmPrompt && (
         <ConfirmDialog
@@ -287,11 +414,12 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
 
 // ─── Overview ────────────────────────────────────────────────────────────────
 
-function OverviewTab({ project, agg, remaining, health, allocations = [], wallet = null, allocSupported = false, campaignTask = null, invoice = null, perms }: {
+function OverviewTab({ project, agg, remaining, health, result, allocations = [], wallet = null, allocSupported = false, campaignTask = null, invoice = null, perms }: {
   project: Project
   agg: ReturnType<typeof aggregateMetrics>
   remaining: number | null
-  health: ReturnType<typeof healthScore>
+  health: HealthScoreResult
+  result: { definition: ResultDefinition; count: number | null; cost: number | null }
   allocations?: CampaignAllocation[]
   wallet?: WalletSummaryView | null
   allocSupported?: boolean
@@ -305,6 +433,21 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
   const [startDateInput, setStartDateInput] = useState(project.start_date ?? '')
   const [endDateInput, setEndDateInput] = useState(project.end_date ?? '')
   const [savingDates, setSavingDates] = useState(false)
+
+  const [objective, setObjective] = useState(project.campaign_type ?? '')
+  const [savingObjective, setSavingObjective] = useState(false)
+  const [objectiveError, setObjectiveError] = useState<string | null>(null)
+
+  // Saves on change, like the status select. The objective decides what
+  // reports count as this campaign's results (leads, conversations, purchases…).
+  async function saveObjective(next: string) {
+    const previous = objective
+    setObjective(next); setSavingObjective(true); setObjectiveError(null)
+    const res = await updateAdProject(project.id, { campaignType: next || null })
+    setSavingObjective(false)
+    if (res.ok) router.refresh()
+    else { setObjective(previous); setObjectiveError(res.error ?? 'Could not save the objective.') }
+  }
 
   async function saveDates() {
     setSavingDates(true)
@@ -344,11 +487,21 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
     ] : []),
   ]
 
+  // The objective's result leads the tiles. A count the objective already
+  // shows elsewhere (Leads, Clicks) is not repeated; its cost always is.
+  // Revenue/ROAS/CPC/CTR read "Not tracked"/"—" when they can't be measured,
+  // never ₹0 / 0×.
+  const def = result.definition
+  const resultTiles: [string, string][] = def.metric ? [
+    ...(def.metric === 'leads' || def.metric === 'clicks' ? [] : [[def.label, num(result.count)] as [string, string]]),
+    [def.costLabel, inr(result.cost, 2)],
+  ] : []
   const kpis: [string, string][] = [
-    ['Revenue', inr(agg.revenue)],
-    ['ROAS', agg.roas != null ? `${round2(agg.roas)}×` : '—'],
-    ['CTR', agg.ctr != null ? `${round2(agg.ctr)}%` : '—'],
-    ['CPC', inr(agg.cpc, 2)],
+    ...resultTiles,
+    ['Revenue', agg.revenue > 0 ? inr(agg.revenue) : 'Not tracked'],
+    ['ROAS', agg.revenue > 0 ? `${round2(agg.roas)}×` : '—'],
+    ['CTR', agg.impressions > 0 ? `${round2(agg.ctr)}%` : '—'],
+    ['CPC', agg.clicks > 0 ? inr(agg.cpc, 2) : '—'],
     ['Clicks', num(agg.clicks)],
     ['Impressions', num(agg.impressions)],
     ['Leads', num(agg.leads)],
@@ -358,12 +511,42 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-border bg-card p-4 flex items-center justify-between">
-        <div>
+      <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <div className="text-xs uppercase tracking-wide text-muted-foreground">Campaign health</div>
-          <div className="text-2xl font-bold">{health.score}<span className="text-base font-normal text-muted-foreground">/100 · {health.label}</span></div>
+          {health.insufficientData ? (
+            <div className="text-2xl font-bold">Not graded</div>
+          ) : (
+            <div className="text-2xl font-bold">{health.score}<span className="text-base font-normal text-muted-foreground">/100 · Grade {health.grade}</span></div>
+          )}
+          {/* Why: the first reason that isn't the generic "not enough data". */}
+          <div className="text-xs text-muted-foreground mt-0.5" title={health.explanations.join('\n')}>
+            {health.explanations.find(e => !e.startsWith('Not enough data')) ?? healthLabel(health)}
+          </div>
+          {!def.metric && def.unavailableReason && (
+            <div className="text-xs text-muted-foreground">{def.unavailableReason}</div>
+          )}
         </div>
-        <div className="text-right text-xs text-muted-foreground">
+        <div className="flex flex-col items-start gap-1.5 text-left text-xs text-muted-foreground sm:items-end sm:text-right">
+          <label className="inline-flex items-center gap-1.5" title="Decides what reports count as this campaign's results">
+            <span>Objective</span>
+            {perms.edit ? (
+              <select
+                value={objective}
+                onChange={e => void saveObjective(e.target.value)}
+                disabled={savingObjective}
+                aria-label="Campaign objective"
+                className="rounded border border-border bg-background px-1.5 py-0.5 text-xs text-foreground disabled:opacity-50"
+              >
+                <option value="">Not set</option>
+                {CIRQLE_CAMPAIGN_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+            ) : (
+              <span className="text-foreground">{CIRQLE_CAMPAIGN_TYPES.find(t => t.value === objective)?.label ?? 'Not set'}</span>
+            )}
+            {savingObjective && <Loader2 className="h-3 w-3 animate-spin" />}
+          </label>
+          {objectiveError && <span role="alert" className="text-red-500">{objectiveError}</span>}
           {editingDates ? (
             <div className="flex items-center gap-1.5">
               <input type="date" value={startDateInput} onChange={e => setStartDateInput(e.target.value)}
@@ -497,7 +680,7 @@ function OverviewTab({ project, agg, remaining, health, allocations = [], wallet
 // ─── Daily performance ───────────────────────────────────────────────────────
 
 const EMPTY_ROW = {
-  metricDate: new Date().toISOString().slice(0, 10),
+  metricDate: todayISO(),
   spend: '', reach: '', impressions: '', clicks: '', conversions: '',
   leads: '', messages: '', purchases: '', revenue: '', videoViews: '', notes: '',
 }
@@ -1033,7 +1216,7 @@ interface ReportRow {
   template: string
   date_from: string
   date_to: string
-  status: 'pending' | 'generating' | 'ready' | 'failed'
+  status: 'pending' | 'generating' | 'partial' | 'ready' | 'failed'
   error_message?: string | null
   generation_time_ms?: number | null
   pdf_url?: string | null
@@ -1047,25 +1230,20 @@ function ProjectReportsTab({
   projectId,
   clientId,
   canEdit,
+  composerProjects,
+  preferences,
+  preferencesSupported,
 }: {
   projectId: string
   clientId: string
   canEdit: boolean
+  composerProjects: ComposerProject[]
+  preferences?: Record<string, ClientReportPreferences>
+  preferencesSupported?: boolean
 }) {
   const [reports, setReports] = useState<ReportRow[]>([])
   const [loadingList, setLoadingList] = useState(false)
-  const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
-
-  // Form state
-  const today = new Date().toISOString().slice(0, 10)
-  const thirtyAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
-  const [dateFrom, setDateFrom] = useState(thirtyAgo)
-  const [dateTo, setDateTo] = useState(today)
-  const [template, setTemplate] = useState('daily')
-  const [formats, setFormats] = useState<string[]>(['pdf'])
-  const [withComparison, setWithComparison] = useState(false)
   const [loaded, setLoaded] = useState(false)
 
   async function loadReports() {
@@ -1082,38 +1260,6 @@ function ProjectReportsTab({
 
   // Load on first render
   if (!loaded && !loadingList) loadReports()
-
-  const toggleFormat = (f: string) =>
-    setFormats(prev => prev.includes(f) ? prev.filter(x => x !== f) : [...prev, f])
-
-  async function onGenerate() {
-    if (!clientId) { setError('Campaign has no associated client'); return }
-    if (formats.length === 0) { setError('Select at least one format'); return }
-    setGenerating(true); setError(null); setSuccess(null)
-    try {
-      const body: any = { projectId, clientId, reportType: 'custom', template, dateFrom, dateTo, formats }
-      if (withComparison) {
-        const from = new Date(dateFrom)
-        const to   = new Date(dateTo)
-        const days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1
-        const compTo = new Date(from); compTo.setDate(compTo.getDate() - 1)
-        const compFrom = new Date(compTo); compFrom.setDate(compFrom.getDate() - days + 1)
-        body.comparisonFrom = compFrom.toISOString().slice(0, 10)
-        body.comparisonTo   = compTo.toISOString().slice(0, 10)
-      }
-      const res = await fetch('/api/advertising/reports/generate?sync=true', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-      })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error ?? 'Failed')
-      setSuccess('Report generated successfully.')
-      loadReports()
-    } catch (err: any) {
-      setError(err.message)
-    } finally {
-      setGenerating(false)
-    }
-  }
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
   // In-app confirmation. NOT window.confirm: the desktop shell returns false
@@ -1139,78 +1285,22 @@ function ProjectReportsTab({
   const statusIcon = (status: string) => ({
     pending:    <Clock className="h-3.5 w-3.5 text-muted-foreground" />,
     generating: <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />,
+    partial:    <Clock className="h-4 w-4 text-amber-600" />,
     ready:      <CheckCircle className="h-3.5 w-3.5 text-green-500" />,
     failed:     <XCircle className="h-3.5 w-3.5 text-red-500" />,
   } as Record<string, React.ReactNode>)[status] ?? null
 
   return (
     <div className="space-y-6">
-      {/* Generate form */}
+      {/* One composer everywhere (Reports hub, client workspace, here) —
+          prefilled with this campaign; tick siblings for a client report. */}
       {canEdit && (
-        <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-          <h3 className="font-medium text-sm text-foreground flex items-center gap-2">
-            <BarChart2 className="h-4 w-4 text-primary" />
-            Generate Report
-          </h3>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-muted-foreground mb-1">From</label>
-              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-                className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm" />
-            </div>
-            <div>
-              <label className="block text-xs text-muted-foreground mb-1">To</label>
-              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-                className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm" />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs text-muted-foreground mb-1">Template</label>
-            <select value={template} onChange={e => setTemplate(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm">
-              <option value="daily">Daily Report (Meta / WhatsApp style)</option>
-              <option value="monthly">Monthly Report (Meta / WhatsApp style)</option>
-              <option value="performance">Performance Report</option>
-              <option value="executive">Executive Summary</option>
-              <option value="marketing">Marketing Performance</option>
-              <option value="lead_gen">Lead Generation</option>
-              <option value="ecommerce">E-commerce</option>
-              <option value="agency">Agency Report</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs text-muted-foreground mb-1">Formats</label>
-            <div className="flex gap-2 flex-wrap">
-              {['pdf', 'xlsx', 'csv', 'image_portrait'].map(f => (
-                <button key={f} type="button" onClick={() => toggleFormat(f)}
-                  className={['rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors',
-                    formats.includes(f) ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-background text-muted-foreground'
-                  ].join(' ')}>
-                  {f}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={withComparison} onChange={e => setWithComparison(e.target.checked)}
-              className="rounded border-border" />
-            <span className="text-xs text-foreground">Compare with previous period</span>
-          </label>
-
-          {error && <p className="text-xs text-red-500">{error}</p>}
-          {success && <p className="text-xs text-green-600">{success}</p>}
-
-          <button onClick={onGenerate} disabled={generating}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-            {generating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-            {generating ? 'Generating…' : 'Generate'}
-          </button>
-        </div>
+        <ReportComposer
+          projects={composerProjects} initialClientId={clientId || undefined} initialProjectIds={[projectId]}
+          preferences={preferences} preferencesSupported={preferencesSupported} canEdit={canEdit}
+        />
       )}
+      {error && <p className="text-xs text-red-500">{error}</p>}
 
       {/* Report history */}
       <div>
@@ -1232,16 +1322,16 @@ function ProjectReportsTab({
                       <span className="text-sm font-medium capitalize">{r.template}</span>
                       <span className="text-xs text-muted-foreground">{r.date_from} → {r.date_to}</span>
                     </div>
-                    {r.status === 'failed' && r.error_message && (
+                    {(r.status === 'failed' || r.status === 'partial') && r.error_message && (
                       <p className="text-xs text-red-500 truncate">{r.error_message}</p>
                     )}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
-                  {r.pdf_url  && <a href={r.pdf_url}  target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"><Download className="h-3 w-3" />PDF</a>}
-                  {r.xlsx_url && <a href={r.xlsx_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"><Download className="h-3 w-3" />Excel</a>}
-                  {r.csv_url  && <a href={r.csv_url}  target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"><Download className="h-3 w-3" />CSV</a>}
-                  {r.image_url_portrait && <a href={r.image_url_portrait} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"><Download className="h-3 w-3" />Image</a>}
+                  {r.pdf_url  && <a href={`/api/advertising/reports/${r.id}/download?format=pdf&redirect=1`}  target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"><Download className="h-3 w-3" />PDF</a>}
+                  {r.xlsx_url && <a href={`/api/advertising/reports/${r.id}/download?format=xlsx&redirect=1`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"><Download className="h-3 w-3" />Excel</a>}
+                  {r.csv_url  && <a href={`/api/advertising/reports/${r.id}/download?format=csv&redirect=1`}  target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"><Download className="h-3 w-3" />CSV</a>}
+                  {r.image_url_portrait && <a href={`/api/advertising/reports/${r.id}/download?format=image_portrait&redirect=1`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground"><Download className="h-3 w-3" />Image</a>}
                   {canEdit && (
                     <button
                       onClick={() => setDeleteReportId(r.id)}

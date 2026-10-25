@@ -3,6 +3,8 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { getWalletSummary, getCompanyWalletSummary } from '@/lib/advertising/wallet'
+import { getBenchmarksWithSource } from '@/lib/advertising/ai/benchmarks'
+import { loadClientReportPreferences } from '@/lib/reporting/preferences'
 import ProjectDetailClient from './project-detail-client'
 
 export const dynamic = 'force-dynamic'
@@ -79,6 +81,28 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const safeProject = viewBilling ? project : {
     ...project, service_charge_type: null, service_charge_value: null, tax_percent: null,
   }
+  // Same benchmark tiers the report uses, so page and report grade health
+  // identically. Best-effort: health simply goes ungraded on benchmarks
+  // without them.
+  const benchmarks = await getBenchmarksWithSource(id, project.client_id ?? '', project.campaign_type ?? 'general')
+    .catch(() => null)
+
+  // Platform-side facts: Meta's own delivery status (captured at campaign
+  // discovery — may lag) and a deep link into Ads Manager. Best-effort.
+  const platform = await loadPlatformInfo(admin, project)
+
+  // The report composer on the Reports tab: this client's campaigns (to add
+  // to a client report) and the client's saved report defaults.
+  const [clientCampaigns, reportPrefs] = await Promise.all([
+    project.client_id
+      ? admin.from('ad_projects')
+          .select('id, campaign_name, platform, client_id, status, archived_at, campaign_type, start_date, client:clients(id, name, code)')
+          .eq('client_id', project.client_id).is('deleted_at', null).order('created_at', { ascending: false }).limit(100)
+          .then(r => (r.data as any[]) ?? [], () => [])
+      : Promise.resolve([] as any[]),
+    loadClientReportPreferences(admin, project.client_id ? [project.client_id] : []),
+  ])
+
   const tasks = (tasksRes.data || []).map((r: any) => r.task).filter(Boolean)
   const safeTasks = viewBilling ? tasks : tasks.map((t: any) => ({ ...t, billing_amount: null }))
 
@@ -96,7 +120,37 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       allocations={(allocRes.data as any) || []}
       wallet={wallet}
       allocSupported={allocSupported}
+      benchmarks={benchmarks}
+      platform={platform}
+      clientCampaigns={clientCampaigns}
+      reportPreferences={reportPrefs.byClient}
+      reportPreferencesSupported={reportPrefs.supported}
       perms={perms}
     />
   )
+}
+
+async function loadPlatformInfo(
+  admin: ReturnType<typeof createAdminClient>,
+  project: { id: string; ad_account_id?: string | null; external_campaign_id?: string | null; provider_metadata?: { campaign_id?: string } | null },
+) {
+  if (!project.ad_account_id) return null
+  const [acct, camp] = await Promise.all([
+    admin.from('ad_accounts').select('provider, account_id').eq('id', project.ad_account_id).maybeSingle()
+      .then(r => r.data, () => null),
+    admin.from('ad_campaigns').select('status, last_seen_at').eq('project_id', project.id).maybeSingle()
+      .then(r => r.data, () => null),
+  ])
+  const campaignId: string | undefined = project.provider_metadata?.campaign_id ?? project.external_campaign_id ?? undefined
+  const accountId = acct?.account_id ? String(acct.account_id).replace(/^act_/, '') : null
+  // Only digits reach the URL — both ids are Meta numeric ids.
+  const adsManagerUrl = acct?.provider === 'meta' && accountId && /^\d+$/.test(accountId) && campaignId && /^\d+$/.test(campaignId)
+    ? `https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${accountId}&selected_campaign_ids=${campaignId}`
+    : null
+  return {
+    provider: acct?.provider ?? null,
+    status: camp?.status ?? null,
+    statusSeenAt: camp?.last_seen_at ?? null,
+    adsManagerUrl,
+  }
 }

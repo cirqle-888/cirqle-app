@@ -1,44 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
+import { requireReadPermission } from '@/lib/permissions/check'
+import { createAdminClient } from '@/lib/supabase/server'
 import { buildRenderData } from '@/lib/reporting/render-engine'
+import { parseReportRequest, resolveScopeFor } from '@/lib/reporting/config'
+import { savePreviewDraft } from '@/lib/reporting/save-preview-draft'
 import type { ReportConfig } from '@/lib/reporting/types'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
+// Same parser as /generate, so the preview and the export are built from an
+// identical config (sections included). Recipients are irrelevant to a
+// preview and are dropped — nothing is sent from here.
 export async function POST(req: NextRequest) {
   try {
-    const me = await loadCurrentUser().catch(() => null)
-    if (!me || !hasPermission(me, 'advertising.view_reports')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
-    }
+    const guard = await requireReadPermission('advertising.view_reports')
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: 403 })
 
-    const body = await req.json() as Partial<ReportConfig>
+    const body = await req.json().catch(() => null)
+    const parsed = parseReportRequest(body)
+    if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
 
-    if (!body.projectId)  return NextResponse.json({ error: 'Missing projectId' }, { status: 400 })
-    if (!body.clientId)   return NextResponse.json({ error: 'Missing clientId' }, { status: 400 })
-    if (!body.dateFrom)   return NextResponse.json({ error: 'Missing dateFrom' }, { status: 400 })
-    if (!body.dateTo)     return NextResponse.json({ error: 'Missing dateTo' }, { status: 400 })
+    const scope = await resolveScopeFor(createAdminClient(), parsed.value, body?.clientId)
+    if (!scope.ok) return NextResponse.json({ error: scope.error }, { status: 400 })
 
     const config: ReportConfig = {
-      projectId:      body.projectId,
-      clientId:       body.clientId,
-      reportType:     body.reportType     ?? 'custom',
-      template:       body.template       ?? 'performance',
-      dateFrom:       body.dateFrom,
-      dateTo:         body.dateTo,
-      comparisonFrom: body.comparisonFrom,
-      comparisonTo:   body.comparisonTo,
-      formats:        body.formats?.length ? body.formats : ['pdf'],
-      generatedBy:    me.employeeId || undefined,
-      recipients:     body.recipients     ?? [],
-      sections:       body.sections,
+      ...parsed.value,
+      clientId:    scope.value.clientId,
+      generatedBy: guard.employeeId || undefined,
+      recipients:  [],
     }
 
     const renderData = await buildRenderData(config)
-    return NextResponse.json(renderData)
-  } catch (err: any) {
+    if (body?.saveDraft === true) {
+      const saved = await savePreviewDraft(config, renderData)
+      if (!saved.ok) return NextResponse.json({ error: saved.error }, { status: saved.status })
+      const draft = saved.draft
+      return NextResponse.json({ ...renderData, snapshotId: draft.id }, { headers: { 'Cache-Control': 'private, no-store' } })
+    }
+    return NextResponse.json(renderData, { headers: { 'Cache-Control': 'private, no-store' } })
+  } catch (err) {
     console.error('[API /reports/preview]', err)
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    return NextResponse.json({ error: 'Preview failed. Please try again.' }, { status: 500 })
   }
 }
+

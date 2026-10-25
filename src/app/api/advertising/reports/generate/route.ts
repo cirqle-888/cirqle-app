@@ -1,63 +1,55 @@
-/**
- * POST /api/advertising/reports/generate
- *
- * Enqueues a report generation job.
- * Returns { jobId, reportId } immediately; the job runs in the background.
- *
- * For synchronous generation (useful for small date ranges / testing),
- * pass ?sync=true — waits for the report to complete before responding.
- */
+/** Queue a stable report run and wake its worker after the 202 response. */
 
-import { NextRequest, NextResponse } from 'next/server'
-import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
-import { generateReport, enqueueReportGeneration } from '@/lib/reporting/orchestrator'
-import type { ReportConfig } from '@/lib/reporting/types'
+import { after, NextRequest, NextResponse } from 'next/server'
+import { requirePermission } from '@/lib/permissions/check'
+import { createAdminClient } from '@/lib/supabase/server'
+import { enqueueReportGeneration } from '@/lib/reporting/orchestrator'
+import { parseReportRequest, resolveScopeFor } from '@/lib/reporting/config'
+import { processReportJob } from '@/lib/reporting/process-job'
+import { snapshotFingerprint, snapshotProblem } from '@/lib/reporting/snapshot'
+import type { RenderData, ReportConfig } from '@/lib/reporting/types'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60 // Vercel max for Hobby plan
 
 export async function POST(req: NextRequest) {
   try {
-    const me = await loadCurrentUser().catch(() => null)
-    if (!me || !hasPermission(me, 'advertising.view_reports')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
-    }
+    const guard = await requirePermission('advertising.edit')
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: 403 })
 
-    const body = await req.json() as Partial<ReportConfig>
+    const body = await req.json().catch(() => null)
+    const parsed = parseReportRequest(body)
+    if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
 
-    // Validate required fields
-    if (!body.projectId)  return NextResponse.json({ error: 'Missing projectId' }, { status: 400 })
-    if (!body.clientId)   return NextResponse.json({ error: 'Missing clientId' }, { status: 400 })
-    if (!body.dateFrom)   return NextResponse.json({ error: 'Missing dateFrom' }, { status: 400 })
-    if (!body.dateTo)     return NextResponse.json({ error: 'Missing dateTo' }, { status: 400 })
+    const scope = await resolveScopeFor(createAdminClient(), parsed.value, body?.clientId)
+    if (!scope.ok) return NextResponse.json({ error: scope.error }, { status: 400 })
 
     const config: ReportConfig = {
-      projectId:      body.projectId,
-      clientId:       body.clientId,
-      reportType:     body.reportType     ?? 'custom',
-      template:       body.template       ?? 'performance',
-      dateFrom:       body.dateFrom,
-      dateTo:         body.dateTo,
-      comparisonFrom: body.comparisonFrom,
-      comparisonTo:   body.comparisonTo,
-      formats:        body.formats?.length ? body.formats : ['pdf'],
-      generatedBy:    me.employeeId || undefined,
-      recipients:     body.recipients     ?? [],
+      ...parsed.value,
+      clientId:    scope.value.clientId,
+      generatedBy: guard.employeeId || undefined,
     }
 
-    const sync = req.nextUrl.searchParams.get('sync') === 'true'
-
-    if (sync) {
-      // Synchronous: run inline (use only for small date ranges or dev)
-      const result = await generateReport(config)
-      return NextResponse.json(result)
+    if (!config.snapshotId) return NextResponse.json({ error: 'Preview and approve the report before generating.' }, { status: 400 })
+    const { data: draft } = await createAdminClient().from('ad_report_drafts').select('*').eq('id', config.snapshotId).maybeSingle()
+    if (!draft || draft.client_id !== config.clientId || draft.created_by !== (guard.employeeId || null)
+      || Date.parse(draft.expires_at) <= Date.now() || draft.config_hash !== snapshotFingerprint(config)) {
+      return NextResponse.json({ error: 'Preview expired or settings changed. Refresh the preview.' }, { status: 409 })
     }
+    const problem = snapshotProblem(draft.render_data as RenderData)
+    if (problem && !config.allowIncomplete) return NextResponse.json({ error: problem }, { status: 409 })
+    if (config.allowIncomplete && config.recipients?.length) return NextResponse.json({ error: 'Incomplete drafts cannot be emailed.' }, { status: 400 })
 
-    // Async: enqueue job
-    const jobId = await enqueueReportGeneration(config)
-    return NextResponse.json({ jobId, status: 'queued' }, { status: 202 })
-  } catch (err: any) {
+    const requestKey = req.headers.get('Idempotency-Key')
+    if (requestKey && !/^[a-zA-Z0-9_-]{16,100}$/.test(requestKey)) {
+      return NextResponse.json({ error: 'Invalid request ID.' }, { status: 400 })
+    }
+    const queued = await enqueueReportGeneration(config, requestKey ?? undefined)
+    after(() => processReportJob(queued.jobId))
+    return NextResponse.json(queued, { status: 202, headers: { 'Cache-Control': 'private, no-store' } })
+
+  } catch (err) {
     console.error('[API /reports/generate]', err)
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    return NextResponse.json({ error: 'Report generation failed. Please try again.' }, { status: 500 })
   }
 }

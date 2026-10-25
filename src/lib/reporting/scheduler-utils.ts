@@ -6,44 +6,108 @@
  */
 
 import type { ScheduleFrequency, ReportType } from './types'
-import { toISODate } from '@/lib/utils/local-date'
 
 /**
- * Computes the next UTC run time for a given frequency and delivery hour.
- * Always returns a time in the future.
+ * Computes the next UTC run time for a schedule.
+ *
+ * `deliveryHour` is a wall-clock hour in `timeZone` (an IANA name; the
+ * schedule's delivery_timezone column). Each frequency fires on a period
+ * boundary, because computeDateRange reports the PREVIOUS complete period:
+ *
+ *   daily      every day
+ *   weekly     Mondays          (reports the previous Mon–Sun)
+ *   monthly    the 1st          (reports the previous calendar month)
+ *   quarterly  1 Jan/Apr/Jul/Oct
+ *   yearly     1 January
+ *   custom     every day
+ *
+ * The result is strictly after `now`. The old version only advanced when
+ * today's hour had passed, so a weekly schedule saved on a Monday afternoon
+ * got a time in the past (it re-fired on the next cron tick), and a monthly
+ * one saved before 07:00 on the 24th fired that morning — mid-month.
  */
-export function computeNextRun(frequency: ScheduleFrequency, deliveryHour: number = 7): string {
-  const now = new Date()
-  const next = new Date(now)
-
-  // Set to today at delivery hour
-  next.setUTCHours(deliveryHour, 0, 0, 0)
-
-  // If we've already passed today's window, advance to next occurrence
-  if (next <= now) {
-    switch (frequency) {
-      case 'daily':
-        next.setUTCDate(next.getUTCDate() + 1)
-        break
-      case 'weekly':
-        next.setUTCDate(next.getUTCDate() + (7 - next.getUTCDay() + 1) % 7 || 7) // next Monday
-        break
-      case 'monthly':
-        next.setUTCMonth(next.getUTCMonth() + 1, 1) // 1st of next month
-        break
-      case 'quarterly':
-        next.setUTCMonth(next.getUTCMonth() + 3, 1)
-        break
-      case 'yearly':
-        next.setUTCFullYear(next.getUTCFullYear() + 1, 0, 1)
-        break
-      case 'custom':
-        next.setUTCDate(next.getUTCDate() + 1) // default: next day
-        break
-    }
+export function computeNextRun(
+  frequency: ScheduleFrequency,
+  deliveryHour: number = 7,
+  timeZone: string = 'UTC',
+  now: Date = new Date(),
+): string {
+  if (!Number.isInteger(deliveryHour) || deliveryHour < 0 || deliveryHour > 23) {
+    throw new Error(`Invalid delivery hour: ${deliveryHour}`)
   }
+  if (!isValidTimeZone(timeZone)) throw new Error(`Invalid time zone: ${timeZone}`)
 
-  return next.toISOString()
+  const today = zonedDate(now, timeZone)
+  // Walk candidate days forward from today; the first boundary day whose
+  // delivery instant is after `now` wins. 400 days covers a yearly schedule.
+  for (let i = 0; i <= 400; i++) {
+    const day = new Date(Date.UTC(today.year, today.month - 1, today.day + i))
+    if (!isBoundaryDay(frequency, day)) continue
+    const at = zonedTimeToUtc(day.getUTCFullYear(), day.getUTCMonth() + 1, day.getUTCDate(), deliveryHour, timeZone)
+    if (at.getTime() > now.getTime()) return at.toISOString()
+  }
+  throw new Error(`No next run found for ${frequency}`)
+}
+
+function isBoundaryDay(frequency: ScheduleFrequency, day: Date): boolean {
+  switch (frequency) {
+    case 'weekly':    return day.getUTCDay() === 1
+    case 'monthly':   return day.getUTCDate() === 1
+    case 'quarterly': return day.getUTCDate() === 1 && day.getUTCMonth() % 3 === 0
+    case 'yearly':    return day.getUTCDate() === 1 && day.getUTCMonth() === 0
+    case 'daily':
+    case 'custom':
+    default:          return true
+  }
+}
+
+/** True for a time zone name Intl understands (e.g. 'Asia/Kolkata', 'UTC'). */
+export function isValidTimeZone(timeZone: string): boolean {
+  if (!timeZone || typeof timeZone !== 'string') return false
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** The calendar day and hour an instant falls on in `timeZone`. */
+function zonedParts(instant: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(instant)
+  const get = (type: string) => Number(parts.find(p => p.type === type)?.value)
+  return {
+    year: get('year'), month: get('month'), day: get('day'),
+    hour: get('hour'), minute: get('minute'), second: get('second'),
+  }
+}
+
+function zonedDate(instant: Date, timeZone: string) {
+  const { year, month, day } = zonedParts(instant, timeZone)
+  return { year, month, day }
+}
+
+/** Offset of `timeZone` from UTC at `instant`, in milliseconds. */
+function zoneOffsetMs(instant: Date, timeZone: string): number {
+  const p = zonedParts(instant, timeZone)
+  const asUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)
+  return asUtc - Math.floor(instant.getTime() / 1000) * 1000
+}
+
+/**
+ * The UTC instant of a wall-clock hour in `timeZone`. Resolved twice so a
+ * DST change between the guess and the answer is accounted for; an hour that
+ * does not exist (spring-forward gap) lands just after the gap.
+ */
+function zonedTimeToUtc(year: number, month: number, day: number, hour: number, timeZone: string): Date {
+  const wall = Date.UTC(year, month - 1, day, hour)
+  let utc = wall - zoneOffsetMs(new Date(wall), timeZone)
+  utc = wall - zoneOffsetMs(new Date(utc), timeZone)
+  return new Date(utc)
 }
 
 /**
@@ -53,9 +117,12 @@ export function computeNextRun(frequency: ScheduleFrequency, deliveryHour: numbe
 export function computeDateRange(
   frequency: ScheduleFrequency | ReportType,
   referenceDate: Date = new Date(),
+  timeZone: string = 'UTC',
 ): { dateFrom: string; dateTo: string } {
-  const ref = new Date(referenceDate)
-  ref.setUTCHours(0, 0, 0, 0)
+  // "Today" is the schedule's own calendar day, not the server's UTC day:
+  // a 05:00 IST run is still the previous day in UTC.
+  const local = zonedDate(referenceDate, isValidTimeZone(timeZone) ? timeZone : 'UTC')
+  const ref = new Date(Date.UTC(local.year, local.month - 1, local.day))
 
   let dateFrom: Date
   let dateTo: Date
@@ -142,6 +209,7 @@ export function computeComparisonRange(
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Formats a UTC-midnight calendar Date as YYYY-MM-DD. */
 function toISO(d: Date): string {
-  return toISODate(d)
+  return d.toISOString().slice(0, 10)
 }

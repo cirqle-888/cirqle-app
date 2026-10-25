@@ -20,6 +20,7 @@ import {
   Card, SectionHeading, StatBlock, StatRow, BulletList, ProgressBar, ConfidentialWatermark,
   type IconName,
   capitalize, longDate, ddmmyyyy, num, money, truncate, computeCampaignMeta,
+  rupeesOrDash, headlineReach,
 } from './shared'
 import { measureElementHeight, type ReportFont } from './measure'
 import { paginateByRealHeight } from './paginate'
@@ -114,14 +115,15 @@ export function buildKpiScorecardCard(data: RenderData, s: number) {
   const d = data.kpi.derived
   const deltas = data.kpi.deltas
   const stats = [
-    { label: 'Total Spend', value: `₹${money(d.actualCost)}`, sub: `${d.budgetUtilisation.toFixed(1)}% of budget` },
-    { label: 'Revenue',     value: `₹${money(p.revenue)}`,    sub: `ROAS ${p.roas.toFixed(2)}` },
-    { label: 'Impressions', value: num(p.impressions),        sub: `Reach ${num(p.reach)}` },
-    { label: 'Clicks',      value: num(p.clicks),             sub: `CTR ${p.ctr.toFixed(2)}%` },
-    { label: 'Leads',       value: num(p.leads),              sub: `CPL ₹${p.cpl.toFixed(2)}` },
-    { label: 'CPC',         value: `₹${p.cpc.toFixed(2)}`,    sub: `CPM ₹${p.cpm.toFixed(2)}` },
+    { label: 'Total Spend', value: `₹${money(d.actualCost)}`, sub: `${d.budgetUtilisation.toFixed(1)}% of allocation used to date` },
+    { label: 'Revenue',     value: p.revenue > 0 ? `₹${money(p.revenue)}` : 'Not tracked', sub: p.revenue > 0 ? `ROAS ${p.roas.toFixed(2)}` : 'No revenue reported' },
+    { label: 'Impressions', value: num(p.impressions),        sub: `${headlineReach(data).label} ${headlineReach(data).value}` },
+    { label: 'Clicks',      value: num(p.clicks),             sub: p.impressions > 0 ? `CTR ${p.ctr.toFixed(2)}%` : 'CTR —' },
+    { label: 'Leads',       value: num(p.leads),              sub: `CPL ${p.leads > 0 ? `₹${p.cpl.toFixed(2)}` : '—'}` },
+    { label: 'CPC',         value: p.clicks > 0 ? `₹${p.cpc.toFixed(2)}` : '—', sub: `CPM ${p.impressions > 0 ? `₹${p.cpm.toFixed(2)}` : '—'}` },
   ]
-  const deltaRows: [string, number][] = deltas ? [
+  // Null deltas (zero baseline / undefined ratio) render as "new", not ±100%.
+  const deltaRows: [string, number | null][] = deltas ? [
     ['Spend', deltas.spendDelta], ['Clicks', deltas.clicksDelta], ['Leads', deltas.leadsDelta],
     ['ROAS', deltas.roasDelta], ['CTR', deltas.ctrDelta], ['CPL', deltas.cplDelta],
   ] : []
@@ -136,12 +138,12 @@ export function buildKpiScorecardCard(data: RenderData, s: number) {
           {deltaRows.map(([label, v]) => (
             <div key={label} style={{
               display: 'flex', alignItems: 'center', gap: `${4 * s}px`,
-              background: v >= 0 ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)',
-              color: v >= 0 ? '#16A34A' : '#DC2626',
+              background: v == null ? 'rgba(100,116,139,0.1)' : v >= 0 ? 'rgba(22,163,74,0.1)' : 'rgba(220,38,38,0.1)',
+              color: v == null ? '#64748B' : v >= 0 ? '#16A34A' : '#DC2626',
               borderRadius: `${8 * s}px`, padding: `${6 * s}px ${10 * s}px`,
               fontSize: `${14 * s}px`, fontWeight: 600,
             }}>
-              {label}: {v >= 0 ? '+' : ''}{v.toFixed(1)}%
+              {label}: {v == null ? 'not comparable' : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`}
             </div>
           ))}
         </div>
@@ -154,8 +156,10 @@ export function buildKpiScorecardCard(data: RenderData, s: number) {
 
 export function buildCampaignHealthCard(data: RenderData, s: number) {
   const h = data.health
+  // Nothing could be judged: show "not graded", never a letter grade.
+  const ungraded = h.result.insufficientData === true
   const grade = (h.grade in GRADE_COLORS ? h.grade : 'C') as keyof typeof GRADE_COLORS
-  const accent = GRADE_COLORS[grade]
+  const accent = ungraded ? '#94A3B8' : GRADE_COLORS[grade]
   const comps = h.result.components
   const compRows: [string, number][] = [
     ['Budget', comps.budgetScore], ['Performance', comps.performanceScore],
@@ -163,17 +167,17 @@ export function buildCampaignHealthCard(data: RenderData, s: number) {
   ]
   return (
     <Card s={s} accent={accent}>
-      <SectionHeading s={s} icon={CARD_STYLE.campaignHealth.icon} label="Campaign Health" meta={`${h.risk} risk`} accent={accent} />
+      <SectionHeading s={s} icon={CARD_STYLE.campaignHealth.icon} label="Campaign Health" meta={ungraded ? 'not graded' : `${h.risk} risk`} accent={accent} />
       <div style={{ display: 'flex', alignItems: 'center', gap: `${16 * s}px`, marginBottom: `${14 * s}px` }}>
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: `${56 * s}px`, height: `${56 * s}px`, borderRadius: `${56 * s}px`,
           background: accent, color: '#FFFFFF', fontSize: `${28 * s}px`, fontWeight: 800,
         }}>
-          {h.grade}
+          {ungraded ? '—' : h.grade}
         </div>
         <div style={{ display: 'flex', fontSize: `${22 * s}px`, fontWeight: 700, color: INK }}>
-          Score {h.score}/100
+          {ungraded ? 'Not enough data to grade yet' : `Score ${h.score}/100`}
         </div>
       </div>
       <div style={{ display: 'flex', marginBottom: `${18 * s}px` }}>
@@ -312,7 +316,7 @@ export function buildBudgetAnalysisCard(data: RenderData, s: number) {
       <SectionHeading s={s} icon={CARD_STYLE.budgetAnalysis.icon} label="Budget Analysis" accent={CARD_STYLE.budgetAnalysis.accent} />
       <div style={{ display: 'flex', gap: `${16 * s}px`, marginBottom: `${18 * s}px`, flexWrap: 'wrap' }}>
         <Pill s={s} bg={RED_PILL} label="Remaining Budget" value={`₹${money(d.remainingAllocation)}`} />
-        <Pill s={s} bg={GREY_PILL} label="Budget Utilisation" value={`${d.budgetUtilisation.toFixed(1)}%`} />
+        <Pill s={s} bg={GREY_PILL} label="Allocation Used (to date)" value={`${d.budgetUtilisation.toFixed(1)}%`} />
       </div>
       <div style={{ display: 'flex', marginBottom: `${18 * s}px` }}>
         <ProgressBar s={s} pct={d.budgetUtilisation} color={PURPLE} />
@@ -430,11 +434,11 @@ const KPI_POOL_KEYS = ['reach', 'impressions', 'clicks', 'spend', 'cpr', 'revenu
 type KpiPoolKey = typeof KPI_POOL_KEYS[number]
 
 const KPI_POOL: Record<KpiPoolKey, { label: string; value: (d: RenderData) => string; grad: [string, string]; icon: IconName }> = {
-  reach:       { label: 'Reach',       value: d => num(d.kpi.primary.reach),              grad: ['#8B5CF6', '#6D28D9'], icon: 'users' },
+  reach:       { label: 'Reach',       value: d => headlineReach(d).value,              grad: ['#8B5CF6', '#6D28D9'], icon: 'users' },
   impressions: { label: 'Impressions', value: d => num(d.kpi.primary.impressions),        grad: ['#6366F1', '#4F46E5'], icon: 'eye' },
   clicks:      { label: 'Clicks',      value: d => num(d.kpi.primary.clicks),             grad: ['#22B8F2', '#2563EB'], icon: 'cursor' },
   spend:       { label: 'Spend',       value: d => `₹${money(d.kpi.derived.actualCost)}`, grad: ['#A855F7', '#7C3AED'], icon: 'rupee' },
-  cpr:         { label: 'CPR',         value: d => `₹${money(d.kpi.derived.costPerResult)}`, grad: ['#FB923C', '#EF4444'], icon: 'percent' },
+  cpr:         { label: 'CPR',         value: d => rupeesOrDash(d.kpi.derived.costPerResult), grad: ['#FB923C', '#EF4444'], icon: 'percent' },
   revenue:     { label: 'Revenue',     value: d => `₹${money(d.kpi.primary.revenue)}`,    grad: ['#A855F7', '#7C3AED'], icon: 'rupee' },
   leads:       { label: 'Leads',       value: d => num(d.kpi.primary.leads),              grad: ['#8B5CF6', '#6D28D9'], icon: 'users' },
 }
@@ -487,7 +491,7 @@ export function buildHeroSection(data: RenderData, s: number, opts: { continuati
         <KpiCircle s={s} label={primary.label} value={primary.value(data)} grad={primary.grad} icon={primary.icon} dia={104} />
         {fallbackKeys.flatMap(k => [
           <KpiDivider key={`div-${k}`} s={s} />,
-          <KpiCircle key={k} s={s} label={KPI_POOL[k].label} value={KPI_POOL[k].value(data)} grad={KPI_POOL[k].grad} icon={KPI_POOL[k].icon} />,
+          <KpiCircle key={k} s={s} label={k === 'reach' ? headlineReach(data).label : KPI_POOL[k].label} value={KPI_POOL[k].value(data)} grad={KPI_POOL[k].grad} icon={KPI_POOL[k].icon} />,
         ])}
       </div>
       <div style={{ display: 'flex', justifyContent: 'center', gap: `${20 * s}px`, marginBottom: `${36 * s}px`, flexWrap: 'wrap' }}>
@@ -562,7 +566,7 @@ function buildTableSnippet(data: RenderData, s: number, opts: { maxRows: number 
       {rows.map((r, i) => (
         <TableRow
           key={r.date} s={s} zebra={i % 2 === 1} last={i === rows.length - 1}
-          cells={[ddmmyyyy(r.date), `₹${money(r.spend)}`, `₹${money(r.gstAmount)}`, num(r.reach), num(r.impressions), `₹${money(r.cpr)}`, `₹${money(r.balance)}`]}
+          cells={[ddmmyyyy(r.date), `₹${money(r.spend)}`, `₹${money(r.gstAmount)}`, num(r.reach), num(r.impressions), rupeesOrDash(r.cpr), `₹${money(r.balance)}`]}
         />
       ))}
     </div>

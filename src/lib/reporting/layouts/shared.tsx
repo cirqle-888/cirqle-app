@@ -20,6 +20,7 @@
 /* eslint-disable @next/next/no-img-element */
 import React from 'react'
 import type { RenderData } from '../types'
+import { describeDataQuality } from '../data-quality'
 import { META_LOGO_DATA_URI } from './meta-logo'
 
 // ─── Brand tokens ───────────────────────────────────────────────────────────
@@ -303,10 +304,10 @@ export function PageChrome({
         display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
       }}>
         <div style={{ display: 'flex', width: `${width}px` }}>
-          {brand.bgImageTopUrl ? <img src={brand.bgImageTopUrl} width={width} style={{ width: `${width}px` }} alt="" /> : null}
+          {rasterSrc(brand.bgImageTopUrl) ? <img src={rasterSrc(brand.bgImageTopUrl)!} width={width} style={{ width: `${width}px` }} alt="" /> : null}
         </div>
         <div style={{ display: 'flex', width: `${width}px` }}>
-          {brand.bgImageBottomUrl ? <img src={brand.bgImageBottomUrl} width={width} style={{ width: `${width}px` }} alt="" /> : null}
+          {rasterSrc(brand.bgImageBottomUrl) ? <img src={rasterSrc(brand.bgImageBottomUrl)!} width={width} style={{ width: `${width}px` }} alt="" /> : null}
         </div>
       </div>
     )
@@ -324,11 +325,11 @@ export function PageChrome({
 export function CirqleLogo({ s, brand }: { s: number; brand: RenderData['brand'] }) {
   // Real agency logo from Settings → Company → Branding. Fixed box keeps the
   // header height stable regardless of the logo's aspect ratio.
-  if (brand.agencyLogoUrl) {
+  if (rasterSrc(brand.agencyLogoUrl)) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', width: `${230 * s}px`, height: `${64 * s}px` }}>
         <img
-          src={brand.agencyLogoUrl}
+          src={rasterSrc(brand.agencyLogoUrl)!}
           alt=""
           width={230 * s}
           height={64 * s}
@@ -601,6 +602,55 @@ export const num = (n: number) => Math.round(n || 0).toLocaleString('en-IN')
 /** Two-decimal money, e.g. 1426.666 → "1,426.67". */
 export const money = (n: number) =>
   (n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+/** `₹1,234.00`, or `—` for a value that is not available (e.g. cost per
+ *  result with no results). Never renders an unavailable ratio as ₹0.00. */
+export const rupeesOrDash = (n: number | null | undefined) =>
+  n == null || !Number.isFinite(n) ? '—' : `₹${money(n)}`
+
+/**
+ * The headline reach figure and its honest label.
+ *
+ * Unique period reach from the platform when the report has it. A single-day
+ * report's daily reach is already unique. Otherwise only the SUM of daily
+ * reach is known — it counts a person once per day reached — so it is shown
+ * as "Reach (sum)", never as plain "Reach".
+ */
+export function headlineReach(data: RenderData): { label: string; value: string; unique: boolean } {
+  const pr = data.kpi.periodReach
+  if (pr?.available) return { label: 'Reach', value: num(pr.value), unique: true }
+  const unique = data.config.dateFrom === data.config.dateTo
+  return { label: unique ? 'Reach' : 'Reach (sum)', value: num(data.kpi.primary.reach), unique }
+}
+
+/** Coverage warning for the report body, or null when data is complete. */
+export function DataNote({ s, data }: { s: number; data: RenderData }) {
+  const note = describeDataQuality(data.dataQuality)
+  if (!note) return null
+  return (
+    <div style={{
+      display: 'flex', justifyContent: 'center', textAlign: 'center',
+      fontSize: `${20 * s}px`, color: '#92400E', background: '#FEF3C7',
+      borderRadius: `${10 * s}px`, padding: `${10 * s}px ${18 * s}px`, marginBottom: `${24 * s}px`,
+      maxWidth: '100%',
+    }}>
+      {note}
+    </div>
+  )
+}
+
+/**
+ * An image source the rasteriser can load (data URI or absolute URL), else
+ * null. Snapshots saved before branding images were embedded can still hold
+ * `storage:` references — those are skipped instead of failing the export.
+ */
+export const rasterSrc = (src: string | null | undefined): string | null =>
+  src && /^(data:image\/|https?:\/\/)/.test(src) ? src : null
+
+/** Allocation left when the report period opened. Snapshots made before
+ *  openingBalance existed fall back to the old all-time allocation. */
+export const openingBalanceOf = (project: { walletAllocation: number; openingBalance?: number }) =>
+  project.openingBalance ?? project.walletAllocation
 
 /** Truncate with an ellipsis — consolidated from the identical copy that
  * previously lived in `exporters/image.tsx`'s `buildDarkLayout`. */

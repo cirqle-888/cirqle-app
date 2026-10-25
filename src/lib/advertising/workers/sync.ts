@@ -3,7 +3,8 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { getProvider } from '@/lib/advertising/providers'
 import { ingestMetrics } from '@/lib/advertising/pipeline'
 import { decryptToken } from '@/lib/integrations/tokens'
-import { toISODate } from '@/lib/utils/local-date'
+import { toISODate, addDaysISO } from '@/lib/utils/local-date'
+import { daySpan, isISODate } from '@/lib/reporting/config'
 
 
 export async function syncProjectWorker(job: DequeuedJob): Promise<any> {
@@ -44,11 +45,12 @@ export async function syncProjectWorker(job: DequeuedJob): Promise<any> {
 
   const provider = getProvider(providerName)
 
-  // Sync a trailing 7 day window
-  const d = new Date()
-  const endDate =toISODate( d)
-  d.setDate(d.getDate() - 7)
-  const startDate =toISODate( d)
+  // Default: a trailing 7-day window. A backfill job passes start_date /
+  // end_date to fill days that were never synced (or synced before an action
+  // type was imported, which left messages/purchases NULL).
+  const range = syncRange(job.payload, new Date())
+  if ('error' in range) throw new Error(range.error)
+  const { startDate, endDate } = range
 
   const pStartedAt = new Date().toISOString()
   await admin.from('ad_projects').update({ sync_status: 'running' }).eq('id', project.id)
@@ -73,6 +75,9 @@ export async function syncProjectWorker(job: DequeuedJob): Promise<any> {
       clicks: m.clicks,
       reach: m.reach || 0,
       leads: m.leads || 0,
+      messages: m.messages,
+      purchases: m.purchases,
+      landingPageViews: m.landing_page_views,
       adCurrency: account.currency
     }))
 
@@ -80,6 +85,7 @@ export async function syncProjectWorker(job: DequeuedJob): Promise<any> {
     let updated = 0
     if (rows.length > 0) {
       const result = await ingestMetrics(`${providerName} API`, null, rows)
+      if (result.failed > 0) throw new Error(`${result.failed} metric rows could not be imported. Check currency rates and sync errors.`)
       imported = result.imported
       updated = result.updated
     }
@@ -113,7 +119,7 @@ export async function syncProjectWorker(job: DequeuedJob): Promise<any> {
     if (logErr) console.error('[syncProjectWorker] Failed to write sync log:', logErr)
 
     // Enqueue dependent notifications and reports
-    await enqueueJob({
+    if (!job.payload.suppress_notifications) await enqueueJob({
       job_type: 'advertising_send_notification',
       parent_job_id: job.id,
       payload: { project_id: project.id }
@@ -137,4 +143,27 @@ export async function syncProjectWorker(job: DequeuedJob): Promise<any> {
     }).then(null, () => {})
     throw err
   }
+}
+
+/** Longest backfill one job may request; Meta keeps ~37 months of insights. */
+export const MAX_SYNC_RANGE_DAYS = 400
+
+/** The date window for a sync job: explicit start/end, or the last 7 days. */
+export function syncRange(
+  payload: { start_date?: unknown; end_date?: unknown } | null | undefined,
+  now: Date,
+): { startDate: string; endDate: string } | { error: string } {
+  const today = toISODate(now)
+  if (payload?.start_date == null && payload?.end_date == null) {
+    return { startDate: addDaysISO(today, -7), endDate: today }
+  }
+  const startDate = payload?.start_date
+  const endDate = payload?.end_date ?? today
+  if (!isISODate(startDate) || !isISODate(endDate)) return { error: 'Invalid sync date range' }
+  if (startDate > endDate) return { error: 'Sync start date is after end date' }
+  const end = endDate > today ? today : endDate
+  if (daySpan(startDate, end) > MAX_SYNC_RANGE_DAYS) {
+    return { error: `A sync can cover at most ${MAX_SYNC_RANGE_DAYS} days` }
+  }
+  return { startDate, endDate: end }
 }

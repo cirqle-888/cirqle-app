@@ -16,6 +16,15 @@ export interface AggregateMetrics {
   reach: number
   leads: number
   conversions: number
+  /** Messaging conversations started; see messagesDays for coverage. */
+  messages?: number
+  purchases?: number
+  landingPageViews?: number
+  /** Days whose row actually recorded the metric (non-null). A row synced
+   *  before the metric was imported has NULL — "not recorded", not zero. */
+  messagesDays?: number
+  purchasesDays?: number
+  landingPageViewsDays?: number
   days: number
   
   roas: number
@@ -38,6 +47,9 @@ export function aggregateMetrics(metrics: Partial<AdDailyMetricRow>[]): Aggregat
   let reach = 0
   let leads = 0
   let conversions = 0
+  let messages = 0, messagesDays = 0
+  let purchases = 0, purchasesDays = 0
+  let landingPageViews = 0, landingPageViewsDays = 0
   let days = 0
 
   for (const m of metrics) {
@@ -52,6 +64,9 @@ export function aggregateMetrics(metrics: Partial<AdDailyMetricRow>[]): Aggregat
     reach += Number(m.reach || 0)
     leads += Number(m.leads || 0)
     conversions += Number(m.conversions || 0)
+    if (m.messages != null) { messages += Number(m.messages); messagesDays++ }
+    if (m.purchases != null) { purchases += Number(m.purchases); purchasesDays++ }
+    if (m.landing_page_views != null) { landingPageViews += Number(m.landing_page_views); landingPageViewsDays++ }
     days += 1
   }
 
@@ -63,6 +78,12 @@ export function aggregateMetrics(metrics: Partial<AdDailyMetricRow>[]): Aggregat
     reach,
     leads,
     conversions,
+    messages,
+    purchases,
+    landingPageViews,
+    messagesDays,
+    purchasesDays,
+    landingPageViewsDays,
     days,
     roas: spend > 0 ? revenue / spend : 0,
     ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,

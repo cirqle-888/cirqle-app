@@ -126,7 +126,8 @@ describe('computeMonthlyRows', () => {
     expect(rows[0].days).toBe(1)
     // No revenue → ROAS 0 (not NaN/Infinity from a spend>0 divide-by-zero-revenue).
     expect(rows[0].roas).toBe(0)
-    // No leads → falls back to clicks for CPR's denominator.
-    expect(rows[0].cpr).toBeCloseTo(100 / 10, 6)
+    // No leads → cost per result is unavailable. It used to fall back to
+    // clicks, showing a click cost under a results label (AUD-02).
+    expect(rows[0].cpr).toBeNull()
   })
 })

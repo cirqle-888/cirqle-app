@@ -176,7 +176,7 @@ async function mapCampaignCore(
     projectId = created.id
 
     // Automatically create a linked task for this new campaign
-    const { createCampaignTask } = await import('@/app/(dashboard)/dashboard/advertising/actions')
+    const { createCampaignTask } = await import('@/lib/advertising/campaign-task')
     await createCampaignTask(admin, {
       projectId: projectId,
       campaignName: camp.name,

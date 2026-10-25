@@ -24,6 +24,8 @@ import { logRequestActivity } from '@/lib/requests/core'
 import { logActivity } from '@/lib/activity/log'
 import { deriveWorkScope, retryWithoutScope, withoutScope } from '@/lib/finance/classify'
 import { todayISO } from '@/lib/utils/local-date'
+import { createCampaignTask } from '@/lib/advertising/campaign-task'
+import { isCampaignType } from '@/lib/advertising/campaign-objective'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
@@ -32,13 +34,7 @@ const VALID_STATUS = ['draft', 'pending_approval', 'active', 'paused', 'complete
 
 const today = () => todayISO()
 
-/** Convert an amount to INR via exchange_rates (mirrors tasks/actions.ts toInr). */
-async function toInr(admin: SupabaseClient, amount: number, currency?: string | null): Promise<number> {
-  if (!currency || currency === 'INR') return amount
-  const { data } = await admin.from('exchange_rates').select('rate_to_inr').eq('currency', currency).maybeSingle()
-  const rate = (data as any)?.rate_to_inr ?? 1
-  return Math.round(amount * rate * 100) / 100
-}
+// toInr lives with createCampaignTask in lib/advertising/campaign-task.ts.
 
 /**
  * Persist the daily-budget metadata (best-effort). ad_budget_amount already
@@ -100,48 +96,6 @@ export interface CreateAdProjectInput {
   startDate?: string | null
   endDate?: string | null
   requestId?: string | null
-}
-
-/**
- * Create the SINGLE task that represents a campaign's work (replaces the old
- * 7-task checklist). It is a normal Cirqle task — the chosen advertising service
- * drives its contribution parameters, so the work breakdown (setup, creative,
- * media buying, …) is split via Contributions, not separate tasks. Billing =
- * the agency service charge, so team earnings flow from the agency fee (the ad
- * spend is a pass-through, billed separately on the campaign invoice).
- */
-export async function createCampaignTask(
-  admin: SupabaseClient,
-  opts: {
-    projectId: string; campaignName: string; clientId: string | null;
-    serviceId: string | null; serviceCharge: number; currency: string; employeeId: string;
-  },
-): Promise<string | null> {
-  try {
-    const { data: maxRow } = await admin
-      .from('tasks').select('task_number')
-      .order('task_number', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
-    const billingInr = await toInr(admin, opts.serviceCharge, opts.currency)
-    const taskRow = {
-      task_number: nextTaskNumber((maxRow as any)?.task_number),
-      title: opts.campaignName,
-      client_id: opts.clientId,
-      service_id: opts.serviceId,
-      status: 'pending',
-      task_date: today(),
-      billing_amount: opts.serviceCharge,
-      billing_amount_inr: billingInr,
-      currency: opts.currency,
-      created_by: opts.employeeId,
-      scope: deriveWorkScope(opts.clientId),
-    }
-    const { data: t } = await retryWithoutScope(strip =>
-      admin.from('tasks').insert(strip ? withoutScope(taskRow) : taskRow).select('id').single()
-    )
-    if (!t) return null
-    await admin.from('ad_project_tasks').insert({ project_id: opts.projectId, task_id: (t as any).id })
-    return (t as any).id
-  } catch { return null /* tasks shape differs / transient — campaign still created */ }
 }
 
 export async function createAdProject(
@@ -266,7 +220,16 @@ export async function updateAdProject(id: string, patch: UpdateAdProjectInput): 
   const guard = await requirePermission(PERMS.ADVERTISING_EDIT)
   if (!guard.ok) return { ok: false, error: guard.error }
 
+  // The objective decides what reports count as results — reject anything
+  // outside the known set rather than storing a type no report understands.
+  if (patch.campaignType !== undefined && patch.campaignType !== null && !isCampaignType(patch.campaignType)) {
+    return { ok: false, error: 'Unknown campaign objective.' }
+  }
+
   const admin = createAdminClient()
+  const { data: before } = patch.campaignType !== undefined
+    ? await admin.from('ad_projects').select('campaign_type').eq('id', id).maybeSingle()
+    : { data: null }
   const upd: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (patch.campaignName !== undefined)     upd.campaign_name = patch.campaignName.trim()
   if (patch.platform !== undefined)         upd.platform = patch.platform
@@ -279,7 +242,15 @@ export async function updateAdProject(id: string, patch: UpdateAdProjectInput): 
 
   const { error } = await admin.from('ad_projects').update(upd).eq('id', id)
   if (error) return { ok: false, error: error.message }
-  await logAdEvent(admin, id, 'updated', guard.employeeId, {})
+
+  const typeChanged = patch.campaignType !== undefined && (before?.campaign_type ?? null) !== patch.campaignType
+  if (typeChanged) {
+    // Keep the campaign-mapping registry (Connections) showing the same type.
+    await admin.from('ad_campaigns').update({ campaign_type: patch.campaignType }).eq('project_id', id)
+      .then(null, () => { /* registry may not exist pre-migration */ })
+  }
+  await logAdEvent(admin, id, 'updated', guard.employeeId,
+    typeChanged ? { campaign_type: { from: before?.campaign_type ?? null, to: patch.campaignType } } : {})
   revalidatePath(REVALIDATE); revalidatePath(`${REVALIDATE}/${id}`)
   return { ok: true }
 }
@@ -684,8 +655,12 @@ export async function upsertDailyMetric(projectId: string, row: DailyMetricInput
   return res
 }
 
-/** Internal upsert that bypasses permission checks (used by API sync engines). */
-export async function upsertDailyMetricInternal(
+/**
+ * Upsert without a permission check — callers have already checked. NOT
+ * exported: everything exported from a 'use server' file is an action the
+ * browser can call, and this one would have bypassed every guard.
+ */
+async function upsertDailyMetricInternal(
   projectId: string,
   metricDate: string,
   row: Partial<DailyMetricInput>,
@@ -911,5 +886,31 @@ export async function setMetricSyncState(metricId: string, projectId: string, st
   
   await logAdEvent(admin, projectId, state === 'locked' ? 'metric_locked' : 'manual_metric_edited', me.employeeId, { metricId, newState: state })
   revalidatePath(`/dashboard/advertising/${projectId}`)
+  return { ok: true }
+}
+
+// ─── Needs-attention snoozes ─────────────────────────────────────────────────
+
+/**
+ * Hide one needs-attention item for `days` days. Needs migration
+ * 20261025180000_ad_attention_snoozes.sql; before it is applied this returns
+ * an error and the overview does not offer Snooze at all.
+ */
+export async function snoozeAttention(alertKey: string, days: number): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.ADVERTISING_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (typeof alertKey !== 'string' || !/^[a-z-]+:[\w:.-]{1,200}$/.test(alertKey)) {
+    return { ok: false, error: 'Unknown alert.' }
+  }
+  if (![1, 3, 7].includes(days)) return { ok: false, error: 'Snooze for 1, 3 or 7 days.' }
+
+  const admin = createAdminClient()
+  const until = new Date(Date.now() + days * 86_400_000).toISOString()
+  const { error } = await admin.from('ad_attention_snoozes').upsert({
+    alert_key: alertKey, snoozed_until: until, snoozed_by: guard.employeeId || null,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'alert_key' })
+  if (error) return { ok: false, error: 'Snoozing is not set up yet.' }
+  revalidatePath(REVALIDATE)
   return { ok: true }
 }

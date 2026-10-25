@@ -1,4 +1,5 @@
-import { AdProvider, AdAccountResponse, AdCampaignResponse, AdMetricsResponse } from './interface'
+import { AdProvider, AdAccountResponse, AdCampaignResponse, AdMetricsResponse, AdPeriodReachResponse } from './interface'
+import { parseMetaActions } from './meta-actions'
 import {
   FACEBOOK_URL,
   exchangeForLongLivedToken,
@@ -11,7 +12,7 @@ export class MetaProvider implements AdProvider {
   readonly id = 'meta'
   readonly name = 'Meta Ads'
   readonly logoUrl = '/logos/meta-ads.svg'
-  readonly capabilities = ['impressions', 'clicks', 'reach', 'spend', 'leads', 'revenue']
+  readonly capabilities = ['impressions', 'clicks', 'reach', 'spend', 'leads', 'messages', 'purchases', 'landing_page_views', 'revenue', 'period_reach']
 
   getOAuthUrl(targetClientId: string, redirectUri: string, state: string): string {
     const clientId = process.env.META_APP_ID || process.env.META_CLIENT_ID
@@ -151,15 +152,8 @@ export class MetaProvider implements AdProvider {
 
     const results: AdMetricsResponse[] = []
     for (const row of rows) {
-      let leads = 0
-
-      if (Array.isArray(row.actions)) {
-        for (const action of row.actions) {
-          // 'lead' is Meta's total-leads rollup; do NOT also add the
-          // onsite/offsite variants or leads double-count.
-          if (action.action_type === 'lead') leads += Number(action.value)
-        }
-      }
+      // One priority-ordered pick per metric — see meta-actions.ts.
+      const actions = parseMetaActions(row.actions)
 
       // Parse purchase ROAS (1.0 ROAS = spend == revenue)
       let roas = 0
@@ -174,11 +168,45 @@ export class MetaProvider implements AdProvider {
         impressions: Number(row.impressions || 0),
         clicks: Number(row.clicks || 0),
         reach: Number(row.reach || 0),
-        leads,
+        leads: actions.leads,
+        messages: actions.messages,
+        purchases: actions.purchases,
+        landing_page_views: actions.landingPageViews,
         revenue,
       })
     }
     return results
+  }
+
+  /**
+   * Unique reach for the whole range: the same insights call WITHOUT
+   * time_increment, so Meta de-duplicates people across days. Returns null
+   * when Meta returns no row (no delivery in the range).
+   */
+  async getCampaignPeriodReach(
+    accountId: string,
+    accessToken: string,
+    providerMetadata: any,
+    startDate: string,
+    endDate: string,
+  ): Promise<AdPeriodReachResponse | null> {
+    const campaignId = providerMetadata?.campaign_id
+    if (!campaignId) throw new Error('Meta provider requires campaign_id in provider_metadata')
+
+    const rows = await metaGraphAll<any>(`${campaignId}/insights`, {
+      token: accessToken,
+      params: {
+        time_range: { since: startDate, until: endDate },
+        fields: 'reach,frequency',
+        limit: 10,
+      },
+    })
+    const row = rows[0]
+    if (!row || row.reach == null) return null
+    const reach = Number(row.reach)
+    if (!Number.isFinite(reach)) return null
+    const frequency = row.frequency != null ? Number(row.frequency) : undefined
+    return { reach, ...(frequency != null && Number.isFinite(frequency) ? { frequency } : {}) }
   }
 }
 

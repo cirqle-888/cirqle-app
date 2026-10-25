@@ -23,6 +23,7 @@ import {
   PURPLE, NAVY, INK, GREY_PILL, RED_PILL, SAFE_AREA,
   PageChrome, CirqleLogo, MetaLogo, MetaLine, KpiCircle, KpiDivider, Pill, TableRow,
   capitalize, longDate, ddmmyyyy, num, money, truncate, computeCampaignMeta,
+  rupeesOrDash, openingBalanceOf, headlineReach, DataNote,
 } from './shared'
 
 export type DailyRowWithBalance = DailySeriesPoint & { balance: number; actualCost: number; gstAmount: number }
@@ -48,7 +49,7 @@ export function computeDailyRows(data: RenderData): DailyRowWithBalance[] {
       const gstAmount = row.spend * AD_SPEND_GST_RATE
       const actualCost = row.spend + gstAmount
       cumulativeCost += actualCost
-      return { ...row, actualCost, gstAmount, balance: project.walletAllocation - cumulativeCost }
+      return { ...row, actualCost, gstAmount, balance: openingBalanceOf(project) - cumulativeCost }
     })
 }
 
@@ -62,7 +63,7 @@ function dailyRowCells(r: DailyRowWithBalance): string[] {
     `₹${money(r.gstAmount)}`,
     num(r.reach),
     num(r.impressions),
-    `₹${money(r.cpr)}`,
+    rupeesOrDash(r.cpr),
     `₹${money(r.balance)}`,
   ]
 }
@@ -194,7 +195,7 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
 
           {/* Performance KPI circle row */}
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', marginBottom: `${30 * s}px` }}>
-            <KpiCircle s={s} label="Reach"       value={num(p.reach)}        grad={['#8B5CF6', '#6D28D9']} icon="users" />
+            <KpiCircle s={s} label={headlineReach(data).label} value={headlineReach(data).value} grad={['#8B5CF6', '#6D28D9']} icon="users" />
             <KpiDivider s={s} />
             <KpiCircle s={s} label="Impressions" value={num(p.impressions)}  grad={['#6366F1', '#4F46E5']} icon="eye" />
             <KpiDivider s={s} />
@@ -202,14 +203,15 @@ export function buildDailyReportElement(data: RenderData, opts: LayoutOpts) {
             <KpiDivider s={s} />
             <KpiCircle s={s} label="Meta Spend"  value={`₹${money(d.actualCost)}`} grad={['#A855F7', '#7C3AED']} icon="rupee" />
             <KpiDivider s={s} />
-            <KpiCircle s={s} label="CPR"         value={`₹${money(d.costPerResult)}`} grad={['#FB923C', '#EF4444']} icon="percent" />
+            <KpiCircle s={s} label="CPR"         value={rupeesOrDash(d.costPerResult)} grad={['#FB923C', '#EF4444']} icon="percent" />
           </div>
 
           {/* Financial summary pills */}
           <div style={{ display: 'flex', justifyContent: 'center', gap: `${20 * s}px`, marginBottom: `${36 * s}px`, flexWrap: 'wrap' }}>
-            <Pill s={s} bg={RED_PILL}  label="Total Remaining Amount" value={`₹${money(project.walletAllocation - (p.spend * (1 + AD_SPEND_GST_RATE)))}`} />
+            <Pill s={s} bg={RED_PILL}  label="Total Remaining Amount" value={`₹${money(openingBalanceOf(project) - (p.spend * (1 + AD_SPEND_GST_RATE)))}`} />
             <Pill s={s} bg={GREY_PILL} label="Remaining Days" value={`${remainingDays} Days`} />
           </div>
+          <DataNote s={s} data={data} />
         </div>
       )}
 

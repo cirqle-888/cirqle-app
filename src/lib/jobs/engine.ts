@@ -69,6 +69,7 @@ export async function dequeueJobs(workerId: string, maxJobs: number = 5): Promis
     .from('system_jobs')
     .select('*')
     .in('status', ['pending', 'queued'])
+    .lte('queued_at', new Date().toISOString())
     .order('queued_at', { ascending: true, nullsFirst: false })
     .limit(maxJobs)
 
@@ -83,7 +84,7 @@ export async function dequeueJobs(workerId: string, maxJobs: number = 5): Promis
   for (const job of pending) {
     const { data: updated, error: updateErr } = await supabase
       .from('system_jobs')
-      .update({ status: 'running', started_at: new Date().toISOString() })
+      .update({ status: 'running', started_at: new Date().toISOString(), locked_at: new Date().toISOString() })
       .eq('id', job.id)
       .eq('status', job.status) // optimistic lock: only update if still same status
       .select('*')
@@ -129,7 +130,8 @@ export async function failJob(job: DequeuedJob, errorMsg: string): Promise<void>
     .update({
       status: isDeadLetter ? 'failed' : 'pending',
       attempts: newAttempts,
-      queued_at: new Date().toISOString(),
+      queued_at: new Date(Date.now() + Math.min(3600, 30 * 2 ** (newAttempts - 1)) * 1000).toISOString(),
+      locked_at: null,
       finished_at: isDeadLetter ? new Date().toISOString() : null,
       error_log: errorMsg,
     })

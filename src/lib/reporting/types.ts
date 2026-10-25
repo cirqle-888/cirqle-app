@@ -14,17 +14,34 @@ import type { AggregateMetrics } from '@/lib/advertising/reporting'
 import type { ForecastResult } from '@/lib/advertising/ai/forecasting'
 import type { HealthScoreResult } from '@/lib/advertising/ai/scoring'
 import type { BenchmarkMetrics } from '@/lib/advertising/ai/benchmarks'
+import type { ResultDefinition } from './result-type'
+import type { DataQuality } from './data-quality'
+import type { PeriodReach } from '@/lib/advertising/period-reach'
 
 // ─── Report Config ────────────────────────────────────────────────────────────
 
 export type ReportType = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'custom'
 export type ReportTemplate = 'executive' | 'marketing' | 'lead_gen' | 'ecommerce' | 'performance' | 'agency' | 'daily' | 'monthly'
-export type ReportFormat = 'pdf' | 'xlsx' | 'csv' | 'image_portrait' | 'image_square'
+export type ReportFormat = 'pdf' | 'xlsx' | 'csv' | 'image_portrait' | 'image_square' | 'image_bundle'
 export type WhiteLabelMode = 'cirqle' | 'client' | 'agency'
-export type ReportStatus = 'pending' | 'generating' | 'ready' | 'failed'
+export type ReportStatus = 'pending' | 'generating' | 'partial' | 'ready' | 'failed'
 
 export interface ReportConfig {
+  snapshotId?: string
+  supersedesId?: string
+  allowIncomplete?: boolean
+  language?: 'en' | 'ml'
+  summaryOverride?: string
+  /** Internal stable identity; never accepted from an untrusted request. */
+  reportId?: string
+  /** The report's primary campaign (the first of projectIds for a client report). */
   projectId: string
+  /**
+   * Client report: every campaign included (2+ ids, all the same client).
+   * Absent / one id = a single-campaign report. Snapshotted in the config so
+   * later campaign changes never alter an old report.
+   */
+  projectIds?: string[]
   clientId: string
   reportType: ReportType
   template: ReportTemplate
@@ -78,7 +95,18 @@ export interface ReportProject {
   objective: string | null
   startDate: string | null
   endDate: string | null
-  walletAllocation: number // Fetched from ad_wallet_ledger
+  /** Campaign allocations from ad_wallet_ledger made on or before the
+   *  report's end date (GST-inclusive INR). */
+  walletAllocation: number
+  /** Ad spend (ex-GST, base currency) before the report's start date. */
+  priorSpend?: number
+  /**
+   * Allocation remaining when the period opened: walletAllocation minus the
+   * GST-inclusive cost of priorSpend. Running and closing balances in the
+   * report are this minus in-period cost. Absent on snapshots made before it
+   * existed — readers fall back to walletAllocation (the old behaviour).
+   */
+  openingBalance?: number
 }
 
 export interface ReportMetricRow {
@@ -90,6 +118,10 @@ export interface ReportMetricRow {
   reach: number
   leads: number
   conversions: number
+  /** null = the row did not record it (synced before it was imported). */
+  messages: number | null
+  purchases: number | null
+  landingPageViews: number | null
   exchangeRate: number
 }
 
@@ -98,6 +130,27 @@ export interface ReportRawData {
   metrics: ReportMetricRow[]            // primary period
   comparisonMetrics: ReportMetricRow[]  // comparison period (empty if not requested)
   branding: BrandConfig
+  /** Unique reach for the whole primary / comparison period, from the provider. */
+  periodReach?: PeriodReach
+  comparisonPeriodReach?: PeriodReach
+  dataQuality?: DataQuality
+  /** Client report: each campaign's own data, for the per-campaign breakdown. */
+  campaigns?: { project: ReportProject; metrics: ReportMetricRow[] }[]
+}
+
+/** One campaign's line in a client report. */
+export interface CampaignBreakdownRow {
+  projectId: string
+  campaignName: string
+  objective: string | null
+  resultLabel: string | null
+  costLabel: string | null
+  /** null = the objective has no result metric, or it was not recorded. */
+  results: number | null
+  costPerResult: number | null
+  spend: number
+  impressions: number
+  clicks: number
 }
 
 // ─── Brand Config (output of Branding Engine) ────────────────────────────────
@@ -160,20 +213,26 @@ export interface KPIData {
   weeklySeries: WeeklySeriesPoint[]
   /** Additional derived KPIs. */
   derived: DerivedKPIs
+  /** De-duplicated reach for the whole period. `primary.reach` is the SUM of
+   *  daily reach and must not be presented as unique people. Absent on old
+   *  snapshots. */
+  periodReach?: PeriodReach
 }
 
+/** Signed % changes. `null` = not comparable: the baseline is zero (growth
+ *  from nothing is "new", not +100%) or the ratio is undefined on a side. */
 export interface KPIDeltas {
-  spendDelta: number        // %
-  revenueDelta: number      // %
-  impressionsDelta: number  // %
-  clicksDelta: number       // %
-  reachDelta: number        // %
-  leadsDelta: number        // %
-  roasDelta: number         // %
-  ctrDelta: number          // %
-  cpcDelta: number          // %
-  cpmDelta: number          // %
-  cplDelta: number          // %
+  spendDelta: number | null
+  revenueDelta: number | null
+  impressionsDelta: number | null
+  clicksDelta: number | null
+  reachDelta: number | null
+  leadsDelta: number | null
+  roasDelta: number | null
+  ctrDelta: number | null
+  cpcDelta: number | null
+  cpmDelta: number | null
+  cplDelta: number | null
 }
 
 export interface DailySeriesPoint {
@@ -186,8 +245,12 @@ export interface DailySeriesPoint {
   leads: number
   roas: number
   ctr: number
-  /** Cost per result = spend / (leads || conversions || clicks). 0 when no results. */
-  cpr: number
+  /** Results for the campaign's objective (see result-type.ts); null when
+   *  the objective has no imported result metric. */
+  results?: number | null
+  /** Spend ÷ results. null when unavailable or no results — never a cost of
+   *  some other metric. */
+  cpr: number | null
   /** Actual money spent including GST */
   actualCost: number
   gstAmount: number
@@ -203,7 +266,14 @@ export interface DerivedKPIs {
   margin: number            // (profit / revenue) * 100
   roi: number               // (profit / spend) * 100
   conversionRate: number    // (leads / clicks) * 100
-  costPerResult: number     // spend / (leads || conversions || clicks)
+  /** Spend ÷ objective results; null when unavailable or zero results. */
+  costPerResult: number | null
+  /** Which metric `results`/`costPerResult` count (absent on old snapshots). */
+  result?: ResultDefinition
+  results?: number | null
+  /** Days that recorded the result metric vs days in the period. Fewer
+   *  recorded days means the result count is incomplete. */
+  resultCoverage?: { recordedDays: number; days: number }
   budgetUtilisation: number // (spend / budget) * 100
   avgDailySpend: number
   avgDailyLeads: number
@@ -211,7 +281,8 @@ export interface DerivedKPIs {
   remainingBudget: number   // deprecated fallback, use remainingAllocation
   actualCost: number
   gstAmount: number
-  remainingAllocation: number // walletAllocation - actualCost
+  /** Allocation left at the end of the period: openingBalance - actualCost. */
+  remainingAllocation: number
 }
 
 // ─── Benchmark Summary (output of Benchmark Engine) ──────────────────────────
@@ -266,6 +337,7 @@ export interface AIReport {
 // All exporters (PDF, Excel, CSV, Image) derive their output from this.
 
 export interface RenderData {
+  snapshotId?: string
   config: ReportConfig
   template: TemplateConfig
   brand: BrandConfig
@@ -275,6 +347,10 @@ export interface RenderData {
   forecasts: ForecastBundle
   health: HealthSummary
   ai: AIReport
+  /** Which days had data; absent on snapshots made before it existed. */
+  dataQuality?: DataQuality
+  /** Client report (2+ campaigns): one row per campaign. */
+  campaigns?: CampaignBreakdownRow[]
   generatedAt: string
 }
 
@@ -338,26 +414,35 @@ export interface ExportResult {
   storageKey: string    // path inside the ad-reports bucket
   publicUrl: string     // signed URL (or permanent URL)
   sizeBytes: number
+  mimeType?: string
 }
 
 // ─── Delivery Result ─────────────────────────────────────────────────────────
 
+/** One recipient's e-mail outcome. `accepted` = the provider took the
+ *  message for sending; it is NOT confirmation of inbox delivery. */
 export interface DeliveryResult {
-  format: ReportFormat
-  export: ExportResult
-  emailDelivered: boolean
-  emailRecipients: string[]
+  email: string
+  status: 'accepted' | 'failed' | 'sending' | 'delivered' | 'bounced'
+  providerId?: string
   error?: string
+}
+
+export interface ExportFailure {
+  format: ReportFormat
+  error: string
 }
 
 // ─── Orchestration Result ────────────────────────────────────────────────────
 
 export interface OrchestrationResult {
   reportId: string
-  status: 'ready' | 'failed'
+  /** Ready = all requested formats; partial = some; failed = none or interrupted. */
+  status: 'ready' | 'partial' | 'failed'
   generationTimeMs: number
   formats: ReportFormat[]
   exports: ExportResult[]
+  failedFormats: ExportFailure[]
   delivery: DeliveryResult[]
   error?: string
 }
