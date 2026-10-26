@@ -54,7 +54,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     reportQuery.range(page * pageSize, (page + 1) * pageSize - 1),
     allRows('ad_report_schedules',
       'id, project_id, client_id, frequency, report_type, template, formats, is_active, next_run_at, last_run_at, created_at, project:ad_projects(id, campaign_name, platform, client:clients(id, name, code))'),
-    allRows('ad_projects', 'id, campaign_name, platform, client_id, status, archived_at, campaign_type, start_date, client:clients(id, name, code)', true),
+    allRows('ad_projects', 'id, campaign_name, platform, client_id, status, archived_at, campaign_type, start_date, created_at, client:clients(id, name, code)', true),
   ])
   const prefs = await loadClientReportPreferences(admin)
   const initialClientId = typeof params.client === 'string' && /^[0-9a-f-]{36}$/i.test(params.client) ? params.client : undefined

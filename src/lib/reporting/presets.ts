@@ -96,6 +96,20 @@ export function composerRange(
   }
 }
 
+/**
+ * When a campaign really started, for "Lifetime": its set start date, else the
+ * first day it recorded data, else the day it was added to Cirqle. Without
+ * this a campaign with no start date reported 400 days back — "ran from
+ * 2025-09-21" for a campaign that began on 24 Oct 2026.
+ */
+export function campaignStartFor(p: {
+  start_date?: string | null
+  first_metric_date?: string | null
+  created_at?: string | null
+}): string | null {
+  return p.start_date?.slice(0, 10) ?? p.first_metric_date?.slice(0, 10) ?? p.created_at?.slice(0, 10) ?? null
+}
+
 /** The equally long period immediately before [from, to]. */
 export function previousPeriod(dateFrom: string, dateTo: string): { comparisonFrom: string; comparisonTo: string } {
   const days = daySpan(dateFrom, dateTo)

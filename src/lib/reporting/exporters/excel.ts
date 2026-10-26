@@ -30,6 +30,11 @@ function addSummarySheet(wb: XLSX.WorkBook, d: RenderData) {
   const p = d.kpi.primary
   const bm = d.benchmarks.metrics
   const derived = d.kpi.derived
+  // The objective's result leads the metrics; raw leads stay for completeness.
+  const r = resultHeadline(d.kpi, d.project.campaignType)
+  const resultRows: (string | number)[][] = r.definition.metric && r.definition.metric !== 'leads'
+    ? [[r.label, r.value ?? '', '', ''], [`${r.costLabel} (₹)`, r.cost ?? '', '', '']]
+    : []
 
   const rows: (string | number)[][] = [
     ['CAMPAIGN REPORT', '', '', ''],
@@ -48,6 +53,7 @@ function addSummarySheet(wb: XLSX.WorkBook, d: RenderData) {
     [''],
     ['KEY METRICS', 'Value', 'Benchmark', 'vs Benchmark (%)'],
     ['Spend (₹)', p.spend, '', ''],
+    ...resultRows,
     ['Revenue (₹)', p.revenue, '', ''],
     ['Budget (₹)', d.project.adBudget, '', ''],
     ['Allocation used to date (%)', derived.budgetUtilisation, '', ''],
@@ -83,6 +89,10 @@ function addSummarySheet(wb: XLSX.WorkBook, d: RenderData) {
     rows.push(['Revenue (₹)', cp.revenue, '', `${deltaStr(deltas.revenueDelta)}`])
     rows.push(['ROAS', cp.roas, '', `${deltaStr(deltas.roasDelta)}`])
     rows.push(['CTR (%)', cp.ctr, '', `${deltaStr(deltas.ctrDelta)}`])
+    if (r.definition.metric && r.definition.metric !== 'leads') {
+      rows.push([r.label, '', '', `${deltaStr(r.delta)}`])
+      rows.push([`${r.costLabel} (₹)`, '', '', `${deltaStr(r.costDelta)}`])
+    }
     rows.push(['Leads', cp.leads, '', `${deltaStr(deltas.leadsDelta)}`])
     rows.push(['CPL (₹)', cp.cpl, '', `${deltaStr(deltas.cplDelta)}`])
   }
@@ -184,4 +194,5 @@ function addCampaignsSheet(wb: XLSX.WorkBook, d: RenderData) {
 // the .xx5 midpoints (1.005 -> 1.00 instead of 1.01) and would drift from
 // the finance engines. See currency.ts round2.
 import { round2 } from '@/lib/calculations/currency'
+import { resultHeadline } from '../result-display'
 const deltaStr = (v: number | null) => v == null ? 'not comparable' : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`

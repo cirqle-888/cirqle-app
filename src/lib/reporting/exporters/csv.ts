@@ -6,6 +6,7 @@
  */
 
 import type { RenderData } from '../types'
+import { resultHeadline } from '../result-display'
 
 /**
  * Generates a CSV buffer from RenderData.
@@ -38,8 +39,16 @@ export function generateCSV(data: RenderData): Buffer {
   if (data.kpi.periodReach?.available) lines.push(`Reach (unique; period),${Math.round(data.kpi.periodReach.value)}`)
   lines.push(`Reach (sum of daily),${Math.round(p.reach)}`)
   lines.push(`Clicks,${Math.round(p.clicks)}`)
+  {
+    // The objective's result first; raw leads stay below for completeness.
+    const r = resultHeadline(data.kpi, data.project.campaignType)
+    if (r.definition.metric && r.definition.metric !== 'leads') {
+      lines.push(`${r.label},${r.value == null ? '' : Math.round(r.value)}`)
+      lines.push(`${r.costLabel} (₹),${r.cost == null ? '' : r.cost.toFixed(2)}`)
+    }
+  }
   lines.push(`Leads,${Math.round(p.leads)}`)
-  lines.push(`CPL (₹),${p.cpl.toFixed(2)}`)
+  lines.push(`CPL (₹),${p.leads > 0 ? p.cpl.toFixed(2) : ''}`)
   lines.push(`Revenue minus ad spend (₹),${d.profit.toFixed(2)}`)
   lines.push(`Margin (%),${d.margin.toFixed(1)}`)
   lines.push(`ROI (%),${d.roi.toFixed(1)}`)

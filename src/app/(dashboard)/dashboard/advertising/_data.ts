@@ -117,6 +117,12 @@ export async function loadAdvertisingData(opts: {
         .select('project_id, spend, revenue, impressions, clicks, reach, leads, conversions, messages, purchases, exchange_rate_ad_to_base, metric_date')
         .in('project_id', ids)
       for (const m of metrics || []) (metricsByProject[(m as any).project_id] ||= []).push(m)
+      // First day with data — the report composer's "Lifetime" starts here
+      // when a campaign has no start date.
+      for (const p of projects) {
+        const dates = (metricsByProject[p.id] ?? []).map((m: any) => String(m.metric_date)).sort()
+        p.first_metric_date = dates[0] ?? null
+      }
     } catch { /* metrics table not migrated */ }
   }
 

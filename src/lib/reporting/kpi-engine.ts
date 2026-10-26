@@ -80,6 +80,8 @@ export function buildKPIData(
       case 'cpl':  return a.leads > 0 ? a.cpl : null
     }
   }
+  const compResults = comp ? resultCount(result, comp) : null
+  const primaryResults = resultCount(result, primary)
   const deltas: KPIDeltas | undefined = comp
     ? {
         spendDelta:       pctChange(primary.spend, comp.spend),
@@ -97,6 +99,11 @@ export function buildKPIData(
         cpcDelta:         pctChange(ratio(primary, 'cpc'), ratio(comp, 'cpc')),
         cpmDelta:         pctChange(ratio(primary, 'cpm'), ratio(comp, 'cpm')),
         cplDelta:         pctChange(ratio(primary, 'cpl'), ratio(comp, 'cpl')),
+        resultsDelta:     pctChange(primaryResults, compResults),
+        costPerResultDelta: pctChange(
+          costPerSelectedResult(primary.spend, primaryResults),
+          costPerSelectedResult(comp.spend, compResults),
+        ),
       }
     : undefined
 

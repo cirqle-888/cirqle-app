@@ -72,8 +72,9 @@ KEY METRICS:
 ${ctx.campaigns && ctx.campaigns.length > 1 ? `- Client report over ${ctx.campaigns.length} campaigns. Per campaign (judge each on its own objective; do not add different result types together):\n${ctx.campaigns.map(c => `  • ${c.campaignName}: ${c.resultLabel ? `${c.results ?? 'n/a'} ${c.resultLabel.toLowerCase()}${c.costPerResult != null ? ` at ₹${fmt2(c.costPerResult)} each` : ''}` : 'no result metric'}, spend ₹${fmt(c.spend)}`).join('\n')}\n` : ''}- Data coverage: ${describeDataQuality(ctx.dataQuality) ?? 'complete for the period.'}${d.resultCoverage && d.resultCoverage.recordedDays < d.resultCoverage.days ? ` ${d.result?.label ?? 'Results'} were recorded on only ${d.resultCoverage.recordedDays} of ${d.resultCoverage.days} days.` : ''}
 - CTR: ${fmt2(p.ctr)}%${bmNote(benchmarks.metrics.ctr, v => `${fmt2(v)}%`)}
 - CPC: ${p.clicks > 0 ? `₹${fmt2(p.cpc)}` : 'n/a'}${bmNote(benchmarks.metrics.cpc, v => `₹${fmt2(v)}`)}
-- Leads: ${fmtN(p.leads)} | CPL: ${p.leads > 0 ? `₹${fmt2(p.cpl)}` : 'n/a (no leads)'}${bmNote(benchmarks.metrics.cpa, v => `₹${fmt2(v)}`)}
-${p.revenue > 0 ? `- Revenue minus ad spend (not business profit): ₹${fmt(d.profit)} | Margin: ${fmt1(d.margin)}% | ROI: ${fmt1(d.roi)}%\n` : ''}Benchmarks: ${benchmarks.source === 'global' ? 'none available (placeholders only) — do not compare against benchmarks.' : `source ${benchmarks.source}.`}
+${!d.result?.metric || d.result.metric === 'leads' ? `- Leads: ${fmtN(p.leads)} | CPL: ${p.leads > 0 ? `₹${fmt2(p.cpl)}` : 'n/a (no leads)'}${bmNote(benchmarks.metrics.cpa, v => `₹${fmt2(v)}`)}
+` : `- This is a ${d.result.label.toLowerCase()} campaign: judge it on ${d.result.label.toLowerCase()} and ${d.result.costLabel.toLowerCase()}, not on leads.
+`}${p.revenue > 0 ? `- Revenue minus ad spend (not business profit): ₹${fmt(d.profit)} | Margin: ${fmt1(d.margin)}% | ROI: ${fmt1(d.roi)}%\n` : ''}Benchmarks: ${benchmarks.source === 'global' ? 'none available (placeholders only) — do not compare against benchmarks.' : `source ${benchmarks.source}.`}
 
 HEALTH: ${health.result.insufficientData ? 'NOT GRADED — not enough data; do not describe the campaign as healthy or unhealthy.' : `Score ${health.score}/100, Grade ${health.grade}, Risk: ${health.risk}`}
 ${health.result.explanations.slice(0, 3).join(' | ')}
@@ -135,6 +136,12 @@ function buildRuleBasedNarrative(ctx: AIContext): AIReport {
         `${config.dateFrom} to ${config.dateTo}, ad spend was ₹${fmt(p.spend)}`
       : `The ${project.campaignName} campaign ran on ${project.platform} from ` +
         `${config.dateFrom} to ${config.dateTo}, spending ₹${fmt(p.spend)} in this period`) +
+    // The result it was run for, in its own terms (conversations, leads…).
+    (!multi && d.result?.metric && d.results != null
+      ? (d.results > 0
+          ? ` and delivering ${fmtN(d.results)} ${d.result.label.toLowerCase()} at ₹${fmt2(d.costPerResult ?? 0)} each`
+          : ` with no ${d.result.label.toLowerCase()} recorded`)
+      : '') +
     // Utilisation is to-date (all spend through the period end ÷ allocation),
     // so it is stated separately from the period's own spend.
     (project.walletAllocation > 0

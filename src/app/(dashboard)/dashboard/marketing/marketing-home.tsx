@@ -240,7 +240,7 @@ function ClientCard({ c, access }: { c: DirectoryEntry; access: MarketingAccess 
       </div>
 
       <div className="grid grid-cols-3 gap-2 text-center">
-        <Metric label="Reach" value={compact(c.reach30)} />
+        <Metric label="Page reach" value={compact(c.reach30)} />
         {access.ads ? <Metric label="Ad spend" value={inr(c.spend30)} /> : <Metric label="Followers" value={compact(c.followers)} />}
         {access.leads ? <Metric label="Leads" value={String(c.leads30)} /> : <Metric label="Pages" value={String(c.pages)} />}
       </div>

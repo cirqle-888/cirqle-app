@@ -96,7 +96,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   const [clientCampaigns, reportPrefs] = await Promise.all([
     project.client_id
       ? admin.from('ad_projects')
-          .select('id, campaign_name, platform, client_id, status, archived_at, campaign_type, start_date, client:clients(id, name, code)')
+          .select('id, campaign_name, platform, client_id, status, archived_at, campaign_type, start_date, created_at, client:clients(id, name, code)')
           .eq('client_id', project.client_id).is('deleted_at', null).order('created_at', { ascending: false }).limit(100)
           .then(r => (r.data as any[]) ?? [], () => [])
       : Promise.resolve([] as any[]),

@@ -22,7 +22,7 @@ import { useReportSubmission } from './use-report-submission'
 import WebReportViewer from '@/app/(dashboard)/dashboard/advertising/reports/components/WebReportViewer'
 import { saveClientReportPreferences } from '@/app/(dashboard)/dashboard/advertising/reports/preference-actions'
 import {
-  REPORT_PRESETS, COMPOSER_PERIODS, composerRange, previousPeriod, presetByKey,
+  REPORT_PRESETS, COMPOSER_PERIODS, composerRange, previousPeriod, presetByKey, campaignStartFor,
   type ComposerPeriod, type PresetKey,
 } from '@/lib/reporting/presets'
 import { REPORT_TEMPLATES, REPORT_FORMATS, isISODate, daySpan, MAX_RANGE_DAYS } from '@/lib/reporting/config'
@@ -42,6 +42,9 @@ export interface ComposerProject {
   archived_at?: string | null
   campaign_type?: string | null
   start_date?: string | null
+  /** First day with data — Lifetime starts here when there is no start date. */
+  first_metric_date?: string | null
+  created_at?: string | null
 }
 
 interface Props {
@@ -133,7 +136,7 @@ export function ReportComposer({
   }
 
   // ── Resolved request ──────────────────────────────────────────────────────
-  const earliestStart = clientProjects.filter(p => selected.includes(p.id)).map(p => p.start_date).filter(Boolean).sort()[0] ?? null
+  const earliestStart = clientProjects.filter(p => selected.includes(p.id)).map(campaignStartFor).filter(Boolean).sort()[0] ?? null
   const range = period === 'custom'
     ? (isISODate(customFrom) && isISODate(customTo) ? { dateFrom: customFrom, dateTo: customTo } : null)
     : composerRange(period, todayISO(), earliestStart)

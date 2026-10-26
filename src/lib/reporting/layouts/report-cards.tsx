@@ -24,6 +24,7 @@ import {
 } from './shared'
 import { measureElementHeight, type ReportFont } from './measure'
 import { paginateByRealHeight } from './paginate'
+import { resultHeadline, formatResultValue, formatResultCost } from '../result-display'
 
 export type CardKey =
   | 'executiveSummary' | 'kpiScorecard' | 'campaignHealth' | 'benchmarkComparison'
@@ -114,18 +115,23 @@ export function buildKpiScorecardCard(data: RenderData, s: number) {
   const p = data.kpi.primary
   const d = data.kpi.derived
   const deltas = data.kpi.deltas
+  // The campaign's own result (conversations, purchases, leads…), never a
+  // hard-coded "Leads" that reads 0 on a messages campaign.
+  const r = resultHeadline(data.kpi, data.project.campaignType)
   const stats = [
     { label: 'Total Spend', value: `₹${money(d.actualCost)}`, sub: `${d.budgetUtilisation.toFixed(1)}% of allocation used to date` },
     { label: 'Revenue',     value: p.revenue > 0 ? `₹${money(p.revenue)}` : 'Not tracked', sub: p.revenue > 0 ? `ROAS ${p.roas.toFixed(2)}` : 'No revenue reported' },
     { label: 'Impressions', value: num(p.impressions),        sub: `${headlineReach(data).label} ${headlineReach(data).value}` },
     { label: 'Clicks',      value: num(p.clicks),             sub: p.impressions > 0 ? `CTR ${p.ctr.toFixed(2)}%` : 'CTR —' },
-    { label: 'Leads',       value: num(p.leads),              sub: `CPL ${p.leads > 0 ? `₹${p.cpl.toFixed(2)}` : '—'}` },
+    { label: r.label,       value: formatResultValue(r),      sub: r.reason ?? `${r.costLabel} ${formatResultCost(r)}` },
     { label: 'CPC',         value: p.clicks > 0 ? `₹${p.cpc.toFixed(2)}` : '—', sub: `CPM ${p.impressions > 0 ? `₹${p.cpm.toFixed(2)}` : '—'}` },
   ]
   // Null deltas (zero baseline / undefined ratio) render as "new", not ±100%.
   const deltaRows: [string, number | null][] = deltas ? [
-    ['Spend', deltas.spendDelta], ['Clicks', deltas.clicksDelta], ['Leads', deltas.leadsDelta],
-    ['ROAS', deltas.roasDelta], ['CTR', deltas.ctrDelta], ['CPL', deltas.cplDelta],
+    ['Spend', deltas.spendDelta], ['Clicks', deltas.clicksDelta],
+    ...(r.definition.metric ? [[r.label, r.delta], [r.costLabel, r.costDelta]] as [string, number | null][] : []),
+    ...(p.revenue > 0 ? [['ROAS', deltas.roasDelta]] as [string, number | null][] : []),
+    ['CTR', deltas.ctrDelta],
   ] : []
   return (
     <Card s={s} accent={CARD_STYLE.kpiScorecard.accent}>
@@ -218,7 +224,10 @@ export function buildBenchmarkComparisonCard(data: RenderData, s: number) {
     { metric: 'ROAS', your: p.roas.toFixed(2), bench: benchmarks.metrics.roas.toFixed(2), delta: pctStr(benchmarks.roasVsBenchmark), color: benchmarkColor(benchmarks.roasVsBenchmark, false) },
     { metric: 'CTR (%)', your: p.ctr.toFixed(2), bench: benchmarks.metrics.ctr.toFixed(2), delta: pctStr(benchmarks.ctrVsBenchmark), color: benchmarkColor(benchmarks.ctrVsBenchmark, false) },
     { metric: 'CPC (₹)', your: p.cpc.toFixed(2), bench: benchmarks.metrics.cpc.toFixed(2), delta: pctStr(benchmarks.cpcVsBenchmark), color: benchmarkColor(benchmarks.cpcVsBenchmark, true) },
-    { metric: 'CPL (₹)', your: p.cpl.toFixed(2), bench: benchmarks.metrics.cpa.toFixed(2), delta: pctStr(benchmarks.cplVsBenchmark), color: benchmarkColor(benchmarks.cplVsBenchmark, true) },
+    // The CPA benchmark is a cost-per-lead figure: only lead campaigns compare against it.
+    ...(resultHeadline(kpi, data.project.campaignType).isLeads
+      ? [{ metric: 'CPL (₹)', your: p.cpl.toFixed(2), bench: benchmarks.metrics.cpa.toFixed(2), delta: pctStr(benchmarks.cplVsBenchmark), color: benchmarkColor(benchmarks.cplVsBenchmark, true) }]
+      : []),
     { metric: 'Conv. Rate (%)', your: d.conversionRate.toFixed(1), bench: benchmarks.metrics.conversion_rate.toFixed(1), delta: '—' },
   ]
   return (
@@ -256,9 +265,11 @@ export function buildForecastCard(data: RenderData, s: number) {
   const spendRows = [
     ['7 days', fc.spend7d], ['30 days', fc.spend30d], ['90 days', fc.spend90d],
   ] as const
-  const leadsRows = [
+  // The lead forecast is built from leads; on a messages or sales campaign it
+  // would forecast zero of a thing the campaign never aimed for.
+  const leadsRows = resultHeadline(data.kpi, data.project.campaignType).isLeads ? [
     ['7 days', fc.leads7d], ['30 days', fc.leads30d],
-  ] as const
+  ] as const : []
   return (
     <Card s={s} accent={CARD_STYLE.forecast.accent}>
       <SectionHeading s={s} icon={trendIcon} label="Forecast" accent={CARD_STYLE.forecast.accent} />
@@ -273,8 +284,8 @@ export function buildForecastCard(data: RenderData, s: number) {
           cellColors={[undefined, undefined, undefined, undefined, TREND_LABEL[r.trend].color]}
         />
       ))}
-      <div style={{ display: 'flex', fontSize: `${16 * s}px`, fontWeight: 700, color: '#6B7280', marginTop: `${16 * s}px`, marginBottom: `${8 * s}px` }}>LEADS FORECAST</div>
-      <MiniTableRow s={s} flex={flex} header cells={['Period', 'Predicted', 'Model', 'Confidence', 'Trend']} />
+      {leadsRows.length > 0 && <div style={{ display: 'flex', fontSize: `${16 * s}px`, fontWeight: 700, color: '#6B7280', marginTop: `${16 * s}px`, marginBottom: `${8 * s}px` }}>LEADS FORECAST</div>}
+      {leadsRows.length > 0 && <MiniTableRow s={s} flex={flex} header cells={['Period', 'Predicted', 'Model', 'Confidence', 'Trend']} />}
       {leadsRows.map(([period, r], i) => (
         <MiniTableRow key={period} s={s} flex={flex} zebra={i % 2 === 1} last={i === leadsRows.length - 1}
           cells={[period, r.predicted_value.toFixed(2), r.model_used, `${r.confidence}%`, TREND_LABEL[r.trend].text]}
@@ -440,7 +451,9 @@ const KPI_POOL: Record<KpiPoolKey, { label: string; value: (d: RenderData) => st
   spend:       { label: 'Spend',       value: d => `₹${money(d.kpi.derived.actualCost)}`, grad: ['#A855F7', '#7C3AED'], icon: 'rupee' },
   cpr:         { label: 'CPR',         value: d => rupeesOrDash(d.kpi.derived.costPerResult), grad: ['#FB923C', '#EF4444'], icon: 'percent' },
   revenue:     { label: 'Revenue',     value: d => `₹${money(d.kpi.primary.revenue)}`,    grad: ['#A855F7', '#7C3AED'], icon: 'rupee' },
-  leads:       { label: 'Leads',       value: d => num(d.kpi.primary.leads),              grad: ['#8B5CF6', '#6D28D9'], icon: 'users' },
+  // Keyed 'leads' for the template's primaryKPI, but shows the campaign's own
+  // result (see heroLabel) — a messages campaign leads with conversations.
+  leads:       { label: 'Leads',       value: d => formatResultValue(resultHeadline(d.kpi, d.project.campaignType)), grad: ['#8B5CF6', '#6D28D9'], icon: 'users' },
 }
 
 const PRIMARY_KPI_CIRCLE: Record<TemplateConfig['primaryKPI'], { label: string; value: (d: RenderData) => string; grad: [string, string]; icon: IconName }> = {
@@ -449,6 +462,12 @@ const PRIMARY_KPI_CIRCLE: Record<TemplateConfig['primaryKPI'], { label: string; 
   revenue: KPI_POOL.revenue,
   reach:   KPI_POOL.reach,
   spend:   KPI_POOL.spend,
+}
+
+function heroLabel(data: RenderData, k: KpiPoolKey): string {
+  if (k === 'reach') return headlineReach(data).label
+  if (k === 'leads') return resultHeadline(data.kpi, data.project.campaignType).label
+  return KPI_POOL[k].label
 }
 
 export function buildHeroSection(data: RenderData, s: number, opts: { continuation: boolean }) {
@@ -488,10 +507,10 @@ export function buildHeroSection(data: RenderData, s: number, opts: { continuati
         <MetaLine s={s} pairs={[['Daily Budget', `₹${money(meta.dailyBudget)}`], ['Expected Budget', `₹${num(meta.expectedBudget)}`]]} />
       </div>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', marginBottom: `${30 * s}px` }}>
-        <KpiCircle s={s} label={primary.label} value={primary.value(data)} grad={primary.grad} icon={primary.icon} dia={104} />
+        <KpiCircle s={s} label={template.primaryKPI === 'leads' ? heroLabel(data, 'leads') : primary.label} value={primary.value(data)} grad={primary.grad} icon={primary.icon} dia={104} />
         {fallbackKeys.flatMap(k => [
           <KpiDivider key={`div-${k}`} s={s} />,
-          <KpiCircle key={k} s={s} label={k === 'reach' ? headlineReach(data).label : KPI_POOL[k].label} value={KPI_POOL[k].value(data)} grad={KPI_POOL[k].grad} icon={KPI_POOL[k].icon} />,
+          <KpiCircle key={k} s={s} label={heroLabel(data, k)} value={KPI_POOL[k].value(data)} grad={KPI_POOL[k].grad} icon={KPI_POOL[k].icon} />,
         ])}
       </div>
       <div style={{ display: 'flex', justifyContent: 'center', gap: `${20 * s}px`, marginBottom: `${36 * s}px`, flexWrap: 'wrap' }}>

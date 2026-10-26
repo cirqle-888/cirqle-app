@@ -233,6 +233,9 @@ export interface KPIDeltas {
   cpcDelta: number | null
   cpmDelta: number | null
   cplDelta: number | null
+  /** The objective's result (conversations, purchases…) — absent on old snapshots. */
+  resultsDelta?: number | null
+  costPerResultDelta?: number | null
 }
 
 export interface DailySeriesPoint {

@@ -15,6 +15,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { getResend } from '@/lib/email/resend'
 import type { RenderData, ReportFormat, ExportResult, ReportRecipient } from './types'
 import { describeDataQuality } from './data-quality'
+import { resultHeadline, formatResultValue, formatResultCost } from './result-display'
 
 const BUCKET = 'ad-reports'
 const SIGNED_URL_TTL = 60 * 60 * 24 * 7 // 7 days
@@ -218,8 +219,13 @@ function buildEmailHTML(data: RenderData, exports: ExportResult[]): string {
     ['Clicks', fmtN(p.clicks)],
     ['CTR', p.impressions > 0 ? `${p.ctr.toFixed(2)}%` : '—'],
     ['CPC', p.clicks > 0 ? `₹${p.cpc.toFixed(2)}` : '—'],
-    ['Leads', fmtN(p.leads)],
-    ['CPL', p.leads > 0 ? `₹${p.cpl.toFixed(2)}` : '—'],
+    // The campaign's own result (conversations, purchases, leads…).
+    ...(() => {
+      const r = resultHeadline(data.kpi, data.project.campaignType)
+      return r.definition.metric
+        ? [[r.label, formatResultValue(r)], [r.costLabel, formatResultCost(r)]]
+        : []
+    })(),
     ['Health Score', data.health.result?.insufficientData ? 'Not graded yet' : `${data.health.score}/100 (${data.health.grade})`],
   ].map(([label, value]) => `
     <tr>

@@ -3,6 +3,7 @@
 import React from 'react'
 import type { RenderData } from '@/lib/reporting/types'
 import { describeDataQuality } from '@/lib/reporting/data-quality'
+import { resultHeadline } from '@/lib/reporting/result-display'
 
 function formatCurrency(amount: number, currency: string = 'INR') {
   return new Intl.NumberFormat('en-IN', {
@@ -10,6 +11,20 @@ function formatCurrency(amount: number, currency: string = 'INR') {
     currency,
     maximumFractionDigits: 0,
   }).format(amount)
+}
+
+function formatCurrency2(amount: number, currency: string = 'INR') {
+  return new Intl.NumberFormat('en-IN', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)
+}
+
+function Tile({ label, value, sub, accent = false }: { label: string; value: string; sub?: string; accent?: boolean }) {
+  return (
+    <div className={`border p-4 rounded-xl ${accent ? 'bg-primary/[0.04] border-primary/30' : 'bg-card border-border'}`}>
+      <div className="text-sm text-muted-foreground mb-1">{label}</div>
+      <div className="text-2xl font-semibold tabular-nums">{value}</div>
+      {sub && <div className="text-xs text-muted-foreground mt-1">{sub}</div>}
+    </div>
+  )
 }
 
 function formatNumber(num: number) {
@@ -28,6 +43,7 @@ export default function WebReportViewer({ data }: { data: RenderData }) {
   const dataNote = coverage && !(sections.executiveSummary && ai.executiveSummary?.includes(coverage)) ? coverage : null
   const pr = kpi.periodReach
   const singleDay = data.config.dateFrom === data.config.dateTo
+  const result = resultHeadline(kpi, project.campaignType)
 
   return (
     <div className="bg-background text-foreground max-w-5xl mx-auto p-4 sm:p-8 md:p-12 space-y-12">
@@ -73,47 +89,28 @@ export default function WebReportViewer({ data }: { data: RenderData }) {
         <section className="space-y-4">
           <h2 className="text-xl font-semibold border-b border-border pb-2">Key Performance Indicators</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-card border border-border p-4 rounded-xl">
-              <div className="text-sm text-muted-foreground mb-1">Spend</div>
-              <div className="text-2xl font-semibold">{formatCurrency(kpi.primary.spend)}</div>
-            </div>
-            <div className="bg-card border border-border p-4 rounded-xl">
-              <div className="text-sm text-muted-foreground mb-1">Revenue</div>
-              <div className="text-2xl font-semibold">{kpi.primary.revenue > 0 ? formatCurrency(kpi.primary.revenue) : 'Not tracked'}</div>
-            </div>
-            <div className="bg-card border border-border p-4 rounded-xl">
-              <div className="text-sm text-muted-foreground mb-1">ROAS</div>
-              <div className="text-2xl font-semibold">{kpi.primary.revenue > 0 ? `${kpi.primary.roas.toFixed(2)}x` : '—'}</div>
-            </div>
-            <div className="bg-card border border-border p-4 rounded-xl">
-              <div className="text-sm text-muted-foreground mb-1">Leads</div>
-              <div className="text-2xl font-semibold">{formatNumber(kpi.primary.leads)}</div>
-            </div>
-            <div className="bg-card border border-border p-4 rounded-xl">
-              <div className="text-sm text-muted-foreground mb-1">Cost per Lead</div>
-              <div className="text-2xl font-semibold">{kpi.primary.leads > 0 ? formatCurrency(kpi.primary.cpl) : '—'}</div>
-            </div>
-            <div className="bg-card border border-border p-4 rounded-xl">
-              <div className="text-sm text-muted-foreground mb-1">
-                {pr?.available || singleDay ? 'Reach' : 'Reach (sum of daily)'}
-              </div>
-              <div className="text-2xl font-semibold">{formatNumber(pr?.available ? pr.value : kpi.primary.reach)}</div>
-              {!pr?.available && !singleDay && (
-                <div className="text-xs text-muted-foreground mt-1">Counts a person once per day reached</div>
-              )}
-            </div>
-            <div className="bg-card border border-border p-4 rounded-xl">
-              <div className="text-sm text-muted-foreground mb-1">Clicks</div>
-              <div className="text-2xl font-semibold">{formatNumber(kpi.primary.clicks)}</div>
-            </div>
-            <div className="bg-card border border-border p-4 rounded-xl">
-              <div className="text-sm text-muted-foreground mb-1">CTR</div>
-              <div className="text-2xl font-semibold">{kpi.primary.impressions > 0 ? formatPercent(kpi.primary.ctr) : '—'}</div>
-            </div>
-            <div className="bg-card border border-border p-4 rounded-xl">
-              <div className="text-sm text-muted-foreground mb-1">CPC</div>
-              <div className="text-2xl font-semibold">{kpi.primary.clicks > 0 ? formatCurrency(kpi.primary.cpc) : '—'}</div>
-            </div>
+            <Tile label="Spend" value={formatCurrency(kpi.primary.spend)} sub="excl. GST" />
+            {/* The campaign's own result — conversations, purchases, leads… */}
+            <Tile label={result.label} value={result.value == null ? '—' : formatNumber(result.value)}
+              sub={result.reason ?? (result.partial ? 'recorded on only some days' : undefined)} accent />
+            <Tile label={result.costLabel} value={result.cost == null ? '—' : formatCurrency2(result.cost)} accent />
+            <Tile
+              label={pr?.available || singleDay ? 'Reach' : 'Reach (sum of daily)'}
+              value={formatNumber(pr?.available ? pr.value : kpi.primary.reach)}
+              sub={!pr?.available && !singleDay ? 'Counts a person once per day reached' : undefined}
+            />
+            <Tile label="Impressions" value={formatNumber(kpi.primary.impressions)} />
+            <Tile label="Clicks" value={formatNumber(kpi.primary.clicks)} />
+            <Tile label="CTR" value={kpi.primary.impressions > 0 ? formatPercent(kpi.primary.ctr) : '—'} />
+            <Tile label="CPC" value={kpi.primary.clicks > 0 ? formatCurrency2(kpi.primary.cpc) : '—'} />
+            {/* Revenue only where sales are tracked — "Not tracked" tiles on a
+                messages campaign were noise. */}
+            {kpi.primary.revenue > 0 && (
+              <>
+                <Tile label="Revenue" value={formatCurrency(kpi.primary.revenue)} />
+                <Tile label="ROAS" value={`${kpi.primary.roas.toFixed(2)}x`} />
+              </>
+            )}
           </div>
         </section>
       )}
@@ -173,8 +170,8 @@ export default function WebReportViewer({ data }: { data: RenderData }) {
                   <th className="px-4 py-3 font-medium text-right">Spend</th>
                   <th className="px-4 py-3 font-medium text-right">Impressions</th>
                   <th className="px-4 py-3 font-medium text-right">Clicks</th>
-                  <th className="px-4 py-3 font-medium text-right">Leads</th>
-                  <th className="px-4 py-3 font-medium text-right">CPR</th>
+                  <th className="px-4 py-3 font-medium text-right">{result.label}</th>
+                  <th className="px-4 py-3 font-medium text-right">{result.costLabel}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -184,8 +181,8 @@ export default function WebReportViewer({ data }: { data: RenderData }) {
                     <td className="px-4 py-3 text-right tabular-nums">{formatCurrency(row.spend)}</td>
                     <td className="px-4 py-3 text-right tabular-nums">{formatNumber(row.impressions)}</td>
                     <td className="px-4 py-3 text-right tabular-nums">{formatNumber(row.clicks)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{formatNumber(row.leads)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{row.cpr == null ? '—' : formatCurrency(row.cpr)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{row.results == null ? '—' : formatNumber(row.results)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{row.cpr == null ? '—' : formatCurrency2(row.cpr)}</td>
                   </tr>
                 ))}
               </tbody>

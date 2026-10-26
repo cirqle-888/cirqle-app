@@ -213,14 +213,16 @@ export default function ClientHub({ client, clients, withMarketing, hub, issues,
                 <>
                   <Stat icon={Users} tone="pink" label="Followers" value={compact(hub.social30.followers)}
                     sub={`across ${hub.accounts.length} account${hub.accounts.length === 1 ? '' : 's'}`} />
-                  <Stat icon={Eye} tone="blue" label="Reach" value={compact(hub.social30.reach)} sub={`${compact(hub.social30.views)} views · 30 days`} />
+                  {/* Organic reach of the Pages / Instagram accounts — ad reach is under Ads. */}
+                  <Stat icon={Eye} tone="blue" label="Page reach" value={compact(hub.social30.reach)} sub={`${compact(hub.social30.views)} views · 30 days, organic`} />
                   <Stat icon={Heart} tone="violet" label="Engagement" value={compact(hub.social30.interactions)}
                     sub={`${hub.social30.posts} post${hub.social30.posts === 1 ? '' : 's'} published`} />
                 </>
               )}
               {ads && (
                 <>
-                  <Stat icon={Wallet} tone="amber" label="Ad spend" value={inr(adSpend30)} sub="30 days · excl. GST" />
+                  {/* Includes today's spend so far; reports cover completed days only. */}
+                  <Stat icon={Wallet} tone="amber" label="Ad spend" value={inr(adSpend30)} sub="30 days incl. today · excl. GST" />
                   <Stat icon={Target} tone="emerald" label={adResults[0]?.label ?? 'Ad results'}
                     value={adResults[0] ? adResults[0].count.toLocaleString('en-IN') : '—'}
                     sub={adResults[0] && adResults[0].count > 0 ? `${adResults[0].costLabel} ${inr(adResults[0].spend / adResults[0].count, 2)}` : 'no results in 30 days'} />
