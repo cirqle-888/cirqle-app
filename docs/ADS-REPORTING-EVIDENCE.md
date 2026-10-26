@@ -250,7 +250,7 @@ warnings (cap 2128); privacy gate clean.
 
 ### Safety
 
-- Preview never writes. Generate requires a fresh preview (stale settings flagged) and, when the period has **no data at all**, an explicit "Generate anyway".
+- At that stage preview was read-only (superseded by the persisted approval snapshot below). Generate requires a fresh preview (stale settings flagged) and, when the period has **no data at all**, an explicit "Generate anyway".
 - Email is sent only when "Email this report" is ticked for that send; saved recipients are shown, never used silently.
 - Tab/period changes use `history.replaceState` (no server round trip).
 - Coverage fix found in live preview: a campaign with no start date now counts from its first recorded day, so days before it existed are not "missing".
@@ -306,3 +306,42 @@ Two older reports for Sea Star (`3b1bb965`, `d436dd11`, made 18:01 IST via the o
 - Email delivery, which was deliberately never attempted.
 
 **Cleanup (25 Oct, at the user's request).** All seven reports above were deleted with the app's own `deleteReportStorageAndRow`, using the same checks as `DELETE /api/advertising/reports/[id]`: 9f581ae1, 42c76853, 2e63987d, a4bd0e06 and e4af72be from the verification, plus the two empty ones, 3b1bb965 and d436dd11. That removed 7 storage files. A read-only check confirmed 0 rows, 0 analytics rows and 0 files remain, and report history is now empty.
+
+
+## Completion pass — 26 Oct 2026 (IST)
+
+This section supersedes earlier outstanding-feature notes. These changes are local; the three new migrations below have **not** been applied. The earlier production verification only covers the earlier pipeline, not these new review/delivery tables.
+
+### Implemented
+
+- Persisted preview snapshots, tied to the editor, client, settings hash and 24-hour expiry. Generate uses the exact reviewed snapshot across every export/retry. Read-only previews remain available; saving drafts uses a separate write guard. Changing settings requires another preview. Missing-day/result data or failed sync requires an explicitly incomplete draft, which cannot be emailed or publicly approved.
+- Sync-period action and enforced sync-before-report for scheduled/new unsnapshotted jobs, including comparison dates and suppression of unrelated notification jobs. FX/ingest failures cannot be marked as successful sync.
+- Review status independent of generation and delivery. Edited summaries produce a new immutable version; the previous version becomes superseded only when its replacement is ready and approved.
+- Revocable 1/7/30-day report links: random 256-bit token, only its SHA-256 hash stored, server checks report approval/status/expiry/revocation on every request. Public HTML has an explicit client-field allowlist, escaped text, no internal payload/downloads, no indexing and no caching.
+- English/Malayalam preference and factual Malayalam summaries; optional edited summary. PDFs include readable supplementary summary/campaign pages. Image ZIP contains every rendered PDF page. Copy/download and device share-sheet controls remain user initiated.
+- Campaign creative comparison uses the existing Meta integration, selected campaign and dates, native currency, objective-specific results, unavailable-media fallback and small-sample warning without winner claims.
+- Campaign annotations with chart markers; existing CRM records receive enquiry-quality/status/reason reviews, separately labelled from provider totals. Budget requests retain requester/approver, currency, expiry and decision; approval does not change platform budgets, receipts or allocations.
+- Signed Resend event webhook with deduplicated event inbox, out-of-order reconciliation, accepted/delivered/bounced/failed separation. Per-recipient sending claims prevent concurrent duplicate sends; failed recipients can be retried explicitly. Ambiguous external-call outcomes remain held for provider review.
+- Separate schedule last-enqueued, last-generated and last-confirmed-delivered timestamps. Scheduled reports await review before email; approval never sends silently.
+
+### Apply before deploying this code
+
+After the three previously applied migrations, apply in order:
+
+1. `20261025210000_report_review_and_sharing.sql`
+2. `20261025211000_campaign_review_tools.sql`
+3. `20261025212000_report_delivery_events.sql`
+
+The last migration also installs schedule lifecycle tracking. Rollbacks in `supabase/rollbacks/` reverse executable paths in reverse order while deliberately retaining audit/history tables and columns. Roll back application code alongside SQL; disable the provider webhook before rolling back its functions. These are data-preserving operational rollbacks, not schema-reset scripts; re-enabling requires restoring grants/functions, not blindly rerunning CREATE TABLE.
+
+### Verification and live requirements
+
+- Final full suite: **3,018 passed, 3 skipped** (227 passed test files, one skipped). Includes public-route malformed/expired/revoked/superseded access denial and escaped/no-store responses, plus webhook signature rejection/event handling.
+- Final TypeScript check passed. ESLint passed with 0 errors / 2,127 warnings, within the existing 2,128 budget. The final repeated whole-repository lint stalled without output and was stopped; focused lint of the final added/changed files passed with no findings. Employee-name privacy gate passed.
+- Malayalam and four-campaign supplementary pages rendered and visually inspected; characters shaped correctly and content fit. Visual fixture test passed with `REPORT_VISUAL_QA=1`. No client email was sent.
+- Production build reached compilation, then failed fetching the existing Inter and Geist Mono fonts from Google Fonts because the network connection was unavailable. No font or global typography change was made to disguise this environmental failure.
+- No PostgreSQL CLI, database connection URL or Supabase management credential is available in this session. New SQL functions/triggers still need staging execution and concurrency tests; the existing REST service key cannot execute arbitrary migrations. A final read-only REST probe of all three new tables could not connect, so their live presence could not be independently confirmed.
+- Set `RESEND_REPORT_WEBHOOK_SECRET`, register `/api/webhooks/report-email` for email.delivered/email.bounced/email.failed, then verify a permitted test recipient before enabling live email. Signature rejection and event handling are covered by mocked route tests; external delivery is not claimed verified.
+- `vercel.json` still declares daily scheduler/worker triggers. A deployed trigger owner/plan supporting the intended local send frequency must be confirmed; interactive generation wakes its own job immediately. Do not claim precise hourly delivery from the daily trigger.
+- Google Ads remains explicitly unavailable. Developer-token/account approval, provider completion and a permitted account reconciliation are outstanding; it is not production-ready.
+- New UI browser end-to-end verification requires a running authenticated dev environment with the new schema. Prior browser/export evidence above applies only to the earlier implementation. No deployment or live platform spend change was performed.
