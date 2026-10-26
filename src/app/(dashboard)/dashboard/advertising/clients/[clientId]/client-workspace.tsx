@@ -44,6 +44,13 @@ interface Props {
   reportPreferences?: Record<string, ClientReportPreferences>
   reportPreferencesSupported?: boolean
   perms: { create: boolean; edit: boolean; manageBudget: boolean; viewFinancials: boolean; viewBilling: boolean; viewReports: boolean }
+  /**
+   * Rendered inside the Client Marketing Hub: no back link or title (the hub
+   * has its own), and the sub-tab lives under its own URL key so it does not
+   * fight the hub's `tab`.
+   */
+  embedded?: boolean
+  tabKey?: string
 }
 
 const inr = (v: number, dp = 0) => `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: dp })}`
@@ -52,20 +59,21 @@ const round2 = (v: number) => Math.round(v * 100) / 100
 export default function ClientWorkspace({
   client, migrated, projects, metricsByProject, benchmarksByProject, attention,
   walletSupported, ledger, fundCandidates, reports, reportPreferences = {}, reportPreferencesSupported = false, perms,
+  embedded = false, tabKey = 'tab',
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const rawPeriod = searchParams.get('period')
   const period: PeriodKey = isPeriodKey(rawPeriod) ? rawPeriod : DEFAULT_PERIOD
-  const rawTab = searchParams.get('tab')
+  const rawTab = searchParams.get(tabKey)
   const canSeeFunds = perms.viewFinancials || perms.viewBilling
   const tab: Tab = rawTab === 'campaigns' || rawTab === 'reports' || (rawTab === 'funds' && canSeeFunds) ? rawTab : 'overview'
   const range = useMemo(() => periodRange(period, todayISO()), [period])
   const [showArchived, setShowArchived] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
 
-  function setParam(key: 'tab' | 'period', value: string, fallback: string) {
+  function setParam(key: string, value: string, fallback: string) {
     const q = new URLSearchParams(searchParams.toString())
     if (value === fallback) q.delete(key); else q.set(key, value)
     // Native history: updates useSearchParams without a server round trip
@@ -121,29 +129,39 @@ export default function ClientWorkspace({
     ...(perms.viewReports ? [{ key: 'reports' as const, label: 'Reports' }] : []),
   ]
 
-  return (
-    <div className="mx-auto max-w-7xl space-y-6 px-4 py-8">
-      <Link href="/dashboard/advertising" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-4 w-4" /> Advertising
-      </Link>
+  const reportsHref = (() => {
+    const q = new URLSearchParams(searchParams.toString())
+    q.set(tabKey, 'reports')
+    return `${pathname}?${q}`
+  })()
 
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold">
-            <Building2 className="h-6 w-6 text-pink-500" /> {client.name}
-            {client.code && <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-semibold text-muted-foreground">{client.code}</span>}
-          </h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">Campaigns, funds and reports for this client.</p>
-        </div>
+  return (
+    <div className={embedded ? 'space-y-5' : 'mx-auto max-w-7xl space-y-6 px-4 py-8'}>
+      {!embedded && (
+        <Link href="/dashboard/advertising" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" /> Advertising
+        </Link>
+      )}
+
+      <div className={`flex flex-wrap items-start gap-3 ${embedded ? 'justify-end' : 'justify-between'}`}>
+        {!embedded && (
+          <div>
+            <h1 className="flex items-center gap-2 text-2xl font-bold">
+              <Building2 className="h-6 w-6 text-pink-500" /> {client.name}
+              {client.code && <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-semibold text-muted-foreground">{client.code}</span>}
+            </h1>
+            <p className="mt-0.5 text-sm text-muted-foreground">Campaigns, funds and reports for this client.</p>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           {perms.viewReports && (
-            <Link href={`${pathname}?tab=reports`}
+            <Link href={reportsHref}
               className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:border-pink-500/40">
               <FileText className="h-4 w-4 text-pink-500" /> Prepare client report
             </Link>
           )}
-          {perms.create && (
-            <Link href="/dashboard/advertising/new"
+          {perms.create && !embedded && (
+            <Link href={`/dashboard/advertising/new?client=${client.id}`}
               className="inline-flex items-center gap-1.5 rounded-lg gradient-bg px-4 py-2 text-sm font-medium text-white hover:opacity-90">
               <Plus className="h-4 w-4" /> New Campaign
             </Link>
@@ -156,7 +174,7 @@ export default function ClientWorkspace({
       <div className="flex flex-wrap gap-1 border-b border-border" role="tablist">
         {tabs.map(t => (
           <button key={t.key} role="tab" aria-selected={tab === t.key}
-            onClick={() => setParam('tab', t.key, 'overview')}
+            onClick={() => setParam(tabKey, t.key, 'overview')}
             className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
               tab === t.key ? 'border-pink-500 text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}>

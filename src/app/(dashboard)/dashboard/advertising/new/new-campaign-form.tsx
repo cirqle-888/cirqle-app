@@ -23,16 +23,18 @@ interface Props {
   clients: { id: string; name: string; code: string }[]
   services: ServiceRow[]
   servicePricing: { client_id: string; service_id: string; price: number }[]
+  /** Preselected client — set when the form is opened from a client's Marketing Hub. */
+  initialClientId?: string
 }
 
 const inrFmt = (v: number) => `₹${Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 
-export default function NewCampaignForm({ clients, services, servicePricing }: Props) {
+export default function NewCampaignForm({ clients, services, servicePricing, initialClientId }: Props) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [clientId, setClientId] = useState('')
+  const [clientId, setClientId] = useState(initialClientId ?? '')
   const [serviceId, setServiceId] = useState('')
   const [campaignName, setCampaignName] = useState('')
   const [platform, setPlatform] = useState('meta')

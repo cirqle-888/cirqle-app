@@ -245,7 +245,7 @@ export default function ClientDetailClient({
               )}
             </div>
 
-            <ClientSocialSection accounts={socialAccounts} />
+            <ClientSocialSection accounts={socialAccounts} clientId={client.id} />
 
             {showAmounts && (
               <div className="bg-card border border-border rounded-2xl overflow-hidden">

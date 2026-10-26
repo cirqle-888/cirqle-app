@@ -24,7 +24,7 @@ import {
   ClipboardCheck, ClipboardList, FileText, Gauge, Handshake, HardHat, History,
   Images, Inbox, Landmark, LayoutDashboard, LayoutGrid, MapPin, Megaphone, MessageSquare,
   NotebookPen, Package, PhoneCall, PieChart, Receipt, Repeat, Scale, Settings,
-  Share2, Sheet, ShieldCheck, SlidersHorizontal, Sparkles, Star, Tags,
+  Share2, Sheet, ShieldCheck, SlidersHorizontal, Sparkles, Star, Tags, Target,
   TrendingUp, Upload, UserPlus, Users2, Wallet,
   // Not in navSections today, but held by favourites saved when it was —
   // dropping it would turn those rows into stars.
@@ -38,7 +38,7 @@ export const FAVORITE_ICON_MAP: Record<string, LucideIcon> = {
   ClipboardCheck, ClipboardList, FileText, Gauge, Handshake, HardHat, History,
   Images, Inbox, Landmark, LayoutDashboard, LayoutGrid, MapPin, Megaphone, MessageSquare,
   NotebookPen, PhoneCall, PieChart, Receipt, Repeat, Scale, Settings,
-  Share2, Sheet, ShieldCheck, SlidersHorizontal, Sparkles, Star, Tags,
+  Share2, Sheet, ShieldCheck, SlidersHorizontal, Sparkles, Star, Tags, Target,
   TrendingUp, Upload, UserPlus, Users2, Wallet,
   // navSections imports this as `PackageIcon`; register that spelling too so
   // a key taken from the import name resolves.

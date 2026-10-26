@@ -13,7 +13,7 @@ import {
   SlidersHorizontal, MessageSquare, ClipboardCheck, NotebookPen, LayoutGrid,
   Briefcase, ClipboardList, CalendarClock, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
   BadgePercent, CalendarRange, HardHat, Repeat, Package as PackageIcon,
-  Share2, UserPlus, Gauge, ShieldCheck, MapPin,
+  Share2, UserPlus, Gauge, ShieldCheck, MapPin, Target,
   Scale, Receipt, Images,
   Calculator, CreditCard, Landmark,
   type LucideIcon,
@@ -158,26 +158,29 @@ export const navSections: NavSection[] = [
     label: 'Marketing',
     defaultOpen: false,
     items: [
-      // Order mirrors the workflow: connect once, decide whose each asset is,
-      // keep our own separate — then the modules that consume those assets.
-      { label: 'Connections',      href: '/dashboard/connections',     icon: Blocks, requiredPerm: 'advertising.manage_providers', keywords: ['integrations', 'meta', 'oauth', 'connect', 'facebook', 'google ads', 'token', 'ad accounts'] },
-      { label: 'Asset Assignment', href: '/dashboard/assets',          icon: Building2, requiredPerm: 'assets.assign', keywords: ['assign', 'ownership', 'unassigned', 'pages', 'ad accounts', 'lead forms', 'which client'] },
-      { label: 'Cirqle Accounts',  href: '/dashboard/cirqle-accounts', icon: ShieldCheck, requiredPerm: 'assets.view_cirqle', keywords: ['our own', 'agency', 'internal', 'own marketing', 'cirqle owned'] },
+      // Start here: pick a client, and their Pages, campaigns, content and
+      // leads are all in one hub (/dashboard/marketing/[clientId]). Visible to
+      // anyone who holds any one marketing module; each tab keeps its own gate.
+      { label: 'Clients Hub',      href: '/dashboard/marketing',       icon: Target, requiredAnyPerm: ['social.view', 'social.view_insights', 'advertising.view', 'leads.view', 'assets.assign'], keywords: ['marketing', 'client marketing', 'pages', 'campaigns', 'content', 'leads', 'one place', 'client hub'] },
       // ONE entry for the whole Instagram/Facebook workflow. It used to be six
       // — hub, calendar, queue, comments, feed, composer — which had to be
       // found separately in the sidebar despite being steps in one job. They
       // now share a tab bar (components/social-hub/social-tabs) and this is the
       // way in. Routes are unchanged, so every existing link still works.
       { label: 'Social',           href: '/dashboard/social-calendar', icon: Share2, requiredPerm: 'social.view', keywords: ['content', 'planner', 'posts', 'instagram', 'facebook', 'calendar', 'publish', 'schedule', 'comments', 'inbox', 'reply', 'feed', 'grid', 'insights', 'reach', 'to post', 'caption', 'hashtags', 'stories', 'reels'] },
+      { label: 'Advertising',      href: '/dashboard/advertising',     icon: Megaphone, requiredPerm: 'advertising.view', keywords: ['campaigns', 'ads', 'marketing'] },
+      { label: 'Leads',            href: '/dashboard/leads',           icon: UserPlus, requiredPerm: 'leads.view', keywords: ['crm', 'meta leads', 'lead ads', 'prospects', 'enquiries'] },
       // Publishes straight to cirqle.work — the site reads this content from a
       // separate Supabase project, so nothing here touches business data.
       { label: 'Portfolio',        href: '/dashboard/portfolio',       icon: Images, requiredPerm: 'portfolio.view', keywords: ['website', 'work', 'gallery', 'creatives', 'showcase', 'cirqle.work', 'case studies', 'brands', 'social media posts', 'upload work'] },
-      { label: 'Leads',            href: '/dashboard/leads',           icon: UserPlus, requiredPerm: 'leads.view', keywords: ['crm', 'meta leads', 'lead ads', 'prospects', 'enquiries'] },
       // Door-to-door / direct marketing: physical prospects on a map, visit
       // tracking, follow-ups — distinct from the Meta-ads Leads CRM above.
       { label: 'Field Marketing',  href: '/dashboard/field-marketing', icon: MapPin, requiredPerm: 'field.view', keywords: ['map', 'territory', 'door to door', 'direct marketing', 'supermarkets', 'shops', 'visits', 'gps', 'route', 'coverage', 'field sales'] },
-      { label: 'Advertising',      href: '/dashboard/advertising',     icon: Megaphone, requiredPerm: 'advertising.view', keywords: ['campaigns', 'ads', 'marketing'] },
       { label: 'Agency',           href: '/dashboard/agency',          icon: LayoutGrid, requiredPerm: 'reports.view', keywords: ['agency dashboard', 'all clients', 'overview', 'spend', 'leads', 'cpl', 'alerts'] },
+      // Setup, done once per account — last, so the daily tools come first.
+      { label: 'Connections',      href: '/dashboard/connections',     icon: Blocks, requiredPerm: 'advertising.manage_providers', keywords: ['integrations', 'meta', 'oauth', 'connect', 'facebook', 'google ads', 'token', 'ad accounts'] },
+      { label: 'Asset Assignment', href: '/dashboard/assets',          icon: Building2, requiredPerm: 'assets.assign', keywords: ['assign', 'ownership', 'unassigned', 'pages', 'ad accounts', 'lead forms', 'which client'] },
+      { label: 'Cirqle Accounts',  href: '/dashboard/cirqle-accounts', icon: ShieldCheck, requiredPerm: 'assets.view_cirqle', keywords: ['our own', 'agency', 'internal', 'own marketing', 'cirqle owned'] },
     ],
   },
   {

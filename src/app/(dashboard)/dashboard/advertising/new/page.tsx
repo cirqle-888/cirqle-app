@@ -6,7 +6,7 @@ import NewCampaignForm from './new-campaign-form'
 
 export const dynamic = 'force-dynamic'
 
-export default async function NewCampaignPage() {
+export default async function NewCampaignPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const me = await loadCurrentUser().catch(() => null)
   const isAdmin = me?.isAdmin ?? false
   const canCreate = isAdmin || hasPermission(me, PERMS.ADVERTISING_CREATE)
@@ -29,8 +29,14 @@ export default async function NewCampaignPage() {
       : Promise.resolve({ data: [] as { client_id: string; service_id: string; price: number }[] }),
   ])
 
+  // ?client= preselects the client (the Marketing Hub's "New campaign").
+  const sp = await searchParams
+  const wanted = typeof sp.client === 'string' ? sp.client : undefined
+  const initialClientId = wanted && (clientsRes.data || []).some(c => c.id === wanted) ? wanted : undefined
+
   return (
     <NewCampaignForm
+      initialClientId={initialClientId}
       clients={clientsRes.data || []}
       services={viewBilling
         ? (servicesRes.data || [])

@@ -30,7 +30,7 @@ const STATUS_DOT: Record<string, string> = {
   disconnected: 'bg-gray-500',
 }
 
-export function ClientSocialSection({ accounts }: { accounts: ClientSocialAccount[] }) {
+export function ClientSocialSection({ accounts, clientId }: { accounts: ClientSocialAccount[]; clientId?: string }) {
   // Each link only shows to someone its page will let in — the Hub and the
   // account pages check social permissions themselves (no sidebar entry), and
   // Connections is admin-only, so a plain link bounced e.g. a Task Manager to
@@ -39,11 +39,16 @@ export function ClientSocialSection({ accounts }: { accounts: ClientSocialAccoun
   const canHub = can('social.view_insights') || can('social.connect')
   const canAccount = can('social.view_insights')
   const canConnect = canOpenHref('/dashboard/connections', can, user.isAdmin)
+  // The client's Marketing Hub has everything (Pages, campaigns, content,
+  // leads) in one place — preferred over the all-clients Social Hub.
+  const marketingHref = clientId && canOpenHref('/dashboard/marketing', can, user.isAdmin) ? `/dashboard/marketing/${clientId}` : null
   return (
     <div className="bg-card border border-border rounded-2xl p-5">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-semibold flex items-center gap-1.5"><Share2 className="w-4 h-4" /> Social accounts</h2>
-        {canHub && (
+        {marketingHref ? (
+          <Link href={marketingHref} className="text-xs text-primary hover:underline flex items-center">Marketing <ChevronRight className="w-3 h-3" /></Link>
+        ) : canHub && (
           <Link href="/dashboard/social" className="text-xs text-primary hover:underline flex items-center">Hub <ChevronRight className="w-3 h-3" /></Link>
         )}
       </div>
