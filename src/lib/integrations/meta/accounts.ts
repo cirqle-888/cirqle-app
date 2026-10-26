@@ -13,6 +13,12 @@ export interface SocialDiscoveryResult {
   pages: number
   instagramAccounts: number
   errors: string[]
+  /**
+   * Pages a business portfolio owns (or manages for a client) that this login
+   * has NOT shared with the app — they cannot be discovered until someone
+   * ticks them in Facebook's page selection for the app.
+   */
+  ungrantedPages?: { id: string; name: string }[]
 }
 
 interface MetaPage {
@@ -29,6 +35,54 @@ interface MetaPage {
     profile_picture_url?: string
     followers_count?: number
   }
+}
+
+const PAGE_FIELDS =
+  'id,name,access_token,category,followers_count,picture{url},' +
+  'instagram_business_account{id,username,name,profile_picture_url,followers_count}'
+
+/**
+ * Pages in the user's business portfolios (owned + client Pages) that are not
+ * in me/accounts. Each is read individually: Meta returns it (with a Page
+ * token) only when the Page was granted to the app, so a failed read means
+ * "not shared with the app" and is reported, not treated as an error.
+ * Best-effort throughout — a portfolio we cannot list is simply skipped.
+ */
+export async function discoverBusinessPages(
+  userToken: string,
+  known: Set<string>,
+): Promise<{ pages: MetaPage[]; ungranted: { id: string; name: string }[] }> {
+  const found: MetaPage[] = []
+  const ungranted: { id: string; name: string }[] = []
+  let businesses: { id: string }[] = []
+  try {
+    businesses = await metaGraphAll<{ id: string }>('me/businesses', { token: userToken, params: { fields: 'id', limit: 50 } })
+  } catch {
+    return { pages: found, ungranted }
+  }
+
+  const candidates = new Map<string, string>()
+  for (const b of businesses) {
+    for (const edge of ['owned_pages', 'client_pages']) {
+      try {
+        const rows = await metaGraphAll<{ id: string; name: string }>(`${b.id}/${edge}`, {
+          token: userToken, params: { fields: 'id,name', limit: 100 },
+        })
+        for (const r of rows) if (!known.has(r.id)) candidates.set(r.id, r.name)
+      } catch { /* portfolio edge not readable — skip */ }
+    }
+  }
+
+  for (const [id, name] of candidates) {
+    try {
+      const page = await metaGraph<MetaPage>(id, { token: userToken, params: { fields: PAGE_FIELDS }, retries: 0 })
+      if (page?.id && page.access_token) found.push(page)
+      else ungranted.push({ id, name })
+    } catch {
+      ungranted.push({ id, name })
+    }
+  }
+  return { pages: found, ungranted }
 }
 
 /**
@@ -67,17 +121,19 @@ export async function discoverSocialAccounts(
   try {
     pages = await metaGraphAll<MetaPage>('me/accounts', {
       token: userToken,
-      params: {
-        fields:
-          'id,name,access_token,category,followers_count,picture{url},' +
-          'instagram_business_account{id,username,name,profile_picture_url,followers_count}',
-        limit: 50,
-      },
+      params: { fields: PAGE_FIELDS, limit: 50 },
     })
   } catch (err: any) {
     result.errors.push(redactTokens(err?.message ?? 'Failed to list Pages'))
     return result
   }
+
+  // me/accounts lists only Pages the person holds a role on directly. Pages
+  // reached through a business portfolio (agency-owned or client Pages) are
+  // missing from it even when granted to the app — add those too.
+  const fromBusinesses = await discoverBusinessPages(userToken, new Set(pages.map(p => p.id)))
+  pages = [...pages, ...fromBusinesses.pages]
+  if (fromBusinesses.ungranted.length) result.ungrantedPages = fromBusinesses.ungranted
 
   const now = new Date().toISOString()
 

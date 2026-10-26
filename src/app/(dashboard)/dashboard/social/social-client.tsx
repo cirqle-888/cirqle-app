@@ -211,6 +211,14 @@ export default function SocialClient({
           'Accounts refreshed',
           `${res.data?.pages ?? 0} Pages, ${res.data?.instagramAccounts ?? 0} Instagram accounts.`,
         )
+        const ungranted = res.data?.ungrantedPages ?? []
+        if (ungranted.length > 0) {
+          toast.info(
+            'Some Pages are not shared with Cirqle',
+            `${ungranted.map(p => p.name).join(', ')} — reconnect Meta and tick ${ungranted.length === 1 ? 'it' : 'them'} on the Pages step.`,
+            12000,
+          )
+        }
       } else {
         toast.error('Refresh failed', res.error)
       }

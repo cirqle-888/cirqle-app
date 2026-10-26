@@ -17,7 +17,7 @@ import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { revalidatePath } from 'next/cache'
 import { syncSocialAccount } from '@/lib/integrations/meta/insights'
-import { discoverSocialAccounts } from '@/lib/integrations/meta/accounts'
+import { discoverSocialAccounts, type SocialDiscoveryResult } from '@/lib/integrations/meta/accounts'
 import { decryptToken } from '@/lib/integrations/tokens'
 
 const REVALIDATE = '/dashboard/social'
@@ -195,7 +195,7 @@ export async function disconnectSocialAccount(accountId: string): Promise<Action
 
 export async function refreshSocialAccountsForConnection(
   connectionId: string,
-): Promise<ActionResult<{ pages: number; instagramAccounts: number; errors: string[] }>> {
+): Promise<ActionResult<SocialDiscoveryResult>> {
   const guard = await requirePermission(PERMS.SOCIAL_CONNECT)
   if (!guard.ok) return { ok: false, error: guard.error }
 
