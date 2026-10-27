@@ -686,6 +686,20 @@ export function canPullBack(item: RoutableItem): boolean {
 }
 
 /**
+ * Has this item produced FINISHED work — a delivered/done/invoiced/paid task
+ * (through the inbox or linked directly), or a request completed or delivered
+ * to the client? Removing its plan entry is still allowed, but only on an
+ * explicit acknowledgement, because the task and request it points at are a
+ * record the planner is walking away from.
+ */
+export function isFinishedItem(item: RoutableItem): boolean {
+  if (item.task && !item.task.deleted_at && isFinishedTaskStatus(item.task.status)) return true
+  const promoted = item.request?.promoted_task
+  if (promoted && !promoted.deleted_at) return isFinishedTaskStatus(promoted.status)
+  return ['completed', 'delivered'].includes(item.request?.status ?? '')
+}
+
+/**
  * Is a task (live, not soft-deleted) holding this item's schedule — through the
  * inbox or linked directly? Then the plan entry's fields are frozen.
  */

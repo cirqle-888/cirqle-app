@@ -910,7 +910,16 @@ export async function getRefUploadUrl(
   return { ok: true, data: { uploadUrl: data.signedUrl, publicUrl: pub.publicUrl } }
 }
 
-export async function deleteCalendarItem(itemId: string): Promise<ActionResult> {
+/**
+ * Remove a plan entry from the calendar. Only the entry goes: a task and its
+ * request are never deleted or cancelled here when they hold the item, and
+ * finished work (a delivered/done/invoiced/paid task, a request completed or
+ * delivered to the client) is removed from the PLAN only, and only when the
+ * caller passes `acknowledgeFinished` after an explicit confirmation.
+ */
+export async function deleteCalendarItem(
+  itemId: string, opts: { acknowledgeFinished?: boolean } = {},
+): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.SOCIAL_MANAGE)
   if (!guard.ok) return { ok: false, error: guard.error }
 
@@ -923,20 +932,21 @@ export async function deleteCalendarItem(itemId: string): Promise<ActionResult> 
   const req = (item as any).request
   const promoted = req?.promoted_task_id ? (Array.isArray(req.promoted_task) ? req.promoted_task[0] : req.promoted_task) : null
   const taskHoldsIt = !!promoted && !promoted.deleted_at
-  if (taskHoldsIt && isFinishedTaskStatus(promoted.status)) {
-    return { ok: false, error: `Its task is already ${promoted.status} — that is finished work, so the plan entry stays. Handle it from the Tasks page.` }
-  }
-  if (!taskHoldsIt && req && (req.status === 'completed' || req.status === 'delivered')) {
-    return {
-      ok: false,
-      error: `Its request (${req.ref_no ? `REQ-${String(req.ref_no).padStart(4, '0')}` : 'linked'}) is already ${req.status} — the client has been notified. Handle it in the Requests inbox.`,
-    }
+  const finished = (taskHoldsIt && isFinishedTaskStatus(promoted.status))
+    || (!taskHoldsIt && !!req && (req.status === 'completed' || req.status === 'delivered'))
+  if (finished && !opts.acknowledgeFinished) {
+    const what = taskHoldsIt
+      ? `its task is already ${promoted.status}`
+      : `its request (${req.ref_no ? `REQ-${String(req.ref_no).padStart(4, '0')}` : 'linked'}) is already ${req.status} and the client has been notified`
+    return { ok: false, error: `This is finished work — ${what}. Removing it only takes the entry off the calendar; confirm that to continue.` }
   }
 
   // A promoted request is NOT cancelled from here: its task is real work that
   // is cancelled on the Tasks page. Only the plan entry goes — the request and
   // the task are left exactly as they are.
-  if (req?.id && !taskHoldsIt && !isClosedRequestStatus(req.status)) {
+  // Finished work is never cancelled either: a completed request the client
+  // has seen would flip to Cancelled on their portal.
+  if (req?.id && !taskHoldsIt && !finished && !isClosedRequestStatus(req.status)) {
     // setRequestStatus writes status + client_status + status_updated_at and
     // logs a requester-visible status_changed entry (core.ts) — the inline
     // update this replaces flipped the portal to Cancelled with no timeline.

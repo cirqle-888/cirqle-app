@@ -71,14 +71,23 @@ describe('deleteCalendarItem — an item whose request became a task', () => {
     expect(cancelled).toEqual([])          // the request is NOT cancelled from here
   })
 
-  it('refuses once the task is finished work', async () => {
+  it('refuses finished work unless the caller acknowledges it', async () => {
     for (const status of ['delivered', 'done', 'invoiced', 'paid']) {
       items = [milkees(status)]
       const res = await deleteCalendarItem('i1')
       expect(res.ok).toBe(false)
       expect(res.error).toMatch(new RegExp(`already ${status}`))
+      expect(res.error).toMatch(/confirm/)
     }
     expect(deleted).toEqual([])
+  })
+
+  it('removes finished work from the PLAN only once acknowledged, never touching the task or request', async () => {
+    items = [milkees('delivered', { reqStatus: 'delivered' })]
+    const res = await deleteCalendarItem('i1', { acknowledgeFinished: true })
+    expect(res).toEqual({ ok: true })
+    expect(deleted).toEqual(['i1'])
+    expect(cancelled).toEqual([])
   })
 
   it('still cancels the request of an item that was never a task', async () => {
@@ -88,10 +97,13 @@ describe('deleteCalendarItem — an item whose request became a task', () => {
     expect(deleted).toEqual(['i1'])
   })
 
-  it('still refuses a completed request the client has seen', async () => {
+  it('a completed request the client has seen needs the acknowledgement too, and is not cancelled', async () => {
     items = [{ id: 'i1', status: 'requested', request_id: 'r1', request: { id: 'r1', ref_no: 5, status: 'completed', promoted_task_id: null, promoted_task: null } }]
     expect((await deleteCalendarItem('i1')).ok).toBe(false)
     expect(deleted).toEqual([])
+    expect((await deleteCalendarItem('i1', { acknowledgeFinished: true })).ok).toBe(true)
+    expect(deleted).toEqual(['i1'])
+    expect(cancelled).toEqual([])
   })
 })
 

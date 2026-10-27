@@ -13,6 +13,7 @@ import { clientPickerSub } from '@/lib/clients/draft'
 const QuickCreateClientModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(m => m.QuickCreateClientModal), { ssr: false })
 import AppSelect from '@/components/ui/app-select'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { refLabel } from '@/lib/requests/core'
 import { planPackageCalendar, cadenceLabel, suggestPlacements } from '@/lib/packages/calendar-coverage'
@@ -28,7 +29,7 @@ import {
   CONTENT_TYPES, CONTENT_TYPE_LABEL, CONTENT_TYPE_CHIP, VARIANT_TYPES,
   PLATFORMS, PLATFORM_LABEL, platformLabels, contentTypeWithVariants,
   PROGRESS_LABEL, PROGRESS_CHIP, resolveItemProgress, isClosedRequestStatus,
-  isUnrouted, canPullBack, isPlanFrozen,
+  isUnrouted, canPullBack, isPlanFrozen, isFinishedItem,
   formatShortDateRange, suggestServiceId, type CaptionCanvas,
   type ItemProgress,
 } from '@/lib/social/plan'
@@ -804,15 +805,23 @@ export default function SocialCalendarClient({
     router.refresh()
   }
 
-  async function removeItem(itemId: string) {
-    // A task holds this item: only the plan entry goes. Say so, because the
-    // task and its request stay behind and are cancelled where they live.
+  // Remove asks first when a task holds the item or the work is finished. An
+  // in-app dialog, not window.confirm: the desktop shell returns false from the
+  // native one without drawing anything, so Remove would silently do nothing.
+  const [removeConfirm, setRemoveConfirm] = useState<{ itemId: string; title: string; finished: boolean } | null>(null)
+
+  function askRemove(itemId: string) {
     const it = items.find(i => i.id === itemId)
-    if (it && isPlanFrozen(it) && !confirm(
-      `Remove "${it.title}" from the calendar?\n\nOnly the plan entry is removed. Its task and request are left as they are — cancel or delete them from the Tasks and Requests pages.`,
-    )) return
+    if (it && (isPlanFrozen(it) || isFinishedItem(it))) {
+      setRemoveConfirm({ itemId, title: it.title, finished: isFinishedItem(it) })
+      return
+    }
+    void removeItem(itemId)
+  }
+
+  async function removeItem(itemId: string, acknowledgeFinished = false) {
     setBusy(`delete:${itemId}`)
-    const res = await deleteCalendarItem(itemId)
+    const res = await deleteCalendarItem(itemId, { acknowledgeFinished })
     setBusy(null)
     if (!res.ok) { toast.toastError('Could not remove the item', res.error); return }
     setItemModal(null)
@@ -1741,7 +1750,7 @@ export default function SocialCalendarClient({
                   This item is already a task — the plan entry is frozen. Manage it from the Tasks page.
                   {editingPullable
                     ? ' Added by mistake? Use Remove to take it off the calendar, or Re-plan to unlink it and edit the plan again. The task and its request are left untouched.'
-                    : ' Its task is finished work, so the plan entry stays.'}
+                    : ' Its task is finished work, so it cannot be re-planned. Remove takes only the calendar entry off, after a typed confirmation.'}
                 </div>
               )}
               {/* Shared Content Brief (Title, Content type, Caption, Reference
@@ -2051,9 +2060,9 @@ export default function SocialCalendarClient({
                   panelTitle={itemForm.title?.trim() || 'Calendar item'}
                 />
               )}
-              {itemModal.mode === 'edit' && (!editingFrozen || editingPullable) && (
+              {itemModal.mode === 'edit' && (
                 <button
-                  onClick={() => removeItem(itemModal.itemId!)}
+                  onClick={() => askRemove(itemModal.itemId!)}
                   disabled={busy === `delete:${itemModal.itemId}`}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:text-red-500 disabled:opacity-50"
                 >
@@ -2121,6 +2130,20 @@ export default function SocialCalendarClient({
             </div>
           </div>
         </ModalOverlay>
+      )}
+
+      {removeConfirm && (
+        <ConfirmDialog
+          title={removeConfirm.finished ? 'Remove finished work from the calendar?' : 'Remove from the calendar?'}
+          body={removeConfirm.finished
+            ? `"${removeConfirm.title}" has finished work behind it (a delivered task or a request the client has already seen). Only the calendar entry is removed; the task and request stay as the record. The month's plan, counts and reports will no longer include it. Type REMOVE to confirm.`
+            : `"${removeConfirm.title}" has a task behind it. Only the calendar entry is removed; its task and request are left as they are — cancel or delete them from the Tasks and Requests pages.`}
+          confirmLabel="Remove from calendar"
+          danger
+          requireTypedText={removeConfirm.finished ? 'REMOVE' : undefined}
+          onConfirm={() => { const c = removeConfirm; setRemoveConfirm(null); void removeItem(c.itemId, c.finished) }}
+          onCancel={() => setRemoveConfirm(null)}
+        />
       )}
 
       {quickClient !== null && (

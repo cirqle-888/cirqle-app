@@ -3,7 +3,7 @@ import {
   composeRequestDescription, buildSocialMeta, resolveItemProgress, platformLabels,
   isTerminalRequestStatus, isClosedRequestStatus, contentTypeWithVariants,
   sanitizeCaptionHtml, captionHtmlToText, formatShortDateRange,
-  sanitizeCaptionCanvas, canvasToText, isUnrouted, canPullBack, isPlanFrozen, dueDateForPublish,
+  sanitizeCaptionCanvas, canvasToText, isUnrouted, canPullBack, isPlanFrozen, isFinishedItem, dueDateForPublish,
   suggestContentType,
 } from './plan'
 
@@ -511,6 +511,21 @@ describe('canPullBack', () => {
 
   it('there is nothing to pull back from an unrouted item', () => {
     expect(canPullBack({ status: 'planned' })).toBe(false)
+  })
+})
+
+describe('isFinishedItem', () => {
+  it('is finished for a delivered task, through the inbox or linked directly', () => {
+    expect(isFinishedItem({ status: 'requested', request_id: 'r1', request: { status: 'delivered', promoted_task: { status: 'delivered' } } })).toBe(true)
+    expect(isFinishedItem({ status: 'tasked', task_id: 't1', task: { status: 'paid' } })).toBe(true)
+  })
+  it('is finished for a request the client has already seen', () => {
+    expect(isFinishedItem({ status: 'requested', request_id: 'r1', request: { status: 'completed' } })).toBe(true)
+  })
+  it('is not finished while work is open, or when its finished task was deleted', () => {
+    expect(isFinishedItem({ status: 'requested', request_id: 'r1', request: { status: 'in_progress', promoted_task: { status: 'in_progress' } } })).toBe(false)
+    expect(isFinishedItem({ status: 'requested', request_id: 'r1', request: { status: 'cancelled', promoted_task: { status: 'done', deleted_at: '2026-10-20' } } })).toBe(false)
+    expect(isFinishedItem({ status: 'planned' })).toBe(false)
   })
 })
 
