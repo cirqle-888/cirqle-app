@@ -238,6 +238,15 @@ export default function ClientHub({ client, clients, withMarketing, hub, issues,
               )}
             </div>
 
+            <div className="rounded-xl border border-border bg-card p-4">
+              <h2 className="text-sm font-semibold mb-2">Client workspace</h2>
+              <p className="text-xs text-muted-foreground mb-3">Client details, work, advertising and billing in one place.</p>
+              <div className="flex flex-wrap gap-2">
+                <Link href={`/dashboard/clients/${client.id}`} className="rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-secondary">Client details &amp; work</Link>
+                {access.ads && <Link href={`/dashboard/advertising/clients/${client.id}`} className="rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-secondary">Ads &amp; reports</Link>}
+                {access.ads && <Link href={`/dashboard/advertising/funds?client=${client.id}`} className="rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-secondary">Ad funds</Link>}
+              </div>
+            </div>
             <AttentionPanel items={allIssues} canSnooze={false} />
 
             <div className="grid gap-4 lg:grid-cols-2">
