@@ -33,8 +33,10 @@ describe('parsing money', () => {
     expect(parseMoney('abc')).toBeNull()
   })
   it('finds the amount in extra_data JSON at any depth', () => {
-    expect(parseFundingAmount('{"amount":"800.00","currency":"INR"}')).toEqual({ amount: 800, currency: 'INR' })
-    expect(parseFundingAmount({ new_value: { amount: 1000, currency: 'INR' } })).toEqual({ amount: 1000, currency: 'INR' })
+    // JSON amounts are in paise — live: a ₹200 top-up arrived as 20000.
+    expect(parseFundingAmount('{"amount":"20000","currency":"INR"}')).toEqual({ amount: 200, currency: 'INR' })
+    expect(parseFundingAmount({ new_value: { amount: 165200, currency: 'INR' } })).toEqual({ amount: 1652, currency: 'INR' })
+    expect(parseFundingAmount({ amount: 5000 }, 'JPY')).toEqual({ amount: 5000, currency: null })
     expect(parseFundingAmount('Added ₹1,652.00 to balance')).toEqual({ amount: 1652, currency: 'INR' })
     expect(parseFundingAmount(null)).toEqual({ amount: null, currency: null })
   })

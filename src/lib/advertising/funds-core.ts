@@ -59,13 +59,21 @@ export function parseMoney(v: unknown): number | null {
 const AMOUNT_KEYS = ['amount', 'funded_amount', 'funding_amount', 'payment_amount', 'value', 'new_value']
 const CURRENCY_KEYS = ['currency', 'currency_code']
 
+/** Currencies Meta keeps with no minor unit (amounts are already whole units). */
+const ZERO_DECIMAL = new Set(['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'HUF', 'TWD', 'COP', 'PYG', 'IDR'])
+
 /**
  * Best-effort amount + currency from an activity's `extra_data` (a JSON
  * string whose shape Meta does not document). Looks for amount-like keys at
  * any depth, preferring the most specific names, and falls back to a money
  * pattern in the raw text. Never throws.
+ *
+ * Amounts under JSON keys are in the currency's MINOR unit — confirmed live on
+ * 27 Oct 2026: a ₹200 top-up arrives as 20000 — so they are divided by 100
+ * (except zero-decimal currencies). Amounts read from display text ("₹1,652.00")
+ * are already in rupees.
  */
-export function parseFundingAmount(extra: unknown): { amount: number | null; currency: string | null } {
+export function parseFundingAmount(extra: unknown, fallbackCurrency: string | null = null): { amount: number | null; currency: string | null } {
   let obj: unknown = extra
   if (typeof extra === 'string') {
     try { obj = JSON.parse(extra) } catch { obj = extra }
@@ -91,7 +99,13 @@ export function parseFundingAmount(extra: unknown): { amount: number | null; cur
   }
   visit(obj, 0)
 
-  if (amount === null && typeof obj === 'string') {
+  if (amount !== null) {
+    const ccy = currency ?? fallbackCurrency
+    if (!ccy || !ZERO_DECIMAL.has(ccy)) amount = r2((amount as number) / 100)
+    return { amount, currency }
+  }
+
+  if (typeof obj === 'string') {
     const m = obj.match(/(?:₹|INR|Rs\.?)\s*([\d,]+(?:\.\d+)?)|([\d,]+(?:\.\d+)?)\s*INR/i)
     if (m) amount = parseMoney(m[1] ?? m[2])
     if (amount !== null && !currency && /INR|₹|Rs/i.test(obj)) currency = 'INR'

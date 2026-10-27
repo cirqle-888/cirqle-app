@@ -185,7 +185,21 @@ export async function loadFundsData(): Promise<FundsData> {
       invoiceStatus: inv.status ?? null, projectId: r.ad_project_id ?? null,
     })
   }
-  const statement = buildStatement(billableSpend, billed, currentPeriod)
+  // Legacy lines that rebilled a top-up only count from the month the client's
+  // spend data starts: an older top-up line has no spend to set against (it
+  // predates the sync window), so it would show as "invoiced extra" forever.
+  const firstSpendPeriod = new Map<string, string>()
+  for (const s of billableSpend) {
+    if (!s.clientId || s.spendExGst <= 0) continue
+    const p = s.date.slice(0, 7)
+    if (!firstSpendPeriod.has(s.clientId) || p < firstSpendPeriod.get(s.clientId)!) firstSpendPeriod.set(s.clientId, p)
+  }
+  const comparable = billed.filter(b => {
+    if (b.source === 'ad_spend') return true
+    const first = firstSpendPeriod.get(b.clientId)
+    return !!first && b.period >= first
+  })
+  const statement = buildStatement(billableSpend, comparable, currentPeriod)
 
   // ── Wallet runway → top-up suggestions ───────────────────────────────────
   const clientIds = [...new Set(campaigns.filter(c => c.clientId).map(c => c.clientId as string))]

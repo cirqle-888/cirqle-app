@@ -106,11 +106,15 @@ export async function syncAccountBilling(
     const amountSpent = snap.amount_spent != null ? Math.round(Number(snap.amount_spent)) / 100 : null
 
     // 2 ── Funding / billing events ───────────────────────────────────────
+    // Events always re-read the full backfill window (cheap, money events are
+    // few): a re-sync then overwrites every stored row, so a parsing fix heals
+    // old rows instead of only new ones. Spend below stays incremental.
+    const eventsSince = addDaysISO(today, -(opts.backfillDays ?? BACKFILL_DAYS))
     const activities = await metaGraphAll<MetaActivity>(`${act}/activities`, {
       token,
       params: {
         fields: 'event_type,event_time,extra_data,object_id,translated_event_type',
-        since: unix(`${sinceDay}T00:00:00Z`),
+        since: unix(`${eventsSince}T00:00:00Z`),
         until: unix(new Date().toISOString()) + 60,
         limit: 200,
       },
@@ -119,7 +123,7 @@ export async function syncAccountBilling(
     const eventRows = activities.flatMap(a => {
       const status = classifyFundingEvent(a.event_type)
       if (!status || !a.event_time) return []
-      const parsed = parseFundingAmount(a.extra_data)
+      const parsed = parseFundingAmount(a.extra_data, currency(snap))
       let extra: unknown = a.extra_data ?? null
       if (typeof extra === 'string') { try { extra = JSON.parse(extra) } catch { extra = { raw: extra } } }
       const extraObj = extra && typeof extra === 'object' ? extra as Record<string, unknown> : { value: extra }
