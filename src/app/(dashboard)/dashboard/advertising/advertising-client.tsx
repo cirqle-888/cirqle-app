@@ -502,6 +502,15 @@ export default function AdvertisingClient({
             <Link2 className="h-4 w-4 text-pink-500" />
             Ad Accounts
           </Link>
+          {perms.viewFinancials && (
+            <Link
+              href="/dashboard/advertising/funds"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:border-pink-500/40 transition-colors"
+            >
+              <Wallet className="h-4 w-4 text-pink-500" />
+              Ad Funds
+            </Link>
+          )}
           {perms.create && (
             <Link
               href="/dashboard/advertising/new"
@@ -870,12 +879,21 @@ function ClientSection({ group, history, candidates, walletSupported, canManage,
                 <History className="h-3.5 w-3.5" /> History
                 <ChevronDown className={`h-3 w-3 transition-transform ${showHistory ? 'rotate-180' : ''}`} />
               </button>
+              {canManage && group.clientId !== COMPANY_KEY && (
+                <Link
+                  href={`/dashboard/advertising/funds?client=${group.clientId}#top-up`}
+                  className="inline-flex items-center gap-1 rounded-lg gradient-bg px-2.5 py-1.5 text-xs font-medium text-white hover:opacity-90"
+                >
+                  <Wallet className="h-3.5 w-3.5" /> Top up Meta
+                </Link>
+              )}
               {canManage && (
                 <button
                   onClick={() => setShowAdd(v => !v)}
-                  className="inline-flex items-center gap-1 rounded-lg gradient-bg px-2.5 py-1.5 text-xs font-medium text-white hover:opacity-90"
+                  title="Credit the wallet from a payment already in the Cashbook"
+                  className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium hover:bg-secondary"
                 >
-                  <Plus className="h-3.5 w-3.5" /> Add Funds
+                  <Plus className="h-3.5 w-3.5" /> From Cashbook
                 </button>
               )}
             </div>

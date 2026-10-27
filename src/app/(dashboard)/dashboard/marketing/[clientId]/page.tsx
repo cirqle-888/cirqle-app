@@ -75,6 +75,7 @@ export default async function ClientMarketingPage({ params }: { params: Promise<
         reportPreferences: ads.prefs.byClient,
         reportPreferencesSupported: ads.prefs.supported,
         perms: adsPerms,
+        adFunds: ads.adFunds,
       } : null}
       access={access}
       today={today}

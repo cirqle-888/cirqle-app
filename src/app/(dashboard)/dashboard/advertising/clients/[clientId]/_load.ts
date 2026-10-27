@@ -9,6 +9,7 @@ import { hasPermission, type CurrentUser } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { loadClientReportPreferences } from '@/lib/reporting/preferences'
 import { loadAdvertisingData } from '../../_data'
+import { loadFundsData, sliceFundsForClient } from '../../funds/_data'
 
 export interface ClientAdsPerms {
   create: boolean
@@ -53,5 +54,9 @@ export async function loadClientAds(clientId: string, perms: ClientAdsPerms) {
       : Promise.resolve([] as any[]),
     loadClientReportPreferences(admin, [clientId]),
   ])
-  return { data, reports, prefs }
+  // Meta ad funds (top-up, suggestion, statement) — wallet-layer, so gated.
+  const adFunds = perms.viewFinancials
+    ? await loadFundsData().then(d => sliceFundsForClient(d, clientId), () => null)
+    : null
+  return { data, reports, prefs, adFunds }
 }

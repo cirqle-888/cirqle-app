@@ -2157,6 +2157,8 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
       .in('client_id', uniqueClientIds)
       .eq('type', 'outflow')
       .is('deleted_at', null)
+      // Ad top-ups are wallet funding, billed as actual spend — never rebilled.
+      .is('ad_account_id', null)
     const expEntriesRaw = (allExpEntries || []) as { id: string; client_id: string; entry_date: string; description: string | null; amount_inr: number }[]
     // Find already-billed entries
     const { data: billedExpItems } = expEntriesRaw.length
@@ -2291,6 +2293,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
           .eq('client_id', group.client_id)
           .eq('type', 'outflow')
           .is('deleted_at', null)
+          .is('ad_account_id', null) // ad top-ups are billed as actual spend
           .gte('entry_date', monthStart)
           .lte('entry_date', monthEnd)
         if (expEntries?.length) {

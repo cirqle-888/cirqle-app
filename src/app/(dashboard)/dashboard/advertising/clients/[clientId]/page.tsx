@@ -24,7 +24,7 @@ export default async function ClientWorkspacePage({ params }: { params: Promise<
   const { data: client } = await admin.from('clients').select('id, name, code').eq('id', clientId).maybeSingle()
   if (!client) notFound()
 
-  const { data, reports, prefs } = await loadClientAds(clientId, perms)
+  const { data, reports, prefs, adFunds } = await loadClientAds(clientId, perms)
 
   return (
     <ClientWorkspace
@@ -41,6 +41,7 @@ export default async function ClientWorkspacePage({ params }: { params: Promise<
       reportPreferences={prefs.byClient}
       reportPreferencesSupported={prefs.supported}
       perms={perms}
+      adFunds={adFunds}
     />
   )
 }

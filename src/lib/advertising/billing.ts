@@ -1,12 +1,13 @@
 /**
- * Advertising — allocation-based billing engine (server-only).
+ * Advertising — billing engine (server-only).
  *
- * The agency funds ad platforms in advance (a Cashbook outflow), then allocates
- * portions of that entry to client campaigns (ad_fund_allocations). Billing is
- * derived from the ACTUAL allocated funds (GST-inclusive, what was really paid),
- * not the estimated campaign budget and not the platform-reported spend:
+ * The agency funds ad platforms in advance (a Cashbook top-up credited to the
+ * client's wallet and allocated to campaigns). Since 20261027120000 the client
+ * is billed the ACTUAL platform spend incl. 18% GST — unspent top-ups simply
+ * carry forward in the wallet:
  *
- *     basis          = Σ active allocations   (fallback: ad_budget_amount)
+ *     basis          = Σ platform spend × 1.18   (see ad-spend-invoicing.ts)
+ *                      fallback: Σ active allocations → ad_budget_amount
  *     service charge = computeServiceCharge(basis, type, value)
  *
  * recomputeCampaignBilling() re-derives the campaign task's billing_amount and
@@ -22,6 +23,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { computeBudgetTotals, computeServiceCharge } from './budget'
 import { PLATFORM_LABEL } from './types'
+import { getSpendBasis, type SpendProject } from './ad-spend-invoicing'
 
 const round2 = (v: number) => Math.round((Number(v || 0) + Number.EPSILON) * 100) / 100
 
@@ -93,6 +95,19 @@ export async function getAllocationBasis(
 }
 
 /**
+ * The billing basis in the campaign's budget currency: actual spend incl. GST
+ * once the platform reports any; before that, the allocated funds (0 when
+ * none — unchanged from the allocation-only engine, so a draft campaign never
+ * bills a service charge on an estimate).
+ */
+export async function getBillingBasisNative(admin: SupabaseClient, project: SpendProject, currency: string): Promise<number> {
+  const spend = await getSpendBasis(admin, project)
+  if (spend.hasSpend) return fromInr(admin, spend.spendInclGstInr, currency)
+  const basis = await getAllocationBasis(admin, project.id, currency)
+  return basis.allocatedNative
+}
+
+/**
  * Re-derives the campaign task's billing from the latest allocation basis and
  * resyncs the campaign's draft invoice. Call after ANY event that changes the
  * basis: allocation added/removed, service charge % edited, funding entry
@@ -112,8 +127,7 @@ export async function recomputeCampaignBilling(admin: SupabaseClient, projectId:
     if ((project as any).scope === 'company') return
 
     const currency = (project as any).ad_budget_currency || 'INR'
-    const basis = await getAllocationBasis(admin, projectId, currency)
-    const spendBasis = basis.allocatedNative
+    const spendBasis = await getBillingBasisNative(admin, project, currency)
     const serviceCharge = computeServiceCharge(
       spendBasis, (project as any).service_charge_type, Number((project as any).service_charge_value || 0),
     )
@@ -166,8 +180,10 @@ export async function writeInvoiceLines(
 ): Promise<void> {
   const currency = project.ad_budget_currency || project.client?.default_currency || 'INR'
   const basis = await getAllocationBasis(admin, projectId, currency)
+  const spend = await getSpendBasis(admin, project)
   const totals = computeBudgetTotals({
-    adBudget: basis.hasAllocations ? basis.allocatedNative : Number(project.ad_budget_amount || 0),
+    adBudget: spend.hasSpend ? await fromInr(admin, spend.spendInclGstInr, currency)
+      : basis.hasAllocations ? basis.allocatedNative : Number(project.ad_budget_amount || 0),
     serviceChargeType: project.service_charge_type,
     serviceChargeValue: Number(project.service_charge_value || 0),
     taxPercent: Number(project.tax_percent || 0),
@@ -188,8 +204,10 @@ export async function writeInvoiceLines(
     })
   }
 
-  // Advertising spend → separate section (allocated funds when available).
-  const adInr = basis.hasAllocations ? basis.allocatedInr : await toInr(admin, totals.adSpend, currency)
+  // Advertising spend → separate section: actual spend incl. GST, else the
+  // allocated funds, else the estimate.
+  const adInr = spend.hasSpend ? spend.spendInclGstInr
+    : basis.hasAllocations ? basis.allocatedInr : await toInr(admin, totals.adSpend, currency)
   const adDesc = `${PLATFORM_LABEL[project.platform] || 'Advertising'} Ad Spend — ${project.campaign_name}`
   const { data: adItem } = await admin.from('invoice_ad_spend_items')
     .select('id').eq('invoice_id', invoiceId).eq('ad_project_id', projectId).limit(1).maybeSingle()

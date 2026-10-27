@@ -1,4 +1,4 @@
-import { createTypedAdminClient } from '@/lib/supabase/server'
+import { createTypedAdminClient, createAdminClient } from '@/lib/supabase/server'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { isTaskMonthProtected } from '@/lib/payroll/compute'
@@ -491,7 +491,14 @@ export async function syncDraftInvoiceExpenses(entryId: string, opts: { cushionE
     .eq('id', entryId).maybeSingle()
   const entryMarkupType  = (markupRow as { markup_type?: string } | null)?.markup_type ?? 'none'
   const entryMarkupValue = Number((markupRow as { markup_value?: number } | null)?.markup_value ?? 0)
-    
+
+  // An ad top-up (wallet funding, migration 20261027120000) is never rebilled:
+  // the client is billed the actual ad spend instead. Optional column — on a
+  // pre-migration DB this read fails and the entry is treated as before.
+  const { data: adRow } = await createAdminClient().from('cashbook_entries')
+    .select('ad_account_id').eq('id', entryId).maybeSingle()
+  const isAdTopUp = !!(adRow as { ad_account_id?: string | null } | null)?.ad_account_id
+
   const invoiceIdsToRecalculate = new Set<string>()
 
   // 2. Check if this entry is already an expense item
@@ -500,7 +507,7 @@ export async function syncDraftInvoiceExpenses(entryId: string, opts: { cushionE
     .eq('cashbook_entry_id', entryId)
     .maybeSingle()
 
-  if (!entry || entry.deleted_at || opts.released || entry.type !== 'outflow' || !entry.client_id || !entry.entry_date) {
+  if (!entry || entry.deleted_at || opts.released || isAdTopUp || entry.type !== 'outflow' || !entry.client_id || !entry.entry_date) {
     if (existingExp) {
       const { data: inv } = await supabase.from('invoices').select('status').eq('id', existingExp.invoice_id).single()
       if (inv && inv.status === 'draft') {

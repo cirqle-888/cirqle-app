@@ -9,7 +9,7 @@ import { ArrowLeft } from 'lucide-react'
 // deeper pages like the campaign-mapping screen (which carry their own crumb)
 // are intentionally excluded.
 const SUBROUTES = new Set([
-  'integrations', 'new', 'reports', 'forecast', 'health', 'admin', 'ai-center', 'executive',
+  'integrations', 'new', 'reports', 'funds', 'forecast', 'health', 'admin', 'ai-center', 'executive',
 ])
 
 export function AdBackBar() {

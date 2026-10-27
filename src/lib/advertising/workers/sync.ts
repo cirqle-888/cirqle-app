@@ -5,6 +5,8 @@ import { ingestMetrics } from '@/lib/advertising/pipeline'
 import { decryptToken } from '@/lib/integrations/tokens'
 import { toISODate, addDaysISO } from '@/lib/utils/local-date'
 import { daySpan, isISODate } from '@/lib/reporting/config'
+import { recomputeCampaignBilling } from '@/lib/advertising/billing'
+import { syncCampaignAdSpendLines } from '@/lib/advertising/ad-spend-invoicing'
 
 
 export async function syncProjectWorker(job: DequeuedJob): Promise<any> {
@@ -117,6 +119,11 @@ export async function syncProjectWorker(job: DequeuedJob): Promise<any> {
       trigger_source: 'manual',
     })
     if (logErr) console.error('[syncProjectWorker] Failed to write sync log:', logErr)
+
+    // Spend changed → re-derive the spend-based billing (service charge) and
+    // the campaign's monthly ad-spend invoice lines. Both best-effort.
+    await recomputeCampaignBilling(admin, project.id)
+    await syncCampaignAdSpendLines(admin, project.id)
 
     // Enqueue dependent notifications and reports
     if (!job.payload.suppress_notifications) await enqueueJob({

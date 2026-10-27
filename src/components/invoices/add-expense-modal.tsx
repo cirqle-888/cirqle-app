@@ -100,6 +100,7 @@ export default function AddExpenseModal({
       .eq('client_id', clientId)
       .eq('type', 'outflow')
       .is('deleted_at', null)
+      .is('ad_account_id', null) // ad top-ups are billed as actual spend, never rebilled
       .order('entry_date', { ascending: false })
     if (err) { setError(err.message); setLoading(false); return }
     const rows = (data || []) as unknown as CashbookExpenseEntry[]

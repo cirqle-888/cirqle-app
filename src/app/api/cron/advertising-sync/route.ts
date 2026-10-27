@@ -3,6 +3,8 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { enqueueJob } from '@/lib/jobs/engine'
 import { discoverAccountCampaigns } from '@/lib/advertising/discovery'
 import { logCronRun } from '@/lib/cron/log'
+import { syncAccountBilling } from '@/lib/advertising/meta-billing'
+import { syncAccountAdSpendLines } from '@/lib/advertising/ad-spend-invoicing'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,6 +40,19 @@ export async function GET(req: Request) {
       discovered += r.discovered
     }
 
+    // 0b. Billing pass — balance, funding events (top-ups, failed payments)
+    //     and per-campaign daily spend for every account, then refresh the
+    //     spend-based invoice lines. Best-effort per account.
+    let billingSynced = 0
+    let billingFailed = 0
+    for (const acc of accounts ?? []) {
+      const b = await syncAccountBilling(admin, acc.id)
+      if (b.ok) {
+        billingSynced++
+        await syncAccountAdSpendLines(admin, acc.id)
+      } else billingFailed++
+    }
+
     // Fetch active ad_projects with sync_enabled = true and an assigned ad_account_id.
     // select('*') so the archived_at filter below stays safe before its migration.
     const { data: projects, error: projErr } = await admin
@@ -63,7 +78,7 @@ export async function GET(req: Request) {
       enqueued++
     }
 
-    await logCronRun(admin, 'advertising-sync', true, { discovered, enqueued })
+    await logCronRun(admin, 'advertising-sync', true, { discovered, enqueued, billingSynced, billingFailed })
     return NextResponse.json({
       ok: true,
       discovered,

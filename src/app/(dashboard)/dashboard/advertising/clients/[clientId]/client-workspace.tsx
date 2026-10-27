@@ -26,6 +26,8 @@ import type { BenchmarkResult } from '@/lib/advertising/ai/benchmarks'
 import { PERIODS, DEFAULT_PERIOD, isPeriodKey, periodRange, type PeriodKey } from '@/lib/advertising/period'
 import { spendWithGst } from '@/lib/advertising/budget'
 import { todayISO } from '@/lib/utils/local-date'
+import { ClientAdFundsPanel } from '../../funds/funds-client'
+import type { ClientFundsData } from '../../funds/_data'
 
 type Tab = 'overview' | 'campaigns' | 'funds' | 'reports'
 type ProjectRow = AdProjectRow & { client?: { id: string; name: string; code: string } | null }
@@ -51,6 +53,8 @@ interface Props {
    */
   embedded?: boolean
   tabKey?: string
+  /** Meta ad funds for this client (top-up, suggestion, statement) — view_financials only. */
+  adFunds?: ClientFundsData | null
 }
 
 const inr = (v: number, dp = 0) => `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: dp })}`
@@ -59,7 +63,7 @@ const round2 = (v: number) => Math.round(v * 100) / 100
 export default function ClientWorkspace({
   client, migrated, projects, metricsByProject, benchmarksByProject, attention,
   walletSupported, ledger, fundCandidates, reports, reportPreferences = {}, reportPreferencesSupported = false, perms,
-  embedded = false, tabKey = 'tab',
+  embedded = false, tabKey = 'tab', adFunds = null,
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -235,6 +239,9 @@ export default function ClientWorkspace({
 
       {tab === 'funds' && canSeeFunds && (
         <div className="space-y-4">
+          {adFunds?.migrated && perms.viewFinancials && (
+            <ClientAdFundsPanel funds={adFunds} clientName={client.name} canManage={perms.manageBudget} onDone={() => router.refresh()} />
+          )}
           {!walletSupported ? (
             <p className="text-sm text-muted-foreground">Client wallets are not set up yet.</p>
           ) : (
