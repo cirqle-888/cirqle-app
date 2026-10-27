@@ -65,7 +65,7 @@ export default async function SocialCalendarPage({
         caption, notes, status, request_id, created_at,
         request:task_requests!social_calendar_items_request_id_fkey(
           id, ref_no, status, promoted_task_id,
-          promoted_task:tasks!task_requests_promoted_task_id_fkey(id, task_number, status)
+          promoted_task:tasks!task_requests_promoted_task_id_fkey(id, task_number, status, deleted_at)
         )
       `
     // The OTHER exit: a task linked straight to the item, no request in

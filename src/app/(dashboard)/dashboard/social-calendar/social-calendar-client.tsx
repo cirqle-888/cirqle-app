@@ -28,7 +28,7 @@ import {
   CONTENT_TYPES, CONTENT_TYPE_LABEL, CONTENT_TYPE_CHIP, VARIANT_TYPES,
   PLATFORMS, PLATFORM_LABEL, platformLabels, contentTypeWithVariants,
   PROGRESS_LABEL, PROGRESS_CHIP, resolveItemProgress, isClosedRequestStatus,
-  isUnrouted, canPullBack,
+  isUnrouted, canPullBack, isPlanFrozen,
   formatShortDateRange, suggestServiceId, type CaptionCanvas,
   type ItemProgress,
 } from '@/lib/social/plan'
@@ -613,8 +613,7 @@ export default function SocialCalendarClient({
   // Frozen = a task owns the schedule. Both exits qualify: promoted through
   // the inbox, or linked directly. A soft-deleted direct task does not freeze
   // anything — the item is editable again.
-  const editingFrozen = !!editingItem?.request?.promoted_task_id
-    || !!(editingItem?.task && !editingItem.task.deleted_at)
+  const editingFrozen = !!editingItem && isPlanFrozen(editingItem)
   const requestIsClosed = isClosedRequestStatus(editingItem?.request?.status)
   // Can the item still be sent anywhere? (nothing live attached to it)
   const editingUnrouted = !!editingItem && isUnrouted(editingItem)
@@ -806,6 +805,12 @@ export default function SocialCalendarClient({
   }
 
   async function removeItem(itemId: string) {
+    // A task holds this item: only the plan entry goes. Say so, because the
+    // task and its request stay behind and are cancelled where they live.
+    const it = items.find(i => i.id === itemId)
+    if (it && isPlanFrozen(it) && !confirm(
+      `Remove "${it.title}" from the calendar?\n\nOnly the plan entry is removed. Its task and request are left as they are — cancel or delete them from the Tasks and Requests pages.`,
+    )) return
     setBusy(`delete:${itemId}`)
     const res = await deleteCalendarItem(itemId)
     setBusy(null)
@@ -1734,7 +1739,9 @@ export default function SocialCalendarClient({
               {editingFrozen && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
                   This item is already a task — the plan entry is frozen. Manage it from the Tasks page.
-                  {editingPullable && ' Use Re-plan below to unlink it and edit the plan again; the task itself is left untouched.'}
+                  {editingPullable
+                    ? ' Added by mistake? Use Remove to take it off the calendar, or Re-plan to unlink it and edit the plan again. The task and its request are left untouched.'
+                    : ' Its task is finished work, so the plan entry stays.'}
                 </div>
               )}
               {/* Shared Content Brief (Title, Content type, Caption, Reference
@@ -2044,7 +2051,7 @@ export default function SocialCalendarClient({
                   panelTitle={itemForm.title?.trim() || 'Calendar item'}
                 />
               )}
-              {itemModal.mode === 'edit' && !editingFrozen && (
+              {itemModal.mode === 'edit' && (!editingFrozen || editingPullable) && (
                 <button
                   onClick={() => removeItem(itemModal.itemId!)}
                   disabled={busy === `delete:${itemModal.itemId}`}
@@ -2089,7 +2096,7 @@ export default function SocialCalendarClient({
                   disabled={busy === `replan:${itemModal.itemId}`}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50"
                   title={
-                    editingItem?.task && !editingItem.task.deleted_at
+                    editingFrozen
                       ? 'Unlink the task and plan this again — the task itself is left untouched'
                       : requestIsClosed
                         ? 'Its request was closed in the inbox — unlink and plan it again'
@@ -2097,7 +2104,7 @@ export default function SocialCalendarClient({
                   }
                 >
                   {busy === `replan:${itemModal.itemId}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
-                  {requestIsClosed || (editingItem?.task && !editingItem.task.deleted_at) ? 'Re-plan' : 'Pull back'}
+                  {requestIsClosed || editingFrozen ? 'Re-plan' : 'Pull back'}
                 </button>
               )}
               <div className="flex-1" />

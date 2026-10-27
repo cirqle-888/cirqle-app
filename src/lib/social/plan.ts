@@ -539,8 +539,14 @@ export const PROGRESS_CHIP: Record<ItemProgress, string> = {
 
 export interface LinkedRequestView {
   status: string                                   // task_requests.status
-  promoted_task?: { status: string } | null
+  promoted_task?: { status: string; deleted_at?: string | null } | null
 }
+
+/** A task past this point is a record — nothing is rewritten from the planner. */
+export const FINISHED_TASK_STATUSES = ['delivered', 'done', 'invoiced', 'paid'] as const
+
+export const isFinishedTaskStatus = (status: string | null | undefined): boolean =>
+  (FINISHED_TASK_STATUSES as readonly string[]).includes(status ?? '')
 
 /**
  * A task linked STRAIGHT to the item, with no request in between (the
@@ -664,11 +670,29 @@ export function canPullBack(item: RoutableItem): boolean {
     // Direct-task exit: only reversible while the task has not been delivered
     // or finished. An unstarted task is a planning mistake; a delivered one is
     // a record.
-    return !['delivered', 'done', 'invoiced', 'paid'].includes(item.task.status)
+    return !isFinishedTaskStatus(item.task.status)
   }
   if (!item.request_id) return false
-  if (item.request?.promoted_task) return false
+  const promoted = item.request?.promoted_task
+  if (promoted && !promoted.deleted_at) {
+    // Promoted through the inbox. Same rule as the direct exit: while the task
+    // is unfinished the planner may drop its own plan entry (the task and the
+    // request are left exactly as they are, to be cancelled where they live).
+    // This used to refuse outright, which left an item added by mistake with
+    // no way out of the calendar at all.
+    return !isFinishedTaskStatus(promoted.status)
+  }
   return !['completed', 'delivered'].includes(item.request?.status ?? '')
+}
+
+/**
+ * Is a task (live, not soft-deleted) holding this item's schedule — through the
+ * inbox or linked directly? Then the plan entry's fields are frozen.
+ */
+export function isPlanFrozen(item: RoutableItem & { request?: (LinkedRequestView & { promoted_task_id?: string | null }) | null }): boolean {
+  const r = item.request
+  if (r?.promoted_task_id && !r.promoted_task?.deleted_at) return true
+  return !!(item.task && !item.task.deleted_at)
 }
 
 // ── Lead time ────────────────────────────────────────────────────────────────

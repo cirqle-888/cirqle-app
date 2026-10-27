@@ -28,6 +28,7 @@ import {
   CONTENT_TYPES, PLATFORMS, composeRequestDescription, buildSocialMeta,
   isTerminalRequestStatus, isClosedRequestStatus, suggestServiceId,
   sanitizeCaptionHtml, captionHtmlToText, sanitizeCaptionCanvas, dueDateForPublish,
+  isFinishedTaskStatus,
 } from '@/lib/social/plan'
 import { todayISO } from '@/lib/utils/local-date'
 import { normalizeContentBrief, cleanBriefLinks } from '@/lib/content-brief'
@@ -612,7 +613,7 @@ export async function revertItemToPlanned(itemId: string): Promise<ActionResult>
   } catch { /* pre-migration — no direct-task exit exists yet */ }
 
   const { data: item, error: itemErr } = await admin.from('social_calendar_items')
-    .select('id, status, request_id, request:task_requests(id, ref_no, status, promoted_task_id)')
+    .select('id, status, request_id, request:task_requests(id, ref_no, status, promoted_task_id, promoted_task:tasks!task_requests_promoted_task_id_fkey(id, status, deleted_at))')
     .eq('id', itemId).maybeSingle()
   if (itemErr || !item) return { ok: false, error: 'Item not found.' }
 
@@ -661,7 +662,27 @@ export async function revertItemToPlanned(itemId: string): Promise<ActionResult>
     }
     return { ok: false, error: 'This item has no linked request or task.' }
   }
-  if (req.promoted_task_id) return { ok: false, error: 'This item is already a task — manage it from the Tasks page.' }
+  const promoted = req.promoted_task_id ? (Array.isArray(req.promoted_task) ? req.promoted_task[0] : req.promoted_task) : null
+  if (req.promoted_task_id && promoted && !promoted.deleted_at) {
+    if (isFinishedTaskStatus(promoted.status)) {
+      return {
+        ok: false,
+        error: `Its task is already ${promoted.status} — that is finished work, so the plan entry stays. Handle it from the Tasks page.`,
+      }
+    }
+    // The task was made from this item's request. Unlink the plan entry only:
+    // the request and the task are left exactly as they are, to be cancelled
+    // or deleted where they live (Requests / Tasks), the same as the
+    // direct-task exit above.
+    const { data: unlinked, error } = await admin.from('social_calendar_items')
+      .update({ request_id: null, status: 'planned', updated_at: new Date().toISOString() })
+      .eq('id', itemId).eq('request_id', req.id)
+      .select('id')
+    if (error) return { ok: false, error: error.message }
+    if (!unlinked?.length) return { ok: false, error: 'The item changed while you were working — reload and retry.' }
+    revalidatePath(REVALIDATE); revalidatePath('/dashboard/requests')
+    return { ok: true }
+  }
   if (req.status === 'completed' || req.status === 'delivered') {
     return {
       ok: false,
@@ -895,22 +916,27 @@ export async function deleteCalendarItem(itemId: string): Promise<ActionResult> 
 
   const admin = createAdminClient()
   const { data: item, error: itemErr } = await admin.from('social_calendar_items')
-    .select('id, request_id, request:task_requests(id, ref_no, promoted_task_id, status)')
+    .select('id, request_id, request:task_requests(id, ref_no, promoted_task_id, status, promoted_task:tasks!task_requests_promoted_task_id_fkey(id, status, deleted_at))')
     .eq('id', itemId).maybeSingle()
   if (itemErr || !item) return { ok: false, error: 'Item not found.' }
 
   const req = (item as any).request
-  if (req?.promoted_task_id) {
-    return { ok: false, error: 'This item is already a task — cancel the task from the Tasks page instead.' }
+  const promoted = req?.promoted_task_id ? (Array.isArray(req.promoted_task) ? req.promoted_task[0] : req.promoted_task) : null
+  const taskHoldsIt = !!promoted && !promoted.deleted_at
+  if (taskHoldsIt && isFinishedTaskStatus(promoted.status)) {
+    return { ok: false, error: `Its task is already ${promoted.status} — that is finished work, so the plan entry stays. Handle it from the Tasks page.` }
   }
-  if (req && (req.status === 'completed' || req.status === 'delivered')) {
+  if (!taskHoldsIt && req && (req.status === 'completed' || req.status === 'delivered')) {
     return {
       ok: false,
       error: `Its request (${req.ref_no ? `REQ-${String(req.ref_no).padStart(4, '0')}` : 'linked'}) is already ${req.status} — the client has been notified. Handle it in the Requests inbox.`,
     }
   }
 
-  if (req?.id && !isClosedRequestStatus(req.status)) {
+  // A promoted request is NOT cancelled from here: its task is real work that
+  // is cancelled on the Tasks page. Only the plan entry goes — the request and
+  // the task are left exactly as they are.
+  if (req?.id && !taskHoldsIt && !isClosedRequestStatus(req.status)) {
     // setRequestStatus writes status + client_status + status_updated_at and
     // logs a requester-visible status_changed entry (core.ts) — the inline
     // update this replaces flipped the portal to Cancelled with no timeline.

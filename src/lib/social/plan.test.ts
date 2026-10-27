@@ -3,7 +3,7 @@ import {
   composeRequestDescription, buildSocialMeta, resolveItemProgress, platformLabels,
   isTerminalRequestStatus, isClosedRequestStatus, contentTypeWithVariants,
   sanitizeCaptionHtml, captionHtmlToText, formatShortDateRange,
-  sanitizeCaptionCanvas, canvasToText, isUnrouted, canPullBack, dueDateForPublish,
+  sanitizeCaptionCanvas, canvasToText, isUnrouted, canPullBack, isPlanFrozen, dueDateForPublish,
   suggestContentType,
 } from './plan'
 
@@ -468,11 +468,33 @@ describe('canPullBack', () => {
     expect(canPullBack({ status: 'planned', request_id: 'r1', request: { status: 'cancelled' } })).toBe(true)
   })
 
-  it('refuses once the request became a task — the task owns the schedule', () => {
+  it('a request that became a task can be unlinked while the task is unfinished', () => {
+    // The Milkees case: added by mistake, promoted to Task #2041, then no way
+    // off the calendar. The task and request are left alone; only the plan entry moves.
+    expect(canPullBack({
+      status: 'requested', request_id: 'r1',
+      request: { status: 'in_progress', promoted_task: { status: 'in_progress' } },
+    })).toBe(true)
     expect(canPullBack({
       status: 'requested', request_id: 'r1',
       request: { status: 'started', promoted_task: { status: 'pending' } },
-    })).toBe(false)
+    })).toBe(true)
+  })
+
+  it('but not once that task is finished — the task is a record', () => {
+    for (const status of ['delivered', 'done', 'invoiced', 'paid']) {
+      expect(canPullBack({
+        status: 'requested', request_id: 'r1',
+        request: { status: 'started', promoted_task: { status } },
+      })).toBe(false)
+    }
+  })
+
+  it('a deleted promoted task no longer holds the item', () => {
+    expect(canPullBack({
+      status: 'requested', request_id: 'r1',
+      request: { status: 'cancelled', promoted_task: { status: 'done', deleted_at: '2026-10-20' } },
+    })).toBe(true)
   })
 
   it('refuses to rewrite work the client has already seen', () => {
@@ -489,6 +511,19 @@ describe('canPullBack', () => {
 
   it('there is nothing to pull back from an unrouted item', () => {
     expect(canPullBack({ status: 'planned' })).toBe(false)
+  })
+})
+
+describe('isPlanFrozen', () => {
+  it('is frozen while a live task holds the item, by either exit', () => {
+    expect(isPlanFrozen({ status: 'requested', request_id: 'r1', request: { status: 'started', promoted_task_id: 't1', promoted_task: { status: 'pending' } } })).toBe(true)
+    expect(isPlanFrozen({ status: 'tasked', task_id: 't1', task: { status: 'pending' } })).toBe(true)
+  })
+
+  it('is not frozen once the task is deleted, or when nothing is promoted', () => {
+    expect(isPlanFrozen({ status: 'requested', request_id: 'r1', request: { status: 'cancelled', promoted_task_id: 't1', promoted_task: { status: 'pending', deleted_at: '2026-10-20' } } })).toBe(false)
+    expect(isPlanFrozen({ status: 'tasked', task_id: 't1', task: { status: 'pending', deleted_at: '2026-10-20' } })).toBe(false)
+    expect(isPlanFrozen({ status: 'requested', request_id: 'r1', request: { status: 'submitted' } })).toBe(false)
   })
 })
 
