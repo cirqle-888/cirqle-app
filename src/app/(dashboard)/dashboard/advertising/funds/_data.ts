@@ -9,6 +9,8 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { loadCampaignOwners } from '@/lib/advertising/meta-billing'
+import { getCompanySettings } from '@/lib/settings/company-settings'
+import { documentSettings } from '@/lib/advertising/ad-statement-html'
 import {
   one, asRows, num,
   type AdAccountRow, type AdProjectLite, type CampaignSpendRow, type DailyMetricRow, type ExpenseLineRow,
@@ -63,7 +65,7 @@ export interface FundsTodo {
 export interface FundsData {
   migrated: boolean
   accounts: FundsAccount[]
-  clients: { id: string; name: string; code: string | null }[]
+  clients: { id: string; name: string; code: string | null; address?: string | null; phone?: string | null }[]
   banks: { id: string; name: string; isDefault: boolean }[]
   campaigns: FundsCampaign[]
   /** Unlinked client-tagged outflows a Meta payment could be linked to. */
@@ -72,6 +74,10 @@ export interface FundsData {
   todos: FundsTodo[]
   statement: StatementClient[]
   currentPeriod: string
+  /** Letterhead settings for the printable statement (document keys only — never secrets). */
+  brand: Record<string, string>
+  /** Wallet top-ups per client, for the statement's "money added" block. */
+  topUpsByClient: Record<string, { date: string; amountInr: number }[]>
 }
 
 const BURN_DAYS = 3
@@ -85,7 +91,7 @@ export async function loadFundsData(): Promise<FundsData> {
 
   const empty: FundsData = {
     migrated: false, accounts: [], clients: [], banks: [], campaigns: [], linkableEntries: [],
-    suggestions: [], todos: [], statement: [], currentPeriod,
+    suggestions: [], todos: [], statement: [], currentPeriod, brand: {}, topUpsByClient: {},
   }
 
   // ── Accounts (the billing_* columns double as the migration probe) ───────
@@ -101,7 +107,7 @@ export async function loadFundsData(): Promise<FundsData> {
   const accountIds = accounts.map(a => a.id)
 
   const [clientsRes, banksRes, projectsRes, spendRes, eventsRes, topupsRes, billedRes, owners] = await Promise.all([
-    admin.from('clients').select('id, name, code').order('name'),
+    admin.from('clients').select('id, name, code, address, phone').order('name'),
     admin.from('bank_accounts').select('id, name, is_default, is_active').order('name'),
     admin.from('ad_projects').select('id, campaign_name, client_id, ad_account_id, status, scope, provider_metadata')
       .is('deleted_at', null),
@@ -126,7 +132,8 @@ export async function loadFundsData(): Promise<FundsData> {
     loadCampaignOwners(admin, accountIds),
   ])
 
-  const clients = asRows<{ id: string; name: string; code: string | null }>(clientsRes.data).map(c => ({ id: c.id, name: c.name, code: c.code ?? null }))
+  const clients = asRows<{ id: string; name: string; code: string | null; address: string | null; phone: string | null }>(clientsRes.data)
+    .map(c => ({ id: c.id, name: c.name, code: c.code ?? null, address: c.address ?? null, phone: c.phone ?? null }))
   const banks = asRows<{ id: string; name: string; is_default: boolean | null; is_active: boolean | null }>(banksRes.data)
     .filter(b => b.is_active !== false)
     .map(b => ({ id: b.id, name: b.name, isDefault: !!b.is_default }))
@@ -220,6 +227,7 @@ export async function loadFundsData(): Promise<FundsData> {
         .eq('direction', 'credit').is('deleted_at', null).in('client_id', clientIds)
     : { data: [] as unknown[] }
   const wallets = new Map<string, { creditedInr: number; firstCreditDate: string }>()
+  const topUpsByClient: Record<string, { date: string; amountInr: number }[]> = {}
   type CreditRow = { client_id: string; amount_inr: number | string | null; created_at: string; entry: { entry_date: string } | { entry_date: string }[] | null }
   for (const c of asRows<CreditRow>(credits)) {
     const d = String(one(c.entry)?.entry_date ?? c.created_at).slice(0, 10)
@@ -227,6 +235,7 @@ export async function loadFundsData(): Promise<FundsData> {
     w.creditedInr += num(c.amount_inr)
     if (d < w.firstCreditDate) w.firstCreditDate = d
     wallets.set(c.client_id, w)
+    ;(topUpsByClient[c.client_id] ||= []).push({ date: d, amountInr: num(c.amount_inr) })
   }
   const burnFrom = addDaysISO(today, -BURN_DAYS)
   const suggestions: FundsSuggestion[] = []
@@ -335,6 +344,8 @@ export async function loadFundsData(): Promise<FundsData> {
     migrated: true, accounts, clients, banks, campaigns,
     linkableEntries: asRows<TopUpEntryRow>(linkable).map(e => ({ id: e.id, date: e.entry_date, description: e.description || '', amount: num(e.amount) })),
     suggestions, todos, statement, currentPeriod,
+    brand: documentSettings(await getCompanySettings()),
+    topUpsByClient,
   }
 }
 
@@ -355,6 +366,8 @@ export interface ClientFundsData {
   todos: FundsTodo[]
   statement: StatementClient | null
   currentPeriod: string
+  brand: Record<string, string>
+  topUps: { date: string; amountInr: number }[]
 }
 
 export function sliceFundsForClient(d: FundsData, clientId: string): ClientFundsData {
@@ -369,5 +382,7 @@ export function sliceFundsForClient(d: FundsData, clientId: string): ClientFunds
     todos: d.todos.filter(t => t.clientId === clientId || (t.kind === 'unrecorded' && t.suggestedClientId === clientId)),
     statement: d.statement.find(s => s.clientId === clientId) ?? null,
     currentPeriod: d.currentPeriod,
+    brand: d.brand,
+    topUps: d.topUpsByClient[clientId] ?? [],
   }
 }

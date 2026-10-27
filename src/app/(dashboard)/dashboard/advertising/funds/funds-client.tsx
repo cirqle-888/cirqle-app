@@ -14,7 +14,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   Wallet, RefreshCw, ExternalLink, Loader2, CheckCircle2, AlertTriangle, XCircle, Link2,
-  ChevronDown, Printer, Plus, Info, EyeOff,
+  ChevronDown, Printer, Plus, Info, EyeOff, Download,
 } from 'lucide-react'
 import type {
   FundsData, FundsAccount, FundsCampaign, FundsSuggestion, FundsTodo, ClientFundsData,
@@ -22,6 +22,7 @@ import type {
 import type { StatementClient, StatementMonth } from '@/lib/advertising/funds-core'
 import { recordAdTopUp, linkFundingEventToEntry, dismissFundingEvent, syncAdBillingNow } from './actions'
 import { todayISO } from '@/lib/utils/local-date'
+import { renderAdStatementHtml, type AdStatementParty, type AdStatementTopUp } from '@/lib/advertising/ad-statement-html'
 
 const inr = (v: number | null | undefined, dp = 0) =>
   v == null ? '—' : `₹${Number(v).toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp })}`
@@ -138,7 +139,12 @@ export default function FundsClient({ data, canManage, initialClientId }: {
             <Printer className="h-3.5 w-3.5" /> Print
           </button>
         </div>
-        <StatementView statement={data.statement} clientName={clientName} />
+        <StatementView statement={data.statement} clientName={clientName} doc={{
+          brand: data.brand,
+          party: id => data.clients.find(c => c.id === id) ?? null,
+          topUps: id => data.topUpsByClient[id] ?? [],
+          balance: id => data.suggestions.find(x => x.clientId === id)?.balanceInr ?? null,
+        }} />
       </section>
     </div>
   )
@@ -490,24 +496,70 @@ const STATUS: Record<StatementMonth['status'], { text: string; cls: string }> = 
   running:      { text: 'This month',    cls: 'bg-sky-500/10 text-sky-700 dark:text-sky-400' },
 }
 
-export function StatementView({ statement, clientName, defaultOpen = false }: {
+/** What the printable client statement needs beyond the numbers. */
+export interface StatementDocContext {
+  brand: Record<string, string>
+  party: (clientId: string) => AdStatementParty | null
+  topUps: (clientId: string) => AdStatementTopUp[]
+  balance: (clientId: string) => number | null
+}
+
+export function StatementView({ statement, clientName, defaultOpen = false, doc }: {
   statement: StatementClient[]
   clientName: Map<string, string>
   defaultOpen?: boolean
+  doc?: StatementDocContext
 }) {
   if (!statement.length) return <p className="text-xs text-muted-foreground">No ad spend recorded yet.</p>
   return (
     <div className="space-y-3">
-      {statement.map(c => <StatementCard key={c.clientId ?? 'unmapped'} c={c} name={c.clientId ? clientName.get(c.clientId) ?? 'Client' : 'Not linked to a client'} defaultOpen={defaultOpen || statement.length === 1} />)}
+      {statement.map(c => <StatementCard key={c.clientId ?? 'unmapped'} c={c} name={c.clientId ? clientName.get(c.clientId) ?? 'Client' : 'Not linked to a client'} defaultOpen={defaultOpen || statement.length === 1} doc={doc} />)}
     </div>
   )
 }
 
-function StatementCard({ c, name, defaultOpen }: { c: StatementClient; name: string; defaultOpen: boolean }) {
+function StatementCard({ c, name, defaultOpen, doc }: { c: StatementClient; name: string; defaultOpen: boolean; doc?: StatementDocContext }) {
   const [open, setOpen] = useState(defaultOpen)
   const diffTone = c.differenceInr > 1 ? 'text-red-600 dark:text-red-400' : c.differenceInr < -1 ? 'text-amber-600' : 'text-emerald-600 dark:text-emerald-400'
+
+  // The client document — same letterhead as invoices / Statement of Account.
+  const canDoc = !!doc && !!c.clientId
+  function docHtml(autoprint: boolean): string {
+    if (!doc || !c.clientId) return ''
+    return renderAdStatementHtml(c, doc.party(c.clientId) ?? { name }, doc.brand, {
+      autoprint, origin: window.location.origin,
+      topUps: doc.topUps(c.clientId), balanceInr: doc.balance(c.clientId),
+    })
+  }
+  function printDoc() {
+    const w = window.open('', '_blank', 'width=860,height=960')
+    if (w) { w.document.write(docHtml(true)); w.document.close() }
+  }
+  function downloadDoc() {
+    const blob = new Blob([docHtml(false)], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const party = doc && c.clientId ? doc.party(c.clientId) : null
+    a.href = url
+    a.download = `Ad_Spend_Statement_${(party?.code || name).replace(/\s+/g, '_')}_${todayISO()}.html`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden break-inside-avoid">
+      {canDoc && (
+        <div className="flex justify-end gap-2 px-4 pt-3 print:hidden">
+          <button onClick={printDoc}
+            className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-medium hover:bg-secondary">
+            <Printer className="h-3.5 w-3.5" /> Print / PDF
+          </button>
+          <button onClick={downloadDoc}
+            className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-medium hover:bg-secondary">
+            <Download className="h-3.5 w-3.5" /> Download
+          </button>
+        </div>
+      )}
       <button onClick={() => setOpen(v => !v)} className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-left hover:bg-secondary/40">
         <span className="font-semibold">{name}</span>
         <span className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs tabular-nums">
@@ -623,7 +675,12 @@ export function ClientAdFundsPanel({ funds, clientName: name, canManage, onDone 
       {funds.statement && (
         <div>
           <h2 className="mb-2 text-sm font-semibold">Ad spend vs invoiced</h2>
-          <StatementView statement={[funds.statement]} clientName={names} defaultOpen />
+          <StatementView statement={[funds.statement]} clientName={names} defaultOpen doc={{
+            brand: funds.brand,
+            party: () => funds.clients[0] ?? { name },
+            topUps: () => funds.topUps,
+            balance: () => funds.suggestion?.balanceInr ?? null,
+          }} />
         </div>
       )}
     </div>
