@@ -9,7 +9,7 @@
  * same statement filtered to one client.
  */
 
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -228,6 +228,13 @@ export function TopUpForm({ clients, accounts, banks, campaigns, initialClientId
   onDone: () => void
 }) {
   const [clientId, setClientId] = useState<string>(initialClientId ?? '')
+  useEffect(() => {
+    if (initialClientId || fixedClient) return
+    try {
+      const saved = JSON.parse(localStorage.getItem('cirqle:ad-funds:defaults') || '{}')
+      if (typeof saved.clientId === 'string' && clients.some(c => c.id === saved.clientId)) setClientId(saved.clientId)
+    } catch { /* optional preference */ }
+  }, [initialClientId, fixedClient, clients])
   const clientCampaigns = campaigns.filter(c => c.clientId === clientId)
   const defaultAccount = clientCampaigns.find(c => c.status === 'active' && c.adAccountId)?.adAccountId
     ?? clientCampaigns.find(c => c.adAccountId)?.adAccountId ?? accounts[0]?.id ?? ''
@@ -265,6 +272,8 @@ export function TopUpForm({ clients, accounts, banks, campaigns, initialClientId
     setBusy(false)
     if (!res.ok) { setErr(res.error || 'Could not record the top-up.'); return }
     setDone(res.data?.warning ?? `Recorded ${inr(amt, 2)} — Cashbook entry added, wallet credited${res.data?.allocatedTo ? ' and allocated to the campaign' : ''}.`)
+    try { localStorage.setItem('cirqle:ad-funds:defaults', JSON.stringify({ clientId, accountId, bankId })) }
+    catch { /* optional preference */ }
     setAmount(''); setReference(''); setOpened(false)
     onDone()
   }
