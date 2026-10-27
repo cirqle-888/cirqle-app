@@ -221,6 +221,9 @@ export async function fetchSyncStatus(clientId?: string) {
       ad_account:ad_accounts(name, provider)
     `)
     .not('ad_account_id', 'is', null)
+    // Deleted campaigns never sync (the cron skips them) — listing them showed
+    // a duplicate row stuck at "Queued" forever.
+    .is('deleted_at', null)
     
   if (clientId) query = query.eq('client_id', clientId)
   

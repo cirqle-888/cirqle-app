@@ -147,6 +147,17 @@ export async function loadFundsData(): Promise<FundsData> {
       date: s.spend_date, spendExGst: num(s.spend),
     })
   }
+  // Every live project whose campaign the account sync already reports is
+  // covered — not only the registry's owner — so a second project for the same
+  // campaign never adds its spend again.
+  const syncedKeys = new Set(asRows<CampaignSpendRow>(spendRes.data).map(s => `${s.ad_account_id}:${s.external_campaign_id}`))
+  for (const p of projects) {
+    const cid = p.provider_metadata?.campaign_id
+    if (p.ad_account_id && cid != null && syncedKeys.has(`${p.ad_account_id}:${cid}`)) coveredProjects.add(p.id)
+  }
+  // Manual / legacy metrics only fill months the account sync has nothing for
+  // that client — once a client's campaigns are mapped, the synced spend wins.
+  const syncedClientMonths = new Set(spend.filter(s => s.clientId).map(s => `${s.clientId}:${s.date.slice(0, 7)}`))
   const metricProjects = projects.filter(p => p.client_id && p.scope !== 'company' && !coveredProjects.has(p.id))
   if (metricProjects.length) {
     const { data: metrics } = await admin.from('ad_daily_metrics')
@@ -155,7 +166,7 @@ export async function loadFundsData(): Promise<FundsData> {
     const byId = new Map(metricProjects.map(p => [p.id, p]))
     for (const m of asRows<DailyMetricRow>(metrics)) {
       const p = byId.get(m.project_id ?? '')
-      if (!p) continue
+      if (!p || syncedClientMonths.has(`${p.client_id}:${m.metric_date.slice(0, 7)}`)) continue
       spend.push({
         clientId: p.client_id, projectId: p.id, campaignKey: `project:${p.id}`, campaignName: p.campaign_name,
         date: m.metric_date, spendExGst: num(m.spend) * (num(m.exchange_rate_ad_to_base) || 1),

@@ -36,8 +36,33 @@ export interface CampaignSpendDay { date: string; spendExGst: number }
 /** The fields of an ad project the spend lookup needs. */
 export type SpendProject = Pick<AdProjectLite, 'id' | 'ad_account_id' | 'provider_metadata'>
 
-/** Daily spend (excl. GST, INR) for one campaign. */
+/**
+ * Several live projects can point at the same platform campaign (e.g. a
+ * second "Create Single Project" for a campaign that already had one). Only
+ * ONE may bill it, or the client is invoiced the spend — and the service
+ * charge — once per project. The owner is the project the campaign registry
+ * maps it to; failing that, the oldest live project. True for every other one.
+ */
+export async function isDuplicateCampaignProject(admin: SupabaseClient, project: SpendProject): Promise<boolean> {
+  const cid = project.provider_metadata?.campaign_id
+  if (!project.ad_account_id || cid == null) return false
+  const { data } = await admin.from('ad_projects').select('id, created_at')
+    .eq('ad_account_id', project.ad_account_id)
+    .eq('provider_metadata->>campaign_id', String(cid))
+    .is('deleted_at', null)
+    .order('created_at', { ascending: true })
+  const live = asRows<{ id: string; created_at: string }>(data)
+  if (live.length <= 1) return false
+  const { data: reg } = await admin.from('ad_campaigns').select('project_id')
+    .eq('ad_account_id', project.ad_account_id).eq('external_campaign_id', String(cid)).maybeSingle()
+  const regId = asRow<{ project_id: string | null }>(reg)?.project_id
+  const owner = regId && live.some(p => p.id === regId) ? regId : live[0].id
+  return owner !== project.id
+}
+
+/** Daily spend (excl. GST, INR) for one campaign. Empty for a duplicate project. */
 export async function getCampaignSpend(admin: SupabaseClient, project: SpendProject): Promise<CampaignSpendDay[]> {
+  if (await isDuplicateCampaignProject(admin, project)) return []
   const campaignId = project.provider_metadata?.campaign_id
   if (project.ad_account_id && campaignId != null) {
     const { data, error } = await admin.from('ad_campaign_daily_spend')
@@ -90,6 +115,23 @@ export async function syncCampaignAdSpendLines(admin: SupabaseClient, projectId:
       .eq('id', projectId).is('deleted_at', null).maybeSingle()
     const project = asRow<AdProjectLite>(pData)
     if (!project || project.scope === 'company' || !project.client_id) return 0
+
+    // A duplicate project never bills — and takes back any lines it already
+    // put on a draft invoice (sent/paid invoices are never touched).
+    if (await isDuplicateCampaignProject(admin, project)) {
+      const { data: mine } = await admin.from('invoice_expense_items')
+        .select('id, invoice_id, invoice:invoices(status)')
+        .eq('kind', 'ad_spend').eq('ad_project_id', projectId)
+      let removed = 0
+      for (const l of asRows<ExpenseLineRow>(mine)) {
+        const inv = one(l.invoice)
+        if (!inv || !['draft', 'reviewed'].includes(inv.status)) continue
+        await admin.from('invoice_expense_items').delete().eq('id', l.id)
+        await admin.rpc('recalc_invoice_totals', { p_invoice_id: l.invoice_id })
+        removed++
+      }
+      return removed
+    }
 
     // Billed on its own campaign invoice (createInvoiceForProject) → leave it there.
     const { data: ownInv } = await admin.from('invoices').select('id')
