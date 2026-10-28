@@ -9,7 +9,7 @@
  * same statement filtered to one client.
  */
 
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -56,6 +56,14 @@ export default function FundsClient({ data, canManage, initialClientId }: {
   const [syncing, startSync] = useTransition()
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
   const clientName = useMemo(() => new Map(data.clients.map(c => [c.id, c.name])), [data.clients])
+  const monthSpend = data.statement.reduce((sum, item) =>
+    sum + (item.months.find(m => m.period === data.currentPeriod)?.spendInclGst ?? 0), 0)
+  const needToAdd = data.suggestions.reduce((sum, item) =>
+    sum + ((item.level === 'low' || item.level === 'empty') ? (item.suggestedInr ?? 0) : 0), 0)
+  const knownBalances = data.accounts.length > 0 && data.accounts.every(a => a.availableBalance != null)
+  const totalBalance = knownBalances ? data.accounts.reduce((sum, a) => sum + (a.availableBalance ?? 0), 0) : null
+  const attentionCount = data.todos.length
+
 
   if (!data.migrated) {
     return (
@@ -99,7 +107,24 @@ export default function FundsClient({ data, canManage, initialClientId }: {
       </div>
       {syncMsg && <p className="text-xs text-muted-foreground print:hidden">{syncMsg}</p>}
 
-      <AccountStrip accounts={data.accounts} />
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4 print:hidden" aria-label="Ad funds overview">
+        {[
+          { label: 'Meta balance', value: totalBalance == null ? 'Not synced' : inr(totalBalance, 2), note: 'Across connected accounts' },
+          { label: 'Spent this month', value: inr(monthSpend, 2), note: 'Includes GST' },
+          { label: 'Need to add', value: inr(needToAdd, 2), note: 'Suggested top-ups only' },
+          { label: 'Billing status', value: attentionCount ? `${attentionCount} to review` : 'No alerts', note: 'Check details below' },
+        ].map(card => (
+          <div key={card.label} className="rounded-xl border border-border bg-card p-4">
+            <p className="text-xs text-muted-foreground">{card.label}</p>
+            <p className="mt-2 text-xl font-semibold tabular-nums">{card.value}</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">{card.note}</p>
+          </div>
+        ))}
+      </section>
+      <details className="rounded-xl border border-border bg-card p-4 print:hidden">
+        <summary className="cursor-pointer text-sm font-semibold">Account balances and sync details</summary>
+        <div className="mt-3"><AccountStrip accounts={data.accounts} /></div>
+      </details>
 
       <div className="grid gap-6 lg:grid-cols-2 print:hidden">
         <section id="top-up" className="rounded-xl border border-border bg-card p-4">
@@ -126,10 +151,10 @@ export default function FundsClient({ data, canManage, initialClientId }: {
         </section>
       </div>
 
-      <section className="rounded-xl border border-border bg-card p-4 print:hidden">
-        <h2 className="text-sm font-semibold">To check</h2>
-        <TodoList todos={data.todos} data={data} canManage={canManage} clientName={clientName} onDone={() => router.refresh()} />
-      </section>
+      <details className="rounded-xl border border-border bg-card p-4 print:hidden" open={attentionCount > 0}>
+        <summary className="cursor-pointer text-sm font-semibold">Reconciliation and funding checks ({attentionCount})</summary>
+        <div className="mt-3"><TodoList todos={data.todos} data={data} canManage={canManage} clientName={clientName} onDone={() => router.refresh()} /></div>
+      </details>
 
       <section>
         <div className="mb-2 flex items-center justify-between gap-2">
@@ -203,6 +228,13 @@ export function TopUpForm({ clients, accounts, banks, campaigns, initialClientId
   onDone: () => void
 }) {
   const [clientId, setClientId] = useState<string>(initialClientId ?? '')
+  useEffect(() => {
+    if (initialClientId || fixedClient) return
+    try {
+      const saved = JSON.parse(localStorage.getItem('cirqle:ad-funds:defaults') || '{}')
+      if (typeof saved.clientId === 'string' && clients.some(c => c.id === saved.clientId)) setClientId(saved.clientId)
+    } catch { /* optional preference */ }
+  }, [initialClientId, fixedClient, clients])
   const clientCampaigns = campaigns.filter(c => c.clientId === clientId)
   const defaultAccount = clientCampaigns.find(c => c.status === 'active' && c.adAccountId)?.adAccountId
     ?? clientCampaigns.find(c => c.adAccountId)?.adAccountId ?? accounts[0]?.id ?? ''
@@ -240,6 +272,8 @@ export function TopUpForm({ clients, accounts, banks, campaigns, initialClientId
     setBusy(false)
     if (!res.ok) { setErr(res.error || 'Could not record the top-up.'); return }
     setDone(res.data?.warning ?? `Recorded ${inr(amt, 2)} — Cashbook entry added, wallet credited${res.data?.allocatedTo ? ' and allocated to the campaign' : ''}.`)
+    try { localStorage.setItem('cirqle:ad-funds:defaults', JSON.stringify({ clientId, accountId, bankId })) }
+    catch { /* optional preference */ }
     setAmount(''); setReference(''); setOpened(false)
     onDone()
   }
