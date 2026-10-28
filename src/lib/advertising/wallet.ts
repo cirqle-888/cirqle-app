@@ -5,10 +5,10 @@
  * transaction row, balances are ALWAYS derived from the rows, never stored.
  *
  *   credit 'topup'               Cashbook outflow share → client wallet
- *   debit  'campaign_allocation' client wallet → campaign (billing basis)
+ *   debit  'campaign_allocation' client wallet → campaign (reserved budget)
  *
  * Amounts are GST-inclusive actual paid money. Platform-reported spend
- * (ad_daily_metrics) is reporting-only and never enters the ledger.
+ * is reconciled separately against funding; service fees stay on tasks.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'

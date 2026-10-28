@@ -88,6 +88,7 @@ interface Entry {
   description?: string
   reference?: string
   invoice_id?: string
+  ad_account_id?: string | null
   client_id?: string        // entity tag for per-client FIFO allocation
   // Finance dimension: 'client' | 'company'; null/undefined = untriaged.
   scope?: 'client' | 'company' | null
@@ -212,6 +213,7 @@ interface PendingPayroll {
 }
 
 interface Props {
+  adAccounts?: { id: string; name: string | null }[]
   initialEntries: Entry[]
   categories: any[]
   bankAccounts: any[]
@@ -254,7 +256,7 @@ interface Props {
 
 const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 
-export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts, showTotals, markupAvailable, canEditEntries, allTags, reversalsAvailable = false }: Props) {
+export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts, showTotals, markupAvailable, canEditEntries, allTags, reversalsAvailable = false, adAccounts = [] }: Props) {
   // Coming back from a record lands where the list was left, not at the top.
   // See lib/lists/scroll-restore for the rules.
   useScrollRestore('cashbook')
@@ -364,6 +366,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const defaultBankAccountId = useMemo(() => bankAccounts.find(b => b.is_default)?.id || '', [bankAccounts])
 
   const [form, setForm] = useState({
+    ad_account_id: '',
     type: 'inflow' as 'inflow' | 'outflow',
     category_id: invoiceCategoryId,
     bank_account_id: defaultBankAccountId,
@@ -489,7 +492,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     }
     const cur = (entry.currency as Currency) ?? 'INR'
     const storedRate = entry.exchange_rate ?? (cur === 'INR' ? 1 : (rateMap[cur] || 1))
-    setForm({
+    setForm({ ad_account_id: entry.ad_account_id || '',
       type:            entry.type,
       category_id:     entry.category_id ?? '',
       bank_account_id: entry.bank_account_id ?? '',
@@ -527,7 +530,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     if (entry.transfer_ref) { setEditingTransfer(entry); return }
     const cur = (entry.currency as Currency) ?? 'INR'
     const storedRate = entry.exchange_rate ?? (cur === 'INR' ? 1 : (rateMap[cur] || 1))
-    setForm({
+    setForm({ ad_account_id: entry.ad_account_id || '',
       type:            entry.type,
       category_id:     entry.category_id ?? '',
       bank_account_id: entry.bank_account_id ?? '',
@@ -576,7 +579,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
    * what the (then hidden) inputs still hold.
    */
   function markupForSave(clientId: string | null): { type: MarkupType; value: number } {
-    const rebillable = form.type === 'outflow' && !!clientId
+    const rebillable = form.type === 'outflow' && !!clientId && !form.ad_account_id
     if (!rebillable || form.markupType === 'none') return { type: 'none', value: 0 }
     return { type: form.markupType, value: parseFloat(form.markupValue) || 0 }
   }
@@ -608,6 +611,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         bank_account_id: form.bank_account_id || null,
         description:     effectiveDescription,
         reference:       form.reference,
+        ad_account_id: form.type === 'outflow' ? form.ad_account_id || null : null,
         client_id:       savedClientId,
         scope:           savedScope,
         tags:            form.tags,
@@ -643,6 +647,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 entry_date:      form.entry_date,
                 description:     effectiveDescription,
                 reference:       form.reference,
+                ad_account_id: form.type === 'outflow' ? form.ad_account_id || null : null,
                 client_id:       savedClientId || undefined,
                 scope:           savedScope,
                 tags:            form.tags.map(name => ({ tag: { id: name, name } })),
@@ -658,7 +663,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         ))
         setShowForm(false)
         setFormEditingId(null)
-        setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [], markupType: 'none', markupValue: '' })
+        setForm({ ad_account_id: '', type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [], markupType: 'none', markupValue: '' })
         setDescTouched(false)
       }
       setSaving(false)
@@ -719,6 +724,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         invoice_id: isLegacySingle ? splitLines[0].invoice_id : null,
         allocations: isLegacySingle ? [] : splitLines,
         // Persist the client tag so auto-allocation only considers this client's invoices.
+        ad_account_id: form.type === 'outflow' ? form.ad_account_id || null : null,
         client_id: insertClientId,
         scope: insertClientId ? 'client' : (form.scope || null),
         tags: form.tags,
@@ -758,7 +764,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       setEntries(prev => [...[...allInserted].reverse(), ...prev])
       setShowForm(false)
       setRecurringMonths(0)
-      setForm({ type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [], markupType: 'none', markupValue: '' })
+      setForm({ ad_account_id: '', type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [], markupType: 'none', markupValue: '' })
       setDescTouched(false)
       // The entry saved but the DB rejected the split (over-allocation, or an
       // invoice that was settled from another tab meanwhile). Say so — the
@@ -2907,6 +2913,20 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                       Clear client
                     </button>
                   )}
+                </div>
+              )}
+
+              {form.type === 'outflow' && adAccounts.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Meta funding — ad account</label>
+                  <Combobox
+                    options={adAccounts.map(a => ({ id: a.id, label: a.name || a.id }))}
+                    value={form.ad_account_id}
+                    onChange={id => setForm(p => ({ ...p, ad_account_id: id }))}
+                    placeholder="Select only when funding an ad account"
+                  />
+                  {form.ad_account_id && <button type="button" className="mt-1 text-xs text-muted-foreground" onClick={() => setForm(p => ({ ...p, ad_account_id: '' }))}>Clear ad account</button>}
+                  <p className="mt-1 text-xs text-muted-foreground">Tag the client and paying bank. The amount already includes GST and will credit the client’s ad wallet once. Service charges stay on campaign tasks.</p>
                 </div>
               )}
 

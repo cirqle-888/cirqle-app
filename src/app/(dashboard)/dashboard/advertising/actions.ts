@@ -17,7 +17,7 @@ import { PERMS } from '@/lib/permissions/keys'
 import { generateInvoiceNumber } from '@/lib/invoices/numbering'
 import { nextTaskNumber } from '@/lib/utils/task-code'
 import { computeBudgetTotals, computeServiceCharge } from '@/lib/advertising/budget'
-import { recomputeCampaignBilling, writeInvoiceLines } from '@/lib/advertising/billing'
+import { getBillingBasisNative, recomputeCampaignBilling, writeInvoiceLines } from '@/lib/advertising/billing'
 import { getWalletSummary, getCompanyWalletSummary, getEntryUncredited } from '@/lib/advertising/wallet'
 import { createManualRequest } from '@/app/(dashboard)/dashboard/requests/actions'
 import { logRequestActivity } from '@/lib/requests/core'
@@ -156,7 +156,7 @@ export async function createAdProject(
   // any contribution pool for internal work is a deliberate manual decision.
   const serviceCharge = input.clientId
     ? computeServiceCharge(
-        input.adBudget ?? 0, input.serviceChargeType || 'fixed', input.serviceChargeValue ?? 0,
+        0, input.serviceChargeType || 'fixed', input.serviceChargeValue ?? 0,
       )
     : 0
   const taskId = await createCampaignTask(admin, {
@@ -186,7 +186,8 @@ export async function generateTaskForProject(projectId: string): Promise<ActionR
   if (projErr || !project) return { ok: false, error: 'Project not found' }
 
   const serviceCharge = computeServiceCharge(
-    project.ad_budget_amount ?? 0, project.service_charge_type || 'fixed', project.service_charge_value ?? 0
+    await getBillingBasisNative(admin, project, project.ad_budget_currency || 'INR'),
+    project.service_charge_type || 'fixed', project.service_charge_value ?? 0
   )
 
   const taskId = await createCampaignTask(admin, {

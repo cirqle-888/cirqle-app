@@ -7,7 +7,6 @@
  * carry forward in the wallet:
  *
  *     basis          = Σ platform spend × 1.18   (see ad-spend-invoicing.ts)
- *                      fallback: Σ active allocations → ad_budget_amount
  *     service charge = computeServiceCharge(basis, type, value)
  *
  * recomputeCampaignBilling() re-derives the campaign task's billing_amount and
@@ -15,15 +14,14 @@
  * then propagates the new billing onto any monthly draft invoice line, so no
  * manual invoice edits are ever needed.
  *
- * Everything here is best-effort against optional migrations: if the
- * ad_fund_allocations table hasn't been applied yet, billing silently keeps the
- * previous estimated-budget behaviour.
+ * Funding is already GST-inclusive and never becomes the service-fee basis.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { computeBudgetTotals, computeServiceCharge } from './budget'
 import { PLATFORM_LABEL } from './types'
-import { getSpendBasis, type SpendProject } from './ad-spend-invoicing'
+import { resolveAutomaticAdvertisingRate, campaignBillingIsLocked } from './automatic-pricing'
+import { getSpendBasis, isDuplicateCampaignProject, type SpendProject } from './ad-spend-invoicing'
 
 const round2 = (v: number) => Math.round((Number(v || 0) + Number.EPSILON) * 100) / 100
 
@@ -96,19 +94,16 @@ export async function getAllocationBasis(
 
 /**
  * The billing basis in the campaign's budget currency: actual spend incl. GST
- * once the platform reports any; before that, the allocated funds (0 when
- * none — unchanged from the allocation-only engine, so a draft campaign never
- * bills a service charge on an estimate).
+ * only. A top-up or allocation is not spend; no spend means a zero basis.
  */
 export async function getBillingBasisNative(admin: SupabaseClient, project: SpendProject, currency: string): Promise<number> {
   const spend = await getSpendBasis(admin, project)
   if (spend.hasSpend) return fromInr(admin, spend.spendInclGstInr, currency)
-  const basis = await getAllocationBasis(admin, project.id, currency)
-  return basis.allocatedNative
+  return 0
 }
 
 /**
- * Re-derives the campaign task's billing from the latest allocation basis and
+ * Re-derives the campaign task's billing from actual GST-inclusive spend and
  * resyncs the campaign's draft invoice. Call after ANY event that changes the
  * basis: allocation added/removed, service charge % edited, funding entry
  * deleted. Never throws.
@@ -124,7 +119,36 @@ export async function recomputeCampaignBilling(admin: SupabaseClient, projectId:
     // derived onto the task (which would create a commission pool from our own
     // ad spend) and no invoice lines are ever written. Budget tracking,
     // wallet allocations and metrics all still work.
-    if ((project as any).scope === 'company') return
+    if ((project as any).scope === 'company' || !project.client_id) return
+    if (await isDuplicateCampaignProject(admin, project)) return
+
+    // The campaign's billing task = the earliest-linked task (created with the
+    // campaign; extra tasks added later are work items, not the billing line).
+    const { data: link, error: linkError } = await admin
+      .from('ad_project_tasks').select('task_id')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: true }).limit(1).maybeSingle()
+
+    if (linkError) throw linkError
+    if (!link?.task_id) throw new Error('Campaign billing task is missing')
+    if (await campaignBillingIsLocked(admin, projectId, link?.task_id)) return
+
+    // Repair only active imported campaigns with the old empty pricing shape.
+    // Preserve explicitly selected services and nonzero/manual campaign fees.
+    if (!project.service_id && project.status === 'active' && project.external_campaign_id
+      && project.service_charge_type === 'fixed' && Number(project.service_charge_value) === 0) {
+      const rate = await resolveAutomaticAdvertisingRate(admin, project.client_id)
+      if (!rate) throw new Error('Needs pricing: no advertising rate configured')
+      const { data: updated, error } = await admin.from('ad_projects').update({
+        service_id: rate.serviceId, service_charge_type: rate.type, service_charge_value: rate.value,
+      }).eq('id', projectId).is('service_id', null).eq('service_charge_type', 'fixed')
+        .eq('service_charge_value', 0).select('id').maybeSingle()
+      if (error) throw error
+      if (!updated) return // another editor changed pricing; retry on the next sync
+      project.service_id = rate.serviceId
+      project.service_charge_type = rate.type
+      project.service_charge_value = rate.value
+    }
 
     const currency = (project as any).ad_budget_currency || 'INR'
     const spendBasis = await getBillingBasisNative(admin, project, currency)
@@ -132,26 +156,21 @@ export async function recomputeCampaignBilling(admin: SupabaseClient, projectId:
       spendBasis, (project as any).service_charge_type, Number((project as any).service_charge_value || 0),
     )
 
-    // The campaign's billing task = the earliest-linked task (created with the
-    // campaign; extra tasks added later are work items, not the billing line).
-    const { data: link } = await admin
-      .from('ad_project_tasks').select('task_id')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: true }).limit(1).maybeSingle()
-
     if ((link as any)?.task_id) {
       const billingInr = await toInr(admin, serviceCharge, currency)
       // The auto_attach_task_to_invoice trigger propagates this onto any
       // draft/reviewed monthly invoice line and recalculates its totals.
-      await admin.from('tasks').update({
+      const { error: taskError } = await admin.from('tasks').update({
+        ...(project.service_id ? { service_id: project.service_id } : {}),
         billing_amount: serviceCharge,
         billing_amount_inr: billingInr,
         updated_at: new Date().toISOString(),
       }).eq('id', (link as any).task_id)
+      if (taskError) throw taskError
     }
 
     await resyncInvoiceForProject(admin, projectId)
-  } catch { /* best-effort — never block the calling action */ }
+  } catch (error) { console.error('[advertising billing] Recompute failed', projectId, error) }
 }
 
 /** Recompute the linked draft invoice's service-charge + ad-spend lines. No-op if none. */
@@ -172,18 +191,16 @@ export async function resyncInvoiceForProject(admin: SupabaseClient, projectId: 
 
 /**
  * Write (insert-or-update) the agency service-charge item + ad-spend section
- * for a project's invoice. The ad-spend basis is the allocated funds when any
- * exist, else the estimated budget.
+ * for a project's invoice, using actual GST-inclusive spend only.
  */
 export async function writeInvoiceLines(
   admin: SupabaseClient, projectId: string, invoiceId: string, project: any,
 ): Promise<void> {
   const currency = project.ad_budget_currency || project.client?.default_currency || 'INR'
-  const basis = await getAllocationBasis(admin, projectId, currency)
   const spend = await getSpendBasis(admin, project)
   const totals = computeBudgetTotals({
     adBudget: spend.hasSpend ? await fromInr(admin, spend.spendInclGstInr, currency)
-      : basis.hasAllocations ? basis.allocatedNative : Number(project.ad_budget_amount || 0),
+      : 0,
     serviceChargeType: project.service_charge_type,
     serviceChargeValue: Number(project.service_charge_value || 0),
     taxPercent: Number(project.tax_percent || 0),
@@ -204,10 +221,8 @@ export async function writeInvoiceLines(
     })
   }
 
-  // Advertising spend → separate section: actual spend incl. GST, else the
-  // allocated funds, else the estimate.
-  const adInr = spend.hasSpend ? spend.spendInclGstInr
-    : basis.hasAllocations ? basis.allocatedInr : await toInr(admin, totals.adSpend, currency)
+  // Advertising spend → actual spend incl. GST, never funding or estimates.
+  const adInr = spend.hasSpend ? spend.spendInclGstInr : 0
   const adDesc = `${PLATFORM_LABEL[project.platform] || 'Advertising'} Ad Spend — ${project.campaign_name}`
   const { data: adItem } = await admin.from('invoice_ad_spend_items')
     .select('id').eq('invoice_id', invoiceId).eq('ad_project_id', projectId).limit(1).maybeSingle()

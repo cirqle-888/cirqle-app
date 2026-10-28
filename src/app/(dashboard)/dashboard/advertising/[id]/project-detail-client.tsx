@@ -463,8 +463,8 @@ function OverviewTab({ project, agg, remaining, health, result, allocations = []
   const hasAllocations = allocations.length > 0
   const basis = allocated
   const spend = agg.spend || 0
-  const spendGross = spendWithGst(spend)              // actual money consumed (incl. 18% GST)
-  const serviceCharge = computeServiceCharge(basis, project.service_charge_type, Number(project.service_charge_value || 0))
+  const spendGross = project.actual_spend_inr ?? spendWithGst(spend)              // actual money consumed (incl. 18% GST)
+  const serviceCharge = computeServiceCharge(spendGross, project.service_charge_type, Number(project.service_charge_value || 0))
 
   // Composed per money layer. Allocations/budget/spend are the campaign's
   // working numbers — every viewer gets them. Service charge is billing
@@ -478,12 +478,12 @@ function OverviewTab({ project, agg, remaining, health, result, allocations = []
     ['Allocated (wallet)', hasAllocations ? inr(allocated, 2) : '—'],
     ['Budget (estimated)', inr(project.ad_budget_amount)],
     ['Spend incl. GST 18%', inr(spendGross, 2)],
-    ['Remaining (incl. GST)', inr(round2(basis - spendGross), 2)],
+    ['Allocation remaining (incl. GST)', inr(round2(basis - spendGross), 2)],
     ...(perms.viewBilling ? [
       ['Service charge (billing)', `${inr(serviceCharge, 2)}${project.service_charge_type === 'percent' ? ` (${project.service_charge_value}%)` : ''}`] as [string, string],
     ] : []),
     ...(perms.viewFinancials ? [
-      ['Wallet balance', allocSupported && wallet ? inr(wallet.balanceInr, 2) : '—'] as [string, string],
+      ['Unallocated wallet', allocSupported && wallet ? inr(wallet.balanceInr, 2) : '—'] as [string, string],
     ] : []),
   ]
 
@@ -1011,10 +1011,10 @@ function FundAllocationCard({ project, allocations, wallet, supported, reportedS
   // billed — no service charge applies.
   const isCompanyCampaign = !project.client_id && (project as any).scope === 'company'
   const walletEligible = Boolean(project.client_id) || isCompanyCampaign
+  const spendGross = project.actual_spend_inr ?? spendWithGst(reportedSpend)
   const serviceCharge = isCompanyCampaign
     ? 0
-    : computeServiceCharge(basis, project.service_charge_type, Number(project.service_charge_value || 0))
-  const spendGross = spendWithGst(reportedSpend) // actual money consumed (incl. 18% GST)
+    : computeServiceCharge(spendGross, project.service_charge_type, Number(project.service_charge_value || 0))
   const balance = wallet?.balanceInr ?? 0
 
   async function add() {

@@ -131,7 +131,12 @@ export async function recordAdTopUp(input: RecordTopUpInput): Promise<ActionResu
   const entryId = asRow<{ id: string }>(entry)?.id as string
 
   // ── 2. Wallet credit ──────────────────────────────────────────────────────
-  const credit = input.clientId
+  // New installs credit client-tagged funding atomically with the Cashbook insert.
+  // Keep the old credit path for company wallets and pre-migration installs.
+  const { data: autoCredit } = await admin.from('ad_wallet_ledger')
+    .select('id').eq('cashbook_entry_id', entryId).eq('cashbook_auto_credit', true)
+    .is('deleted_at', null).maybeSingle()
+  const credit = autoCredit ? { ok: true as const } : input.clientId
     ? await addClientFund(input.clientId, { cashbookEntryId: entryId, amount, notes: 'Meta top-up' })
     : await addCompanyFund({ cashbookEntryId: entryId, amount, notes: 'Meta top-up' })
   if (!credit.ok) {

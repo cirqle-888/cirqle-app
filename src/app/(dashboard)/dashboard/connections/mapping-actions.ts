@@ -1,5 +1,6 @@
 'use server'
 
+import { resolveAutomaticAdvertisingRate } from '@/lib/advertising/automatic-pricing'
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requirePermission, requireReadPermission } from '@/lib/permissions/check'
@@ -109,10 +110,16 @@ async function mapCampaignCore(
 
   const { data: camp, error: campErr } = await admin
     .from('ad_campaigns')
-    .select('id, ad_account_id, provider, external_campaign_id, name, objective')
+    .select('id, ad_account_id, provider, external_campaign_id, name, objective, project_id, client_id')
     .eq('id', input.campaignId)
     .maybeSingle()
   if (campErr || !camp) return { success: false, error: 'Campaign not found' }
+
+  // Repeated mapping must reuse the registry owner, not create another billable campaign.
+  if (input.projectMode !== 'existing' && camp.project_id) {
+    if (camp.client_id !== input.clientId) return { success: false, error: 'Campaign already belongs to another client.' }
+    return { success: true, projectId: camp.project_id }
+  }
 
   const campaignType = isCampaignType(input.campaignType) ? input.campaignType : null
   const providerMetadata = {
@@ -155,7 +162,12 @@ async function mapCampaignCore(
     if (updErr) return { success: false, error: updErr.message }
     projectId = input.existingProjectId
   } else {
+    const rate = await resolveAutomaticAdvertisingRate(admin, input.clientId)
+    if (!rate) return { success: false, error: 'Needs pricing: configure the default advertising service and client rate.' }
     const mappedRow = {
+      service_id:           rate.serviceId,
+      service_charge_type:  rate.type,
+      service_charge_value: rate.value,
       campaign_name:        camp.name,
       client_id:            input.clientId,
       platform:             camp.provider,
@@ -181,7 +193,7 @@ async function mapCampaignCore(
       projectId: projectId,
       campaignName: camp.name,
       clientId: input.clientId,
-      serviceId: null,
+      serviceId: rate.serviceId,
       serviceCharge: 0,
       currency: 'INR',
       employeeId,

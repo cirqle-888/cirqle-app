@@ -255,7 +255,7 @@ export function buildCampaignCards(
     })
     const allocated = allocatedByProject[p.id] || 0
     const billing = computeServiceCharge(
-      allocated,
+      spendWithGst(agg.spend || 0),
       p.service_charge_type, Number(p.service_charge_value || 0),
     )
     const periodAgg = aggregateMetrics(rowsInPeriod(rows, range))

@@ -1,3 +1,4 @@
+import { getSpendBasis } from '@/lib/advertising/ad-spend-invoicing'
 import { notFound, redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
@@ -42,6 +43,9 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       .eq('ad_project_id', id).eq('direction', 'debit').is('deleted_at', null)
       .order('created_at', { ascending: false }),
   ])
+
+  const actualSpend = await getSpendBasis(admin, project)
+  project.actual_spend_inr = actualSpend.spendInclGstInr
 
   // Two confidentiality layers (migration 027) — manage_budget implies both.
   // Campaign allocations are behind NEITHER: they are the campaign's working

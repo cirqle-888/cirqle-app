@@ -243,6 +243,13 @@ export async function reconcileAccountFunding(admin: SupabaseClient, accountRowI
         .eq('ad_account_id', accountRowId).eq('type', 'outflow').is('deleted_at', null)
         .gte('entry_date', since),
     ])
+    // Cashbook is the source of funding. Reconcile existing accountant entries
+    // as well as new entries; the database locks each source and credits only
+    // its unassigned remainder. Never creates Cashbook receipts or service fees.
+    for (const entry of asRows<TopUpEntryRow>(entryRes.data)) {
+      const { error } = await admin.rpc('reconcile_cashbook_ad_wallet', { p_entry_id: entry.id })
+      if (error) console.error('[ad funding] Wallet reconciliation failed', entry.id, error.message)
+    }
     const evRows = asRows<FundingEventRow>(evRes.data)
     const events: FundingEventLite[] = evRows.map(e => ({
       id: e.id, adAccountId: e.ad_account_id, status: e.status, amount: e.amount != null ? num(e.amount) : null,

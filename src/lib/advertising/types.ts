@@ -92,6 +92,8 @@ export const AD_STATUS_CHIP: Record<string, string> = {
 // ─── Row shapes (Supabase returns snake_case; kept loose like requests core) ──
 
 export interface AdProjectRow {
+  /** Authoritative synced platform spend including GST, in INR (not funding). */
+  actual_spend_inr?: number
   id: string
   client_id: string | null
   request_id: string | null

@@ -148,6 +148,9 @@ export default async function CashBookPage() {
   // has run. Without the columns the entry still saves (the write strips
   // them), but the cushion would be silently dropped — so the form hides the
   // section rather than taking an answer it cannot keep.
+  const { data: adAccounts } = hasPermission(me, PERMS.CASHBOOK_EDIT)
+    ? await supabase.from('ad_accounts').select('id, name').eq('is_active', true).order('name')
+    : { data: [] }
   const markupAvailable = await columnExists(supabase, 'cashbook_entries', 'markup_type')
   // Return / Reverse needs migration 20261016100000; until then it is not offered.
   const reversalsAvailable = await columnExists(supabase, 'cashbook_entries', 'reversal_of')
@@ -155,6 +158,7 @@ export default async function CashBookPage() {
   return (
     <CashBookClient
       initialEntries={initialEntries}
+      adAccounts={adAccounts || []}
       categories={categoriesRes.data || []}
       bankAccounts={bankAccountsRes.data || []}
       exchangeRates={exchangeRatesRes.data || []}

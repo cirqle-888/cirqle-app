@@ -34,6 +34,7 @@ interface ActionResult<T = void> {
 
 export interface CashbookEntryPayload {
   type: 'inflow' | 'outflow'
+  ad_account_id?: string | null
   category_id: string | undefined
   bank_account_id: string | null
   amount: number
@@ -268,7 +269,7 @@ export async function insertCashbookEntries(
   const { data, error } = await retryWithoutMissingColumns(omit =>
     admin
       .from('cashbook_entries')
-      .insert(rows.map(r => withoutKeys(r, omit)))
+      .insert(rows.map(r => withoutKeys(r, omit.filter(k => k !== 'ad_account_id'))))
       .select(ENTRY_SELECT)
   )
 
@@ -409,12 +410,15 @@ export async function insertCashbookEntries(
   }
 
   revalidatePath(REVALIDATE)
+  revalidatePath('/dashboard/advertising')
+  revalidatePath('/dashboard/advertising/funds')
   return { ok: true, data: { entries: allInserted, allocationError } }
 }
 
 // ─── Update cashbook entry (inline edit) ─────────────────────────────────────
 
 export interface CashbookEntryUpdate {
+  ad_account_id?: string | null
   entry_date: string
   type?: 'inflow' | 'outflow'
   amount: number
@@ -460,7 +464,7 @@ export async function updateCashbookEntry(
   const { error } = await retryWithoutMissingColumns(omit =>
     admin
       .from('cashbook_entries')
-      .update(withoutKeys(tableFields, omit))
+      .update(withoutKeys(tableFields, omit.filter(k => k !== 'ad_account_id')))
       .eq('id', id)
   )
   if (error) return { ok: false, error: error.message }
@@ -476,6 +480,8 @@ export async function updateCashbookEntry(
   await syncDraftInvoiceExpenses(id, { cushionEdited })
 
   revalidatePath(REVALIDATE)
+  revalidatePath('/dashboard/advertising')
+  revalidatePath('/dashboard/advertising/funds')
   return { ok: true }
 }
 
@@ -544,6 +550,8 @@ export async function softDeleteCashbookEntry(id: string): Promise<ActionResult<
   for (const entryId of idList) await releaseEntryFunding(admin, entryId)
 
   revalidatePath(REVALIDATE)
+  revalidatePath('/dashboard/advertising')
+  revalidatePath('/dashboard/advertising/funds')
   return { ok: true, data: { deletedIds: idList } }
 }
 
@@ -573,6 +581,8 @@ export async function toggleCashbookEntryReview(id: string, is_reviewed: boolean
   if (error) return { ok: false, error: error.message }
 
   revalidatePath(REVALIDATE)
+  revalidatePath('/dashboard/advertising')
+  revalidatePath('/dashboard/advertising/funds')
   return { ok: true }
 }
 
@@ -731,6 +741,8 @@ export async function saveClientTags(
   }
 
   revalidatePath(REVALIDATE)
+  revalidatePath('/dashboard/advertising')
+  revalidatePath('/dashboard/advertising/funds')
   return { ok: true, data: { saved } }
 }
 
