@@ -44,6 +44,7 @@ export default function WebReportViewer({ data }: { data: RenderData }) {
   const pr = kpi.periodReach
   const singleDay = data.config.dateFrom === data.config.dateTo
   const result = resultHeadline(kpi, project.campaignType)
+  const showAllocationBalance = !data.campaigns || data.campaigns.length <= 1
 
   return (
     <div className="bg-background text-foreground max-w-5xl mx-auto p-4 sm:p-8 md:p-12 space-y-12">
@@ -162,6 +163,7 @@ export default function WebReportViewer({ data }: { data: RenderData }) {
       {sections.dailyBreakdown && kpi.dailySeries.length > 0 && (
         <section className="space-y-4">
           <h2 className="text-xl font-semibold border-b border-border pb-2">Daily Performance</h2>
+          <p className="text-xs text-muted-foreground">Spend excludes GST. Balance to Spend is the closing allocated wallet balance after actual cost including GST, not the live Meta account balance.</p>
           <div className="overflow-x-auto rounded-xl border border-border bg-card">
             <table className="w-full text-sm text-left">
               <thead className="bg-muted/50 text-muted-foreground border-b border-border">
@@ -172,6 +174,7 @@ export default function WebReportViewer({ data }: { data: RenderData }) {
                   <th className="px-4 py-3 font-medium text-right">Clicks</th>
                   <th className="px-4 py-3 font-medium text-right">{result.label}</th>
                   <th className="px-4 py-3 font-medium text-right">{result.costLabel}</th>
+                  {showAllocationBalance && <th className="px-4 py-3 font-medium text-right whitespace-nowrap">Balance to Spend</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -183,6 +186,7 @@ export default function WebReportViewer({ data }: { data: RenderData }) {
                     <td className="px-4 py-3 text-right tabular-nums">{formatNumber(row.clicks)}</td>
                     <td className="px-4 py-3 text-right tabular-nums">{row.results == null ? '—' : formatNumber(row.results)}</td>
                     <td className="px-4 py-3 text-right tabular-nums">{row.cpr == null ? '—' : formatCurrency2(row.cpr)}</td>
+                    {showAllocationBalance && <td className="px-4 py-3 text-right tabular-nums">{Number.isFinite(row.remainingAllocation) ? formatCurrency2(row.remainingAllocation) : '—'}</td>}
                   </tr>
                 ))}
               </tbody>

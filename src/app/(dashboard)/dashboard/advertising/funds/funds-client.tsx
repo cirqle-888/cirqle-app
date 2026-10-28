@@ -9,7 +9,7 @@
  * same statement filtered to one client.
  */
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -227,14 +227,15 @@ export function TopUpForm({ clients, accounts, banks, campaigns, initialClientId
   fixedClient?: boolean
   onDone: () => void
 }) {
-  const [clientId, setClientId] = useState<string>(initialClientId ?? '')
-  useEffect(() => {
-    if (initialClientId || fixedClient) return
+  const [clientId, setClientId] = useState<string>(() => {
+    if (initialClientId) return initialClientId
+    if (fixedClient || typeof window === 'undefined') return ''
     try {
       const saved = JSON.parse(localStorage.getItem('cirqle:ad-funds:defaults') || '{}')
-      if (typeof saved.clientId === 'string' && clients.some(c => c.id === saved.clientId)) setClientId(saved.clientId)
+      if (typeof saved.clientId === 'string' && clients.some(c => c.id === saved.clientId)) return saved.clientId
     } catch { /* optional preference */ }
-  }, [initialClientId, fixedClient, clients])
+    return ''
+  })
   const clientCampaigns = campaigns.filter(c => c.clientId === clientId)
   const defaultAccount = clientCampaigns.find(c => c.status === 'active' && c.adAccountId)?.adAccountId
     ?? clientCampaigns.find(c => c.adAccountId)?.adAccountId ?? accounts[0]?.id ?? ''
