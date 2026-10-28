@@ -30,6 +30,7 @@ interface HeaderProps {
 }
 
 const ROUTE_LABELS: Record<string, string> = {
+  'prompt-studio': 'Prompt Studio',
   dashboard:     'Dashboard',
   tasks:         'Tasks',
   contributions: 'Contributions',

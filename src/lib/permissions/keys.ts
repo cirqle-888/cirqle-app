@@ -4,6 +4,11 @@
  * Use these constants in client/server code instead of raw strings.
  */
 export const PERMS = {
+  /** Build, copy, generate and save prompts, and download reusable skills. */
+  PROMPT_STUDIO_VIEW: 'prompt_studio.view',
+  /** Edit Client Cards and create, edit or delete custom prompt templates. */
+  PROMPT_STUDIO_MANAGE: 'prompt_studio.manage',
+
   // Dashboard
   DASHBOARD_VIEW:           'dashboard.view',
   DASHBOARD_VIEW_ANALYTICS: 'dashboard.view_analytics',

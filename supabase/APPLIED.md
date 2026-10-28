@@ -55,6 +55,7 @@ disaster-recovery path from migrations. That needs a baseline dump — see
 
 | Migration | What it adds | Until it is applied |
 |---|---|---|
+| `20261028120000_prompt_studio` | Client Cards, custom templates, prompt library and two permissions; service-role-only tables. | Create/Copy and Skills work; saving is hidden. After applying: verify admin access, grant view/manage to intended designations, save/reload a card and custom template, save/favorite/reopen/delete a library prompt, and confirm anon/authenticated have no table grants. |
 | `20261004120000_retire_offer_intake` | Relabels `offer.prepare` to "Manage offer product catalog" (all it still gates) and takes `capture.use` back from designations that only had it for AI Capture's retired offer mode — today, Flyer Designer. No data deleted. | Safe in any order. Until it runs, the Designations screen still describes `offer.prepare` as the old Offer Preparation workspace, and Flyer Designer still sees AI Capture (which now just points offer lists to Offer Studio). |
 ### Follow-up: Realtime is not delivering for `employee_presence`
 

@@ -13,6 +13,7 @@ import { NextResponse, type NextRequest } from 'next/server'
  * very people who can see everyone's contributions.
  */
 const ROUTE_PERMS: Array<[RegExp, string | string[]]> = [
+  [/^\/dashboard\/prompt-studio/, 'prompt_studio.view'],
   [/^\/dashboard\/activity/,                'timeline.view_all'],
   [/^\/dashboard\/leads/,                   'leads.view'],
   [/^\/dashboard\/field-marketing/,         'field.view'],

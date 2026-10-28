@@ -17,7 +17,8 @@ export default defineConfig({
     // figma-plugin/ holds self-contained plugin projects with their own module
     // resolution (e.g. '@shared/types'), which this config does not provide —
     // their suites fail on import here without saying anything about the app.
-    exclude: ['**/node_modules/**', '**/dist/**', '.claude/**', '_archive/**', 'figma-plugin/**'],
+    // Local scratch scripts call live services and are not isolated app tests.
+    exclude: ['**/node_modules/**', '**/dist/**', '.claude/**', '_archive/**', 'figma-plugin/**', 'scratch/**'],
   },
   resolve: {
     alias: {
