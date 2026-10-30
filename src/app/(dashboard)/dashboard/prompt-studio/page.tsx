@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation";
 import { createAdminClient, fetchAll } from "@/lib/supabase/server";
 import { loadCurrentUser, hasPermission } from "@/lib/permissions/check";
-import type {
-  CustomTemplate,
-  SavedCard,
-  StudioClient,
-  LibraryItem,
+import {
+  LIBRARY_PAGE,
+  type CustomTemplate,
+  type SavedCard,
+  type StudioClient,
+  type LibraryItem,
 } from "@/lib/prompt-studio/types";
 import PromptStudioClient from "./prompt-studio-client";
 
@@ -66,7 +67,7 @@ export default async function PromptStudioPage() {
           .select("*")
           .is("deleted_at", null)
           .order("created_at", { ascending: false })
-          .limit(200),
+          .limit(LIBRARY_PAGE),
   ]);
   if ([clients, cards, templates, library].some((r) => r.error))
     throw new Error("Could not load Prompt Studio data. Please try again.");
@@ -90,6 +91,7 @@ export default async function PromptStudioPage() {
       initialLibrary={(library.data || []) as LibraryItem[]}
       installed={!missing}
       canManage={hasPermission(me, "prompt_studio.manage") && !me?.isViewAs}
+      myId={me?.employeeId ?? null}
       aiEnabled={!!process.env.GROQ_API_KEY}
     />
   );

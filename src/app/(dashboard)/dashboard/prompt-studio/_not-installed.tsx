@@ -13,6 +13,10 @@ export function NotInstalled() {
             <code className="break-all">
               supabase/migrations/20261028120000_prompt_studio.sql
             </code>{" "}
+            and then{" "}
+            <code className="break-all">
+              20261031090000_prompt_studio_flyer.sql
+            </code>{" "}
             in the Supabase SQL editor.
           </p>
         </div>

@@ -14,6 +14,30 @@ export async function callGroqJSON(
   userText: string,
   opts?: { model?: string; maxTokens?: number },
 ): Promise<any> {
+  const raw = (await groqContent(systemPrompt, userText, opts)) || '{}'
+  const match = raw.match(/\{[\s\S]*\}/)
+  try { return JSON.parse(match ? match[0] : raw) } catch { return {} }
+}
+
+/**
+ * The model's answer as plain text, for long free-form writing (Prompt
+ * Studio's "Generate here"). Asking for JSON there breaks on the quotes and
+ * line breaks a long answer is full of; plain text cannot.
+ */
+export async function callGroqText(
+  systemPrompt: string,
+  userText: string,
+  opts?: { model?: string; maxTokens?: number; temperature?: number },
+): Promise<string> {
+  return (await groqContent(systemPrompt, userText, opts)).trim()
+}
+
+/** One chat completion: the reply text with any leaked <think> block removed. */
+async function groqContent(
+  systemPrompt: string,
+  userText: string,
+  opts?: { model?: string; maxTokens?: number; temperature?: number },
+): Promise<string> {
   const key = process.env.GROQ_API_KEY
   if (!key) throw new Error('AI parsing is not configured (set GROQ_API_KEY).')
   // Default to a NON-reasoning instruct model: it answers this extraction task
@@ -39,7 +63,7 @@ export async function callGroqJSON(
   // parse leniently below. Soft failure (empty object) beats a hard error.
   const buildBody = (withReasoningFormat: boolean) => JSON.stringify({
     model,
-    temperature: 0,
+    temperature: opts?.temperature ?? 0,
     max_tokens: maxTokens,
     ...(withReasoningFormat ? { reasoning_format: 'hidden' } : {}),
     messages: [
@@ -87,10 +111,8 @@ export async function callGroqJSON(
     throw new Error(`AI request failed (${res.status})${msg ? `: ${msg}` : ''}.`)
   }
   const data = await res.json()
-  let raw = data?.choices?.[0]?.message?.content || '{}'
+  const raw: string = data?.choices?.[0]?.message?.content || ''
   // Defense-in-depth: strip any chain-of-thought block that leaked through
-  // despite reasoning_format: 'hidden', before extracting the JSON object.
-  raw = raw.replace(/<think>[\s\S]*?<\/think>/gi, '')
-  const match = raw.match(/\{[\s\S]*\}/)
-  try { return JSON.parse(match ? match[0] : raw) } catch { return {} }
+  // despite reasoning_format: 'hidden'.
+  return raw.replace(/<think>[\s\S]*?<\/think>/gi, '')
 }

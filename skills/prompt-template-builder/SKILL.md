@@ -12,7 +12,7 @@ Work out:
 - **The jobs:** one template per job. Split a brief like "wedding film" into story, shots, clips and so on.
 - **Where the answer is pasted:** which tool.
 - **Whether it needs the Client Card:** client work does; personal or story work does not.
-- **The category:** `ad`, `film`, `product`, `agency` or `fix`. If none fits and more than 3 templates share a new theme, add a category to `CATEGORIES` and to the migration's `category` check constraint, and say that an SQL change is needed.
+- **The category:** `flyer` (offer flyer text and product photos), `ad`, `film`, `product`, `agency` or `fix`. If none fits and more than 3 templates share a new theme, add a category to `CATEGORIES` and to the migration's `category` check constraint, and say that an SQL change is needed.
 
 If the brief is clear, don't ask; state the reading you took.
 
@@ -53,6 +53,13 @@ Rules every template must follow:
 - Music: instrumental, original, BPM, the shape over time.
 - Nothing invented: no prices, claims or real people.
 - To upgrade an existing template, keep its `key` and edit its body or fields.
+
+Optional extras, for templates where people choose a look rather than type it (see `flyer-text-effect` and `flyer-product-photo`):
+- `type: 'choice'` shows the options as picture cards (pick one); `type: 'multi'` lets people tick several, stored joined with `"; "`, so options must not contain `;`.
+- `preview: 'text-effect' | 'text-font' | 'text-angle' | 'photo-angle' | 'photo-pose' | 'photo-shadow'` gives each option a small picture. A new kind needs drawing code in `option-preview.tsx`.
+- `attach: true` adds an "Add a picture" box to the field (it stays in the browser and is never uploaded). Pair it with a `multi` field saying what to take from the reference.
+- `defaults` pre-fills fields (people can clear them), and `presets` are one-click looks; every value must be one of the field's options (the tests check this).
+- `livePreview: 'text-effect' | 'product-photo'` shows a rough live picture of the chosen options.
 
 ## 3. Add and check
 1. Add the templates at the end of their category array in `templates.ts`.

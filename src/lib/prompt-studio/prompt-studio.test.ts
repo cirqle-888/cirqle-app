@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { TEMPLATES, CATEGORIES, templateByKey } from './templates'
-import { renderPrompt, renderBody, missingRequired, placeholdersIn, renderClientCard } from './render'
+import { renderPrompt, renderBody, missingRequired, placeholdersIn, renderClientCard, estimateTokens } from './render'
+import { splitMulti } from './types'
 import { CLIENT_CARD_FIELDS } from './client-card'
 
 describe('template library', () => {
@@ -66,5 +67,92 @@ describe('rendering', () => {
   it('card fields have unique keys', () => {
     const keys = CLIENT_CARD_FIELDS.map(f => f.key)
     expect(new Set(keys).size).toBe(keys.length)
+  })
+})
+
+describe('fixes from the review', () => {
+  const clip = templateByKey('ad-video-clip')!
+
+  it('drops "Use the CLIENT CARD above" when there is no card to point at', () => {
+    const out = renderPrompt(clip, { need: 'x' }, null)
+    expect(out).not.toMatch(/CLIENT CARD/)
+    expect(out.startsWith('You write prompts for AI video tools.')).toBe(true)
+  })
+
+  it('the language picked for this prompt wins over the card, and works with no card', () => {
+    const card = { brand: 'Seastar', language: 'English' }
+    expect(renderPrompt(clip, { need: 'x' }, card, { language: 'Malayalam' })).toContain('Language for voice and text: Malayalam')
+    const noCard = renderPrompt(clip, { need: 'x' }, null, { language: 'Arabic' })
+    expect(noCard).toContain('CLIENT CARD\nLanguage for voice and text: Arabic')
+    expect(noCard).toContain('Use the CLIENT CARD above')
+  })
+
+  it('counts Malayalam as costing more tokens than English', () => {
+    expect(estimateTokens('abcd')).toBe(1)
+    expect(estimateTokens('മലയാളം')).toBeGreaterThan(3)
+  })
+})
+
+describe('Offer Flyer templates', () => {
+  const text = templateByKey('flyer-text-effect')!
+  const photo = templateByKey('flyer-product-photo')!
+
+  it('come first, in their own category', () => {
+    expect(CATEGORIES[0].id).toBe('flyer')
+    expect(TEMPLATES.slice(0, 2).map(t => t.key)).toEqual(['flyer-text-effect', 'flyer-product-photo'])
+  })
+
+  it('every option list, default and preset uses real options and fields', () => {
+    for (const t of [text, photo]) {
+      const keys = t.fields.map(f => f.key)
+      const ok = (key: string, value: string) => {
+        const f = t.fields.find(x => x.key === key)!
+        expect(f, `${t.key}.${key}`).toBeTruthy()
+        if (f.type === 'multi') for (const v of splitMulti(value)) expect(f.options, `${t.key}.${key}`).toContain(v)
+        else if (f.options) expect(f.options, `${t.key}.${key}`).toContain(value)
+      }
+      for (const [k, v] of Object.entries(t.defaults || {})) ok(k, v)
+      for (const p of t.presets || []) for (const [k, v] of Object.entries(p.values)) {
+        expect(keys).toContain(k)
+        ok(k, v)
+      }
+      for (const f of t.fields.filter(x => x.preview)) expect(['choice', 'multi']).toContain(f.type)
+      for (const f of t.fields) for (const o of f.options || []) expect(o, `${t.key}.${f.key}`).not.toContain(';')
+    }
+  })
+
+  it('3D text: defaults fill a full, short prompt from just the words', () => {
+    expect(missingRequired(text, {})).toEqual(['Text to make'])
+    const out = renderPrompt(text, { text: 'MEGA SALE' }, { brand: 'Seastar', colors: 'Red and gold' })
+    expect(out).toContain('TEXT (spell exactly): "MEGA SALE"')
+    expect(out).toContain('Effect: 3D gold metallic')
+    expect(out).toContain('Background: Transparent PNG (no background)')
+    expect(out).not.toContain('Reference image attached')
+    expect(out).not.toContain('{{')
+  })
+
+  it('3D text: ticking reference options adds the reference line', () => {
+    const out = renderBody(text, { text: 'SALE', refUse: 'Text effect style; Colours' })
+    expect(out).toContain('Reference image attached — copy its: Text effect style; Colours')
+  })
+
+  it('a field can be switched off even when it has a default', () => {
+    expect(renderBody(text, { text: 'SALE', extras: '' })).not.toContain('Extra effects:')
+  })
+
+  it('product photo: always transparent 4K by default, keeps the real label, no card', () => {
+    expect(photo.usesClientCard).toBe(false)
+    const out = renderPrompt(photo, { product: 'Kabani Rose Liquid 5L can' }, { brand: 'Seastar' })
+    expect(out).not.toContain('CLIENT CARD')
+    expect(out).toContain('Background: Transparent PNG (no background)')
+    expect(out).toContain('Output size: 4K (4096 px on the long side)')
+    expect(out).toContain('keep the exact label text, logo, colours, shape and proportions')
+  })
+
+  it('product photo: a preset sets the same look for every product', () => {
+    const look = photo.presets!.find(p => p.name === 'Falling offer')!
+    const out = renderBody(photo, { product: 'Sony Soap 650g', ...look.values })
+    expect(out).toContain('Pose: Falling diagonally')
+    expect(out).toContain('Same look as the other products: Falling diagonally')
   })
 })

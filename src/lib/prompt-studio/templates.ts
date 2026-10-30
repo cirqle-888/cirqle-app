@@ -19,6 +19,7 @@
 import type { PromptCategory, PromptField, PromptTemplate } from './types'
 
 export const CATEGORIES: PromptCategory[] = [
+  { id: 'flyer',   name: 'Offer Flyer',         description: '3D offer text and clean product photos for flyers' },
   { id: 'ad',      name: 'Ad Video',            description: 'Offer and promotion reels, step by step' },
   { id: 'film',    name: 'Film & Series',       description: 'Stories, episodes, characters and scenes' },
   { id: 'product', name: 'Product Videography', description: 'Packshots, hero clips, UGC and food' },
@@ -52,6 +53,168 @@ const VIDEO_TOOL: PromptField = {
 }
 
 const AVOID_LINE = 'Then one line starting "Avoid:" with 5 short things to avoid.'
+
+// ── Offer Flyer ─────────────────────────────────────────────────────────────
+// Built from the team's "auto-generate prompts" sheet (theme, light, depth,
+// material, text finish, effects, reference attached …), cut down to the
+// choices that change the result, each with a picture.
+const TRANSPARENT = 'Transparent PNG (no background)'
+
+const FLYER: PromptTemplate[] = [
+  {
+    key: 'flyer-text-effect', name: '3D text effect', category: 'flyer',
+    purpose: 'Offer words like MEGA SALE as 3D lettering, ready to cut out for the flyer',
+    useIn: 'ChatGPT images, Gemini (Nano Banana), Ideogram, Firefly', usesClientCard: true,
+    livePreview: 'text-effect',
+    fields: [
+      { key: 'text', label: 'Text to make', type: 'text', required: true, placeholder: 'MEGA SALE',
+        help: '1 to 3 words works best. Exactly as it should be spelled.' },
+      { key: 'effect', label: 'Effect', type: 'choice', preview: 'text-effect',
+        options: ['3D gold metallic', 'Chrome silver', 'Glossy candy plastic', 'Red and yellow sale 3D', 'Neon glow', 'Embossed (raised)', 'Balloon (inflated)', 'Frosted glass', 'Fire and flames', 'Wooden', 'Paper cut layers', 'Festive gold with lights'] },
+      { key: 'colors', label: 'Colours (optional)', type: 'text', placeholder: 'Red and gold — or leave empty for the brand colours' },
+      { key: 'font', label: 'Letter shape', type: 'choice', preview: 'text-font',
+        options: ['Bold rounded', 'Heavy block', 'Condensed tall', 'Elegant serif', 'Brush script', 'Handwritten'] },
+      { key: 'angle', label: 'Angle', type: 'choice', preview: 'text-angle',
+        options: ['Straight front', 'Tilted back (perspective)', 'Turned left', 'Turned right', 'Slanted (italic)', 'Arched curve'] },
+      { key: 'depth', label: 'Depth', type: 'select', options: ['Flat', 'Semi-3D', 'Deep 3D extrusion', 'Layered (stacked outlines)'] },
+      { key: 'light', label: 'Light', type: 'select', options: ['Soft light from the top left', 'Spotlight from above', 'Soft even light', 'Glow from behind (backlight)', 'Centre glow'] },
+      { key: 'extras', label: 'Extra effects', type: 'multi',
+        options: ['Soft shadow', 'Reflection', 'Glow', 'Sparkles', 'Outline stroke', 'Particles', 'Bokeh lights', 'Motion streaks'] },
+      { key: 'theme', label: 'Occasion or theme (optional)', type: 'text', placeholder: 'Onam, Ramadan, Weekend Sale, New Year' },
+      { key: 'background', label: 'Background', type: 'select',
+        options: [TRANSPARENT, 'Plain white (easy to cut out)', 'Plain black', 'Solid colour from the colours above', 'Small scene behind the text'] },
+      { key: 'ratio', label: 'Size', type: 'select', options: ['Wide 16:9', 'Banner 3:1', 'Square 1:1', 'Portrait 4:5'] },
+      { key: 'refUse', label: 'Reference image (optional)', type: 'multi', attach: true,
+        options: ['Text effect style', 'Colours', 'Letter shape', 'Lighting', 'Whole design and layout'],
+        help: 'Attach the picture in the AI tool too. Tick what to copy from it.' },
+      { key: 'notes', label: 'Anything else (optional)', type: 'text', placeholder: 'Soft white glow behind the letters so they stand out' },
+    ],
+    defaults: {
+      effect: '3D gold metallic', font: 'Bold rounded', angle: 'Straight front', depth: 'Deep 3D extrusion',
+      light: 'Soft light from the top left', extras: 'Soft shadow', background: TRANSPARENT, ratio: 'Wide 16:9',
+    },
+    presets: [
+      { name: 'Mega sale', note: 'Red and gold, big and loud',
+        values: { effect: 'Red and yellow sale 3D', colors: 'Red, yellow and gold', font: 'Heavy block', angle: 'Tilted back (perspective)', depth: 'Deep 3D extrusion', light: 'Spotlight from above', extras: 'Soft shadow; Outline stroke; Sparkles' } },
+      { name: 'Festive gold', note: 'Onam, Eid, Diwali',
+        values: { effect: 'Festive gold with lights', colors: 'Gold and warm white', font: 'Elegant serif', angle: 'Straight front', depth: 'Semi-3D', light: 'Glow from behind (backlight)', extras: 'Glow; Sparkles; Bokeh lights' } },
+      { name: 'Fresh and clean', note: 'Vegetables, dairy, daily needs',
+        values: { effect: 'Glossy candy plastic', colors: 'Fresh green and white', font: 'Bold rounded', angle: 'Straight front', depth: 'Semi-3D', light: 'Soft even light', extras: 'Soft shadow; Reflection' } },
+      { name: 'Neon night', note: 'Night sale, electronics',
+        values: { effect: 'Neon glow', colors: 'Pink and electric blue', font: 'Condensed tall', angle: 'Slanted (italic)', depth: 'Flat', light: 'Centre glow', extras: 'Glow; Particles' } },
+    ],
+    body: `You write prompts for AI image tools that make 3D lettering for shop offer flyers. Use the CLIENT CARD above.
+
+TEXT (spell exactly): "{{text}}"
+Occasion or theme: {{theme}}
+Effect: {{effect}}
+Colours: {{colors}}
+Letter shape: {{font}}
+Angle: {{angle}}
+Depth: {{depth}}
+Light: {{light}}
+Extra effects: {{extras}}
+Background: {{background}}
+Size: {{ratio}}
+Reference image attached — copy its: {{refUse}}
+Also: {{notes}}
+
+Task: write ONE image prompt for this lettering.
+Rules:
+- Show only the text above, spelled exactly, letter by letter. No other words, logos or numbers.
+- Big, bold and easy to read from far away. Letters never touch or overlap.
+- Describe the material, edges, highlights and 3D depth clearly.
+- The whole text fits in the frame with space around it. Nothing cut off.
+- If a reference is attached, say "match the attached reference" for what it copies.
+- 4K, sharp, clean edges ready to cut out.
+- Maximum 100 words.
+
+Output only the prompt. ${AVOID_LINE} No explanation.`,
+    tip: 'AI often misspells long text: keep it to 1–3 words and check every letter. Use one preset for all the text in a flyer so it matches.',
+  },
+  {
+    key: 'flyer-product-photo', name: 'Product photo fix', category: 'flyer',
+    purpose: 'Turn a client’s WhatsApp product photo into a clean, see-through 4K PNG',
+    useIn: 'ChatGPT images or Gemini (Nano Banana) — attach the product photo', usesClientCard: false,
+    livePreview: 'product-photo',
+    fields: [
+      { key: 'product', label: 'Product (name and size)', type: 'text', required: true, placeholder: 'Kabani Rose Liquid 5L can', attach: true,
+        help: 'Add the client’s photo here to see the preview. Attach the same photo in the AI tool.' },
+      { key: 'changes', label: 'What to do', type: 'multi', required: true,
+        options: [
+          'Clean standard photo (straight, sharp, true colours)', 'Change the angle', 'Complete missing or cut-off parts',
+          'Fix blur, glare and low quality', 'Make it look 3D and premium', 'Falling or floating (motion)',
+          'Show several units together', 'Match the other products in this flyer', 'Remove hands, price stickers and clutter',
+        ] },
+      { key: 'problem', label: 'What is wrong or missing (optional)', type: 'textarea',
+        placeholder: 'Cap is cut off at the top; label is creased; photo taken at an angle in the shop' },
+      { key: 'angle', label: 'Angle', type: 'choice', preview: 'photo-angle',
+        options: ['Straight front', 'Three-quarter left', 'Three-quarter right', 'Slightly from above', 'Top-down (flat lay)', 'Low hero angle'] },
+      { key: 'pose', label: 'Pose', type: 'choice', preview: 'photo-pose',
+        options: ['Standing upright', 'Tilted a little', 'Falling diagonally', 'Floating mid-air', 'Lying flat'] },
+      { key: 'shadow', label: 'Shadow and reflection', type: 'choice', preview: 'photo-shadow',
+        options: ['No shadow', 'Soft shadow underneath', 'Drop shadow to the side', 'Reflection below', 'Shadow and reflection'] },
+      { key: 'units', label: 'How many units', type: 'select', options: ['1', '2 side by side', '3 grouped', 'Small stack'] },
+      { key: 'light', label: 'Light', type: 'select', options: ['Soft studio light', 'Bright and clean (high-key)', 'Warm light', 'Cool light', 'Dramatic rim light'] },
+      { key: 'finish', label: 'Finish', type: 'select', options: ['Natural real photo', 'Glossy premium', 'Hyper-real 3D render'] },
+      { key: 'setLook', label: 'Same look as the other products (optional)', type: 'text',
+        placeholder: 'Straight front, soft shadow underneath, light from the top left',
+        help: 'Use the same words for every product in one flyer so they all match. The presets fill this for you.' },
+      { key: 'refUse', label: 'Extra reference image (optional)', type: 'multi', attach: true,
+        options: ['Angle', 'Light and shadow', 'Whole look (a finished product photo to match)', 'The missing part (photo of another side)', 'Colours'],
+        help: 'Attach it in the AI tool after the product photo. Tick what to take from it.' },
+      { key: 'background', label: 'Background', type: 'select',
+        options: [TRANSPARENT, 'Pure white #FFFFFF (cut out after)', 'Pure green #00FF00 (cut out after)'] },
+      { key: 'size', label: 'Output size', type: 'select', options: ['4K (4096 px on the long side)', '2K (2048 px on the long side)'] },
+    ],
+    defaults: {
+      changes: 'Clean standard photo (straight, sharp, true colours)', angle: 'Straight front', pose: 'Standing upright',
+      shadow: 'Soft shadow underneath', units: '1', light: 'Soft studio light', finish: 'Natural real photo',
+      background: TRANSPARENT, size: '4K (4096 px on the long side)',
+    },
+    presets: [
+      { name: 'Standard flyer look', note: 'Front, upright, soft shadow',
+        values: { angle: 'Straight front', pose: 'Standing upright', shadow: 'Soft shadow underneath', light: 'Soft studio light', finish: 'Natural real photo',
+          setLook: 'Straight front view, upright, soft shadow underneath, soft studio light from the top left, true colours' } },
+      { name: 'Premium 3D', note: 'Three-quarter, glossy, reflection',
+        values: { angle: 'Three-quarter left', pose: 'Standing upright', shadow: 'Reflection below', light: 'Dramatic rim light', finish: 'Glossy premium',
+          setLook: 'Three-quarter left view, glossy premium finish, rim light, soft reflection below' } },
+      { name: 'Falling offer', note: 'Tilted mid-fall, drop shadow',
+        values: { angle: 'Three-quarter right', pose: 'Falling diagonally', shadow: 'Drop shadow to the side', light: 'Bright and clean (high-key)', finish: 'Glossy premium',
+          setLook: 'Falling diagonally at about 30 degrees, bright high-key light, soft drop shadow to the lower right' } },
+      { name: 'Floating', note: 'Hovering above a soft shadow',
+        values: { angle: 'Straight front', pose: 'Floating mid-air', shadow: 'Soft shadow underneath', light: 'Bright and clean (high-key)', finish: 'Natural real photo',
+          setLook: 'Floating just above the ground, straight front, soft round shadow below, bright even light' } },
+    ],
+    body: `You write prompts for AI image editing tools. I will attach the client's own product photo.
+
+PRODUCT: {{product}}
+What to do: {{changes}}
+What is wrong or missing: {{problem}}
+Angle: {{angle}}
+Pose: {{pose}}
+Shadow: {{shadow}}
+Units: {{units}}
+Light: {{light}}
+Finish: {{finish}}
+Same look as the other products: {{setLook}}
+Extra reference attached — take its: {{refUse}}
+Background: {{background}}
+Output size: {{size}}
+
+Task: write ONE edit prompt for the attached product photo.
+Rules:
+- It stays the same real product: keep the exact label text, logo, colours, shape and proportions. Never redesign it or invent text.
+- Rebuild any missing or hidden part so it matches the real product. If unsure, keep that part plain.
+- Whole product in frame, centred, nothing cut off, about 8% space around it.
+- Photorealistic, sharp, true colours, clean edges ready for a flyer.
+- No props, hands, price tags, added text or watermarks.
+- Maximum 110 words.
+
+Output only the prompt. ${AVOID_LINE} No explanation.`,
+    tip: 'Use one preset for every product in a flyer so they all match. If the tool shows a grey checkerboard instead of a real see-through background, choose Pure white and cut it out after. Check the size of what you get and upscale if it is under 4K.',
+  },
+]
 
 // ── Ad Video ─────────────────────────────────────────────────────────────────
 const AD: PromptTemplate[] = [
@@ -930,7 +1093,7 @@ Output only the fields, one per line as "Field: value". No explanation.`,
   },
 ]
 
-export const TEMPLATES: PromptTemplate[] = [...AD, ...FILM, ...PRODUCT_T, ...AGENCY, ...FIX]
+export const TEMPLATES: PromptTemplate[] = [...FLYER, ...AD, ...FILM, ...PRODUCT_T, ...AGENCY, ...FIX]
 
 export function templateByKey(key: string): PromptTemplate | undefined {
   return TEMPLATES.find(t => t.key === key)

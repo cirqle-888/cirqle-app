@@ -16,7 +16,9 @@ import {
   missingRequired,
   estimateTokens,
   placeholdersIn,
+  withDefaults,
 } from "@/lib/prompt-studio/render";
+import { answerField, cardFromAnswer } from "@/lib/prompt-studio/answer";
 import type {
   StudioClient,
   SavedCard,
@@ -28,10 +30,16 @@ import type {
   CategoryId,
   ActionResult,
 } from "@/lib/prompt-studio/types";
+import { FIELD_TYPES } from "@/lib/prompt-studio/types";
 import * as actions from "./actions";
 import { StudioFields, GrowingTextarea } from "./studio-fields";
 import { SkillsTab } from "./skills-tab";
 import { NotInstalled } from "./_not-installed";
+import { LibraryTab } from "./library-tab";
+import { LivePreview } from "./live-preview";
+
+const LANGUAGES =
+  CLIENT_CARD_FIELDS.find((f) => f.key === "language")?.options || [];
 
 const tabs = [
   "Create",
@@ -46,7 +54,7 @@ const blank = (): CustomTemplate => ({
   id: "",
   key: "",
   name: "",
-  category: "ad",
+  category: "flyer",
   purpose: "",
   useIn: "",
   usesClientCard: true,
@@ -62,6 +70,7 @@ export default function PromptStudioClient({
   installed,
   canManage,
   aiEnabled,
+  myId = null,
 }: {
   clients: StudioClient[];
   initialCards: SavedCard[];
@@ -70,6 +79,7 @@ export default function PromptStudioClient({
   installed: boolean;
   canManage: boolean;
   aiEnabled: boolean;
+  myId?: string | null;
 }) {
   const toast = useToast();
   const [tab, setTab] = useState<(typeof tabs)[number]>("Create");
@@ -78,35 +88,56 @@ export default function PromptStudioClient({
   const [library, setLibrary] = useState(initialLibrary);
   const [clientId, setClientId] = useState("");
   const [clientSearch, setClientSearch] = useState("");
-  const [category, setCategory] = useState("ad");
+  const [category, setCategory] = useState("flyer");
   const [templateKey, setTemplateKey] = useState(TEMPLATES[0].key);
   const [search, setSearch] = useState("");
   const [stars, setStars] = useState<string[]>([]);
   const [values, setValues] = useState<Record<string, string>>({});
-  const [ai, setAI] = useState<{ prompt: string; result: string } | null>(null);
+  /** The AI's answer: from "Generate here" or pasted back by the user. */
+  const [answer, setAnswer] = useState("");
+  /** Overrides the card's language for this prompt ("" = use the card's). */
+  const [language, setLanguage] = useState("");
+  /** Local pictures (object URLs) per field; never uploaded. */
+  const [attachments, setAttachments] = useState<Record<string, string>>({});
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
   const [cardClient, setCardClient] = useState("");
   const [cardDraft, setCardDraft] = useState<ClientCard>({});
+  /** updated_at of the card as opened, so a save can't overwrite someone else's newer one. */
+  const [cardBase, setCardBase] = useState<string | null>(null);
   const [cardSearch, setCardSearch] = useState("");
   const [editor, setEditor] = useState<CustomTemplate | null>(null);
   const [samples, setSamples] = useState<Record<string, string>>({});
-  const [libSearch, setLibSearch] = useState("");
-  const [libClient, setLibClient] = useState("");
-  const [libTemplate, setLibTemplate] = useState("");
-  const [favorites, setFavorites] = useState(false);
-  const [confirmation, setConfirmation] = useState<{
-    kind: "library" | "template";
-    id: string;
-  } | null>(null);
+  const [confirmation, setConfirmation] = useState<string | null>(null);
   const pending = useRef(false);
   const templates: PromptTemplate[] = [...TEMPLATES, ...custom];
   const template = templates.find((t) => t.key === templateKey) || TEMPLATES[0];
   const card = cards.find((c) => c.client_id === clientId);
-  const prompt = renderPrompt(template, values, card?.card);
-  const result = ai?.prompt === prompt ? ai.result : "";
+  const prompt = renderPrompt(template, values, card?.card, { language });
+  const shown = withDefaults(template, values);
   const missing = missingRequired(template, values);
+  const receivers = templates.filter(
+    (t) => t.key !== template.key && answerField(t),
+  );
+  // Local pictures are object URLs: free them when they are replaced or the page closes.
+  const attachRef = useRef(attachments);
+  useEffect(() => {
+    attachRef.current = attachments;
+  }, [attachments]);
+  useEffect(
+    () => () => Object.values(attachRef.current).forEach((u) => URL.revokeObjectURL(u)),
+    [],
+  );
+  function attach(key: string, file: File | null) {
+    setAttachments((s) => {
+      if (s[key]) URL.revokeObjectURL(s[key]);
+      const next = { ...s };
+      if (file) next[key] = URL.createObjectURL(file);
+      else delete next[key];
+      return next;
+    });
+  }
   useEffect(() => {
     // Restore browser preferences after hydration; cancel if the page unmounts.
     const frame = requestAnimationFrame(() => {
@@ -198,23 +229,37 @@ export default function PromptStudioClient({
   function choose(t: PromptTemplate) {
     setTemplateKey(t.key);
     setValues({});
-    setAI(null);
+    setAnswer("");
     setTitle("");
   }
-  function openCard(id: string) {
+  function openCard(id: string, fill?: ClientCard) {
     setCardClient(id);
     const saved = cards.find((c) => c.client_id === id);
     const client = clients.find((c) => c.id === id);
-    setCardDraft(
-      saved?.card ||
+    setCardBase(saved?.updated_at ?? null);
+    setCardDraft({
+      ...(saved?.card ||
         Object.fromEntries(
           Object.entries(CARD_PREFILL_FROM_CLIENT).map(([k, v]) => [
             k,
             client?.[v] || "",
           ]),
-        ),
-    );
+        )),
+      ...(fill || {}),
+    });
     setTab("Client Cards");
+  }
+  /** Start another template with this answer already in its input box. */
+  function sendAnswerTo(key: string) {
+    const t = templates.find((x) => x.key === key);
+    const field = t && answerField(t);
+    if (!t || !field) return;
+    const text = answer;
+    choose(t);
+    setCategory(custom.some((c) => c.key === t.key) ? "custom" : t.category);
+    setSearch("");
+    setValues({ [field]: text });
+    toast.success(`Answer placed in “${t.fields.find((f) => f.key === field)?.label}”`);
   }
   function editBody(body: string) {
     if (editor)
@@ -253,15 +298,6 @@ export default function PromptStudioClient({
     .sort(
       (a, b) => Number(stars.includes(b.key)) - Number(stars.includes(a.key)),
     );
-  const visibleLibrary = library.filter(
-    (r) =>
-      (!libClient || r.client_id === libClient) &&
-      (!libTemplate || r.template_key === libTemplate) &&
-      (!favorites || r.is_favorite) &&
-      `${r.title || ""} ${r.template_name} ${r.prompt}`
-        .toLowerCase()
-        .includes(libSearch.toLowerCase()),
-  );
   return (
     <>
       <Header
@@ -338,7 +374,32 @@ export default function PromptStudioClient({
                       No card yet · Add
                     </button>
                   ))}
+                <select
+                  className="field sm:w-56"
+                  aria-label="Language for voice and text"
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                >
+                  <option value="">
+                    {card?.card.language
+                      ? `Language: ${card.card.language} (card)`
+                      : "Language: not set"}
+                  </option>
+                  {LANGUAGES.map((l) => (
+                    <option key={l} value={l}>
+                      Language: {l}
+                    </option>
+                  ))}
+                </select>
               </div>
+              {template.usesClientCard && !card && (
+                <p className="text-sm text-muted-foreground">
+                  {clientId
+                    ? "This client has no card yet, so the prompt goes without brand details."
+                    : "No client picked, so the prompt goes without brand details."}
+                  {!language && " Pick a language so voice and on-screen text come out right."}
+                </p>
+              )}
             </section>
             <section className={panel}>
               <h2 className="font-semibold">2. Template</h2>
@@ -416,10 +477,31 @@ export default function PromptStudioClient({
                 <p className="text-sm text-muted-foreground">
                   Paste the answer into: {template.useIn}
                 </p>
+                {!!template.presets?.length && (
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-medium">Quick looks</h3>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {template.presets.map((p) => (
+                        <button
+                          key={p.name}
+                          className="studio-button text-left"
+                          onClick={() => setValues((s) => ({ ...s, ...p.values }))}
+                        >
+                          <span className="block font-medium">{p.name}</span>
+                          {p.note && (
+                            <span className="block text-xs text-muted-foreground">{p.note}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <StudioFields
                   fields={template.fields}
-                  values={values}
+                  values={shown}
                   onChange={(k, v) => setValues((s) => ({ ...s, [k]: v }))}
+                  attachments={attachments}
+                  onAttach={attach}
                 />
                 {template.tip && (
                   <p className="text-sm text-muted-foreground">
@@ -427,7 +509,14 @@ export default function PromptStudioClient({
                   </p>
                 )}
               </section>
-              <section className={panel}>
+              <section className={`${panel} lg:sticky lg:top-4`}>
+                {template.livePreview && (
+                  <LivePreview
+                    kind={template.livePreview}
+                    values={shown}
+                    image={attachments.product}
+                  />
+                )}
                 <div className="flex justify-between gap-2">
                   <h2 className="font-semibold">4. Result</h2>
                   <span className="text-xs text-muted-foreground">
@@ -464,7 +553,7 @@ export default function PromptStudioClient({
                       onClick={() =>
                         run(
                           () => actions.generateWithAI(prompt),
-                          (data) => setAI({ prompt, result: data }),
+                          (data) => setAnswer(data),
                         )
                       }
                     >
@@ -475,21 +564,73 @@ export default function PromptStudioClient({
                     </p>
                   </>
                 )}
-                {result && (
-                  <>
-                    <textarea
-                      aria-label="AI result"
-                      className="field w-full min-h-64 font-mono text-sm"
-                      readOnly
-                      value={result}
-                    />
-                    <button
-                      className="studio-button"
-                      onClick={() => copy(result)}
-                    >
-                      Copy AI result
+                <h3 className="text-sm font-medium">Answer</h3>
+                <GrowingTextarea
+                  label="Answer"
+                  value={answer}
+                  onChange={setAnswer}
+                  placeholder={
+                    aiEnabled
+                      ? "Press Generate here, or paste the answer from Claude, ChatGPT or Gemini to save it or use it next."
+                      : "Paste the answer from Claude, ChatGPT or Gemini here to save it or use it in the next template."
+                  }
+                />
+                {answer.trim() && (
+                  <div className="flex flex-wrap gap-2">
+                    <button className="studio-button" onClick={() => copy(answer)}>
+                      Copy answer
                     </button>
-                  </>
+                    {template.key === "fix-brief-to-card" && clientId && (
+                      <button
+                        className="studio-button"
+                        onClick={() => {
+                          const parsed = cardFromAnswer(answer);
+                          const n = Object.keys(parsed).length;
+                          if (!n) {
+                            toast.error("No card fields found in the answer.");
+                            return;
+                          }
+                          openCard(clientId, parsed);
+                          toast.success(`${n} card fields filled — check them and save.`);
+                        }}
+                      >
+                        Fill Client Card from answer
+                      </button>
+                    )}
+                    {receivers.length > 0 && (
+                      <select
+                        className="field min-w-0 flex-1"
+                        aria-label="Use this answer in another template"
+                        value=""
+                        onChange={(e) => e.target.value && sendAnswerTo(e.target.value)}
+                      >
+                        <option value="">Use this answer in…</option>
+                        {CATEGORIES.map((c) => {
+                          const list = receivers.filter((t) => t.category === c.id && !custom.some((x) => x.key === t.key));
+                          return list.length ? (
+                            <optgroup key={c.id} label={c.name}>
+                              {list.map((t) => (
+                                <option key={t.key} value={t.key}>
+                                  {t.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ) : null;
+                        })}
+                        {receivers.some((t) => custom.some((x) => x.key === t.key)) && (
+                          <optgroup label="My templates">
+                            {receivers
+                              .filter((t) => custom.some((x) => x.key === t.key))
+                              .map((t) => (
+                                <option key={t.key} value={t.key}>
+                                  {t.name}
+                                </option>
+                              ))}
+                          </optgroup>
+                        )}
+                      </select>
+                    )}
+                  </div>
                 )}
                 {installed && (
                   <>
@@ -513,10 +654,9 @@ export default function PromptStudioClient({
                               title: title || null,
                               inputs: values,
                               prompt,
-                              ai_result: result || null,
+                              ai_result: answer.trim() || null,
                             }),
-                          (data) =>
-                            setLibrary((s) => [data, ...s].slice(0, 200)),
+                          (data) => setLibrary((s) => [data, ...s]),
                           "Saved to Library",
                         )
                       }
@@ -548,8 +688,10 @@ export default function PromptStudioClient({
                     className="studio-button"
                     onClick={() => {
                       setValues({});
-                      setAI(null);
+                      setAnswer("");
                       setTitle("");
+                      Object.values(attachments).forEach((u) => URL.revokeObjectURL(u));
+                      setAttachments({});
                     }}
                   >
                     Clear
@@ -626,14 +768,17 @@ export default function PromptStudioClient({
                       disabled={busy || !cardDraft.brand?.trim()}
                       onClick={() =>
                         run(
-                          () => actions.saveClientCard(cardClient, cardDraft),
-                          (data) =>
+                          () =>
+                            actions.saveClientCard(cardClient, cardDraft, cardBase),
+                          (data) => {
                             setCards((s) => [
                               ...s.filter(
                                 (c) => c.client_id !== data.client_id,
                               ),
                               data,
-                            ]),
+                            ]);
+                            setCardBase(data.updated_at);
+                          },
                           "Client Card saved",
                         )
                       }
@@ -807,14 +952,12 @@ export default function PromptStudioClient({
                               })
                             }
                           >
-                            {["textarea", "text", "select", "number"].map(
-                              (t) => (
-                                <option key={t}>{t}</option>
-                              ),
-                            )}
+                            {FIELD_TYPES.map((t) => (
+                              <option key={t}>{t}</option>
+                            ))}
                           </select>
                         </label>
-                        {f.type === "select" && (
+                        {(f.type === "select" || f.type === "choice" || f.type === "multi") && (
                           <label className="block text-sm">
                             Options (one per line)
                             <textarea
@@ -848,7 +991,7 @@ export default function PromptStudioClient({
                     onChange={(k, v) => setSamples((s) => ({ ...s, [k]: v }))}
                   />
                   <pre className="whitespace-pre-wrap break-words rounded-lg bg-secondary p-4 text-sm">
-                    {renderPrompt(editor, samples, card?.card)}
+                    {renderPrompt(editor, samples, card?.card, { language })}
                   </pre>
                   {installed && canManage && (
                     <div className="flex flex-wrap gap-2">
@@ -878,7 +1021,7 @@ export default function PromptStudioClient({
                           className="studio-button"
                           disabled={busy}
                           onClick={() =>
-                            setConfirmation({ kind: "template", id: editor.id })
+                            setConfirmation(editor.id)
                           }
                         >
                           Delete template
@@ -896,178 +1039,58 @@ export default function PromptStudioClient({
             </section>
           </div>
         )}
-        {tab === "Library" && (
-          <div className="space-y-4">
-            <section className={panel}>
-              <h2 className="font-semibold">Library</h2>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <input
-                  aria-label="Search library"
-                  className="field w-full"
-                  placeholder="Search saved prompts…"
-                  value={libSearch}
-                  onChange={(e) => setLibSearch(e.target.value)}
-                />
-                <select
-                  aria-label="Filter library by client"
-                  className="field w-full"
-                  value={libClient}
-                  onChange={(e) => setLibClient(e.target.value)}
-                >
-                  <option value="">All clients</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  aria-label="Filter library by template"
-                  className="field w-full"
-                  value={libTemplate}
-                  onChange={(e) => setLibTemplate(e.target.value)}
-                >
-                  <option value="">All templates</option>
-                  {[
-                    ...new Map(
-                      library.map((r) => [r.template_key, r.template_name]),
-                    ).entries(),
-                  ].map(([key, name]) => (
-                    <option key={key} value={key}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <label className="flex items-center gap-2 min-h-11 text-sm">
-                <input
-                  type="checkbox"
-                  checked={favorites}
-                  onChange={(e) => setFavorites(e.target.checked)}
-                />
-                Favorites only
-              </label>
-            </section>
-            {visibleLibrary.map((r) => (
-              <section key={r.id} className={panel}>
-                <h3 className="font-semibold">{r.title || r.template_name}</h3>
-                <p className="text-sm text-muted-foreground">
-                  {clients.find((c) => c.id === r.client_id)?.name ||
-                    "No active client"}{" "}
-                  · {r.template_name} ·{" "}
-                  {new Date(r.created_at).toLocaleDateString()}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    className="studio-button"
-                    onClick={() => copy(r.prompt)}
-                  >
-                    Copy prompt
-                  </button>
-                  {r.ai_result && (
-                    <button
-                      className="studio-button"
-                      onClick={() => copy(r.ai_result!)}
-                    >
-                      Copy AI result
-                    </button>
-                  )}
-                  <button
-                    className="studio-button"
-                    disabled={busy}
-                    aria-pressed={r.is_favorite}
-                    onClick={() =>
-                      run(
-                        () => actions.toggleFavorite(r.id),
-                        (favorite) =>
-                          setLibrary((s) =>
-                            s.map((item) =>
-                              item.id === r.id
-                                ? { ...item, is_favorite: favorite }
-                                : item,
-                            ),
-                          ),
-                      )
-                    }
-                  >
-                    {r.is_favorite ? "★ Favorite" : "☆ Favorite"}
-                  </button>
-                  <button
-                    className="studio-button"
-                    onClick={() => {
-                      const t = templates.find((t) => t.key === r.template_key);
-                      if (!t) {
-                        toast.error(
-                          "This template was deleted. You can still copy the saved prompt.",
-                        );
-                        return;
-                      }
-                      choose(t);
-                      setCategory(t.category);
-                      setClientId(
-                        clients.some((c) => c.id === r.client_id)
-                          ? r.client_id!
-                          : "",
-                      );
-                      setValues(r.inputs);
-                      setTitle(r.title || "");
-                      setSearch("");
-                      setTab("Create");
-                    }}
-                  >
-                    Open in Create
-                  </button>
-                  <button
-                    className="studio-button"
-                    disabled={busy}
-                    onClick={() =>
-                      setConfirmation({ kind: "library", id: r.id })
-                    }
-                  >
-                    Delete
-                  </button>
-                </div>
-              </section>
-            ))}
-            {!visibleLibrary.length && (
-              <EmptyState
-                title="No saved prompts"
-                body="Save a prompt from Create, or adjust your filters to find one."
-              />
-            )}
-          </div>
-        )}
+        <div hidden={tab !== "Library"}>
+          <LibraryTab
+            clients={clients}
+            templates={templates}
+            library={library}
+            setLibrary={setLibrary}
+            myId={myId}
+            canManage={canManage}
+            busy={busy}
+            run={run}
+            copy={copy}
+            onOpen={(r) => {
+              const t = templates.find((t) => t.key === r.template_key);
+              if (!t) {
+                toast.error(
+                  "This template was deleted. You can still copy the saved prompt.",
+                );
+                return;
+              }
+              choose(t);
+              setCategory(custom.some((c) => c.key === t.key) ? "custom" : t.category);
+              setClientId(
+                clients.some((c) => c.id === r.client_id) ? r.client_id! : "",
+              );
+              setValues(r.inputs);
+              setAnswer(r.ai_result || "");
+              setTitle(r.title || "");
+              setSearch("");
+              setTab("Create");
+            }}
+          />
+        </div>
         {tab === "Skills" && <SkillsTab copy={copy} error={toast.error} />}
       </main>
       {confirmation && (
         <ConfirmDialog
-          title={
-            confirmation.kind === "library"
-              ? "Delete saved prompt?"
-              : "Delete custom template?"
-          }
-          body="This removes the item from Prompt Studio. Built-in templates are kept."
+          title="Delete custom template?"
+          body="This removes the template from Prompt Studio. Built-in templates are kept."
           confirmLabel="Delete"
           danger
           onCancel={() => setConfirmation(null)}
           onConfirm={() => {
-            const item = confirmation;
+            const id = confirmation;
             setConfirmation(null);
-            if (item.kind === "library")
-              void run(
-                () => actions.deleteLibraryItem(item.id),
-                () => setLibrary((s) => s.filter((r) => r.id !== item.id)),
-                "Prompt deleted",
-              );
-            else
-              void run(
-                () => actions.deleteCustomTemplate(item.id),
-                () => {
-                  setCustom((s) => s.filter((t) => t.id !== item.id));
-                  setEditor(null);
-                },
-                "Template deleted",
-              );
+            void run(
+              () => actions.deleteCustomTemplate(id),
+              () => {
+                setCustom((s) => s.filter((t) => t.id !== id));
+                setEditor(null);
+              },
+              "Template deleted",
+            );
           }}
         />
       )}

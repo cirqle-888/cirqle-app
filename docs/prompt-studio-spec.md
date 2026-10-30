@@ -186,3 +186,14 @@ The reusable Claude skills for video work. They are already written; the tab onl
 - [ ] I can open `/dashboard/prompt-studio` locally, pick a client, fill "Video clip" and copy a prompt. Check it at phone width and desktop width.
 - [ ] Without the migration applied, the page still loads, Copy works, and the setup banner shows.
 - [ ] Everything is committed on the branch. **Do not push or run the migration.** Tell me the SQL file to run in Supabase and the checks to do after.
+
+---
+
+## 7. Added 31 Oct 2026 — Offer Flyer and fixes
+
+- **Offer Flyer category** (first tab), two built-in templates:
+  - **3D text effect** (`flyer-text-effect`): offer words as 3D lettering. Effect, letter shape and angle are picture cards; depth, light, extra effects, background and size are quick choices; four one-click looks; a live preview of the typed text; an optional reference picture with ticks for what to copy (effect, colours, letter shape, lighting, whole design). Based on the team's old "auto-generate prompts" sheet.
+  - **Product photo fix** (`flyer-product-photo`): edits a client's WhatsApp product photo — clean standard shot, new angle, complete missing parts, fix quality, 3D/premium, falling or floating, several units, match the other products, remove clutter. Angle, pose and shadow are picture cards; defaults give a transparent 4K PNG; four "Quick looks" give every product in a flyer the same look. The client's photo can be added for a live preview (it stays in the browser).
+- New field types `choice` (picture cards) and `multi` (tick several, joined with `"; "`), plus `preview`, `attach`, `defaults`, `presets` and `livePreview` on templates (see `types.ts`).
+- Migration `20261031090000_prompt_studio_flyer.sql` lets custom templates use the Offer Flyer category.
+- Fixes: "Generate here" asks for plain text (`callGroqText`); no dangling "Use the CLIENT CARD above" when there is no card; a Language picker per prompt; the Library loads 50 at a time with server-side search and "Show older prompts"; only the person who saved a prompt (or a manager) can delete it; title/answer size checks; Client Card saves refuse to overwrite a newer version; an editable **Answer** box that can be saved, sent to the next template, or used to fill a Client Card; Malayalam-aware token estimate; `sync-prompt-skills.mjs` also refreshes `.claude/skills` and `.agents/skills`.

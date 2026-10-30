@@ -1,7 +1,8 @@
-// Regenerates src/lib/prompt-studio/skills.ts from skills/<name>/SKILL.md.
+// Regenerates src/lib/prompt-studio/skills.ts from skills/<name>/SKILL.md,
+// and refreshes the local .claude/skills and .agents/skills copies if present.
 // Keeps title/summary from the existing skills.ts; a new skill folder gets its
 // frontmatter name as title and its description as summary (edit after).
-import { readFileSync, writeFileSync, readdirSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, copyFileSync } from 'fs'
 import { join } from 'path'
 
 const ROOT = process.cwd()
@@ -29,3 +30,16 @@ const head = old.slice(0, old.indexOf('export const PROMPT_SKILLS')) ||
   "export interface PromptSkill { name: string; title: string; summary: string; content: string }\n\n"
 writeFileSync(OUT, `${head}export const PROMPT_SKILLS: PromptSkill[] = [\n${rows.join('\n')}\n]\n`)
 console.log(`skills.ts: ${names.length} skills`)
+
+// Keep the local copies Claude Code and other agents load in step with skills/,
+// so an edited SKILL.md never runs in its old version. Only folders that
+// already exist on this computer are updated (.claude/ is git-ignored).
+for (const dir of ['.claude/skills', '.agents/skills']) {
+  const root = join(ROOT, dir)
+  if (!existsSync(root)) continue
+  for (const n of names) {
+    mkdirSync(join(root, n), { recursive: true })
+    copyFileSync(join(DIR, n, 'SKILL.md'), join(root, n, 'SKILL.md'))
+  }
+  console.log(`${dir}: ${names.length} skills updated`)
+}

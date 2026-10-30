@@ -14,9 +14,15 @@ export function placeholdersIn(body: string): string[] {
   return seen
 }
 
+/** The template's default values under what the user typed (typed wins, even when cleared on purpose to ""). */
+export function withDefaults(t: PromptTemplate, values: Record<string, string>): Record<string, string> {
+  return { ...(t.defaults || {}), ...values }
+}
+
 /** Required fields still empty — the UI disables Copy until this is []. */
 export function missingRequired(t: PromptTemplate, values: Record<string, string>): string[] {
-  return t.fields.filter(f => f.required && !(values[f.key] ?? '').trim()).map(f => f.label)
+  const v = withDefaults(t, values)
+  return t.fields.filter(f => f.required && !(v[f.key] ?? '').trim()).map(f => f.label)
 }
 
 /** The client card as a compact block. Empty lines are left out. */
@@ -33,7 +39,8 @@ export function renderClientCard(card: ClientCard | null | undefined): string {
  * Fill the body. A line whose placeholders are all empty is removed, unless one
  * of them is required (then it stays visibly blank so the gap is obvious).
  */
-export function renderBody(t: PromptTemplate, values: Record<string, string>): string {
+export function renderBody(t: PromptTemplate, input: Record<string, string>): string {
+  const values = withDefaults(t, input)
   const required = new Set(t.fields.filter(f => f.required).map(f => f.key))
   const out: string[] = []
   for (const line of t.body.split('\n')) {
@@ -47,18 +54,39 @@ export function renderBody(t: PromptTemplate, values: Record<string, string>): s
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
-/** Card (if the template uses it) + filled body. This is what gets copied. */
+/** "Use the CLIENT CARD above." and its variants, for when there is no card to point at. */
+const CARD_POINTER = /[ \t]*Use the CLIENT CARD above\.?/g
+
+/**
+ * Card (if the template uses it) + filled body. This is what gets copied.
+ * `language` overrides the card's language for this one prompt (and works
+ * without a card). With no card at all, the body's pointer to it is removed so
+ * the AI isn't told to use something that isn't there.
+ */
 export function renderPrompt(
   t: PromptTemplate,
   values: Record<string, string>,
   card?: ClientCard | null,
+  opts?: { language?: string },
 ): string {
-  const head = t.usesClientCard ? renderClientCard(card) : ''
-  const body = renderBody(t, values)
+  const merged = opts?.language ? { ...(card || {}), language: opts.language } : card
+  const head = t.usesClientCard ? renderClientCard(merged) : ''
+  let body = renderBody(t, values)
+  if (!head) body = body.replace(CARD_POINTER, '').replace(/^[ \t]+$/gm, '')
   return head ? `${head}\n\n${body}` : body
 }
 
-/** Rough token estimate (≈4 characters per token for English; Malayalam costs more). */
+/**
+ * Rough token estimate: about 4 characters per token for English. Malayalam,
+ * Arabic and other non-Latin scripts cost far more (roughly a token for every
+ * 1–2 characters), so they are counted separately.
+ */
 export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4)
+  let ascii = 0
+  let other = 0
+  for (const ch of text) {
+    if (ch.charCodeAt(0) < 128) ascii++
+    else other++
+  }
+  return Math.ceil(ascii / 4 + other / 1.5)
 }
