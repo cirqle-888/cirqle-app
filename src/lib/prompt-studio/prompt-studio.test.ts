@@ -125,10 +125,35 @@ describe('Offer Flyer templates', () => {
     expect(missingRequired(text, {})).toEqual(['Text to make'])
     const out = renderPrompt(text, { text: 'MEGA SALE' }, { brand: 'Seastar', colors: 'Red and gold' })
     expect(out).toContain('TEXT (spell exactly): "MEGA SALE"')
-    expect(out).toContain('Effect: 3D gold metallic')
+    expect(out).toContain('Effect: Bubble 3D with thick outline')
     expect(out).toContain('Background: Transparent PNG (no background)')
     expect(out).not.toContain('Reference image attached')
     expect(out).not.toContain('{{')
+  })
+
+  it('3D text: the text space, a painted layout box and objects reach the prompt', () => {
+    const out = renderBody(text, {
+      text: 'FRESH BASKET', space: 'Fit the coloured box in my layout', spaceNote: 'the white box at the top',
+      objects: 'Ribbon under the text; Leaves', subline: 'Offer valid on 29, 30 Oct',
+    })
+    expect(out).toContain('Text space: Fit the coloured box in my layout')
+    expect(out).toContain('About the space: the white box at the top')
+    expect(out).toContain('Behind and around the text: Ribbon under the text; Leaves')
+    expect(out).toContain('Small line in a ribbon: "Offer valid on 29, 30 Oct"')
+    expect(out).toMatch(/fills its solid-coloured box exactly/)
+  })
+
+  it('3D text: with nothing ticked around it, the text stands alone', () => {
+    const out = renderBody(text, { text: 'SALE' })
+    expect(out).not.toContain('Behind and around the text:')
+    expect(out).toContain('if none are listed, the text stands alone')
+    expect(out).toContain('Text space: Wide (16:9)')
+  })
+
+  it('3D text: every effect and text-space option has a picture', async () => {
+    const { TEXT_EFFECTS, SPACE_RATIOS } = await import('@/app/(dashboard)/dashboard/prompt-studio/option-preview')
+    for (const o of text.fields.find(f => f.key === 'effect')!.options!) expect(TEXT_EFFECTS[o], o).toBeTruthy()
+    for (const o of text.fields.find(f => f.key === 'space')!.options!) expect(SPACE_RATIOS[o], o).toBeTruthy()
   })
 
   it('3D text: ticking reference options adds the reference line', () => {

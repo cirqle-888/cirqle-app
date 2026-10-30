@@ -514,7 +514,11 @@ export default function PromptStudioClient({
                   <LivePreview
                     kind={template.livePreview}
                     values={shown}
-                    image={attachments.product}
+                    image={
+                      template.livePreview === "product-photo"
+                        ? attachments.product
+                        : attachments.space
+                    }
                   />
                 )}
                 <div className="flex justify-between gap-2">

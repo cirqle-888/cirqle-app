@@ -23,6 +23,68 @@ const GOLD =
 
 /** Effect name → [panel background, text style]. */
 export const TEXT_EFFECTS: Record<string, [string, CSSProperties]> = {
+  // Styles from the team's own flyers (Big Savings, More for Less, Fresh Basket …).
+  "Bubble 3D with thick outline": [
+    "linear-gradient(135deg,#fbe7ff,#e9d5ff)",
+    {
+      color: "#fff",
+      WebkitTextStroke: "1.5px #7e22ce",
+      textShadow:
+        "0 2px 0 #c026d3,0 3px 0 #a21caf,0 4px 0 #86198f,0 5px 0 #701a75,0 7px 8px rgba(80,0,90,.45)",
+      fontFamily: '"Arial Rounded MT Bold",ui-rounded,system-ui,sans-serif',
+    },
+  ],
+  "Glossy two-colour on a shape": [
+    "radial-gradient(ellipse at 50% 55%,#ec4899 0 45%,transparent 46%),linear-gradient(135deg,#fef3c7,#e0f2fe)",
+    {
+      ...clip("linear-gradient(180deg,#fff7ae 0%,#ffcf33 45%,#ff8a00 52%,#38bdf8 53%,#1d4ed8 100%)"),
+      filter:
+        "drop-shadow(1px 0 0 #fff) drop-shadow(-1px 0 0 #fff) drop-shadow(0 1px 0 #fff) drop-shadow(0 -1px 0 #fff) drop-shadow(2px 3px 0 #1e3a8a)",
+    },
+  ],
+  "Cartoon sticker (white outline)": [
+    "linear-gradient(135deg,#dcfce7,#fef9c3)",
+    {
+      ...clip("linear-gradient(180deg,#ef4444 0%,#dc2626 55%,#facc15 56%,#f59e0b 100%)"),
+      filter:
+        "drop-shadow(2px 0 0 #fff) drop-shadow(-2px 0 0 #fff) drop-shadow(0 2px 0 #fff) drop-shadow(0 -2px 0 #fff) drop-shadow(2px 3px 2px rgba(0,0,0,.35))",
+    },
+  ],
+  "Gold and red festive 3D": [
+    "radial-gradient(circle at 50% 40%,#dc2626,#7f1d1d)",
+    { ...clip(GOLD), filter: extrude("#991b1b") },
+  ],
+  "Wooden sign board": [
+    "repeating-linear-gradient(90deg,#8b5a2b 0 6px,#7a4b22 6px 9px,#9a6531 9px 15px)",
+    {
+      color: "#fff",
+      textShadow: "0 2px 0 #d4d4d4,0 3px 0 #a3a3a3,0 5px 6px rgba(0,0,0,.5)",
+    },
+  ],
+  "Food texture (cookie, chocolate)": [
+    "linear-gradient(135deg,#fde7c8,#f8d3a4)",
+    {
+      ...clip(
+        "radial-gradient(circle at 20% 30%,#6b3a1f 0 1.5px,transparent 2px),radial-gradient(circle at 70% 60%,#6b3a1f 0 1.5px,transparent 2px),radial-gradient(circle at 45% 80%,#6b3a1f 0 1.2px,transparent 2px),linear-gradient(180deg,#ffd27a 0%,#f59e0b 55%,#c2410c 100%)",
+      ),
+      filter: extrude("#7c2d12"),
+    },
+  ],
+  "Water splash glossy": [
+    "radial-gradient(circle at 50% 50%,#7dd3fc,#0369a1)",
+    {
+      color: "#fff",
+      textShadow:
+        "0 1px 0 #e0f2fe,0 2px 0 #bae6fd,0 3px 0 #7dd3fc,0 5px 8px rgba(3,40,90,.6)",
+    },
+  ],
+  "Cloud white 3D": [
+    "linear-gradient(180deg,#bfe3ff,#e8f4ff)",
+    {
+      color: "#fff",
+      textShadow: "0 2px 0 #cbd5e1,0 3px 0 #94a3b8,0 6px 10px rgba(30,64,175,.35)",
+    },
+  ],
   "3D gold metallic": [LIGHT, { ...clip(GOLD), filter: extrude("#7a4a00") }],
   "Chrome silver": [
     LIGHT,
@@ -156,7 +218,53 @@ export const TEXT_ANGLES: Record<string, string> = {
 };
 
 /** Text drawn in an effect, letter shape and angle. Used by the cards and the live preview. */
+/** Split a headline into the chosen number of lines, keeping words whole. */
+export function splitLines(text: string, layout?: string): string[] {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const n = layout?.startsWith("3") ? 3 : layout?.startsWith("2") || layout?.startsWith("One big") ? 2 : 1;
+  if (n === 1 || words.length < 2) return [words.join(" ")];
+  const per = Math.ceil(words.length / Math.min(n, words.length));
+  const out: string[] = [];
+  for (let i = 0; i < words.length; i += per) out.push(words.slice(i, i + per).join(" "));
+  return out;
+}
+
+/** Text in an effect, letter shape and angle, on one or more lines. */
 export function StyledText({
+  text,
+  effect,
+  font,
+  angle,
+  size,
+  lines,
+}: {
+  text: string;
+  effect?: string;
+  font?: string;
+  angle?: string;
+  size: number;
+  lines?: string;
+}) {
+  const rows = splitLines(text, lines);
+  if (rows.length > 1)
+    return (
+      <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", lineHeight: 1 }}>
+        {rows.map((r, i) => (
+          <OneLine
+            key={i}
+            text={r}
+            effect={effect}
+            font={font}
+            angle={angle}
+            size={lines?.startsWith("One big") && i > 0 ? size * 0.55 : size}
+          />
+        ))}
+      </span>
+    );
+  return <OneLine text={text} effect={effect} font={font} angle={angle} size={size} />;
+}
+
+function OneLine({
   text,
   effect,
   font,
@@ -176,8 +284,9 @@ export function StyledText({
     lineHeight: 1.1,
     whiteSpace: "nowrap",
     display: "inline-block",
-    ...(font ? TEXT_FONTS[font] : {}),
     ...(effect ? TEXT_EFFECTS[effect]?.[1] : { color: "#111827" }),
+    // The chosen letter shape wins over an effect's own font.
+    ...(font ? TEXT_FONTS[font] : {}),
   };
   const transform = angle ? TEXT_ANGLES[angle] : undefined;
   if (transform === "arch") {
@@ -332,6 +441,26 @@ function PhotoSvg({
   );
 }
 
+/** Where each text space sits on a flyer page (34 × 48 mini page). */
+const SPACES: Record<string, CSSProperties> = {
+  "Wide banner (3:1)": { left: 3, top: 4, width: 28, height: 9 },
+  "Wide (16:9)": { left: 3, top: 4, width: 28, height: 16 },
+  "Square (1:1)": { left: 8, top: 4, width: 18, height: 18 },
+  "Tall (4:5)": { left: 9, top: 4, width: 16, height: 20 },
+  "Small corner badge": { left: 22, top: 3, width: 10, height: 8 },
+  "Fit the coloured box in my layout": { left: 4, top: 5, width: 22, height: 13 },
+};
+
+/** Width / height of each text space, for the live preview. */
+export const SPACE_RATIOS: Record<string, string> = {
+  "Wide banner (3:1)": "3 / 1",
+  "Wide (16:9)": "16 / 9",
+  "Square (1:1)": "1 / 1",
+  "Tall (4:5)": "4 / 5",
+  "Small corner badge": "4 / 3",
+  "Fit the coloured box in my layout": "16 / 9",
+};
+
 /** The picture for one option of a field with a `preview` kind. */
 export function OptionPreview({
   kind,
@@ -350,6 +479,33 @@ export function OptionPreview({
     return (
       <Panel>
         <StyledText text="Sale" font={option} effect="3D gold metallic" size={22} />
+      </Panel>
+    );
+  if (kind === "text-space") {
+    const box = SPACES[option];
+    return (
+      <Panel bg="linear-gradient(180deg,#f8fafc,#eef2f7)">
+        <span
+          className="relative block rounded-sm border border-slate-300 bg-white"
+          style={{ width: 34, height: 48 }}
+          aria-hidden
+        >
+          <span
+            className="absolute flex items-center justify-center rounded-[2px]"
+            style={{
+              ...box,
+              background: option.startsWith("Fit") ? "#ffffff" : "#f59e0b",
+              outline: option.startsWith("Fit") ? "2px dashed #2563eb" : undefined,
+            }}
+          />
+        </span>
+      </Panel>
+    );
+  }
+  if (kind === "text-lines")
+    return (
+      <Panel>
+        <StyledText text="BIG SAVE DEALS" lines={option} font="Heavy block" size={option.startsWith("1") ? 13 : 14} />
       </Panel>
     );
   if (kind === "text-angle")

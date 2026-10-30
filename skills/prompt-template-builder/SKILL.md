@@ -56,7 +56,7 @@ Rules every template must follow:
 
 Optional extras, for templates where people choose a look rather than type it (see `flyer-text-effect` and `flyer-product-photo`):
 - `type: 'choice'` shows the options as picture cards (pick one); `type: 'multi'` lets people tick several, stored joined with `"; "`, so options must not contain `;`.
-- `preview: 'text-effect' | 'text-font' | 'text-angle' | 'photo-angle' | 'photo-pose' | 'photo-shadow'` gives each option a small picture. A new kind needs drawing code in `option-preview.tsx`.
+- `preview: 'text-effect' | 'text-font' | 'text-angle' | 'text-space' | 'text-lines' | 'photo-angle' | 'photo-pose' | 'photo-shadow'` gives each option a small picture. A new kind needs drawing code in `option-preview.tsx`.
 - `attach: true` adds an "Add a picture" box to the field (it stays in the browser and is never uploaded). Pair it with a `multi` field saying what to take from the reference.
 - `defaults` pre-fills fields (people can clear them), and `presets` are one-click looks; every value must be one of the field's options (the tests check this).
 - `livePreview: 'text-effect' | 'product-photo'` shows a rough live picture of the chosen options.

@@ -16,7 +16,7 @@ export type FieldType = 'text' | 'textarea' | 'select' | 'number' | 'choice' | '
 
 /** Which little picture each option of a choice/multi field gets (see option-preview.tsx). */
 export type PreviewKind =
-  | 'text-effect' | 'text-font' | 'text-angle'
+  | 'text-effect' | 'text-font' | 'text-angle' | 'text-space' | 'text-lines'
   | 'photo-angle' | 'photo-pose' | 'photo-shadow'
 
 /** How the ticked options of a multi field are joined (options may contain commas). */
@@ -24,7 +24,7 @@ export const MULTI_SEP = '; '
 export const splitMulti = (v: string | undefined): string[] => (v || '').split(';').map(x => x.trim()).filter(Boolean)
 
 export const FIELD_TYPES: FieldType[] = ['textarea', 'text', 'select', 'choice', 'multi', 'number']
-export const PREVIEW_KINDS: PreviewKind[] = ['text-effect', 'text-font', 'text-angle', 'photo-angle', 'photo-pose', 'photo-shadow']
+export const PREVIEW_KINDS: PreviewKind[] = ['text-effect', 'text-font', 'text-angle', 'text-space', 'text-lines', 'photo-angle', 'photo-pose', 'photo-shadow']
 
 export interface PromptField {
   /** Placeholder name used in the body as {{key}}. */

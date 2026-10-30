@@ -6,7 +6,29 @@
  * makes the real image.
  */
 import type { CSSProperties } from "react";
-import { PhotoSvg, StyledText, TEXT_EFFECTS } from "./option-preview";
+import { PhotoSvg, SPACE_RATIOS, StyledText, TEXT_EFFECTS } from "./option-preview";
+import { splitMulti } from "@/lib/prompt-studio/types";
+
+/** A small stand-in for each object people can tick (only for the rough preview). */
+const OBJECT_ICONS: Record<string, string> = {
+  Confetti: "🎊",
+  "Stars and sparkles": "✨",
+  "Paint splashes": "🎨",
+  Leaves: "🍃",
+  "Fruits and vegetables": "🍅",
+  "Water splash": "💦",
+  "Shopping cart": "🛒",
+  Megaphone: "📣",
+  "Gift boxes": "🎁",
+  Balloons: "🎈",
+  "Smiley emoji faces": "😄",
+  Trumpets: "🎺",
+  "Diyas and lanterns": "🪔",
+  Fireworks: "🎆",
+  Clouds: "☁️",
+  "Chain and lock": "🔒",
+  "Cookies and snacks": "🍪",
+};
 
 const CHECKER: CSSProperties = {
   backgroundColor: "#fff",
@@ -58,29 +80,78 @@ export function LivePreview({
 }: {
   kind: "text-effect" | "product-photo";
   values: Record<string, string>;
-  /** The product photo picked on this computer, if any. */
+  /** The picture added on this computer, if any (product photo or flyer layout). */
   image?: string;
 }) {
   if (kind === "text-effect") {
     const text = (values.text || "").trim() || "MEGA SALE";
+    const objects = splitMulti(values.objects);
+    const icons = objects.map((o) => OBJECT_ICONS[o]).filter(Boolean);
+    const plate = objects.includes("Shape plate behind the text");
+    const ribbon = objects.includes("Ribbon under the text") || !!values.subline?.trim();
+    const rows = values.lines?.startsWith("3") ? 3 : values.lines?.startsWith("1") || !values.lines ? 1 : 2;
+    const longest = Math.max(4, Math.ceil(text.length / rows));
+    const layout = values.space === "Fit the coloured box in my layout";
     return (
-      <Frame note="Rough guide to the look — the AI tool makes the real lettering.">
+      <Frame
+        note={
+          layout && image
+            ? "Your layout is shown below the preview: the AI fills its coloured box. Rough guide only."
+            : "Rough guide to the look and the space it fills — the AI tool makes the real lettering."
+        }
+      >
         <div
-          className="flex w-full items-center justify-center overflow-hidden rounded-lg p-4"
+          className="relative mx-auto flex w-full items-center justify-center overflow-hidden rounded-lg p-3"
           style={{
             ...backdrop(values.background, values.effect),
-            aspectRatio: RATIOS[values.ratio] || "16 / 9",
-            maxHeight: 220,
+            aspectRatio: SPACE_RATIOS[values.space] || RATIOS[values.ratio] || "16 / 9",
+            maxHeight: 260,
+            maxWidth: values.space === "Tall (4:5)" || values.space === "Square (1:1)" ? 260 : undefined,
           }}
         >
-          <StyledText
-            text={text}
-            effect={values.effect}
-            font={values.font}
-            angle={values.angle}
-            size={Math.max(22, Math.min(56, 360 / Math.max(4, text.length)))}
-          />
+          {plate && (
+            <span
+              className="absolute inset-[14%] rounded-[40%] bg-gradient-to-br from-pink-500 to-purple-600 opacity-90"
+              aria-hidden
+            />
+          )}
+          <span className="relative flex flex-col items-center gap-1">
+            <StyledText
+              text={text}
+              effect={values.effect}
+              font={values.font}
+              angle={values.angle}
+              lines={values.lines}
+              size={Math.max(18, Math.min(52, 300 / longest))}
+            />
+            {ribbon && (
+              <span className="rounded-full bg-green-700 px-3 py-0.5 text-[11px] font-semibold text-white shadow">
+                {values.subline?.trim() || "Offer valid on …"}
+              </span>
+            )}
+          </span>
+          {icons.slice(0, 6).map((icon, i) => (
+            <span
+              key={i}
+              className="absolute text-xl"
+              style={[
+                { left: "4%", top: "8%" },
+                { right: "4%", top: "8%" },
+                { left: "6%", bottom: "8%" },
+                { right: "6%", bottom: "8%" },
+                { left: "45%", top: "2%" },
+                { left: "45%", bottom: "2%" },
+              ][i]}
+              aria-hidden
+            >
+              {icon}
+            </span>
+          ))}
         </div>
+        {layout && image && (
+          // eslint-disable-next-line @next/next/no-img-element -- a local object URL
+          <img src={image} alt="Your flyer layout" className="mx-auto max-h-48 rounded border border-border object-contain" />
+        )}
       </Frame>
     );
   }

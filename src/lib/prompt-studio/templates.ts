@@ -63,74 +63,107 @@ const TRANSPARENT = 'Transparent PNG (no background)'
 const FLYER: PromptTemplate[] = [
   {
     key: 'flyer-text-effect', name: '3D text effect', category: 'flyer',
-    purpose: 'Offer words like MEGA SALE as 3D lettering, ready to cut out for the flyer',
+    purpose: 'The flyer headline (MEGA SALE, Fresh Basket, വ്യാഴം ചന്ത) as 3D lettering that fits its space',
     useIn: 'ChatGPT images, Gemini (Nano Banana), Ideogram, Firefly', usesClientCard: true,
     livePreview: 'text-effect',
     fields: [
-      { key: 'text', label: 'Text to make', type: 'text', required: true, placeholder: 'MEGA SALE',
-        help: '1 to 3 words works best. Exactly as it should be spelled.' },
+      { key: 'text', label: 'Text to make', type: 'text', required: true, placeholder: 'BIG SAVINGS BIG SMILES!',
+        help: 'Exactly as it should be spelled. Short headlines work best.' },
+      { key: 'lines', label: 'Lines', type: 'choice', preview: 'text-lines',
+        options: ['1 line', '2 lines stacked', '3 lines stacked', 'One big word, small words around it'] },
+      { key: 'subline', label: 'Small line in a ribbon (optional)', type: 'text', placeholder: 'Offer valid on 29, 30 Oct 2026',
+        help: 'Leave empty if the date or tagline goes in separately.' },
+      { key: 'space', label: 'Space for the text on the flyer', type: 'choice', preview: 'text-space', attach: true,
+        options: ['Wide banner (3:1)', 'Wide (16:9)', 'Square (1:1)', 'Tall (4:5)', 'Small corner badge', 'Fit the coloured box in my layout'],
+        help: 'Best fit: paint the text space in your flyer layout white or one solid colour, export it, add it here and attach it in the AI tool, then choose the last card.' },
+      { key: 'spaceNote', label: 'About the space (optional)', type: 'text', placeholder: 'The white box at the top centre, about 1400 × 650 px' },
       { key: 'effect', label: 'Effect', type: 'choice', preview: 'text-effect',
-        options: ['3D gold metallic', 'Chrome silver', 'Glossy candy plastic', 'Red and yellow sale 3D', 'Neon glow', 'Embossed (raised)', 'Balloon (inflated)', 'Frosted glass', 'Fire and flames', 'Wooden', 'Paper cut layers', 'Festive gold with lights'] },
-      { key: 'colors', label: 'Colours (optional)', type: 'text', placeholder: 'Red and gold — or leave empty for the brand colours' },
+        options: [
+          'Bubble 3D with thick outline', 'Glossy two-colour on a shape', 'Cartoon sticker (white outline)', 'Red and yellow sale 3D',
+          'Gold and red festive 3D', 'Wooden sign board', 'Food texture (cookie, chocolate)', 'Water splash glossy', 'Cloud white 3D',
+          '3D gold metallic', 'Chrome silver', 'Glossy candy plastic', 'Neon glow', 'Embossed (raised)', 'Balloon (inflated)',
+          'Frosted glass', 'Fire and flames', 'Wooden', 'Paper cut layers', 'Festive gold with lights',
+        ] },
+      { key: 'colors', label: 'Colours (optional)', type: 'text', placeholder: 'Red and yellow — or leave empty for the brand colours' },
+      { key: 'objects', label: 'Things behind and around the text (optional)', type: 'multi',
+        options: [
+          'Shape plate behind the text', 'Ribbon under the text', 'Confetti', 'Stars and sparkles', 'Paint splashes', 'Leaves',
+          'Fruits and vegetables', 'Water splash', 'Shopping cart', 'Megaphone', 'Gift boxes', 'Balloons', 'Smiley emoji faces',
+          'Trumpets', 'Diyas and lanterns', 'Fireworks', 'Clouds', 'Chain and lock', 'Cookies and snacks',
+        ],
+        help: 'Leave all unticked for clean text only — it works either way.' },
       { key: 'font', label: 'Letter shape', type: 'choice', preview: 'text-font',
         options: ['Bold rounded', 'Heavy block', 'Condensed tall', 'Elegant serif', 'Brush script', 'Handwritten'] },
       { key: 'angle', label: 'Angle', type: 'choice', preview: 'text-angle',
         options: ['Straight front', 'Tilted back (perspective)', 'Turned left', 'Turned right', 'Slanted (italic)', 'Arched curve'] },
+      { key: 'script', label: 'Letters', type: 'select', options: ['English', 'Malayalam', 'English and Malayalam', 'Arabic'] },
       { key: 'depth', label: 'Depth', type: 'select', options: ['Flat', 'Semi-3D', 'Deep 3D extrusion', 'Layered (stacked outlines)'] },
       { key: 'light', label: 'Light', type: 'select', options: ['Soft light from the top left', 'Spotlight from above', 'Soft even light', 'Glow from behind (backlight)', 'Centre glow'] },
       { key: 'extras', label: 'Extra effects', type: 'multi',
         options: ['Soft shadow', 'Reflection', 'Glow', 'Sparkles', 'Outline stroke', 'Particles', 'Bokeh lights', 'Motion streaks'] },
-      { key: 'theme', label: 'Occasion or theme (optional)', type: 'text', placeholder: 'Onam, Ramadan, Weekend Sale, New Year' },
+      { key: 'theme', label: 'Occasion or theme (optional)', type: 'text', placeholder: 'Onam, Ramadan, Diwali, Weekend Sale, fresh vegetables' },
       { key: 'background', label: 'Background', type: 'select',
-        options: [TRANSPARENT, 'Plain white (easy to cut out)', 'Plain black', 'Solid colour from the colours above', 'Small scene behind the text'] },
-      { key: 'ratio', label: 'Size', type: 'select', options: ['Wide 16:9', 'Banner 3:1', 'Square 1:1', 'Portrait 4:5'] },
+        options: [TRANSPARENT, 'Plain white (easy to cut out)', 'Keep my layout, fill only the coloured box', 'Plain black', 'Small scene behind the text'] },
       { key: 'refUse', label: 'Reference image (optional)', type: 'multi', attach: true,
-        options: ['Text effect style', 'Colours', 'Letter shape', 'Lighting', 'Whole design and layout'],
-        help: 'Attach the picture in the AI tool too. Tick what to copy from it.' },
+        options: ['Text effect style', 'Colours', 'Letter shape', 'Lighting', 'Things around the text', 'Whole design and layout', 'My typed text (keep the letters exactly)'],
+        help: 'Attach it in the AI tool too and tick what to copy. For Malayalam, type the headline in a Malayalam font, export it plain, and tick “My typed text” so the letters stay correct.' },
       { key: 'notes', label: 'Anything else (optional)', type: 'text', placeholder: 'Soft white glow behind the letters so they stand out' },
     ],
     defaults: {
-      effect: '3D gold metallic', font: 'Bold rounded', angle: 'Straight front', depth: 'Deep 3D extrusion',
-      light: 'Soft light from the top left', extras: 'Soft shadow', background: TRANSPARENT, ratio: 'Wide 16:9',
+      lines: '1 line', space: 'Wide (16:9)', effect: 'Bubble 3D with thick outline', font: 'Bold rounded', angle: 'Straight front',
+      script: 'English', depth: 'Deep 3D extrusion', light: 'Soft light from the top left', extras: 'Soft shadow', background: TRANSPARENT,
     },
     presets: [
-      { name: 'Mega sale', note: 'Red and gold, big and loud',
-        values: { effect: 'Red and yellow sale 3D', colors: 'Red, yellow and gold', font: 'Heavy block', angle: 'Tilted back (perspective)', depth: 'Deep 3D extrusion', light: 'Spotlight from above', extras: 'Soft shadow; Outline stroke; Sparkles' } },
-      { name: 'Festive gold', note: 'Onam, Eid, Diwali',
-        values: { effect: 'Festive gold with lights', colors: 'Gold and warm white', font: 'Elegant serif', angle: 'Straight front', depth: 'Semi-3D', light: 'Glow from behind (backlight)', extras: 'Glow; Sparkles; Bokeh lights' } },
-      { name: 'Fresh and clean', note: 'Vegetables, dairy, daily needs',
-        values: { effect: 'Glossy candy plastic', colors: 'Fresh green and white', font: 'Bold rounded', angle: 'Straight front', depth: 'Semi-3D', light: 'Soft even light', extras: 'Soft shadow; Reflection' } },
-      { name: 'Neon night', note: 'Night sale, electronics',
-        values: { effect: 'Neon glow', colors: 'Pink and electric blue', font: 'Condensed tall', angle: 'Slanted (italic)', depth: 'Flat', light: 'Centre glow', extras: 'Glow; Particles' } },
+      { name: 'Big bubble sale', note: 'Like “Big Savings Big Smiles”',
+        values: { effect: 'Bubble 3D with thick outline', colors: 'White letters, pink and purple outline', lines: '3 lines stacked', font: 'Bold rounded', angle: 'Arched curve', depth: 'Deep 3D extrusion', objects: 'Shape plate behind the text; Smiley emoji faces; Stars and sparkles; Paint splashes', extras: 'Soft shadow; Glow' } },
+      { name: 'More for less', note: 'Two colours on a bright shape',
+        values: { effect: 'Glossy two-colour on a shape', colors: 'Yellow-orange and sky blue, white outline', lines: '2 lines stacked', font: 'Heavy block', angle: 'Tilted back (perspective)', depth: 'Deep 3D extrusion', objects: 'Shape plate behind the text; Paint splashes; Confetti', extras: 'Soft shadow; Outline stroke' } },
+      { name: 'Weekend sale', note: 'Red, yellow and white with a cart',
+        values: { effect: 'Red and yellow sale 3D', colors: 'Red, yellow and white', lines: '3 lines stacked', font: 'Heavy block', angle: 'Tilted back (perspective)', depth: 'Deep 3D extrusion', objects: 'Shopping cart; Megaphone; Confetti', extras: 'Soft shadow; Outline stroke' } },
+      { name: 'Fresh basket', note: 'Vegetables and fruit days',
+        values: { effect: 'Cartoon sticker (white outline)', colors: 'Red and yellow, white outline', lines: '2 lines stacked', font: 'Bold rounded', angle: 'Slanted (italic)', depth: 'Deep 3D extrusion', objects: 'Ribbon under the text; Leaves; Fruits and vegetables', extras: 'Soft shadow' } },
+      { name: 'Wooden board', note: 'Like “Buy More Save More”',
+        values: { effect: 'Wooden sign board', colors: 'White and yellow letters on brown wood', lines: '2 lines stacked', font: 'Heavy block', angle: 'Straight front', depth: 'Semi-3D', objects: 'Leaves', extras: 'Soft shadow' } },
+      { name: 'Tasty treats', note: 'Snacks, bakery, sweets',
+        values: { effect: 'Food texture (cookie, chocolate)', colors: 'Golden orange and brown', lines: '2 lines stacked', font: 'Bold rounded', angle: 'Straight front', depth: 'Deep 3D extrusion', objects: 'Cookies and snacks; Balloons', extras: 'Soft shadow' } },
+      { name: 'Water splash', note: 'Like “വ്യാഴം ചന്ത”',
+        values: { effect: 'Water splash glossy', colors: 'Glossy white with blue', lines: '2 lines stacked', font: 'Bold rounded', angle: 'Straight front', depth: 'Semi-3D', objects: 'Water splash; Fruits and vegetables', extras: 'Reflection; Sparkles' } },
+      { name: 'Festive gold', note: 'Onam, Eid, Diwali, mega offers',
+        values: { effect: 'Gold and red festive 3D', colors: 'Gold and yellow with red sides', lines: '2 lines stacked', font: 'Heavy block', angle: 'Straight front', depth: 'Deep 3D extrusion', objects: 'Trumpets; Confetti; Stars and sparkles', extras: 'Glow; Sparkles' } },
     ],
-    body: `You write prompts for AI image tools that make 3D lettering for shop offer flyers. Use the CLIENT CARD above.
+    body: `You write prompts for AI image tools that make 3D headline lettering for shop offer flyers. Use the CLIENT CARD above.
 
 TEXT (spell exactly): "{{text}}"
+Lines: {{lines}}
+Small line in a ribbon: "{{subline}}"
+Letters: {{script}}
 Occasion or theme: {{theme}}
+Text space: {{space}}
+About the space: {{spaceNote}}
 Effect: {{effect}}
 Colours: {{colors}}
+Behind and around the text: {{objects}}
 Letter shape: {{font}}
 Angle: {{angle}}
 Depth: {{depth}}
 Light: {{light}}
 Extra effects: {{extras}}
 Background: {{background}}
-Size: {{ratio}}
 Reference image attached — copy its: {{refUse}}
 Also: {{notes}}
 
-Task: write ONE image prompt for this lettering.
+Task: write ONE image prompt for this headline.
 Rules:
-- Show only the text above, spelled exactly, letter by letter. No other words, logos or numbers.
+- Show only the text above (and the small line, if given), spelled exactly, letter by letter. No other words, logos or numbers.
+- Fill the text space's shape and size; nothing cut off. If a layout picture is attached, the lettering fills its solid-coloured box exactly and nothing else changes.
+- Add only the things listed to go behind and around the text; if none are listed, the text stands alone.
 - Big, bold and easy to read from far away. Letters never touch or overlap.
-- Describe the material, edges, highlights and 3D depth clearly.
-- The whole text fits in the frame with space around it. Nothing cut off.
-- If a reference is attached, say "match the attached reference" for what it copies.
+- If my typed text is attached, keep its letter shapes exactly and only add the effect.
 - 4K, sharp, clean edges ready to cut out.
-- Maximum 100 words.
+- Maximum 120 words.
 
 Output only the prompt. ${AVOID_LINE} No explanation.`,
-    tip: 'AI often misspells long text: keep it to 1–3 words and check every letter. Use one preset for all the text in a flyer so it matches.',
+    tip: 'AI often misspells, and Malayalam letters come out wrong more often than English: for Malayalam, attach your typed headline and tick “My typed text”. Use one look for all the text in a flyer so it matches.',
   },
   {
     key: 'flyer-product-photo', name: 'Product photo fix', category: 'flyer',
