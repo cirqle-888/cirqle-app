@@ -8,6 +8,11 @@ import {
   type StudioClient,
   type LibraryItem,
 } from "@/lib/prompt-studio/types";
+import {
+  STYLE_TEMPLATE_KEY,
+  styleFromAnswer,
+  type SavedStyle,
+} from "@/lib/prompt-studio/style";
 import PromptStudioClient from "./prompt-studio-client";
 
 export const dynamic = "force-dynamic";
@@ -69,7 +74,18 @@ export default async function PromptStudioPage() {
           .order("created_at", { ascending: false })
           .limit(LIBRARY_PAGE),
   ]);
-  if ([clients, cards, templates, library].some((r) => r.error))
+  // Saved styles ("Style from a picture" answers) for the "Mix in a saved style" picker.
+  const styles = missing
+    ? { data: [], error: null }
+    : await db
+        .from("prompt_library")
+        .select("id, title, ai_result")
+        .eq("template_key", STYLE_TEMPLATE_KEY)
+        .is("deleted_at", null)
+        .not("ai_result", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(100);
+  if ([clients, cards, templates, library, styles].some((r) => r.error))
     throw new Error("Could not load Prompt Studio data. Please try again.");
   const custom: CustomTemplate[] = templates.data.map((t) => ({
     id: t.id,
@@ -92,6 +108,13 @@ export default async function PromptStudioPage() {
       installed={!missing}
       canManage={hasPermission(me, "prompt_studio.manage") && !me?.isViewAs}
       myId={me?.employeeId ?? null}
+      initialStyles={((styles.data || []) as { id: string; title: string | null; ai_result: string }[]).map(
+        (r): SavedStyle => ({
+          id: r.id,
+          title: r.title || styleFromAnswer(r.ai_result).name,
+          recipe: styleFromAnswer(r.ai_result).recipe,
+        }),
+      )}
       aiEnabled={!!process.env.GROQ_API_KEY}
     />
   );

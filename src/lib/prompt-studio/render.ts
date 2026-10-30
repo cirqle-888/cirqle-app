@@ -4,6 +4,7 @@
  */
 import type { ClientCard, PromptTemplate } from './types'
 import { CLIENT_CARD_FIELDS } from './client-card'
+import { styleBlock } from './style'
 
 const PLACEHOLDER = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g
 
@@ -60,20 +61,22 @@ const CARD_POINTER = /[ \t]*Use the CLIENT CARD above\.?/g
 /**
  * Card (if the template uses it) + filled body. This is what gets copied.
  * `language` overrides the card's language for this one prompt (and works
- * without a card). With no card at all, the body's pointer to it is removed so
+ * without a card); `style` mixes in a saved style recipe. With no card at all, the body's pointer to it is removed so
  * the AI isn't told to use something that isn't there.
  */
 export function renderPrompt(
   t: PromptTemplate,
   values: Record<string, string>,
   card?: ClientCard | null,
-  opts?: { language?: string },
+  opts?: { language?: string; style?: string },
 ): string {
   const merged = opts?.language ? { ...(card || {}), language: opts.language } : card
   const head = t.usesClientCard ? renderClientCard(merged) : ''
   let body = renderBody(t, values)
   if (!head) body = body.replace(CARD_POINTER, '').replace(/^[ \t]+$/gm, '')
-  return head ? `${head}\n\n${body}` : body
+  // A saved style mixed in from the picker sits between the card and the task.
+  const parts = [head, opts?.style?.trim() ? styleBlock(opts.style) : '', body].filter(Boolean)
+  return parts.join('\n\n')
 }
 
 /**

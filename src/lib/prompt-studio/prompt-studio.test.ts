@@ -99,7 +99,7 @@ describe('Offer Flyer templates', () => {
 
   it('come first, in their own category', () => {
     expect(CATEGORIES[0].id).toBe('flyer')
-    expect(TEMPLATES.slice(0, 2).map(t => t.key)).toEqual(['flyer-text-effect', 'flyer-product-photo'])
+    expect(TEMPLATES.slice(0, 3).map(t => t.key)).toEqual(['flyer-text-effect', 'flyer-product-photo', 'flyer-style-recipe'])
   })
 
   it('every option list, default and preset uses real options and fields', () => {

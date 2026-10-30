@@ -203,3 +203,9 @@ The reusable Claude skills for video work. They are already written; the tab onl
 - **Styles from the team's flyers**: bubble 3D with thick outline, glossy two-colour on a shape, cartoon sticker, gold and red festive, wooden sign board, food texture, water splash, cloud white (20 effects in all), and eight Quick looks named after them.
 - **Things around the text** (optional): shape plate, ribbon, confetti, stars, splashes, leaves, fruit and veg, water, cart, megaphone, gifts, balloons, emoji, trumpets, diyas, fireworks, clouds, chain and lock, snacks. Nothing ticked gives clean text only.
 - **Lines** (1, 2, 3 stacked, or one big word), a **small ribbon line**, **Letters** (English, Malayalam, Arabic) and a "My typed text" reference so Malayalam letters stay correct.
+
+### Update — Style from a picture (reusable styles)
+- **Style from a picture** (`flyer-style-recipe`, Offer Flyer): add any picture — another flyer, a scene, weather, a photo — or just describe it, tick what to take (text effect, colours, elements, scenery, weather, lighting, whole design), and the AI answers with a STYLE RECIPE: NAME, STYLE, COLOURS, ELEMENTS, Avoid. No client details, so it works for anyone.
+- **Save as a style**: saves the answer to the Library (title = its name). Saved styles appear in **Mix in a saved style** on every template, which adds the recipe between the Client Card and the task.
+- **Make a text template from it** (manage permission): creates a custom Offer Flyer template — text, lines, ribbon line, space, background — with the recipe built in, under My templates.
+- Code: `src/lib/prompt-studio/style.ts`; the page loads the latest 100 saved styles.

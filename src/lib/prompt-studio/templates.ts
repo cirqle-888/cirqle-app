@@ -247,6 +247,45 @@ Rules:
 Output only the prompt. ${AVOID_LINE} No explanation.`,
     tip: 'Use one preset for every product in a flyer so they all match. If the tool shows a grey checkerboard instead of a real see-through background, choose Pure white and cut it out after. Check the size of what you get and upscale if it is under 4K.',
   },
+  {
+    key: 'flyer-style-recipe', name: 'Style from a picture', category: 'flyer',
+    purpose: 'Turn any flyer, scene, weather or photo into a reusable style you can save and mix into other prompts',
+    useIn: 'Claude, ChatGPT or Gemini — attach the picture, then paste the answer back here', usesClientCard: false,
+    fields: [
+      { key: 'take', label: 'What to take from the picture', type: 'multi', attach: true,
+        options: ['Text effect only', 'Colours', 'Objects and elements around', 'Background and scenery', 'Weather and mood', 'Lighting', 'Whole design'],
+        help: 'Add the picture here and attach it in the AI tool too. No picture? Just describe it in the next box.' },
+      { key: 'useFor', label: 'Use the style for', type: 'select',
+        options: ['Headline text effect', 'Whole flyer design', 'Price tags and badges', 'Any of these'] },
+      { key: 'inspiration', label: 'Inspiration in your words (optional)', type: 'text',
+        placeholder: 'Monsoon rain, Onam pookalam, night market lights, fresh morning dew' },
+      { key: 'leaveOut', label: 'Leave out (optional)', type: 'text', placeholder: 'The cartoon characters, the dark background' },
+    ],
+    defaults: { take: 'Text effect only; Colours; Objects and elements around', useFor: 'Headline text effect' },
+    body: `You are an art director for shop offer flyers. I may attach a reference picture; if not, use my inspiration words.
+
+Take from it: {{take}}
+Use the style for: {{useFor}}
+Inspiration: {{inspiration}}
+Leave out: {{leaveOut}}
+
+Task: write a reusable STYLE RECIPE that recreates this look on any new text or flyer.
+Rules:
+- Describe only the look: letter material and finish, outline and 3D depth, colours, light and shadow, texture, objects and elements, background, mood, weather or scenery.
+- Never name the words, brands, prices or people in the picture, so the recipe works for any client.
+- Turn a scene, weather or photo into a lettering look (for example rain becomes wet glossy letters with drops).
+- Plain words a designer understands.
+- STYLE: maximum 70 words.
+
+Output only these lines:
+NAME: <2 to 4 words>
+STYLE: <one paragraph>
+COLOURS: <3 to 5 colours with hex codes>
+ELEMENTS: <things around the text, or none>
+Avoid: <5 short things>
+No explanation.`,
+    tip: 'Paste the answer back into the Answer box, then press “Save as a style”. Saved styles can be mixed into any template, or turned into your own text template.',
+  },
 ]
 
 // ── Ad Video ─────────────────────────────────────────────────────────────────

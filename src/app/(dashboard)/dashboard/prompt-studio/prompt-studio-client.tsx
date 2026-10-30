@@ -19,6 +19,12 @@ import {
   withDefaults,
 } from "@/lib/prompt-studio/render";
 import { answerField, cardFromAnswer } from "@/lib/prompt-studio/answer";
+import {
+  STYLE_TEMPLATE_KEY,
+  styleFromAnswer,
+  styleTemplate,
+  type SavedStyle,
+} from "@/lib/prompt-studio/style";
 import type {
   StudioClient,
   SavedCard,
@@ -71,6 +77,7 @@ export default function PromptStudioClient({
   canManage,
   aiEnabled,
   myId = null,
+  initialStyles = [],
 }: {
   clients: StudioClient[];
   initialCards: SavedCard[];
@@ -80,6 +87,7 @@ export default function PromptStudioClient({
   canManage: boolean;
   aiEnabled: boolean;
   myId?: string | null;
+  initialStyles?: SavedStyle[];
 }) {
   const toast = useToast();
   const [tab, setTab] = useState<(typeof tabs)[number]>("Create");
@@ -95,6 +103,9 @@ export default function PromptStudioClient({
   const [values, setValues] = useState<Record<string, string>>({});
   /** The AI's answer: from "Generate here" or pasted back by the user. */
   const [answer, setAnswer] = useState("");
+  /** Saved styles, and the one mixed into this prompt ("" = none). */
+  const [styles, setStyles] = useState(initialStyles);
+  const [styleId, setStyleId] = useState("");
   /** Overrides the card's language for this prompt ("" = use the card's). */
   const [language, setLanguage] = useState("");
   /** Local pictures (object URLs) per field; never uploaded. */
@@ -114,7 +125,11 @@ export default function PromptStudioClient({
   const templates: PromptTemplate[] = [...TEMPLATES, ...custom];
   const template = templates.find((t) => t.key === templateKey) || TEMPLATES[0];
   const card = cards.find((c) => c.client_id === clientId);
-  const prompt = renderPrompt(template, values, card?.card, { language });
+  const mixed = styles.find((x) => x.id === styleId);
+  const prompt = renderPrompt(template, values, card?.card, {
+    language,
+    style: mixed?.recipe,
+  });
   const shown = withDefaults(template, values);
   const missing = missingRequired(template, values);
   const receivers = templates.filter(
@@ -527,6 +542,29 @@ export default function PromptStudioClient({
                     ≈ {estimateTokens(prompt)} tokens
                   </span>
                 </div>
+                {template.key !== STYLE_TEMPLATE_KEY && (
+                  <label className="block space-y-1 text-sm">
+                    <span className="font-medium">Mix in a saved style (optional)</span>
+                    <select
+                      className="field w-full"
+                      aria-label="Mix in a saved style"
+                      value={styleId}
+                      onChange={(e) => setStyleId(e.target.value)}
+                      disabled={!styles.length}
+                    >
+                      <option value="">
+                        {styles.length
+                          ? "No style"
+                          : "No saved styles yet — make one with “Style from a picture”"}
+                      </option>
+                      {styles.map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {x.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <textarea
                   aria-label="Prompt preview"
                   readOnly
@@ -584,6 +622,58 @@ export default function PromptStudioClient({
                     <button className="studio-button" onClick={() => copy(answer)}>
                       Copy answer
                     </button>
+                    {template.key === STYLE_TEMPLATE_KEY && installed && (
+                      <button
+                        className="studio-button primary"
+                        disabled={busy}
+                        onClick={() => {
+                          const { name, recipe } = styleFromAnswer(answer);
+                          void run(
+                            () =>
+                              actions.saveToLibrary({
+                                client_id: clientId || null,
+                                template_key: template.key,
+                                template_name: template.name,
+                                title: (title.trim() || name).slice(0, 200),
+                                inputs: values,
+                                prompt,
+                                ai_result: answer.trim(),
+                              }),
+                            (data) => {
+                              setLibrary((s) => [data, ...s]);
+                              setStyles((s) => [
+                                { id: data.id, title: data.title || name, recipe },
+                                ...s,
+                              ]);
+                            },
+                            `Style “${title.trim() || name}” saved — pick it under “Mix in a saved style” in any template`,
+                          );
+                        }}
+                      >
+                        Save as a style
+                      </button>
+                    )}
+                    {template.key === STYLE_TEMPLATE_KEY && installed && canManage && (
+                      <button
+                        className="studio-button"
+                        disabled={busy}
+                        onClick={() => {
+                          const { name, recipe } = styleFromAnswer(answer);
+                          void run(
+                            () => actions.saveCustomTemplate(styleTemplate(title.trim() || name, recipe)),
+                            (data) => {
+                              setCustom((s) => [...s.filter((t) => t.id !== data.id), data]);
+                              choose(data);
+                              setCategory("custom");
+                              setSearch("");
+                            },
+                            "Your text template is ready under My templates",
+                          );
+                        }}
+                      >
+                        Make a text template from it
+                      </button>
+                    )}
                     {template.key === "fix-brief-to-card" && clientId && (
                       <button
                         className="studio-button"
