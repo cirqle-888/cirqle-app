@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Header from "@/components/layout/header";
+import { copyToClipboard } from "@/lib/clipboard";
 import { useToast, ToastContainer } from "@/components/ui/toast";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -203,7 +204,7 @@ export default function PromptStudioClient({
   const copy = useCallback(
     async (text: string) => {
       try {
-        await navigator.clipboard.writeText(text);
+        if (!(await copyToClipboard(text))) throw new Error("Clipboard unavailable");
         toast.success("Copied — paste into Claude, ChatGPT or Gemini");
       } catch {
         toast.error("Could not copy. Select the text and copy it manually.");
