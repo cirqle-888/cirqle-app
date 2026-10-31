@@ -23,7 +23,7 @@ export default async function PromptStudioPage() {
   const db = createAdminClient();
   // Probe directly: fetchAll caches missing tables and intentionally suppresses PGRST205.
   const probes = await Promise.all(
-    ["prompt_client_cards", "prompt_templates", "prompt_library"].map((table) =>
+    ["prompt_client_cards", "prompt_templates", "prompt_library", "prompt_quick_looks"].map((table) =>
       db.from(table).select("id").limit(1),
     ),
   );
@@ -87,6 +87,10 @@ export default async function PromptStudioPage() {
         .limit(100);
   if ([clients, cards, templates, library, styles].some((r) => r.error))
     throw new Error("Could not load Prompt Studio data. Please try again.");
+  const looks = missing ? { data: [], error: null } : await db.from("prompt_quick_looks")
+    .select("id, name, template_key, client_id, values, style_id, language")
+    .is("deleted_at", null).order("name");
+  if (looks.error) throw new Error("Could not load Quick looks. Please try again.");
   const custom: CustomTemplate[] = templates.data.map((t) => ({
     id: t.id,
     key: t.key,
@@ -101,6 +105,7 @@ export default async function PromptStudioPage() {
   }));
   return (
     <PromptStudioClient
+      initialQuickLooks={looks.data || []}
       clients={clients.data as StudioClient[]}
       initialCards={cards.data as SavedCard[]}
       initialTemplates={custom}

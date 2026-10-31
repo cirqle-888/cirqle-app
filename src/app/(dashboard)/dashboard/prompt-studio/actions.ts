@@ -24,6 +24,9 @@ import {
   type SavedCard,
 } from "@/lib/prompt-studio/types";
 
+import { TEMPLATES } from "@/lib/prompt-studio/templates";
+import { quickLookValues, type SavedQuickLook } from "@/lib/prompt-studio/quick-looks";
+
 const path = "/dashboard/prompt-studio";
 const CONFLICT =
   "Someone else changed this Client Card a moment ago. Reload the page to see their version, then make your change again.";
@@ -391,4 +394,46 @@ export async function generateWithAI(
   } catch (e) {
     return fail(e);
   }
+}
+
+
+export async function saveQuickLook(input: Omit<SavedQuickLook, "id">): Promise<ActionResult<SavedQuickLook>> {
+  const auth = await requirePermission("prompt_studio.manage");
+  if (!auth.ok) return auth;
+  try {
+    if (!input || !text(input.name, 120) || !input.name.trim() ||
+        !text(input.template_key, 160) || !strings(input.values) ||
+        JSON.stringify(input.values).length > 100000 || !text(input.language, 120) ||
+        !text(input.client_id, 64, true) || !text(input.style_id, 64, true))
+      throw new Error("Enter a name and valid Quick look settings.");
+    const db = createAdminClient();
+    let template = TEMPLATES.find(t => t.key === input.template_key);
+    if (!template) {
+      const result = await db.from("prompt_templates").select("*").eq("key", input.template_key).is("deleted_at", null).single();
+      check(result.error);
+      template = result.data;
+    }
+    if (!template) throw new Error("This template is no longer available.");
+    const { data, error } = await db.from("prompt_quick_looks").insert({
+      name: input.name.trim(), template_key: template.key,
+      client_id: input.client_id || null, style_id: input.style_id || null,
+      language: input.language, values: quickLookValues(template, input.values), created_by: auth.employeeId,
+    }).select("id, name, template_key, client_id, values, style_id, language").single();
+    check(error);
+    revalidatePath(path);
+    return { ok: true, data: data as SavedQuickLook };
+  } catch (e) { return fail(e); }
+}
+
+export async function deleteQuickLook(id: string): Promise<ActionResult> {
+  const auth = await requirePermission("prompt_studio.manage");
+  if (!auth.ok) return auth;
+  try {
+    if (!id || !text(id, 64)) throw new Error("Choose a Quick look.");
+    const { error } = await createAdminClient().from("prompt_quick_looks")
+      .update({ deleted_at: new Date().toISOString() }).eq("id", id);
+    check(error);
+    revalidatePath(path);
+    return { ok: true };
+  } catch (e) { return fail(e); }
 }

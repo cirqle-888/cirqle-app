@@ -82,3 +82,5 @@ the full old record to evaluate RLS on updates and deletes.
 Every migration above has a matching file in `supabase/rollbacks/`. Run the
 `_down.sql` of the same timestamp. The RLS-close rollback REOPENS the exposure
 it closed, so prefer editing a single policy over running it wholesale.
+
+| 2026-10-31 | `20261031120000_prompt_quick_looks` | applied | Applied via linked Supabase CLI. PostgREST columns verified; RLS enabled, anon read and authenticated direct insert denied, service-role insert enabled. |

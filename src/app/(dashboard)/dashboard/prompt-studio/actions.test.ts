@@ -22,6 +22,8 @@ beforeEach(() => {
 });
 describe("Prompt Studio action authorization", () => {
   const calls: [string, () => Promise<unknown>][] = [
+    ["prompt_studio.manage", () => actions.saveQuickLook({ name: "Test", template_key: "x", client_id: null, values: {}, style_id: null, language: "" })],
+    ["prompt_studio.manage", () => actions.deleteQuickLook("id")],
     ["prompt_studio.manage", () => actions.saveClientCard("id", {})],
     [
       "prompt_studio.manage",
@@ -205,4 +207,24 @@ it("accepts a custom template with tick boxes that are not in the body", async (
     ],
   });
   expect(r.ok).toBe(true);
+});
+
+it("rejects malformed Quick looks before opening storage", async () => {
+  mocks.guard.mockResolvedValue({ ok: true, employeeId: "actor" });
+  const r = await actions.saveQuickLook({ name: " ", template_key: "flyer-product-direct", client_id: null, values: {}, style_id: null, language: "" });
+  expect(r.ok).toBe(false);
+  expect(mocks.db).not.toHaveBeenCalled();
+});
+
+it("saves reusable choices without the current product name", async () => {
+  mocks.guard.mockResolvedValue({ ok: true, employeeId: "actor" });
+  const insert = vi.fn((_row: { name: string; values: Record<string, string>; created_by: string }) => ({ select: () => ({ single: async () => ({ data: { id: "saved" }, error: null }) }) }));
+  mocks.db.mockReturnValue({ from: () => ({ insert }) });
+  const r = await actions.saveQuickLook({ name: " Team standard ", template_key: "flyer-product-direct", client_id: null, values: { product: "Rice", angleWords: "slightly left" }, style_id: null, language: "Malayalam" });
+  expect(r.ok).toBe(true);
+  const row = insert.mock.calls[0][0];
+  expect(row.name).toBe("Team standard");
+  expect(row.values.product).toBeUndefined();
+  expect(row.values.angleWords).toBe("slightly left");
+  expect(row.created_by).toBe("actor");
 });

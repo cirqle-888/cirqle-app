@@ -44,6 +44,8 @@ import { NotInstalled } from "./_not-installed";
 import { LibraryTab } from "./library-tab";
 import { LivePreview } from "./live-preview";
 
+import { applyQuickLook, quickLookValues, type SavedQuickLook } from "@/lib/prompt-studio/quick-looks";
+
 const LANGUAGES =
   CLIENT_CARD_FIELDS.find((f) => f.key === "language")?.options || [];
 
@@ -78,6 +80,7 @@ export default function PromptStudioClient({
   aiEnabled,
   myId = null,
   initialStyles = [],
+  initialQuickLooks = [],
 }: {
   clients: StudioClient[];
   initialCards: SavedCard[];
@@ -88,8 +91,12 @@ export default function PromptStudioClient({
   aiEnabled: boolean;
   myId?: string | null;
   initialStyles?: SavedStyle[];
+  initialQuickLooks?: SavedQuickLook[];
 }) {
   const toast = useToast();
+  const [quickLooks, setQuickLooks] = useState(initialQuickLooks);
+  const [lookName, setLookName] = useState("");
+  const [deleteLookId, setDeleteLookId] = useState<string | null>(null);
   const [tab, setTab] = useState<(typeof tabs)[number]>("Create");
   const [cards, setCards] = useState(initialCards);
   const [custom, setCustom] = useState(initialTemplates);
@@ -521,6 +528,32 @@ export default function PromptStudioClient({
                     </div>
                   </div>
                 )}
+                <div className="space-y-2">
+                  {quickLooks.filter(p => p.template_key === template.key && (!p.client_id || p.client_id === clientId)).map(p => (
+                    <div key={p.id} className="flex gap-2">
+                      <button className="studio-button text-left flex-1" onClick={() => {
+                        setValues(s => applyQuickLook(template, s, p.values));
+                        setLanguage(p.language);
+                        setStyleId(styles.some(s => s.id === p.style_id) ? p.style_id! : "");
+                      }}>
+                        <span className="block font-medium">{p.name}</span>
+                        <span className="text-xs text-muted-foreground">{p.client_id ? "Client Quick look" : "Team Quick look"}</span>
+                      </button>
+                      {canManage && <button className="studio-button" disabled={busy} aria-label={`Delete ${p.name}`} onClick={() => setDeleteLookId(p.id)}>Delete</button>}
+                    </div>
+                  ))}
+                  {canManage && installed && <div className="space-y-2 rounded-lg border border-border p-3">
+                    <label className="block text-sm font-medium" htmlFor="quick-look-name">Save as a Quick look</label>
+                    <div className="flex gap-2">
+                      <input id="quick-look-name" className="field min-w-0 flex-1" maxLength={120} value={lookName} onChange={e => setLookName(e.target.value)} placeholder="Name this look" />
+                      <button className="studio-button" disabled={busy || !lookName.trim()} onClick={() => run(
+                        () => actions.saveQuickLook({ name: lookName, template_key: template.key, client_id: clientId || null, values: quickLookValues(template, values), style_id: styleId || null, language }),
+                        p => { setQuickLooks(s => [...s, p]); setLookName(""); }, "Quick look saved",
+                      )}>Save look</button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{clientId ? `For ${clients.find(c => c.id === clientId)?.name || "this client"}` : "For the whole team"}. Remembers choices, notes, style and language. Leaves out product names, headline text and pictures.</p>
+                  </div>}
+                </div>
                 <StudioFields
                   fields={template.fields}
                   values={shown}
@@ -1187,6 +1220,11 @@ export default function PromptStudioClient({
         </div>
         {tab === "Skills" && <SkillsTab copy={copy} error={toast.error} />}
       </main>
+      {deleteLookId && <ConfirmDialog title="Delete Quick look?" danger body="This removes the saved look for everyone on the team." confirmLabel="Delete" onCancel={() => setDeleteLookId(null)} onConfirm={() => {
+        const id = deleteLookId;
+        setDeleteLookId(null);
+        void run(() => actions.deleteQuickLook(id), () => setQuickLooks(s => s.filter(p => p.id !== id)), "Quick look deleted");
+      }} />}
       {confirmation && (
         <ConfirmDialog
           title="Delete custom template?"
