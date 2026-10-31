@@ -323,13 +323,21 @@ const CAP = "#f59e0b";
 /** A simple bottle seen from the chosen angle, in a 64×64 box. */
 function Bottle({ angle = "Straight front" }: { angle?: string }) {
   switch (angle) {
+    case "Slight turn left":
+    case "Slight turn right":
     case "Three-quarter left":
     case "Three-quarter right": {
-      const left = angle === "Three-quarter left";
+      const left = angle.endsWith("left");
+      // A slight turn shows a thin strip of the side; three-quarter shows more.
+      const side = angle.startsWith("Slight") ? 4 : 8;
       return (
         <g>
           <polygon
-            points={left ? "16,20 24,16 24,50 16,54" : "48,20 40,16 40,50 48,54"}
+            points={
+              left
+                ? `${24 - side},20 24,16 24,50 ${24 - side},54`
+                : `${40 + side},20 40,16 40,50 ${40 + side},54`
+            }
             fill={SIDE}
           />
           <rect x={left ? 24 : 18} y={16} width={22} height={34} rx={3} fill={BODY} />

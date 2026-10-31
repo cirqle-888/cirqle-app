@@ -55,6 +55,8 @@ const RATIOS: Record<string, string> = {
 };
 
 const PHOTO_ANGLE: Record<string, string> = {
+  "Slight turn left": "perspective(500px) rotateY(14deg)",
+  "Slight turn right": "perspective(500px) rotateY(-14deg)",
   "Three-quarter left": "perspective(500px) rotateY(28deg)",
   "Three-quarter right": "perspective(500px) rotateY(-28deg)",
   "Slightly from above": "perspective(500px) rotateX(18deg)",

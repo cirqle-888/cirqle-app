@@ -91,6 +91,11 @@ export interface PromptTemplate {
   livePreview?: 'text-effect' | 'product-photo'
   /** Fields keep these values until the user changes them. */
   defaults?: Record<string, string>
+  /**
+   * The prompt goes straight into the image tool (with the attached photo),
+   * not to a chat AI first: no "Generate here" and no Answer box.
+   */
+  direct?: boolean
 }
 
 /** Values of one client's card, keyed by CLIENT_CARD_FIELDS[].key. */

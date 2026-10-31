@@ -99,7 +99,7 @@ describe('Offer Flyer templates', () => {
 
   it('come first, in their own category', () => {
     expect(CATEGORIES[0].id).toBe('flyer')
-    expect(TEMPLATES.slice(0, 3).map(t => t.key)).toEqual(['flyer-text-effect', 'flyer-product-photo', 'flyer-style-recipe'])
+    expect(TEMPLATES.slice(0, 4).map(t => t.key)).toEqual(['flyer-text-effect', 'flyer-product-photo', 'flyer-product-direct', 'flyer-style-recipe'])
   })
 
   it('every option list, default and preset uses real options and fields', () => {
@@ -179,5 +179,41 @@ describe('Offer Flyer templates', () => {
     const out = renderBody(photo, { product: 'Sony Soap 650g', ...look.values })
     expect(out).toContain('Pose: Falling diagonally')
     expect(out).toContain('Same look as the other products: Falling diagonally')
+  })
+})
+
+describe('Product 3D look (direct)', () => {
+  const t = templateByKey('flyer-product-direct')!
+
+  it('is a ready image-tool prompt: product kept exactly, transparent 4K, no card', () => {
+    expect(t.direct).toBe(true)
+    expect(t.usesClientCard).toBe(false)
+    expect(missingRequired(t, {})).toEqual(['Product (name and size)'])
+    const out = renderPrompt(t, { product: 'Nygra Toilet Cleaner 500ml' }, { brand: 'Seastar' })
+    expect(out.startsWith('Edit the attached product photo')).toBe(true)
+    expect(out).not.toContain('CLIENT CARD')
+    expect(out).toContain('PRODUCT: Nygra Toilet Cleaner 500ml (Bottle)')
+    expect(out).toContain('every colour exactly as in the photo')
+    expect(out).toContain('letter for letter')
+    expect(out).toContain('Background: Transparent PNG (no background)')
+    expect(out).toContain('Size: 4K (4096 px on the long side)')
+    expect(out).not.toContain('Also fix:')
+    expect(out).not.toContain('{{')
+  })
+
+  it('defaults and Quick looks use real options, and share the looks with Product photo fix', () => {
+    const ok = (key: string, value: string) => {
+      const f = t.fields.find(x => x.key === key)!
+      expect(f, key).toBeTruthy()
+      if (f.type === 'multi') for (const v of splitMulti(value)) expect(f.options, key).toContain(v)
+      else if (f.options) expect(f.options, key).toContain(value)
+    }
+    for (const [k, v] of Object.entries(t.defaults!)) ok(k, v)
+    for (const p of t.presets!) for (const [k, v] of Object.entries(p.values)) ok(k, v)
+    const fix = templateByKey('flyer-product-photo')!
+    for (const p of t.presets!) {
+      const twin = fix.presets!.find(x => x.name === p.name)!
+      expect(p.values.setLook, p.name).toBe(twin.values.setLook)
+    }
   })
 })

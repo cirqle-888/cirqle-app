@@ -248,6 +248,83 @@ Output only the prompt. ${AVOID_LINE} No explanation.`,
     tip: 'Use one preset for every product in a flyer so they all match. If the tool shows a grey checkerboard instead of a real see-through background, choose Pure white and cut it out after. Check the size of what you get and upscale if it is under 4K.',
   },
   {
+    key: 'flyer-product-direct', name: 'Product 3D look (direct)', category: 'flyer',
+    purpose: 'Paste straight into the image tool with the client’s photo: same product, professional 3D look, matching angle',
+    useIn: 'ChatGPT images or Gemini (Nano Banana) — attach the photo and paste this prompt', usesClientCard: false,
+    direct: true, livePreview: 'product-photo',
+    fields: [
+      { key: 'product', label: 'Product (name and size)', type: 'text', required: true, placeholder: 'Nygra Toilet Cleaner 500ml bottle', attach: true,
+        help: 'Add the client’s photo here to see the preview. Attach the same photo in the image tool.' },
+      { key: 'packaging', label: 'Pack type', type: 'select',
+        options: ['Bottle', 'Can or tin', 'Box or carton', 'Pouch or packet', 'Sack or bag', 'Jar', 'Tube', 'Wrapped bar (soap)', 'Multi-pack or tray', 'Fresh produce'] },
+      { key: 'angle', label: 'Angle', type: 'choice', preview: 'photo-angle',
+        options: ['Same as the photo, just straightened', 'Straight front', 'Slight turn left', 'Slight turn right', 'Three-quarter left', 'Three-quarter right', 'Slightly from above', 'Low hero angle'],
+        help: 'A small turn is safest: a big turn makes the tool guess the side it cannot see.' },
+      { key: 'pose', label: 'Pose', type: 'choice', preview: 'photo-pose',
+        options: ['Standing upright', 'Tilted a little', 'Falling diagonally', 'Floating mid-air', 'Lying flat'] },
+      { key: 'shadow', label: 'Shadow and reflection', type: 'choice', preview: 'photo-shadow',
+        options: ['No shadow', 'Soft shadow underneath', 'Drop shadow to the side', 'Reflection below', 'Shadow and reflection'] },
+      { key: 'light', label: 'Light', type: 'select', options: ['Soft studio light', 'Bright and clean (high-key)', 'Warm light', 'Cool light', 'Dramatic rim light'] },
+      { key: 'units', label: 'How many units', type: 'select', options: ['1', '2 side by side', '3 grouped'] },
+      { key: 'cleanup', label: 'Clean up', type: 'multi',
+        options: ['Remove the background', 'Remove hands and fingers', 'Remove price stickers and tags', 'Remove room reflections and glare', 'Smooth creases and dents', 'Sharpen blur'] },
+      { key: 'fix', label: 'Anything else to fix (optional)', type: 'text', placeholder: 'The cap is cut off at the top of the photo' },
+      { key: 'setLook', label: 'Same look as the other products (optional)', type: 'text',
+        placeholder: 'Straight front, soft shadow underneath, light from the top left',
+        help: 'Use the same Quick look for every product in one flyer so they all match.' },
+      { key: 'background', label: 'Background', type: 'select',
+        options: [TRANSPARENT, 'Pure white #FFFFFF (cut out after)', 'Pure green #00FF00 (cut out after)'] },
+      { key: 'size', label: 'Output size', type: 'select', options: ['4K (4096 px on the long side)', '2K (2048 px on the long side)'] },
+    ],
+    defaults: {
+      packaging: 'Bottle', angle: 'Straight front', pose: 'Standing upright', shadow: 'Soft shadow underneath', light: 'Soft studio light', units: '1',
+      cleanup: 'Remove the background; Remove hands and fingers; Remove price stickers and tags', background: TRANSPARENT, size: '4K (4096 px on the long side)',
+    },
+    presets: [
+      { name: 'Standard flyer look', note: 'Front, upright, soft shadow',
+        values: { angle: 'Straight front', pose: 'Standing upright', shadow: 'Soft shadow underneath', light: 'Soft studio light',
+          setLook: 'Straight front view, upright, soft shadow underneath, soft studio light from the top left, true colours' } },
+      { name: 'Premium 3D', note: 'Three-quarter, rim light, reflection',
+        values: { angle: 'Three-quarter left', pose: 'Standing upright', shadow: 'Reflection below', light: 'Dramatic rim light',
+          setLook: 'Three-quarter left view, glossy premium finish, rim light, soft reflection below' } },
+      { name: 'Falling offer', note: 'Tilted mid-fall, drop shadow',
+        values: { angle: 'Slight turn right', pose: 'Falling diagonally', shadow: 'Drop shadow to the side', light: 'Bright and clean (high-key)',
+          setLook: 'Falling diagonally at about 30 degrees, bright high-key light, soft drop shadow to the lower right' } },
+      { name: 'Floating', note: 'Hovering above a soft shadow',
+        values: { angle: 'Straight front', pose: 'Floating mid-air', shadow: 'Soft shadow underneath', light: 'Bright and clean (high-key)',
+          setLook: 'Floating just above the ground, straight front, soft round shadow below, bright even light' } },
+    ],
+    body: `Edit the attached product photo into a professional, realistic 3D studio product shot for a supermarket offer flyer.
+
+PRODUCT: {{product}} ({{packaging}})
+
+KEEP THE PRODUCT EXACTLY THE SAME. Do not redesign, redraw or "improve" it:
+- the same shape, model, size and proportions (cap, lid, handle, nozzle, seams, folds, corners)
+- every colour exactly as in the photo
+- every word, logo, number, picture and symbol on the pack, letter for letter, in the same place
+- the same material and finish: plastic, glass, paper, foil, metal or cloth
+If a part is blurry or hidden in the photo, keep it plain and matching; never invent text or details.
+
+CHANGE ONLY THE PHOTOGRAPHY:
+- Angle: {{angle}}
+- Pose: {{pose}}
+- Light: {{light}}, with natural highlights on the material and real 3D depth
+- Shadow: {{shadow}}
+- Units: {{units}} (identical copies of the same product)
+- Clean up: {{cleanup}}
+- Also fix: {{fix}}
+- Match the other products in this flyer: {{setLook}}
+
+OUTPUT:
+- The whole product in frame, centred, nothing cut off, about 8% empty space around it.
+- Background: {{background}}
+- Size: {{size}}, photorealistic, sharp, clean edges ready to cut out.
+- No added text, props, hands, frames, stickers or watermarks.
+
+Output only the edited image.`,
+    tip: 'Attach the client’s photo, paste this prompt, and send. Use the same Quick look for every product in a flyer so they match. Check the label against the original: if a word changed, ask again with “keep the label exactly as in the photo”. If the background comes back as a grey checkerboard, choose Pure white and cut it out after.',
+  },
+  {
     key: 'flyer-style-recipe', name: 'Style from a picture', category: 'flyer',
     purpose: 'Turn any flyer, scene, weather or photo into a reusable style you can save and mix into other prompts',
     useIn: 'Claude, ChatGPT or Gemini — attach the picture, then paste the answer back here', usesClientCard: false,

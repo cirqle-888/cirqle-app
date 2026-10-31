@@ -209,3 +209,9 @@ The reusable Claude skills for video work. They are already written; the tab onl
 - **Save as a style**: saves the answer to the Library (title = its name). Saved styles appear in **Mix in a saved style** on every template, which adds the recipe between the Client Card and the task.
 - **Make a text template from it** (manage permission): creates a custom Offer Flyer template — text, lines, ribbon line, space, background — with the recipe built in, under My templates.
 - Code: `src/lib/prompt-studio/style.ts`; the page loads the latest 100 saved styles.
+
+### Update — Product 3D look (direct)
+- **Product 3D look (direct)** (`flyer-product-direct`, Offer Flyer): a finished image-edit prompt pasted straight into ChatGPT images or Gemini together with the client's photo — no chat AI in between.
+- It locks the product (shape, model, size, every colour, every word and logo letter for letter, material) and changes only the photography: angle, pose, light, shadow and reflection, units, clean-up (background, hands, stickers, glare, creases, blur). Transparent 4K PNG by default.
+- Its four Quick looks use the same "same look" wording as **Product photo fix**, so products made with either template match in one flyer.
+- New template flag `direct: true` hides "Generate here" and the Answer box and tells the user to paste the prompt with the photo.

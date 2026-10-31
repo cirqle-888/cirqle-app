@@ -490,7 +490,9 @@ export default function PromptStudioClient({
               <section className={panel}>
                 <h2 className="font-semibold">3. Fill · {template.name}</h2>
                 <p className="text-sm text-muted-foreground">
-                  Paste the answer into: {template.useIn}
+                  {template.direct
+                    ? `Paste this prompt with the photo into: ${template.useIn}`
+                    : `Paste the answer into: ${template.useIn}`}
                 </p>
                 {!!template.presets?.length && (
                   <div className="space-y-2">
@@ -578,6 +580,12 @@ export default function PromptStudioClient({
                 >
                   Copy prompt
                 </button>
+                {template.direct && (
+                  <p className="text-sm text-muted-foreground">
+                    This prompt goes straight into the image tool: attach the
+                    client’s photo there, paste, and send.
+                  </p>
+                )}
                 {missing.length > 0 ? (
                   <p className="text-sm text-amber-700 dark:text-amber-300">
                     Fill in: {missing.join(", ")}
@@ -587,7 +595,7 @@ export default function PromptStudioClient({
                     Ctrl/Cmd+Enter to copy
                   </p>
                 )}
-                {aiEnabled && (
+                {aiEnabled && !template.direct && (
                   <>
                     <button
                       className="studio-button"
@@ -606,6 +614,8 @@ export default function PromptStudioClient({
                     </p>
                   </>
                 )}
+                {!template.direct && (
+                  <>
                 <h3 className="text-sm font-medium">Answer</h3>
                 <GrowingTextarea
                   label="Answer"
@@ -725,6 +735,8 @@ export default function PromptStudioClient({
                       </select>
                     )}
                   </div>
+                )}
+                  </>
                 )}
                 {installed && (
                   <>
