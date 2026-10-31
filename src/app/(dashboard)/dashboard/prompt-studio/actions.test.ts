@@ -187,3 +187,22 @@ it("accepts a custom template with picture-card and tick-box fields", async () =
   expect(r.ok).toBe(true);
   expect(r.data?.fields[0].options).toEqual(["Neon glow"]);
 });
+it("accepts a custom template with tick boxes that are not in the body", async () => {
+  mocks.guard.mockResolvedValue({ ok: true, employeeId: "actor" });
+  mocks.db.mockReturnValue(fakeDb([{ data: { id: "i", key: "custom-y" }, error: null }]).client);
+  const r = await actions.saveCustomTemplate({
+    id: "",
+    key: "",
+    name: "Product",
+    category: "flyer",
+    purpose: "",
+    useIn: "",
+    usesClientCard: false,
+    body: "Shadow: {{shadow|soft}}",
+    fields: [
+      { key: "shadowOn", label: "Change the shadow", type: "toggle" },
+      { key: "shadow", label: "Choose", type: "select", options: ["Soft"], showIf: "shadowOn" },
+    ],
+  });
+  expect(r.ok).toBe(true);
+});

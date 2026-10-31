@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { ImagePlus, X } from "lucide-react";
 import {
   MULTI_SEP,
+  TOGGLE_ON,
   splitMulti,
   type PromptField,
 } from "@/lib/prompt-studio/types";
@@ -178,12 +179,44 @@ export function StudioFields({
       {fields.map((f) => {
         const value = values[f.key] || "";
         const set = (v: string) => onChange(f.key, v);
+        // A field behind an unticked box stays hidden (its toggle must exist in this form).
+        if (
+          f.showIf &&
+          fields.some((x) => x.key === f.showIf && x.type === "toggle") &&
+          values[f.showIf] !== TOGGLE_ON
+        )
+          return null;
+        if (f.type === "toggle") {
+          const on = value === TOGGLE_ON;
+          return (
+            <label
+              key={f.key}
+              className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm ${on ? "border-primary bg-primary/5 font-medium" : "border-border"}`}
+            >
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={on}
+                disabled={readOnly}
+                onChange={(e) => set(e.target.checked ? TOGGLE_ON : "")}
+              />
+              <span className="flex-1">{f.label}</span>
+              <span className="text-xs text-muted-foreground">
+                {on ? "Your choice" : "General"}
+              </span>
+            </label>
+          );
+        }
+        const nested = !!f.showIf;
         const grouped = f.type === "choice" || f.type === "multi";
         // A label can't hold the picture box's own label, so those fields use a div
         // (every control still carries its own aria-label).
         const Wrapper = grouped || (f.attach && onAttach) ? "div" : "label";
         return (
-          <Wrapper key={f.key} className="block space-y-1.5 text-sm">
+          <Wrapper
+            key={f.key}
+            className={`block space-y-1.5 text-sm ${nested ? "-mt-2 ml-3 border-l-2 border-primary/30 pl-4" : ""}`}
+          >
             <span className="block font-medium">
               {f.label}
               {f.required && " *"}

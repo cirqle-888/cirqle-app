@@ -60,6 +60,29 @@ const AVOID_LINE = 'Then one line starting "Avoid:" with 5 short things to avoid
 // choices that change the result, each with a picture.
 const TRANSPARENT = 'Transparent PNG (no background)'
 
+/**
+ * One optional property of a template: a tick box, and behind it the choice,
+ * "in your own words" and a reference picture. Unticked, the template's
+ * default words for it are used (see `line`).
+ */
+function option(key: string, label: string, choice: Omit<PromptField, 'key' | 'label' | 'showIf'>, wordsExample: string): PromptField[] {
+  const on = `${key}On`
+  return [
+    { key: on, label, type: 'toggle' },
+    { ...choice, key, label: 'Choose', showIf: on },
+    { key: `${key}Words`, label: 'Or say it in your words (optional)', type: 'text', placeholder: wordsExample, showIf: on },
+    { key: `${key}Ref`, label: 'Reference picture (optional)', type: 'text', attach: true, showIf: on,
+      placeholder: 'What to copy from it', help: 'Attach the picture in the AI tool too.' },
+  ]
+}
+
+/** The body lines for one `option`: the choice (or the default words), then the user's words and reference, when given. */
+function line(label: string, key: string, fallback?: string): string {
+  const main = fallback === undefined ? `- ${label}: {{${key}}}` : `- ${label}: {{${key}|${fallback}}}`
+  // Each extra line names its property, so it still reads right if the choice line is empty.
+  return `${main}\n  ${label}, in my words: {{${key}Words}}\n  ${label}, copy from the reference picture I attached: {{${key}Ref}}`
+}
+
 const FLYER: PromptTemplate[] = [
   {
     key: 'flyer-text-effect', name: '3D text effect', category: 'flyer',
@@ -248,81 +271,80 @@ Output only the prompt. ${AVOID_LINE} No explanation.`,
     tip: 'Use one preset for every product in a flyer so they all match. If the tool shows a grey checkerboard instead of a real see-through background, choose Pure white and cut it out after. Check the size of what you get and upscale if it is under 4K.',
   },
   {
-    key: 'flyer-product-direct', name: 'Product 3D look (direct)', category: 'flyer',
-    purpose: 'Paste straight into the image tool with the client’s photo: same product, professional 3D look, matching angle',
-    useIn: 'ChatGPT images or Gemini (Nano Banana) — attach the photo and paste this prompt', usesClientCard: false,
+    key: 'flyer-product-direct', name: 'Product photo (general)', category: 'flyer',
+    purpose: 'One prompt for any client product photo: same product, realistic 3D studio look, transparent and upscaled. Tick only what you want to change.',
+    useIn: 'Figma (Edit with prompt), ChatGPT images or Gemini — with the client’s photo', usesClientCard: false,
     direct: true, livePreview: 'product-photo',
     fields: [
-      { key: 'product', label: 'Product (name and size)', type: 'text', required: true, placeholder: 'Nygra Toilet Cleaner 500ml bottle', attach: true,
-        help: 'Add the client’s photo here to see the preview. Attach the same photo in the image tool.' },
-      { key: 'packaging', label: 'Pack type', type: 'select',
-        options: ['Bottle', 'Can or tin', 'Box or carton', 'Pouch or packet', 'Sack or bag', 'Jar', 'Tube', 'Wrapped bar (soap)', 'Multi-pack or tray', 'Fresh produce'] },
-      { key: 'angle', label: 'Angle', type: 'choice', preview: 'photo-angle',
+      { key: 'product', label: 'Product name (optional)', type: 'text', placeholder: 'Nygra Toilet Cleaner 500ml', attach: true,
+        help: 'Leave empty and the prompt still works. Add the client’s photo here to see the preview.' },
+      ...option('angle', 'Change the angle', { type: 'choice', preview: 'photo-angle',
         options: ['Same as the photo, just straightened', 'Straight front', 'Slight turn left', 'Slight turn right', 'Three-quarter left', 'Three-quarter right', 'Slightly from above', 'Low hero angle'],
-        help: 'A small turn is safest: a big turn makes the tool guess the side it cannot see.' },
-      { key: 'pose', label: 'Pose', type: 'choice', preview: 'photo-pose',
-        options: ['Standing upright', 'Tilted a little', 'Falling diagonally', 'Floating mid-air', 'Lying flat'] },
-      { key: 'shadow', label: 'Shadow and reflection', type: 'choice', preview: 'photo-shadow',
-        options: ['No shadow', 'Soft shadow underneath', 'Drop shadow to the side', 'Reflection below', 'Shadow and reflection'] },
-      { key: 'light', label: 'Light', type: 'select', options: ['Soft studio light', 'Bright and clean (high-key)', 'Warm light', 'Cool light', 'Dramatic rim light'] },
-      { key: 'units', label: 'How many units', type: 'select', options: ['1', '2 side by side', '3 grouped'] },
-      { key: 'cleanup', label: 'Clean up', type: 'multi',
-        options: ['Remove the background', 'Remove hands and fingers', 'Remove price stickers and tags', 'Remove room reflections and glare', 'Smooth creases and dents', 'Sharpen blur'] },
-      { key: 'fix', label: 'Anything else to fix (optional)', type: 'text', placeholder: 'The cap is cut off at the top of the photo' },
-      { key: 'setLook', label: 'Same look as the other products (optional)', type: 'text',
-        placeholder: 'Straight front, soft shadow underneath, light from the top left',
-        help: 'Use the same Quick look for every product in one flyer so they all match.' },
-      { key: 'background', label: 'Background', type: 'select',
-        options: [TRANSPARENT, 'Pure white #FFFFFF (cut out after)', 'Pure green #00FF00 (cut out after)'] },
-      { key: 'size', label: 'Output size', type: 'select', options: ['4K (4096 px on the long side)', '2K (2048 px on the long side)'] },
+        help: 'A small turn is safest: a big turn makes the tool guess the side it cannot see.' }, 'tilted a little to the left, label still facing us'),
+      ...option('pose', 'Change the pose', { type: 'choice', preview: 'photo-pose',
+        options: ['Standing upright', 'Tilted a little', 'Falling diagonally', 'Floating mid-air', 'Lying flat'] }, 'falling towards the price tag'),
+      ...option('light', 'Change the light', { type: 'select',
+        options: ['Soft studio light', 'Bright and clean (high-key)', 'Warm light', 'Cool light', 'Dramatic rim light', 'Natural daylight'] }, 'bright light from the right, gentle shine on the cap'),
+      ...option('shadow', 'Change the shadow', { type: 'choice', preview: 'photo-shadow',
+        options: ['No shadow', 'Soft shadow underneath', 'Drop shadow to the side', 'Reflection below', 'Shadow and reflection'] }, 'long soft shadow to the right, like evening sun'),
+      ...option('finish', 'Change the finish', { type: 'select',
+        options: ['Natural real photo', 'Glossy premium', 'Hyper-real 3D render', 'Soft matte'] }, 'extra shine on the plastic, like a TV advert'),
+      ...option('units', 'Show more than one', { type: 'select',
+        options: ['1', '2 side by side', '3 grouped', 'Small stack'] }, 'two bottles, one slightly behind the other'),
+      ...option('cleanup', 'Choose what to clean up', { type: 'multi',
+        options: ['Remove hands and fingers', 'Remove price stickers and tags', 'Remove glare and room reflections', 'Smooth creases and dents', 'Straighten a bent pack'] }, 'remove the shop shelf edge at the bottom'),
+      ...option('fix', 'Fix or complete something', { type: 'text', placeholder: 'The cap is cut off at the top — complete it' }, 'the bottom of the bag is cut off'),
+      ...option('background', 'Change the background', { type: 'select',
+        options: ['Transparent PNG (no background)', 'Pure white #FFFFFF', 'Pure green #00FF00', 'Soft grey studio backdrop'] }, 'light cream backdrop'),
+      ...option('quality', 'Change the size and sharpness', { type: 'select',
+        options: ['4K (4096 px on the long side)', '2K (2048 px on the long side)', 'Same size, just sharper'] }, 'make the small print on the back readable'),
+      ...option('match', 'Match the other products in this flyer', { type: 'text',
+        placeholder: 'Straight front view, upright, soft shadow underneath, soft studio light from the top left' }, 'same as the rice bag I did before'),
     ],
-    defaults: {
-      packaging: 'Bottle', angle: 'Straight front', pose: 'Standing upright', shadow: 'Soft shadow underneath', light: 'Soft studio light', units: '1',
-      cleanup: 'Remove the background; Remove hands and fingers; Remove price stickers and tags', background: TRANSPARENT, size: '4K (4096 px on the long side)',
-    },
     presets: [
       { name: 'Standard flyer look', note: 'Front, upright, soft shadow',
-        values: { angle: 'Straight front', pose: 'Standing upright', shadow: 'Soft shadow underneath', light: 'Soft studio light',
-          setLook: 'Straight front view, upright, soft shadow underneath, soft studio light from the top left, true colours' } },
+        values: { angleOn: 'yes', angle: 'Straight front', poseOn: 'yes', pose: 'Standing upright', shadowOn: 'yes', shadow: 'Soft shadow underneath', lightOn: 'yes', light: 'Soft studio light',
+          matchOn: 'yes', match: 'Straight front view, upright, soft shadow underneath, soft studio light from the top left, true colours' } },
       { name: 'Premium 3D', note: 'Three-quarter, rim light, reflection',
-        values: { angle: 'Three-quarter left', pose: 'Standing upright', shadow: 'Reflection below', light: 'Dramatic rim light',
-          setLook: 'Three-quarter left view, glossy premium finish, rim light, soft reflection below' } },
+        values: { angleOn: 'yes', angle: 'Three-quarter left', poseOn: 'yes', pose: 'Standing upright', shadowOn: 'yes', shadow: 'Reflection below', lightOn: 'yes', light: 'Dramatic rim light',
+          finishOn: 'yes', finish: 'Glossy premium', matchOn: 'yes', match: 'Three-quarter left view, glossy premium finish, rim light, soft reflection below' } },
       { name: 'Falling offer', note: 'Tilted mid-fall, drop shadow',
-        values: { angle: 'Slight turn right', pose: 'Falling diagonally', shadow: 'Drop shadow to the side', light: 'Bright and clean (high-key)',
-          setLook: 'Falling diagonally at about 30 degrees, bright high-key light, soft drop shadow to the lower right' } },
+        values: { angleOn: 'yes', angle: 'Slight turn right', poseOn: 'yes', pose: 'Falling diagonally', shadowOn: 'yes', shadow: 'Drop shadow to the side', lightOn: 'yes', light: 'Bright and clean (high-key)',
+          matchOn: 'yes', match: 'Falling diagonally at about 30 degrees, bright high-key light, soft drop shadow to the lower right' } },
       { name: 'Floating', note: 'Hovering above a soft shadow',
-        values: { angle: 'Straight front', pose: 'Floating mid-air', shadow: 'Soft shadow underneath', light: 'Bright and clean (high-key)',
-          setLook: 'Floating just above the ground, straight front, soft round shadow below, bright even light' } },
+        values: { angleOn: 'yes', angle: 'Straight front', poseOn: 'yes', pose: 'Floating mid-air', shadowOn: 'yes', shadow: 'Soft shadow underneath', lightOn: 'yes', light: 'Bright and clean (high-key)',
+          matchOn: 'yes', match: 'Floating just above the ground, straight front, soft round shadow below, bright even light' } },
     ],
-    body: `Edit the attached product photo into a professional, realistic 3D studio product shot for a supermarket offer flyer.
+    body: `Edit the attached product photo into a professional, realistic 3D studio product photo for a supermarket offer flyer.
 
-PRODUCT: {{product}} ({{packaging}})
+PRODUCT: {{product|the product in the photo}}
 
 KEEP THE PRODUCT EXACTLY THE SAME. Do not redesign, redraw or "improve" it:
 - the same shape, model, size and proportions (cap, lid, handle, nozzle, seams, folds, corners)
 - every colour exactly as in the photo
 - every word, logo, number, picture and symbol on the pack, letter for letter, in the same place
-- the same material and finish: plastic, glass, paper, foil, metal or cloth
+- the same material: plastic, glass, paper, foil, metal or cloth
 If a part is blurry or hidden in the photo, keep it plain and matching; never invent text or details.
 
 CHANGE ONLY THE PHOTOGRAPHY:
-- Angle: {{angle}}
-- Pose: {{pose}}
-- Light: {{light}}, with natural highlights on the material and real 3D depth
-- Shadow: {{shadow}}
-- Units: {{units}} (identical copies of the same product)
-- Clean up: {{cleanup}}
-- Also fix: {{fix}}
-- Match the other products in this flyer: {{setLook}}
+${line('Angle', 'angle', 'straight front view, upright and centred')}
+${line('Pose', 'pose', 'standing upright')}
+${line('Light', 'light', 'soft studio light from the top left, with natural highlights on the material and real 3D depth')}
+${line('Shadow', 'shadow', 'a soft, natural shadow just under the product')}
+${line('Finish', 'finish', 'a natural, realistic photo with true colours')}
+${line('Units', 'units', 'the same number of units as in the photo')}
+${line('Clean up', 'cleanup', 'remove hands, fingers, price stickers, glare, room reflections and creases')}
+${line('Also fix', 'fix')}
+${line('Match the other products in this flyer', 'match')}
 
 OUTPUT:
 - The whole product in frame, centred, nothing cut off, about 8% empty space around it.
-- Background: {{background}}
-- Size: {{size}}, photorealistic, sharp, clean edges ready to cut out.
+${line('Background', 'background', 'fully transparent (transparent PNG). If your tool cannot make a transparent background, use plain pure white with nothing else')}
+${line('Quality', 'quality', 'upscaled to the highest resolution you can (4K if possible), with crisp label print and fine detail; no blur, noise or over-sharpening')}
 - No added text, props, hands, frames, stickers or watermarks.
 
 Output only the edited image.`,
-    tip: 'Attach the client’s photo, paste this prompt, and send. Use the same Quick look for every product in a flyer so they match. Check the label against the original: if a word changed, ask again with “keep the label exactly as in the photo”. If the background comes back as a grey checkerboard, choose Pure white and cut it out after.',
+    tip: 'Nothing ticked gives the general result — copy and use it. Tick a box only for what you want to change, then pick, write in your words, or add a reference picture. In Figma, edit with this prompt, then click Remove background for a real transparent PNG. Use the same Quick look for every product in a flyer so they match.',
   },
   {
     key: 'flyer-style-recipe', name: 'Style from a picture', category: 'flyer',

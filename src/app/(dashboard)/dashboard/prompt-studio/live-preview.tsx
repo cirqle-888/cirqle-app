@@ -158,7 +158,8 @@ export function LivePreview({
     );
   }
   const units = UNITS[values.units] || 1;
-  const shadow = values.shadow || "";
+  // Empty means the general look: a soft shadow on a transparent background.
+  const shadow = values.shadow || "Soft shadow underneath";
   const softShadow =
     shadow === "Soft shadow underneath" || shadow === "Shadow and reflection";
   const reflect = shadow === "Reflection below" || shadow === "Shadow and reflection";
@@ -187,7 +188,7 @@ export function LivePreview({
     >
       <div
         className="relative flex h-56 w-full items-center justify-center overflow-hidden rounded-lg"
-        style={backdrop(values.background)}
+        style={backdrop(values.background || "Transparent")}
       >
         {image ? (
           <div className="flex items-end justify-center">

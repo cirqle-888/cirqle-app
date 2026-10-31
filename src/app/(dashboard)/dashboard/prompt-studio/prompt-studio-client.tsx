@@ -502,7 +502,15 @@ export default function PromptStudioClient({
                         <button
                           key={p.name}
                           className="studio-button text-left"
-                          onClick={() => setValues((s) => ({ ...s, ...p.values }))}
+                          onClick={() =>
+                            setValues((s) => {
+                              // A Quick look replaces the last one's ticks instead of adding to them.
+                              const next = { ...s };
+                              for (const f of template.fields)
+                                if (f.type === "toggle") next[f.key] = "";
+                              return { ...next, ...p.values };
+                            })
+                          }
                         >
                           <span className="block font-medium">{p.name}</span>
                           {p.note && (

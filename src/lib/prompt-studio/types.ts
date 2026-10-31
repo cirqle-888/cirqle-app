@@ -11,8 +11,10 @@
  * text / textarea / number: typed in. select: one of `options` from a dropdown.
  * choice: one of `options` shown as picture cards. multi: any number of
  * `options` (stored as "A; B; C"), shown as tick chips or picture cards.
+ * toggle: a tick box ("yes" or ""). It is not in the body: it shows or hides
+ * the fields whose `showIf` names it, and a hidden field counts as empty.
  */
-export type FieldType = 'text' | 'textarea' | 'select' | 'number' | 'choice' | 'multi'
+export type FieldType = 'text' | 'textarea' | 'select' | 'number' | 'choice' | 'multi' | 'toggle'
 
 /** Which little picture each option of a choice/multi field gets (see option-preview.tsx). */
 export type PreviewKind =
@@ -23,7 +25,9 @@ export type PreviewKind =
 export const MULTI_SEP = '; '
 export const splitMulti = (v: string | undefined): string[] => (v || '').split(';').map(x => x.trim()).filter(Boolean)
 
-export const FIELD_TYPES: FieldType[] = ['textarea', 'text', 'select', 'choice', 'multi', 'number']
+export const FIELD_TYPES: FieldType[] = ['textarea', 'text', 'select', 'choice', 'multi', 'number', 'toggle']
+/** The value a ticked toggle holds. */
+export const TOGGLE_ON = 'yes'
 export const PREVIEW_KINDS: PreviewKind[] = ['text-effect', 'text-font', 'text-angle', 'text-space', 'text-lines', 'photo-angle', 'photo-pose', 'photo-shadow']
 
 export interface PromptField {
@@ -38,6 +42,8 @@ export interface PromptField {
   required?: boolean
   /** Short hint shown under the field. */
   help?: string
+  /** Only shown (and only used) while this toggle field is ticked. */
+  showIf?: string
   /** choice/multi: draw a small picture for each option. */
   preview?: PreviewKind
   /**

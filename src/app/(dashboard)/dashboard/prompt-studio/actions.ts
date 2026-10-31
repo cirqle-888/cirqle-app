@@ -119,6 +119,7 @@ function validField(f: PromptField): boolean {
   if (!FIELD_TYPES.includes(f.type)) return false;
   if (!text(f.placeholder, 300, true) || !text(f.help, 300, true)) return false;
   if (f.preview != null && !PREVIEW_KINDS.includes(f.preview)) return false;
+  if (!text(f.showIf, 60, true)) return false;
   if (f.type === "select" || f.type === "choice" || f.type === "multi")
     // Blank lines in the "one per line" box are ignored (they are dropped on save).
     return (
@@ -148,11 +149,16 @@ export async function saveCustomTemplate(
     )
       throw new Error("Enter a name, category and template body.");
     const keys = placeholdersIn(t.body);
+    // Tick-box fields are not in the body; every other field must be.
+    const inBody = Array.isArray(t.fields)
+      ? t.fields.filter((f) => f?.type !== "toggle")
+      : [];
     if (
       !Array.isArray(t.fields) ||
-      t.fields.length > 40 ||
-      keys.length !== t.fields.length ||
-      keys.some((k) => !t.fields.some((f) => f.key === k)) ||
+      t.fields.length > 80 ||
+      new Set(t.fields.map((f) => f?.key)).size !== t.fields.length ||
+      keys.length !== inBody.length ||
+      keys.some((k) => !inBody.some((f) => f.key === k)) ||
       !t.fields.every(validField)
     )
       throw new Error(

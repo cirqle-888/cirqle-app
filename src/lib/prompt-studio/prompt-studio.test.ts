@@ -19,7 +19,9 @@ describe('template library', () => {
   it('every placeholder in a body is a declared field, and every field is used', () => {
     for (const t of TEMPLATES) {
       const used = placeholdersIn(t.body)
-      const declared = t.fields.map(f => f.key)
+      const declared = t.fields.filter(f => f.type !== 'toggle').map(f => f.key)
+      for (const f of t.fields.filter(x => x.showIf))
+        expect(t.fields.find(x => x.key === f.showIf)?.type, `${t.key}.${f.key} showIf`).toBe('toggle')
       expect(used.filter(k => !declared.includes(k)), `${t.key}: undeclared`).toEqual([])
       expect(declared.filter(k => !used.includes(k)), `${t.key}: unused`).toEqual([])
     }
@@ -182,38 +184,67 @@ describe('Offer Flyer templates', () => {
   })
 })
 
-describe('Product 3D look (direct)', () => {
+describe('Product photo (general)', () => {
   const t = templateByKey('flyer-product-direct')!
 
-  it('is a ready image-tool prompt: product kept exactly, transparent 4K, no card', () => {
+  it('with nothing filled in, copies a complete general prompt', () => {
     expect(t.direct).toBe(true)
     expect(t.usesClientCard).toBe(false)
-    expect(missingRequired(t, {})).toEqual(['Product (name and size)'])
-    const out = renderPrompt(t, { product: 'Nygra Toilet Cleaner 500ml' }, { brand: 'Seastar' })
+    expect(missingRequired(t, {})).toEqual([])
+    const out = renderPrompt(t, {}, { brand: 'Seastar' })
     expect(out.startsWith('Edit the attached product photo')).toBe(true)
-    expect(out).not.toContain('CLIENT CARD')
-    expect(out).toContain('PRODUCT: Nygra Toilet Cleaner 500ml (Bottle)')
+    expect(out).toContain('PRODUCT: the product in the photo')
     expect(out).toContain('every colour exactly as in the photo')
-    expect(out).toContain('letter for letter')
-    expect(out).toContain('Background: Transparent PNG (no background)')
-    expect(out).toContain('Size: 4K (4096 px on the long side)')
-    expect(out).not.toContain('Also fix:')
+    expect(out).toContain('- Angle: straight front view, upright and centred')
+    expect(out).toContain('- Shadow: a soft, natural shadow just under the product')
+    expect(out).toContain('- Background: fully transparent (transparent PNG)')
+    expect(out).toContain('- Quality: upscaled to the highest resolution you can (4K if possible)')
+    expect(out).not.toMatch(/in my words|reference picture|Also fix|Match the other/)
     expect(out).not.toContain('{{')
+    expect(out).not.toContain('CLIENT CARD')
   })
 
-  it('defaults and Quick looks use real options, and share the looks with Product photo fix', () => {
-    const ok = (key: string, value: string) => {
-      const f = t.fields.find(x => x.key === key)!
-      expect(f, key).toBeTruthy()
-      if (f.type === 'multi') for (const v of splitMulti(value)) expect(f.options, key).toContain(v)
-      else if (f.options) expect(f.options, key).toContain(value)
-    }
-    for (const [k, v] of Object.entries(t.defaults!)) ok(k, v)
-    for (const p of t.presets!) for (const [k, v] of Object.entries(p.values)) ok(k, v)
+  it('ticking a property uses the choice, the words and the reference', () => {
+    const out = renderBody(t, {
+      product: 'Gautam 1121 Basmati 5kg', shadowOn: 'yes', shadow: 'Drop shadow to the side',
+      shadowWords: 'long and soft, to the right', shadowRef: 'the shadow under the rice bag',
+    })
+    expect(out).toContain('PRODUCT: Gautam 1121 Basmati 5kg')
+    expect(out).toContain('- Shadow: Drop shadow to the side')
+    expect(out).toContain('  Shadow, in my words: long and soft, to the right')
+    expect(out).toContain('  Shadow, copy from the reference picture I attached: the shadow under the rice bag')
+    expect(out).toContain('- Angle: straight front view, upright and centred')
+  })
+
+  it('ticked but nothing chosen still uses the general words; words alone are enough', () => {
+    const out = renderBody(t, { lightOn: 'yes', lightWords: 'bright light from the right' })
+    expect(out).toContain('- Light: soft studio light from the top left')
+    expect(out).toContain('  Light, in my words: bright light from the right')
+  })
+
+  it('unticking hides a choice without losing it', () => {
+    const v = { shadowOn: '', shadow: 'Reflection below', shadowWords: 'x' }
+    expect(renderBody(t, v)).not.toContain('Reflection below')
+    expect(renderBody(t, { ...v, shadowOn: 'yes' })).toContain('- Shadow: Reflection below')
+  })
+
+  it('Quick looks use real options, tick their own boxes, and match Product photo fix', () => {
     const fix = templateByKey('flyer-product-photo')!
     for (const p of t.presets!) {
-      const twin = fix.presets!.find(x => x.name === p.name)!
-      expect(p.values.setLook, p.name).toBe(twin.values.setLook)
+      for (const [k, v] of Object.entries(p.values)) {
+        const f = t.fields.find(x => x.key === k)!
+        expect(f, k).toBeTruthy()
+        if (f.type === 'toggle') expect(v).toBe('yes')
+        else if (f.options) expect(f.options, k).toContain(v)
+        if (f.showIf) expect(p.values[f.showIf], `${p.name}: ${k} needs its box ticked`).toBe('yes')
+      }
+      expect(p.values.match, p.name).toBe(fix.presets!.find(x => x.name === p.name)!.values.setLook)
     }
+  })
+})
+
+describe('placeholders with general words', () => {
+  it('reads {{key|words}} as the field key', () => {
+    expect(placeholdersIn('{{a|soft light}} and {{b}} and {{a}}')).toEqual(['a', 'b'])
   })
 })

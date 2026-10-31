@@ -215,3 +215,9 @@ The reusable Claude skills for video work. They are already written; the tab onl
 - It locks the product (shape, model, size, every colour, every word and logo letter for letter, material) and changes only the photography: angle, pose, light, shadow and reflection, units, clean-up (background, hands, stickers, glare, creases, blur). Transparent 4K PNG by default.
 - Its four Quick looks use the same "same look" wording as **Product photo fix**, so products made with either template match in one flyer.
 - New template flag `direct: true` hides "Generate here" and the Answer box and tells the user to paste the prompt with the photo.
+
+### Update — Product photo (general)
+- `flyer-product-direct` is now **Product photo (general)**: one direct prompt for any client product photo. With nothing filled in, Copy gives a complete general prompt (same product, realistic 3D studio look, soft shadow, transparent background, upscaled).
+- Eleven optional properties, each a tick box: angle, pose, light, shadow, finish, units, clean-up, fix or complete, background, size and sharpness, match the other products. Ticking one shows its choices (with pictures where useful), "say it in your words" and a reference picture; unticking returns to the general words without losing what was typed.
+- New field type `toggle` and `showIf` (fields behind a tick box count as empty while it is unticked), and placeholders with general words: `{{key|default words}}`. Custom templates may include tick boxes (they are not in the body).
+- In Figma: edit with the prompt, then click Remove background for a real transparent PNG.

@@ -2,11 +2,16 @@
  * Prompt Studio — turns a template + field values + client card into the
  * final paste-ready text. Pure functions, no I/O, safe on server and client.
  */
-import type { ClientCard, PromptTemplate } from './types'
+import { TOGGLE_ON, type ClientCard, type PromptTemplate } from './types'
 import { CLIENT_CARD_FIELDS } from './client-card'
 import { styleBlock } from './style'
 
-const PLACEHOLDER = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g
+/**
+ * {{key}} or {{key|default words}}: with a default, an empty field prints the
+ * default instead (so a template still reads well with nothing filled in), and
+ * its line is never dropped.
+ */
+const PLACEHOLDER = /\{\{\s*([a-zA-Z0-9_]+)\s*(?:\|([^{}]*))?\}\}/g
 
 /** Every {{key}} used in a body, in first-seen order. Used for custom templates. */
 export function placeholdersIn(body: string): string[] {
@@ -15,9 +20,25 @@ export function placeholdersIn(body: string): string[] {
   return seen
 }
 
-/** The template's default values under what the user typed (typed wins, even when cleared on purpose to ""). */
+/**
+ * The values a template actually uses: its defaults under what the user typed
+ * (typed wins, even when cleared on purpose to ""), with every field behind an
+ * unticked toggle counted as empty. Typed values behind a toggle are kept in
+ * the form, so ticking it again brings them back.
+ */
 export function withDefaults(t: PromptTemplate, values: Record<string, string>): Record<string, string> {
-  return { ...(t.defaults || {}), ...values }
+  const v = { ...(t.defaults || {}), ...values }
+  const toggles = new Set(t.fields.filter(f => f.type === 'toggle').map(f => f.key))
+  for (const f of t.fields)
+    if (f.showIf && toggles.has(f.showIf) && v[f.showIf] !== TOGGLE_ON) v[f.key] = ''
+  return v
+}
+
+/** Whether a field is on screen: a field behind a toggle shows only while it is ticked. */
+export function isShown(t: PromptTemplate, key: string, values: Record<string, string>): boolean {
+  const f = t.fields.find(x => x.key === key)
+  if (!f?.showIf || !t.fields.some(x => x.key === f.showIf && x.type === 'toggle')) return true
+  return withDefaults(t, values)[f.showIf] === TOGGLE_ON
 }
 
 /** Required fields still empty — the UI disables Copy until this is []. */
@@ -45,12 +66,12 @@ export function renderBody(t: PromptTemplate, input: Record<string, string>): st
   const required = new Set(t.fields.filter(f => f.required).map(f => f.key))
   const out: string[] = []
   for (const line of t.body.split('\n')) {
-    const keys = [...line.matchAll(PLACEHOLDER)].map(m => m[1])
-    if (keys.length) {
-      const allEmpty = keys.every(k => !(values[k] ?? '').trim())
-      if (allEmpty && !keys.some(k => required.has(k))) continue
+    const found = [...line.matchAll(PLACEHOLDER)]
+    if (found.length) {
+      const allEmpty = found.every(m => !(values[m[1]] ?? '').trim() && m[2] === undefined)
+      if (allEmpty && !found.some(m => required.has(m[1]))) continue
     }
-    out.push(line.replace(PLACEHOLDER, (_, k: string) => (values[k] ?? '').trim()))
+    out.push(line.replace(PLACEHOLDER, (_, k: string, fallback?: string) => (values[k] ?? '').trim() || (fallback ?? '').trim()))
   }
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim()
 }
