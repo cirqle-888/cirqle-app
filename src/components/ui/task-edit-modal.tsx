@@ -31,6 +31,8 @@ interface TaskEditModalProps {
   canViewContributions?: boolean
   /** Whether the user can enter/save contribution scores */
   canEditContributions?: boolean
+  /** Whether the user can delete (soft-delete → Trash) this task */
+  canDelete?: boolean
   /** Whether the user can see ₹ earnings in contributions */
   showEarnings?: boolean
   /** 'all' = admin sees everyone; 'own' = employee sees only themselves */
@@ -63,7 +65,7 @@ const inputCls = 'w-full bg-background border border-input rounded-lg px-3 py-2 
 
 export function TaskEditModal({
   task, clients, services, clientPricings = [], showFinancials = true,
-  canViewContributions = false, canEditContributions = false, showEarnings = false,
+  canViewContributions = false, canEditContributions = false, canDelete = false, showEarnings = false,
   contribViewScope = 'all', currentEmployeeId,
   initialTab = 'details',
   employees = [], groups = [], parameters = [], groupServices = [],
@@ -400,8 +402,8 @@ export function TaskEditModal({
                 <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} rows={2} className={inputCls + ' resize-none'} placeholder="Optional notes…" />
               </div>
 
-              {/* Delete confirmation zone */}
-              {confirmDelete ? (
+              {/* Delete confirmation zone — only shown to viewers who hold tasks.delete */}
+              {canDelete && (confirmDelete ? (
                 <div className="bg-red-500/10 border border-red-500/25 rounded-xl p-3 space-y-2">
                   {/* Honest copy: serverDeleteTask soft-deletes into the
                       45-day Trash — saying "permanently" here scared users
@@ -422,7 +424,7 @@ export function TaskEditModal({
                 <Button type="button" variant="ghost" onClick={() => setConfirmDelete(true)} className="text-red-400/60 hover:text-red-400 hover:bg-red-500/10 h-auto py-1 px-2 text-xs">
                   <Trash2 className="w-3 h-3 mr-1" /> Delete this task
                 </Button>
-              )}
+              ))}
 
               {saveError && (
                 <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{saveError}</p>

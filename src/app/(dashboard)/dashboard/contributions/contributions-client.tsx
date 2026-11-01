@@ -2266,6 +2266,7 @@ export default function ContributionsClient({
               commission_percentage: p.commission_percentage ?? 0,
             }))}
             showFinancials={showFinancials}
+            canDelete={can('tasks.delete')}
             onSaved={(data) => setLocalTasks(prev => prev.map(t => t.id === data.id ? data : t))}
             onDeleted={(id) => setLocalTasks(prev => prev.filter(t => t.id !== id))}
             onClose={() => setEditingTask(null)}

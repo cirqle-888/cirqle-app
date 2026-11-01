@@ -56,6 +56,7 @@ disaster-recovery path from migrations. That needs a baseline dump — see
 
 | Migration | What it adds | Until it is applied |
 |---|---|---|
+| `20261101120000_tasks_delete_for_cqid002_designation` | Grants `tasks.delete` to whatever designation CQID002 currently holds (keyed off the employee row, so it hits that role for everyone who shares it). Lets the role move tasks to Trash. Does not grant `tasks.trash`. | Until it runs, that role still cannot delete tasks — the server refuses it. The companion code change already hides the Delete button from roles without `tasks.delete`, so it no longer errors; it is simply absent until this grant is applied. Apply in the SQL editor, then move this row up to the applied table. |
 | `20261004120000_retire_offer_intake` | Relabels `offer.prepare` to "Manage offer product catalog" (all it still gates) and takes `capture.use` back from designations that only had it for AI Capture's retired offer mode — today, Flyer Designer. No data deleted. | Safe in any order. Until it runs, the Designations screen still describes `offer.prepare` as the old Offer Preparation workspace, and Flyer Designer still sees AI Capture (which now just points offer lists to Offer Studio). |
 ### Follow-up: Realtime is not delivering for `employee_presence`
 

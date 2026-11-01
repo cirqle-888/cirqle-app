@@ -3395,10 +3395,12 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                           <BarChart2 className="w-3.5 h-3.5" />
                         </a>
                       )}
-                      <button onClick={e => { e.stopPropagation(); initiateDelete(task.id) }} title="Delete task"
-                        className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {can('tasks.delete') && (
+                        <button onClick={e => { e.stopPropagation(); initiateDelete(task.id) }} title="Delete task"
+                          className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -3569,12 +3571,14 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                         <Copy className="w-3.5 h-3.5" />
                       </button>
                     )}
-                    <button
-                      onClick={e => { e.stopPropagation(); initiateDelete(task.id) }}
-                      title="Delete task"
-                      className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {can('tasks.delete') && (
+                      <button
+                        onClick={e => { e.stopPropagation(); initiateDelete(task.id) }}
+                        title="Delete task"
+                        className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -4300,7 +4304,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
             { key: 'done', label: 'Done', icon: <CheckCircle className="w-3.5 h-3.5" />, tint: 'emerald', onClick: () => bulkUpdateStatus('done') },
             { key: 'pending', label: 'Pending', icon: <Hash className="w-3.5 h-3.5" />, tint: 'yellow', onClick: () => bulkUpdateStatus('pending') },
             { key: 'assign', label: 'Assign', icon: <Users className="w-3.5 h-3.5" />, tint: 'cyan', onClick: openBulkAssign },
-            { key: 'delete', label: 'Delete', icon: <Trash2 className="w-3.5 h-3.5" />, tint: 'red', onClick: () => setBulkDeleteConfirm(true) },
+            ...(can('tasks.delete') ? [{ key: 'delete', label: 'Delete', icon: <Trash2 className="w-3.5 h-3.5" />, tint: 'red', onClick: () => setBulkDeleteConfirm(true) }] : []),
           ] as BatchAction[]}
         />
       )}
@@ -4876,6 +4880,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
           services={services}
           clientPricings={clientPricings}
           showFinancials={showBilling}
+          canDelete={can('tasks.delete')}
           canViewContributions={permissionFlags?.contribView}
           canEditContributions={permissionFlags?.contribEdit}
           showEarnings={permissionFlags?.contribEarnings}
