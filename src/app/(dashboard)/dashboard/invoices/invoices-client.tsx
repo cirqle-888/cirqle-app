@@ -44,6 +44,7 @@ import { recordInvoicePayment, serverResyncInvoiceTasks, getInvoiceDetails, setI
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
 import { OverflowMenu } from '@/components/ui/overflow-menu'
+import { InvoicePreviewFrame } from '@/components/invoices/invoice-preview-frame'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -642,8 +643,9 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   const [batchFilterMinAmount, setBatchFilterMinAmount] = useState('')
   const [batchSortBy, setBatchSortBy] = useState<'client_asc' | 'month_asc' | 'month_desc' | 'amount_desc'>('month_asc')
 
-  // Invoice preview modal
-  const [previewInv, setPreviewInv] = useState<Invoice | null>(null)
+  // The invoice document is the default view of an invoice; 'edit' swaps it for
+  // the line-item editor. Reset to the document whenever another invoice opens.
+  const [detailView, setDetailView] = useState<'preview' | 'edit'>('preview')
 
   // ── Navigation guard: warn before leaving while new invoice form is open ──
   // In-app confirmation. NOT window.confirm: the desktop shell returns false
@@ -703,12 +705,12 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   // ships it — so this is what makes the detail view whole. Runs once per
   // invoice; ensureDetails no-ops for anything already loaded.
   useEffect(() => {
-    const id = previewInv?.id || selectedId
+    const id = selectedId
     if (id && !detailLoaded.has(id) && !detailFailed.has(id)) void ensureDetails([id])
     // ensureDetails closes over `invoices`; re-running it on every list change
     // would refetch endlessly. `detailLoaded` is the real guard.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, previewInv?.id, detailLoaded, detailFailed])
+  }, [selectedId, detailLoaded, detailFailed])
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const selectedInv = useMemo(() => invoices.find(i => i.id === selectedId) || null, [invoices, selectedId])
@@ -836,6 +838,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   function selectInvoice(id: string) {
     if (id !== selectedId) {
       // Reset per-invoice UI state when switching invoices
+      setDetailView('preview')
       setShowDiscount(false)
       setShowChangeLogs(false)
       setChangeLogs([])
@@ -2850,27 +2853,17 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
 
     return (
       <div className="flex flex-col h-full overflow-hidden">
-        {/* Header.
-            flex-wrap + min-w-[160px] on the info block: same fix as the
-            shared <Header> component — a shrink-0 icon cluster (6 buttons)
-            claiming more width than was left made the invoice-number/badge
-            row's min-w-0 squeeze to a literal 0px box (number invisible)
-            instead of just truncating. The floor stops the squeeze; wrap
-            drops the icon cluster to its own row on phones once the info
-            block has claimed a sane minimum. */}
-        <div className="px-5 py-5 border-b border-border/40 bg-card flex flex-wrap items-start justify-between gap-x-4 gap-y-2 shrink-0">
+        {/* Header — who and when, plus the money at a glance. Everything you
+            can DO sits in the toolbar below so this stays a quiet label. */}
+        <div className="px-4 pt-3 pb-2 sm:px-5 bg-card shrink-0 flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
           <div className="min-w-[160px] flex-1">
-            <div className="flex items-center gap-3 mb-1.5">
+            <div className="flex items-center gap-2.5 mb-0.5">
               <button
                 type="button"
                 onClick={() => copyInvNum(inv.invoice_number)}
                 title="Copy invoice number"
                 className="flex items-center gap-1.5 font-mono text-sm font-medium text-muted-foreground hover:text-foreground transition-colors group min-w-0"
               >
-                {/* truncate (not implicit wrap): the icon cluster on the right
-                    (shrink-0) can leave this row very little space on phones —
-                    without truncate the number's hyphens gave the browser line-
-                    break points and it wrapped "INV-2607-053-2" across 3 lines. */}
                 <span className="truncate">{inv.invoice_number}</span>
                 <Copy className={`w-3.5 h-3.5 shrink-0 transition-colors ${copiedInvNum ? 'text-green-500' : 'opacity-0 group-hover:opacity-60'}`} />
               </button>
@@ -2879,8 +2872,8 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                 <span className="text-[10px] uppercase tracking-wider font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md">Editable</span>
               )}
             </div>
-            <h3 className="text-xl font-bold text-foreground mb-2 truncate">{inv.client?.name}</h3>
-            <div className="flex items-center gap-4 text-xs text-muted-foreground font-medium">
+            <h3 className="text-lg font-bold text-foreground truncate">{inv.client?.name}</h3>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs text-muted-foreground font-medium">
               {periodLabel && <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" />{periodLabel}</span>}
               <span className="flex items-center gap-1.5"><span className="opacity-50">Issued</span> {fmtDate(inv.issue_date)}</span>
               {editable ? (
@@ -2904,156 +2897,216 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
               ) : null}
             </div>
           </div>
-          <div className="flex flex-wrap gap-1.5 items-start justify-end shrink-0">
-            <button onClick={() => refreshInvoice(inv.id)} title="Reload this invoice (re-fetch latest data)"
-              className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors border border-transparent hover:border-border/50">
-              <RotateCw className="w-4 h-4" />
-            </button>
-            <button onClick={() => setPreviewInv(inv)} title="Preview invoice"
-              className="p-2 text-muted-foreground hover:text-violet-500 hover:bg-violet-500/10 rounded-lg transition-colors border border-transparent hover:border-violet-500/20">
-              <Eye className="w-4 h-4" />
-            </button>
-            <button onClick={() => printInvoice(inv)} disabled={!canSharePdf}
-              title={canSharePdf ? 'Print' : noShareReason}
-              className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors border border-transparent hover:border-border/50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground">
-              <Printer className="w-4 h-4" />
-            </button>
-            <button onClick={() => downloadInvoicePdf(inv)} disabled={!canSharePdf || downloadingInvId === inv.id}
-              title={canSharePdf ? 'Download PDF' : noShareReason}
-              className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded-lg transition-colors border border-transparent hover:border-border/50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground">
-              {downloadingInvId === inv.id
-                ? <RefreshCw className="w-4 h-4 animate-spin" />
-                : <Download className="w-4 h-4" />}
-            </button>
-            <button
-              onClick={() => {
-                const text = buildInvoiceShareText({
-                  invoiceNumber: inv.invoice_number,
-                  clientName:    inv.client?.name ?? null,
-                  companyName:   companySettings.company_name || 'Cirqle Works',
-                  amount:        inv.total_amount,
-                  dueDate:       inv.due_date,
-                  showAmounts,
-                  link:          publicInvoiceUrl((inv as any).public_token),
-                  template:      companySettings[TEMPLATE_KEYS.invoiceShare],
-                })
-                window.open(whatsappShareUrl(text, inv.client?.phone ?? null), '_blank', 'noopener,noreferrer')
-              }}
-              title="Share via WhatsApp"
-              className="p-2 text-muted-foreground hover:text-green-500 hover:bg-green-500/10 rounded-lg transition-colors border border-transparent hover:border-green-500/20">
-              <Share2 className="w-4 h-4" />
-            </button>
-            {!isEditable(inv.status) && (
-              <button
-                onClick={() => forceEdit ? lockEdit() : requestEditUnlock(inv.id)}
-                title={forceEdit ? 'Lock editing' : 'Force edit (requires reason)'}
-                className={cn(
-                  "p-2 rounded-lg transition-colors border",
-                  forceEdit 
-                    ? "text-amber-500 bg-amber-500/10 border-amber-500/20 hover:bg-amber-500/20" 
-                    : "text-muted-foreground hover:text-amber-500 hover:bg-amber-500/10 border-transparent hover:border-amber-500/20"
-                )}>
-                {forceEdit ? <Lock className="w-4 h-4" /> : <Edit2 className="w-4 h-4" />}
-              </button>
-            )}
-            
-            {inv.status === 'draft' && (
-              <button onClick={() => handleResync(inv.id)} disabled={saving}
-                title="Re-sync line items from this month's completed tasks"
-                className="p-2 text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 rounded-lg transition-colors border border-transparent hover:border-blue-500/20 disabled:opacity-50">
-                <ListRestart className={cn("w-4 h-4", resyncingId === inv.id && "animate-spin")} />
-              </button>
-            )}
-            <button onClick={() => confirmDelete(inv.id)} title="Delete"
-              className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors border border-transparent hover:border-red-500/20">
-              <Trash2 className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Scrollable body */}
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
-
-          {/* Action bar — one slim row: progress on the left, the one or two
-              actions that matter now on the right. Everything else lives under
-              "More actions" so the panel opens straight onto the line items. */}
-          <div className="bg-foreground/[0.03] rounded-xl border border-border/40 px-3 py-2">
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="flex items-center gap-1 min-w-0" title={`Stage: ${getStatusLabel(inv.status)}`}>
-                {STATUS_PIPELINE.map((s, idx) => {
-                  const pos = STATUS_PIPELINE.indexOf(inv.status)
-                  const isPast = idx < pos
-                  const isCurrent = s === inv.status
-                  return (
-                    <div key={s} className="flex items-center">
-                      <span className={cn('w-2 h-2 rounded-full shrink-0',
-                        isCurrent ? 'bg-violet-500 ring-2 ring-violet-500/30' : isPast ? 'bg-green-500' : 'bg-border')} />
-                      {isCurrent && (
-                        <span className="ml-1.5 text-[11px] font-semibold text-violet-500 whitespace-nowrap">{getStatusLabel(s)}</span>
-                      )}
-                      {idx < STATUS_PIPELINE.length - 1 && <span className={cn('w-3 h-px mx-1', isPast ? 'bg-green-500/40' : 'bg-border/60')} />}
-                    </div>
-                  )
-                })}
-              </div>
-              <div className="flex-1" />
-              {nextAct && (
-                <button
-                  onClick={() => updateStatus(inv.id, nextAct.next)}
-                  disabled={saving}
-                  className="py-1.5 px-3.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-50">
-                  {nextAct.next === 'reviewed' && <Eye className="w-3.5 h-3.5" />}
-                  {nextAct.next === 'sent' && <Send className="w-3.5 h-3.5" />}
-                  {nextAct.next === 'partial' && <CreditCard className="w-3.5 h-3.5" />}
-                  {nextAct.next === 'paid' && <CheckCircle className="w-3.5 h-3.5" />}
-                  {nextAct.label}
-                </button>
-              )}
-              {canRecordPayment && ['sent', 'partial', 'overdue'].includes(inv.status) && (
-                <button
-                  onClick={() => openPayPanel(inv)}
-                  className="py-1.5 px-3.5 bg-green-600 hover:bg-green-500 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors">
-                  <CreditCard className="w-3.5 h-3.5" />Record Payment
-                </button>
+          {showAmounts && (
+            <div className="text-right shrink-0">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{(inv.paid_amount ?? 0) > 0 ? 'Balance due' : 'Total'}</div>
+              <div className="text-xl font-bold tabular-nums">{fmt((inv.paid_amount ?? 0) > 0 ? balance : inv.total_amount, inv.currency)}</div>
+              {(inv.paid_amount ?? 0) > 0 && (
+                <div className="text-[11px] text-muted-foreground tabular-nums">of {fmt(inv.total_amount, inv.currency)}</div>
               )}
             </div>
+          )}
+        </div>
 
-            {/* Everything secondary, one click away */}
+        {/* Toolbar — the two views on the left, the actions that matter now
+            on the right, everything else behind the "…". */}
+        <div className="px-4 py-2 sm:px-5 border-b border-border/40 bg-card shrink-0 flex flex-wrap items-center gap-2">
+          <div role="tablist" aria-label="Invoice view" className="inline-flex rounded-lg border border-border/60 bg-secondary/40 p-0.5">
+            {([
+              { id: 'preview', label: 'Preview', icon: Eye },
+              { id: 'edit', label: editable ? 'Edit lines' : 'Details', icon: editable ? Edit2 : ListTree },
+            ] as const).map(t => (
+              <button key={t.id} role="tab" aria-selected={detailView === t.id} onClick={() => setDetailView(t.id)}
+                className={cn(
+                  "inline-flex min-h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  detailView === t.id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                )}>
+                <t.icon className="w-3.5 h-3.5" />{t.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex-1" />
+          {nextAct && (
+            <button
+              onClick={() => updateStatus(inv.id, nextAct.next)}
+              disabled={saving}
+              className="min-h-8 py-1.5 px-3.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-50">
+              {nextAct.next === 'reviewed' && <Eye className="w-3.5 h-3.5" />}
+              {nextAct.next === 'sent' && <Send className="w-3.5 h-3.5" />}
+              {nextAct.next === 'partial' && <CreditCard className="w-3.5 h-3.5" />}
+              {nextAct.next === 'paid' && <CheckCircle className="w-3.5 h-3.5" />}
+              {nextAct.label}
+            </button>
+          )}
+          {canRecordPayment && ['sent', 'partial', 'overdue'].includes(inv.status) && (
+            <button
+              onClick={() => openPayPanel(inv)}
+              className="min-h-8 py-1.5 px-3.5 bg-green-600 hover:bg-green-500 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors">
+              <CreditCard className="w-3.5 h-3.5" />Record Payment
+            </button>
+          )}
+          <button onClick={() => downloadInvoicePdf(inv)} disabled={!canSharePdf || downloadingInvId === inv.id}
+            title={canSharePdf ? 'Download PDF' : noShareReason}
+            className="min-h-8 inline-flex items-center gap-1.5 px-3 rounded-lg border border-border text-xs font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent">
+            {downloadingInvId === inv.id
+              ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              : <Download className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">Download</span>
+          </button>
+          <button
+            onClick={() => {
+              const text = buildInvoiceShareText({
+                invoiceNumber: inv.invoice_number,
+                clientName:    inv.client?.name ?? null,
+                companyName:   companySettings.company_name || 'Cirqle Works',
+                amount:        inv.total_amount,
+                dueDate:       inv.due_date,
+                showAmounts,
+                link:          publicInvoiceUrl((inv as any).public_token),
+                template:      companySettings[TEMPLATE_KEYS.invoiceShare],
+              })
+              window.open(whatsappShareUrl(text, inv.client?.phone ?? null), '_blank', 'noopener,noreferrer')
+            }}
+            title="Share via WhatsApp"
+            aria-label="Share via WhatsApp"
+            className="min-h-8 min-w-8 inline-flex items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-green-600 hover:bg-green-500/10 transition-colors">
+            <Share2 className="w-4 h-4" />
+          </button>
+          <OverflowMenu label="More invoice actions" items={[
+            { label: 'Print', icon: Printer, onClick: () => printInvoice(inv), disabled: !canSharePdf },
+            { label: 'Reload invoice', icon: RotateCw, onClick: () => refreshInvoice(inv.id) },
+            ...(inv.status === 'draft' ? [{ label: 'Quick pay', icon: CreditCard, onClick: () => openPayPanel(inv), separatorBefore: true }] : []),
+            { label: 'Request approval', icon: CheckCircle, onClick: () => setApprovalInvoice({ id: inv.id, invoice_number: inv.invoice_number, client_id: inv.client_id ?? null }), separatorBefore: inv.status !== 'draft' },
+            ...(showAmounts && !STATUS_GROUPS.closed.includes(inv.status) && balanceDueInr(inv) > 0.01
+              ? [{ label: 'Allocate from Cash Book', icon: Wallet, onClick: () => setAllocatingInvoice(inv) }] : []),
+            ...(!STATUS_GROUPS.closed.includes(inv.status)
+              ? [{ label: 'Add expenses', icon: ShoppingBag, onClick: () => setAddExpenseInvoice(inv) }] : []),
+            ...(!isEditable(inv.status)
+              ? [{ label: forceEdit ? 'Lock editing' : 'Force edit (needs a reason)', icon: forceEdit ? Lock : Edit2,
+                  onClick: () => { if (forceEdit) lockEdit(); else { setDetailView('edit'); requestEditUnlock(inv.id) } }, separatorBefore: true }] : []),
+            ...(inv.status === 'draft'
+              ? [{ label: 'Re-sync lines from tasks', icon: ListRestart, onClick: () => handleResync(inv.id), disabled: saving }] : []),
+            { label: 'Delete invoice', icon: Trash2, onClick: () => confirmDelete(inv.id), danger: true, separatorBefore: true },
+          ]} />
+        </div>
+
+        {/* ── Preview — the invoice as the client receives it ─────────────── */}
+        {detailView === 'preview' && (() => {
+          // A total with no itemised lines is the one output here that can do
+          // real damage once printed or sent, so the paper is not drawn (and
+          // Print/Download stay off) until the lines are actually in hand.
+          const previewReady = detailLoaded.has(inv.id)
+          const previewFailed = detailFailed.has(inv.id)
+          return (
+            <div className="flex-1 min-h-0 flex flex-col bg-secondary/50">
+              {!canSharePdf && (
+                <div className="shrink-0 px-4 py-2 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400 bg-amber-500/10 border-b border-amber-500/20">
+                  {noShareReason}
+                </div>
+              )}
+              <div className="shrink-0 flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-1.5 sm:px-5 border-b border-border/40 text-xs text-muted-foreground">
+                <span className="mr-auto">Exactly what {inv.client?.name || 'the client'} receives</span>
+                <label
+                  title="Add the client's other overdue/pending invoices as an extra line on this PDF — not saved to the invoice, for sharing only"
+                  className="inline-flex items-center gap-1.5 cursor-pointer font-medium text-foreground">
+                  {loadingOutstandingId === inv.id
+                    ? <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+                    : <input type="checkbox" checked={includeOutstanding.has(inv.id)}
+                        onChange={() => toggleIncludeOutstanding(inv)}
+                        className="rounded accent-violet-500 cursor-pointer" />}
+                  Include outstanding
+                </label>
+                {/* Persisted, unlike Include outstanding: the shape of a
+                    client's invoice is a decision, not a one-off view. */}
+                <label
+                  title={serviceColumnSource(inv, inv.client) === 'client'
+                    ? `On by default for ${inv.client?.name ?? 'this client'}`
+                    : 'Show which service each line belongs to'}
+                  className="inline-flex items-center gap-1.5 cursor-pointer font-medium text-foreground">
+                  <input type="checkbox"
+                    checked={showServiceColumn(inv, inv.client)}
+                    onChange={() => toggleServiceColumn(inv)}
+                    className="rounded accent-violet-500 cursor-pointer" />
+                  Service column
+                </label>
+                {/* Offered only while this invoice disagrees with the client's
+                    rule — otherwise it is a button that would change nothing. */}
+                {serviceColumnSource(inv, inv.client) === 'invoice' && inv.client?.id && (
+                  <button
+                    onClick={() => makeServiceColumnClientDefault(inv)}
+                    className="rounded-md border border-border/60 px-2 py-0.5 font-medium text-foreground transition-colors hover:bg-foreground/[0.06]">
+                    Always for {inv.client?.name ?? 'this client'}
+                  </button>
+                )}
+              </div>
+              <div className="flex-1 min-h-0 overflow-auto px-3 py-4 sm:px-6 sm:py-6">
+                {previewReady ? (
+                  // key forces a full remount on toggle — changing srcDoc on an
+                  // already-mounted iframe doesn't reliably reload its content.
+                  <InvoicePreviewFrame
+                    key={`${inv.id}-${includeOutstanding.has(inv.id)}`}
+                    html={buildInvoiceHtml(inv)}
+                  />
+                ) : (
+                  <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
+                    {previewFailed ? (
+                      <>
+                        <span className="max-w-sm">
+                          The line items for this invoice couldn&apos;t be loaded, so the
+                          document would show a total with nothing itemised. It isn&apos;t
+                          safe to print or send in that state.
+                        </span>
+                        <button
+                          onClick={() => {
+                            setDetailFailed(prev => { const n = new Set(prev); n.delete(inv.id); return n })
+                            void ensureDetails([inv.id])
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium transition-colors hover:bg-secondary"
+                        >
+                          <RefreshCw className="h-3 w-3" />Try again
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-5 w-5 animate-spin" />
+                        <span>Loading line items…</span>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* Scrollable body */}
+        <div className={cn("flex-1 overflow-y-auto px-4 py-3 space-y-4", detailView !== 'edit' && "hidden")}>
+
+          {/* Where this invoice is in its life, and the manual override. The
+              next step itself is the button in the toolbar above. */}
+          <div className="bg-foreground/[0.03] rounded-xl border border-border/40 px-3 py-2">
+            <div className="flex items-center gap-1 min-w-0" title={`Stage: ${getStatusLabel(inv.status)}`}>
+              {STATUS_PIPELINE.map((s, idx) => {
+                const pos = STATUS_PIPELINE.indexOf(inv.status)
+                const isPast = idx < pos
+                const isCurrent = s === inv.status
+                return (
+                  <div key={s} className="flex items-center">
+                    <span className={cn('w-2 h-2 rounded-full shrink-0',
+                      isCurrent ? 'bg-violet-500 ring-2 ring-violet-500/30' : isPast ? 'bg-green-500' : 'bg-border')} />
+                    {isCurrent && (
+                      <span className="ml-1.5 text-[11px] font-semibold text-violet-500 whitespace-nowrap">{getStatusLabel(s)}</span>
+                    )}
+                    {idx < STATUS_PIPELINE.length - 1 && <span className={cn('w-3 h-px mx-1', isPast ? 'bg-green-500/40' : 'bg-border/60')} />}
+                  </div>
+                )
+              })}
+            </div>
             <details className="mt-1.5">
               <summary className="text-[10px] text-muted-foreground cursor-pointer hover:text-foreground list-none flex items-center gap-1 w-fit">
-                <MoreHorizontal className="w-3 h-3" /> More actions
+                <MoreHorizontal className="w-3 h-3" /> Change status manually
               </summary>
               <div className="flex flex-wrap gap-1.5 mt-2">
-                {inv.status === 'draft' && (
-                  <button onClick={() => openPayPanel(inv)}
-                    className="py-1 px-2.5 bg-foreground/[0.05] hover:bg-foreground/[0.1] text-foreground text-[11px] font-medium rounded-lg flex items-center gap-1.5 border border-border/40 transition-colors">
-                    <CreditCard className="w-3 h-3" />Quick Pay
-                  </button>
-                )}
-                <button
-                  onClick={() => setApprovalInvoice({ id: inv.id, invoice_number: inv.invoice_number, client_id: inv.client_id ?? null })}
-                  className="py-1 px-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[11px] font-medium rounded-lg flex items-center gap-1.5 transition-colors">
-                  <CheckCircle className="w-3 h-3" />Request Approval
-                </button>
-                {/* Allocate From Cash Book — alternate entry point into the same
-                    allocation engine; multiple allocations per invoice allowed. */}
-                {showAmounts
-                  && !STATUS_GROUPS.closed.includes(inv.status)
-                  && balanceDueInr(inv) > 0.01 && (
-                  <button
-                    onClick={() => setAllocatingInvoice(inv)}
-                    className="py-1 px-2.5 bg-violet-600/10 hover:bg-violet-600/20 text-violet-700 dark:text-violet-300 border border-violet-500/30 text-[11px] font-medium rounded-lg flex items-center gap-1.5 transition-colors">
-                    <Wallet className="w-3 h-3" />Allocate From Cash Book
-                  </button>
-                )}
-                {!STATUS_GROUPS.closed.includes(inv.status) && (
-                  <button
-                    onClick={() => setAddExpenseInvoice(inv)}
-                    className="py-1 px-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 text-[11px] font-medium rounded-lg flex items-center gap-1.5 transition-colors">
-                    <ShoppingBag className="w-3 h-3" />Add Expenses
-                  </button>
-                )}
-                <span className="w-px self-stretch bg-border/50 mx-0.5" />
                 {['draft', 'reviewed', 'sent', 'partial', 'paid', 'overdue', 'cancelled', 'bad_debt'].map(s => (
                   <button key={s} onClick={() => requestStatusChange(inv, s)}
                     disabled={saving || inv.status === s}
@@ -3145,17 +3198,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
             )
           })()}
 
-          {/* ── Invoice preview frame ──────────────────────────────────────────
-              Line items + amounts are what the client receives, so they sit in
-              a tinted, dashed frame with a label — visibly different from the
-              working controls (status, actions, discount calculator) around
-              them. */}
-          <div className="mb-6 rounded-2xl border-2 border-dashed border-sky-500/35 bg-sky-500/[0.05] p-2.5 sm:p-3">
-          <div className="flex items-center gap-1.5 px-1 pb-2.5 text-[10px] font-bold uppercase tracking-widest text-sky-700 dark:text-sky-300">
-            <Eye className="w-3.5 h-3.5" />
-            Invoice preview
-            <span className="font-medium normal-case tracking-normal text-sky-700/70 dark:text-sky-300/70">· what {inv.client?.name || 'the client'} will see</span>
-          </div>
+          <div className="mb-6">
 
           {/* Line items — document-style ledger card: framed header band,
               a column rule, numbered ruled rows and an in-card subtotal, so
@@ -5545,11 +5588,11 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
         </div>
       )}
 
-      <section className={cn("shrink-0 border-b border-border/60 bg-card px-4 py-4 sm:px-6", showRightPanel && "hidden xl:block")} aria-label="Invoice overview">
+      <section className={cn("shrink-0 border-b border-border/60 bg-card px-4 sm:px-6", showRightPanel ? "hidden xl:block py-2" : "py-4")} aria-label="Invoice overview">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-lg font-semibold tracking-tight">Invoice overview</h1>
-            <p className="mt-1 text-xs text-muted-foreground">Review drafts, track payments, and keep client billing moving.</p>
+            <h1 className={cn("font-semibold tracking-tight", showRightPanel ? "text-sm" : "text-lg")}>Invoice overview</h1>
+            {!showRightPanel && <p className="mt-1 text-xs text-muted-foreground">Review drafts, track payments, and keep client billing moving.</p>}
           </div>
           <div className="flex items-center gap-2">
             <Link href="/dashboard/invoices/follow-ups" className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-xs font-medium hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -5633,146 +5676,6 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
       </div>
 
       {/* ── Edit Reason Modal ─────────────────────────────────────────────────── */}
-      {/* ── Invoice Preview Modal ───────────────────────────────────────────── */}
-      {previewInv && (() => {
-        // previewInv is the invoice as it was WHEN THE MODAL OPENED. Toggling
-        // the Service column updates `invoices`, not this snapshot, so the
-        // checkbox appeared dead and the paper never changed — it only looked
-        // right after closing and reopening the preview. Every read below goes
-        // through `live` so the modal shows what was just saved.
-        const live = invoices.find(i => i.id === previewInv.id) ?? previewInv
-
-        // An invoice whose line items have not arrived still has a client, a
-        // number and a TOTAL — so it renders as a complete-looking document
-        // with an empty table. That is the one output here that can do real
-        // damage: printed or sent, it bills a client an amount with nothing
-        // itemised behind it. Print and Download stay disabled, and the paper
-        // is not drawn at all, until the lines are actually in hand.
-        const previewReady = detailLoaded.has(live.id)
-        const previewFailed = detailFailed.has(live.id)
-        return (
-        <ModalOverlay onClose={() => setPreviewInv(null)} zIndex="z-[300]">
-          <div className="flex flex-col bg-secondary border border-foreground/15 rounded-2xl shadow-2xl overflow-hidden"
-            style={{ width: 'min(860px, 96vw)', height: 'min(92vh, 900px)' }}>
-            {/* Modal header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-foreground/15 shrink-0">
-              <div className="flex items-center gap-2.5">
-                <Eye className="w-4 h-4 text-violet-400" />
-                <div>
-                  <h3 className="font-semibold text-sm">{live.invoice_number}</h3>
-                  <p className="text-[11px] text-muted-foreground">{live.client?.name}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <label
-                  title="Add the client's other overdue/pending invoices as an extra line on this PDF — not saved to the invoice, for sharing only"
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-foreground/[0.06] text-xs font-medium text-foreground cursor-pointer border border-foreground/15">
-                  {loadingOutstandingId === live.id
-                    ? <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
-                    : <input type="checkbox" checked={includeOutstanding.has(live.id)}
-                        onChange={() => toggleIncludeOutstanding(live)}
-                        className="rounded accent-violet-500 cursor-pointer" />}
-                  Include Outstanding
-                </label>
-                {/* Service column — a PDF option, so it sits with the other one.
-                    Persisted, unlike Include Outstanding: the shape of a
-                    client's invoice is a decision, not a one-off view. */}
-                <label
-                  title={serviceColumnSource(live, live.client) === 'client'
-                    ? `On by default for ${live.client?.name ?? 'this client'}`
-                    : 'Show which service each line belongs to'}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-foreground/[0.06] text-xs font-medium text-foreground cursor-pointer border border-foreground/15">
-                  <input type="checkbox"
-                    checked={showServiceColumn(live, live.client)}
-                    onChange={() => toggleServiceColumn(live)}
-                    className="rounded accent-violet-500 cursor-pointer" />
-                  Service column
-                </label>
-                <button onClick={() => printInvoice(live)} disabled={!previewReady || !canSharePdf}
-                  title={!canSharePdf ? noShareReason : previewReady ? undefined : 'Line items are still loading'}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 text-xs font-medium text-foreground transition-colors border border-foreground/15 disabled:opacity-50 disabled:cursor-not-allowed">
-                  <Printer className="w-3.5 h-3.5" />Print
-                </button>
-                <button onClick={() => downloadInvoicePdf(live)} disabled={!previewReady || !canSharePdf || downloadingInvId === live.id}
-                  title={!canSharePdf ? noShareReason : previewReady ? undefined : 'Line items are still loading'}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground/[0.06] hover:bg-foreground/10 text-xs font-medium text-foreground transition-colors border border-foreground/15 disabled:opacity-50">
-                  {downloadingInvId === live.id
-                    ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    : <Download className="w-3.5 h-3.5" />}Download
-                </button>
-                <button onClick={() => setPreviewInv(null)}
-                  className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-foreground/5 rounded-lg transition-colors">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-            {/* Invoice rendered in iframe — scrollable on mobile */}
-            {!canSharePdf && (
-              <div className="shrink-0 px-4 py-2 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400 bg-amber-500/10 border-b border-amber-500/20">
-                {noShareReason}
-              </div>
-            )}
-            {/* Offered only while this invoice disagrees with the client's rule
-                — otherwise it is a button that would change nothing. */}
-            {serviceColumnSource(live, live.client) === 'invoice' && live.client?.id && (
-              <div className="shrink-0 flex items-center justify-between gap-3 px-4 py-1.5 text-[11px] text-muted-foreground bg-foreground/[0.03] border-b border-border/40">
-                <span>
-                  {showServiceColumn(live, live.client) ? 'Service column on' : 'Service column off'} for this invoice only.
-                </span>
-                <button
-                  onClick={() => makeServiceColumnClientDefault(live)}
-                  className="shrink-0 rounded-md border border-border/60 px-2 py-0.5 font-medium text-foreground transition-colors hover:bg-foreground/[0.06]">
-                  Always for {live.client?.name ?? 'this client'}
-                </button>
-              </div>
-            )}
-            <div className="flex-1 overflow-auto bg-[#f5f7fa] rounded-b-2xl" style={{ WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
-              <div style={{ minWidth: 680, height: '100%' }}>
-                {previewReady ? (
-                  <iframe
-                    // key forces a full remount on toggle — changing srcDoc on an
-                    // already-mounted iframe doesn't reliably reload its content.
-                    key={`${live.id}-${includeOutstanding.has(live.id)}`}
-                    srcDoc={buildInvoiceHtml(live)}
-                    className="w-full h-full border-0"
-                    style={{ minHeight: 600 }}
-                    title="Invoice Preview"
-                    sandbox="allow-same-origin"
-                  />
-                ) : (
-                  <div className="flex h-full min-h-[600px] flex-col items-center justify-center gap-3 px-6 text-center text-sm text-[#5b6472]">
-                    {previewFailed ? (
-                      <>
-                        <span className="max-w-sm">
-                          The line items for this invoice couldn&apos;t be loaded, so the
-                          document would show a total with nothing itemised. It isn&apos;t
-                          safe to print or send in that state.
-                        </span>
-                        <button
-                          onClick={() => {
-                            setDetailFailed(prev => { const n = new Set(prev); n.delete(live.id); return n })
-                            void ensureDetails([live.id])
-                          }}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#c9d2de] bg-white px-3 py-1.5 text-xs font-medium text-[#1f2a37] transition-colors hover:bg-[#eef2f7]"
-                        >
-                          <RefreshCw className="h-3 w-3" />Try again
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="h-5 w-5 animate-spin" />
-                        <span>Loading line items…</span>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </ModalOverlay>
-        )
-      })()}
-
       {editReasonModal && (
         <ModalOverlay onClose={() => { setEditReasonModal(null); setEditReasonInput('') }}>
           <div className="bg-card border border-border/60 rounded-2xl shadow-2xl p-6 w-full max-w-md mx-4 max-h-[90dvh] overflow-y-auto">
