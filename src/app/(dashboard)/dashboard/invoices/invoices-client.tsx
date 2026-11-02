@@ -43,6 +43,7 @@ import { recordInvoicePayment, serverResyncInvoiceTasks, getInvoiceDetails, setI
 
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
+import { OverflowMenu } from '@/components/ui/overflow-menu'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -55,7 +56,7 @@ import { unitPriceOf } from '@/lib/invoices/line-math'
 import { showServiceColumn, serviceColumnSource } from '@/lib/invoices/service-column'
 import type { Currency } from '@/types'
 import { formatTaskDate } from '@/lib/utils/format-date'
-import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 
 // Client edit modal only mounts when the user opens it from an invoice's
@@ -84,7 +85,7 @@ const ReceiptModal = dynamic(
 )
 import type { ReceiptInput } from '@/components/cashbook/receipt-modal'
 import { addDaysISO, lastDayOfMonthISO, monthStartISO, todayISO } from '@/lib/utils/local-date'
-import { outstandingAmount, UNSENT_STATUSES } from '@/lib/finance/invoice-revenue'
+import { outstandingAmount } from '@/lib/finance/invoice-revenue'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface StatementLedgerRow {
@@ -366,6 +367,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   const [filterStatus, setFilterStatus] = useState<string>(searchParams.get('status') || '')
   const [filterClient, setFilterClient] = useState<string>(searchParams.get('client') || '')
   const [groupByClient, setGroupByClient] = useState(false)
+  const [sortBy, setSortBy] = useState(searchParams.get('sort') || 'workflow')
   const [searchFacets, setSearchFacets] = useState<SearchFacet[]>(() => {
     try { const raw = searchParams.get('sf'); return raw ? JSON.parse(raw) : [] } catch { return [] }
   })
@@ -470,6 +472,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
 
     if (filterStatus) params.set('status', filterStatus); else params.delete('status')
     if (filterClient) params.set('client', filterClient); else params.delete('client')
+    if (sortBy !== 'workflow') params.set('sort', sortBy); else params.delete('sort')
     if (searchFacets.length) params.set('sf', JSON.stringify(searchFacets)); else params.delete('sf')
     if (tab && tab !== 'active') params.set('tab', tab); else params.delete('tab')
     if (selectedId) params.set('id', selectedId); else params.delete('id')
@@ -478,7 +481,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     if (newQueryString !== searchParams.toString()) {
       router.replace(`${pathname}?${newQueryString}`, { scroll: false })
     }
-  }, [filterStatus, filterClient, searchFacets, tab, selectedId, pathname, router, searchParams])
+  }, [filterStatus, filterClient, searchFacets, tab, selectedId, sortBy, pathname, router, searchParams])
   const [editClientId, setEditClientId] = useState<string | null>(null)
 
   // Panel modes
@@ -578,28 +581,6 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   const [changeLogs, setChangeLogs] = useState<any[]>([])
   const [changeLogsLoading, setChangeLogsLoading] = useState(false)
   const [showChangeLogs, setShowChangeLogs] = useState(false)
-
-  // Stats bar collapse — initialised lazily so the first paint matches the
-  // user's saved preference (or "collapsed on mobile" as a sensible default).
-  // Saves vertical space on phones where the 6 action tiles dominate the screen.
-  const [statsCollapsed, setStatsCollapsed] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false
-    const saved = window.localStorage.getItem('invoices-stats-collapsed')
-    if (saved === '1') return true
-    if (saved === '0') return false
-    // Collapsed by default everywhere. Expanded, the stat tiles + mode tiles +
-    // stage cards + dues strip pushed the actual invoice list below the fold
-    // and put ~19 controls ahead of it. The summary line stays visible and one
-    // click brings the full panel back — the preference is remembered.
-    return true
-  })
-  function toggleStats() {
-    setStatsCollapsed(prev => {
-      const next = !prev
-      try { window.localStorage.setItem('invoices-stats-collapsed', next ? '1' : '0') } catch {}
-      return next
-    })
-  }
 
   // Discount calculator
   const [showDiscount, setShowDiscount]         = useState(false)
@@ -774,14 +755,17 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
       if (activeFacets.length && !recordMatchesFacets(activeFacets, inv, INVOICE_FIELDS, invoiceGeneric)) return false
       return true
     })
-    // Sort: drafts first (newest period), then by created_at desc
     return list.sort((a, b) => {
+      if (sortBy === 'newest') return b.issue_date.localeCompare(a.issue_date)
+      if (sortBy === 'due') return (a.due_date || '9999').localeCompare(b.due_date || '9999')
+      if (sortBy === 'amount' && showAmounts) return balanceDueInr(b) - balanceDueInr(a)
+      // Keep draft review first in the default workflow order.
       const ai = STATUS_PIPELINE.indexOf(a.status)
       const bi = STATUS_PIPELINE.indexOf(b.status)
       if (ai !== bi) return ai - bi
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     })
-  }, [invoices, tab, filterStatus, filterClient, activeFacets])
+  }, [invoices, tab, filterStatus, filterClient, activeFacets, sortBy, showAmounts])
 
   // Client groups for the list panel — only computed when groupByClient is on.
   // Sorted by group balance-due desc (clients who owe the most surface first);
@@ -811,7 +795,6 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     // owed yet — they were inflating this by their whole value; they are shown
     // on their own beside it.
     const active = invoices.filter(i => outstandingAmount(i) > 0)
-    const drafts = invoices.filter(i => UNSENT_STATUSES.includes(i.status))
     // Counted over every invoice, not the filtered view — the pill has to show
     // the size of the job even while a different filter is on.
     const dueToSend = invoices.filter(i => isDueToSend(i, todayISO()))
@@ -821,23 +804,9 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
       // raw invoice-currency amounts (which would mix SAR/USD/INR together).
       outstanding: active.reduce((s, i) => s + outstandingAmount(i), 0),
       overdueAmt: overdue.reduce((s, i) => s + balanceDueInr(i), 0),
-      draftCount: drafts.length,
-      draftTotal: drafts.reduce((s, i) => s + invTotalInr(i), 0),
       toSendCount: dueToSend.length,
       toSendTotal: dueToSend.reduce((s, i) => s + invTotalInr(i), 0),
       overdueCount: overdue.length,
-      // Stage-wise value cards: count + ₹ value sitting in each pipeline stage.
-      // 'overdue' is derived (due_date vs today), matching the list filter and
-      // row badge — the other four are literal status buckets. Amounts are the
-      // balance due (₹ snapshot) — for draft/reviewed nothing is paid yet, so
-      // balance == total and the semantics stay uniform across all five cards.
-      stages: (['draft', 'reviewed', 'sent', 'partial'] as const).reduce((acc, s) => {
-        const list = invoices.filter(i => i.status === s)
-        acc[s] = { count: list.length, amount: list.reduce((sum, i) => sum + balanceDueInr(i), 0) }
-        return acc
-      }, {
-        overdue: { count: overdue.length, amount: overdue.reduce((s, i) => s + balanceDueInr(i), 0) },
-      } as Record<string, { count: number; amount: number }>),
       // Month-wise outstanding dues: unpaid balances of active invoices grouped
       // by due month (fallback: issue month), oldest first.
       monthDues: (() => {
@@ -2588,6 +2557,47 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     }
   }
 
+  function exportInvoicesCSV() {
+    const rows = [
+      ['Invoice #', 'Client', 'Status', 'Issue Date', 'Due Date', 'Currency', 'Subtotal', 'Discount', 'Tax', 'Total', 'Paid', 'Balance'],
+      ...invoices.map(inv => [
+        inv.invoice_number,
+        inv.client?.name || '',
+        inv.status,
+        inv.issue_date || '',
+        inv.due_date || '',
+        inv.currency,
+        (inv.subtotal || inv.total_amount || 0).toFixed(2),
+        (inv.discount_amount || 0).toFixed(2),
+        (inv.tax_amount || 0).toFixed(2),
+        (inv.total_amount || 0).toFixed(2),
+        (inv.paid_amount || 0).toFixed(2),
+        balanceDue(inv).toFixed(2),
+      ])
+    ]
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url
+    a.download = `invoices-${todayISO()}.csv`
+    a.click(); URL.revokeObjectURL(url)
+  }
+
+  function resetListFilters() {
+    setFilterStatus('')
+    setFilterClient('')
+    setSearchFacets([])
+    setSearchDraft('')
+  }
+
+  function showInvoiceQueue(status: string) {
+    resetListFilters()
+    setTab('active')
+    setFilterStatus(status)
+    setSelectedId(null)
+    setPanelMode('detail')
+  }
+
   // ── Render helpers ─────────────────────────────────────────────────────────
   function StatusBadge({ status, className }: { status: string; className?: string }) {
     return (
@@ -2602,65 +2612,44 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   // ─────────────────────────────────────────────────────────────────────────
   function renderList() {
     return (
-      <div className="flex flex-col h-full overflow-hidden bg-background">
-        {/* Search + filter bar */}
-        <div className="px-4 py-3 border-b border-border/40 space-y-3 bg-secondary/20">
-          <TokenizedSearch
-            facets={searchFacets}
-            onFacetsChange={setSearchFacets}
-            draft={searchDraft}
-            onDraftChange={setSearchDraft}
-            placeholder="Search invoice or client…"
-            resultCount={filtered.length}
-            resultNoun="invoice"
-            fields={[
-              { key: 'number', label: 'Invoice #', type: 'text' },
-              { key: 'client', label: 'Client', type: 'text' },
-              { key: 'amount', label: 'Amount ₹', type: 'number' },
-            ]}
-          />
-          <div className="flex flex-col lg:flex-row gap-2 items-start lg:items-center justify-between w-full">
-            <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar w-full lg:w-auto shrink-0 pb-1 lg:pb-0 [&>*]:shrink-0">
-              {['', 'to_send', 'draft', 'reviewed', 'sent', 'partial', 'overdue'].map(s => (
-                <button key={s}
-                  onClick={() => setFilterStatus(s)}
-                  className={cn(
-                    "text-[11px] px-2.5 py-1 rounded-md font-medium transition-colors border",
-                    filterStatus === s
-                      ? "bg-foreground text-background border-foreground shadow-sm"
-                      : "bg-background text-muted-foreground border-border hover:border-foreground/30 hover:text-foreground"
-                  )}
-                  title={s === 'to_send'
-                    ? 'Not sent yet, and its issue date has arrived — what needs to go out today'
-                    : undefined}
-                >{s ? `${getStatusLabel(s)}${s === 'to_send' && stats.toSendCount ? ` ${stats.toSendCount}` : ''}` : 'All'}</button>
-              ))}
-            </div>
-            <div className="flex items-center gap-3 shrink-0">
-              <button
-                type="button"
-                onClick={() => setGroupByClient(g => !g)}
-                title="Group the list by client"
-                className={cn(
-                  "flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-md font-medium transition-colors border",
-                  groupByClient
-                    ? "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/30"
-                    : "bg-background text-muted-foreground border-border hover:border-foreground/30 hover:text-foreground"
-                )}
-              >
-                <Layers className="w-3 h-3" /> Group
+      <div className="flex flex-col h-full min-h-0 overflow-y-auto bg-card">
+        <div className="shrink-0 border-b border-border/60 bg-card px-4 pb-3 pt-1 sm:px-5">
+          <div className="mb-3 flex items-center gap-4 border-b border-border/50" aria-label="Invoice views">
+            {(['active', 'closed', 'all'] as const).map(t => (
+              <button key={t} onClick={() => { setTab(t); setFilterStatus('') }} aria-pressed={tab === t}
+                className={cn("min-h-11 border-b-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>
+                {t === 'active' ? 'Active' : t === 'closed' ? 'Closed' : 'All invoices'}
               </button>
-              {filtered.length > 0 && (
-                <label className="flex items-center gap-1.5 cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
-                  <input
-                    type="checkbox"
-                    className="rounded border-border/50 bg-background text-violet-500 focus:ring-0 cursor-pointer h-3.5 w-3.5"
-                    checked={filtered.length > 0 && filtered.every(i => selectedForBulk.has(i.id))}
-                    onChange={toggleSelectAllBulk}
-                  />
-                  Select All
-                </label>
-              )}
+            ))}
+          </div>
+          <div className="space-y-2.5">
+            <TokenizedSearch
+              facets={searchFacets}
+              onFacetsChange={setSearchFacets}
+              draft={searchDraft}
+              onDraftChange={setSearchDraft}
+              placeholder="Search invoice or client…"
+              resultCount={filtered.length}
+              resultNoun="invoice"
+              fields={[
+                { key: 'number', label: 'Invoice #', type: 'text' },
+                { key: 'client', label: 'Client', type: 'text' },
+                ...(showAmounts ? [{ key: 'amount', label: 'Amount ₹', type: 'number' as const }] : []),
+              ]}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <AppSelect aria-label="Filter by invoice status" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} wrapperClassName="min-w-0 flex-1" className="text-xs">
+                <option value="">All statuses</option>
+                {(tab === 'closed' ? ['paid', 'cancelled', 'bad_debt'] : tab === 'all' ? ['to_send', 'draft', 'reviewed', 'sent', 'partial', 'overdue', 'paid', 'cancelled', 'bad_debt'] : ['to_send', 'draft', 'reviewed', 'sent', 'partial', 'overdue']).map(status => <option key={status} value={status}>{getStatusLabel(status)}</option>)}
+              </AppSelect>
+              <AppSelect aria-label="Filter by client" value={filterClient} onChange={e => setFilterClient(e.target.value)} wrapperClassName="min-w-0 flex-1" className="text-xs">
+                <option value="">All clients</option>
+                {clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
+              </AppSelect>
+              <button type="button" onClick={() => setGroupByClient(g => !g)} aria-pressed={groupByClient} title="Group invoices by client"
+                className={cn("inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", groupByClient ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground")}>
+                <Layers className="h-3.5 w-3.5" />Group
+              </button>
             </div>
           </div>
 
@@ -2677,16 +2666,21 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
             onClearAll={() => { setFilterStatus(''); setFilterClient('') }}
           />
 
-          <div className="flex justify-between items-center px-1 pt-1 mt-1">
-            <span className="text-[11px] font-medium text-muted-foreground">{filtered.length} invoice{filtered.length !== 1 ? 's' : ''}</span>
-            {/* Portfolio sum — the book's size, not any one invoice. Gated with
-                the other aggregates so a collections role sees the invoices it
-                chases without the total they add up to. */}
-            {showTotals && (
-              <span className="text-xs font-bold text-foreground tracking-tight">Total: {fmt(filtered.reduce((s, i) => s + invTotalInr(i), 0))}</span>
-            )}
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <label className="inline-flex min-h-8 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+              <input type="checkbox" aria-label="Select all visible invoices" className="h-4 w-4 accent-violet-600" disabled={filtered.length === 0}
+                ref={el => { if (el) el.indeterminate = filtered.some(i => selectedForBulk.has(i.id)) && !filtered.every(i => selectedForBulk.has(i.id)) }}
+                checked={filtered.length > 0 && filtered.every(i => selectedForBulk.has(i.id))} onChange={toggleSelectAllBulk} />
+              {filtered.length} invoice{filtered.length !== 1 ? 's' : ''}
+            </label>
+            <AppSelect aria-label="Sort invoices" value={sortBy} onChange={e => setSortBy(e.target.value)} className="h-8 text-xs" wrapperClassName="w-36">
+              <option value="workflow">Workflow order</option>
+              <option value="newest">Newest first</option>
+              <option value="due">Due date first</option>
+              {showAmounts && <option value="amount">Highest balance</option>}
+            </AppSelect>
           </div>
-          
+
           {/* Bulk Action Bar — wraps onto multiple lines: this list panel is a
               narrow (~300px) master-detail column, not a full-width table, so
               a single-row flex layout silently overflows off-screen once more
@@ -2754,7 +2748,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                 <button
                   onClick={exportSelectedCSV}
                   disabled={isUpdatingBulk}
-                  title="Export just the selected rows (the page-level Export CSV button exports everything)"
+                  title="Export just the selected rows"
                   className="text-[10px] font-medium bg-background border border-border hover:bg-secondary px-2 py-1 rounded transition-colors disabled:opacity-50"
                 >
                   Export Selected
@@ -2772,10 +2766,13 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
         </div>
 
         {/* List */}
-        <div className="flex-1 overflow-y-auto divide-y divide-border/30">
+        <div className="divide-y divide-border/50">
           {filtered.length === 0 && (
-            <div className="p-6 text-center text-muted-foreground text-sm">
-              {tab === 'active' ? 'No active invoices' : tab === 'closed' ? 'No closed invoices' : 'No invoices'}
+            <div className="flex flex-col items-center px-6 py-14 text-center">
+              <div className="mb-4 rounded-2xl bg-secondary p-4"><FileText className="h-7 w-7 text-muted-foreground" /></div>
+              <h2 className="text-sm font-semibold">{activeFacets.length || filterStatus || filterClient ? 'No matching invoices' : tab === 'active' ? 'You’re all caught up' : 'No invoices yet'}</h2>
+              <p className="mt-2 max-w-xs text-xs leading-relaxed text-muted-foreground">{activeFacets.length || filterStatus || filterClient ? 'Try a different client, status, or search term.' : tab === 'active' ? 'Your active invoices will appear here when there’s work to bill.' : 'Create an invoice or generate one from completed tasks.'}</p>
+              {(activeFacets.length > 0 || filterStatus || filterClient) ? <button onClick={resetListFilters} className="mt-4 rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-secondary">Clear filters</button> : can('billing.edit') && !permUser.isViewAs && <button onClick={() => { setPanelMode('new'); setSelectedId(null) }} className="mt-4 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90">Create invoice</button>}
             </div>
           )}
           {groupByClient
@@ -2785,7 +2782,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                     <span className="text-xs font-semibold text-foreground truncate">{g.clientName}</span>
                     <span className="flex items-center gap-2 shrink-0 text-[10px] text-muted-foreground">
                       <span>{g.invoices.length} inv</span>
-                      {g.balanceInr > 0 && <span className="text-red-400 font-medium">₹{g.balanceInr.toLocaleString('en-IN')} due</span>}
+                      {showTotals && g.balanceInr > 0 && <span className="text-red-400 font-medium">₹{g.balanceInr.toLocaleString('en-IN')} due</span>}
                     </span>
                   </div>
                   <div className="divide-y divide-border/30">
@@ -2804,85 +2801,28 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
       const isSelected = selectedInv?.id === inv.id
 
       return (
-        <div
-          key={inv.id}
-          onClick={() => selectInvoice(inv.id)}
-          className={cn(
-            "group relative flex items-start gap-3 px-4 py-3.5 cursor-pointer transition-all border-l-2",
-            isSelected
-              ? "bg-violet-500/5 dark:bg-violet-500/10 border-violet-500"
-              : "border-transparent hover:bg-secondary/50 dark:hover:bg-white/[0.02]"
-          )}
-        >
-          <div className="pt-0.5 shrink-0" onClick={e => e.stopPropagation()}>
-            <input
-              type="checkbox"
-              className={cn(
-                "rounded border-border/50 bg-background text-violet-500 focus:ring-0 cursor-pointer h-4 w-4 transition-opacity",
-                selectedForBulk.has(inv.id) ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-              )}
-              checked={selectedForBulk.has(inv.id)}
-              onChange={(e) => toggleBulkSelection(e as unknown as React.MouseEvent, inv.id)}
-            />
-          </div>
-          
-          <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <button
-                  type="button"
-                  onClick={e => { e.stopPropagation(); copyInvNum(inv.invoice_number) }}
-                  title="Copy invoice number"
-                  className="flex items-center gap-1 text-[11px] font-mono font-medium text-muted-foreground hover:text-foreground transition-colors group/copy"
-                >
-                  {inv.invoice_number}
-                  <Copy className="w-2.5 h-2.5 opacity-0 group-hover/copy:opacity-100 transition-opacity" />
-                </button>
-                <StatusBadge status={overdue && inv.status !== 'paid' ? 'overdue' : inv.status} className="h-5 px-1.5 text-[10px]" />
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <div className={cn(
-                  "text-sm font-semibold tabular-nums",
-                  balance > 0 && overdue ? "text-red-600 dark:text-red-400" : balance > 0 ? "text-foreground" : "text-emerald-600 dark:text-emerald-400"
-                )}>
-                  {fmt(balance > 0 ? balance : inv.total_amount, inv.currency)}
-                </div>
-              </div>
-            </div>
-
-            {!groupByClient && (
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-sm font-medium text-foreground truncate">
-                  {inv.client?.name || '—'}
-                </div>
-                {role === 'super_admin' && (
-                  <button
-                    type="button"
-                    onClick={e => { e.stopPropagation(); setEditClientId(inv.client_id) }}
-                    title={`Edit ${inv.client?.name}`}
-                    className="text-muted-foreground/30 hover:text-violet-500 transition-colors shrink-0"
-                  >
-                    <ExternalLink size={12} />
-                  </button>
-                )}
-              </div>
-            )}
-
-            <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground mt-0.5">
-              <div className="truncate flex items-center gap-1.5">
-                {inv.billing_period_start ? formatBillingPeriod(inv.billing_period_start) : `Issued ${fmtDate(inv.issue_date)}`}
-                {taskCountOf(inv) > 0 && (
-                  <>
-                    <span className="opacity-30">·</span>
-                    <span>{taskCountOf(inv)} task{taskCountOf(inv) !== 1 ? 's' : ''}</span>
-                  </>
-                )}
-              </div>
-              <div className={cn("shrink-0", overdue && inv.status !== 'paid' && "text-red-600 dark:text-red-400 font-medium")}>
-                {inv.status === 'paid' ? 'Paid' : `Due ${fmtDate(inv.due_date)}`}
-              </div>
-            </div>
-          </div>
+        <div key={inv.id} className={cn("group flex items-center gap-3 border-l-2 px-4 py-1 transition-colors sm:px-5", isSelected ? "border-primary bg-primary/[0.06]" : "border-transparent hover:bg-secondary/50")}>
+          <input type="checkbox" aria-label={`Select invoice ${inv.invoice_number}`} className="h-4 w-4 shrink-0 accent-violet-600"
+            checked={selectedForBulk.has(inv.id)} onChange={e => toggleBulkSelection(e as unknown as React.MouseEvent, inv.id)} />
+          <button type="button" onClick={() => selectInvoice(inv.id)} aria-pressed={isSelected}
+            className={cn("grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 rounded-lg py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", !showRightPanel && "lg:grid-cols-[minmax(0,1.7fr)_110px_minmax(110px,1fr)_130px]")}>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-semibold">{inv.client?.name || 'No client'}</span>
+              <span className="mt-1 block truncate text-xs text-muted-foreground">{inv.invoice_number}{inv.billing_period_start ? ` · ${formatBillingPeriod(inv.billing_period_start)}` : ''}</span>
+            </span>
+            <span className={cn("row-start-2", !showRightPanel && "lg:col-start-2 lg:row-start-1")}><StatusBadge status={overdue && inv.status !== 'paid' ? 'overdue' : inv.status} className="inline-flex text-[11px]" /></span>
+            <span className={cn("col-start-2 row-start-2 text-right text-[11px] text-muted-foreground", !showRightPanel && "lg:col-start-3 lg:row-start-1 lg:text-left", overdue && "text-red-600 dark:text-red-400")}>
+              {inv.status === 'paid' ? 'Payment complete' : ['cancelled', 'bad_debt'].includes(inv.status) ? 'Closed' : inv.due_date ? `Due ${fmtDate(inv.due_date)}` : `Issued ${fmtDate(inv.issue_date)}`}
+            </span>
+            <span className={cn("col-start-2 row-start-1 text-right", !showRightPanel && "lg:col-start-4")}>
+              {showAmounts && <><span className="block text-sm font-semibold tabular-nums">{fmt(balance > 0 ? balance : inv.total_amount, inv.currency)}</span><span className="mt-1 block text-[10px] text-muted-foreground">{balance > 0 && !['draft', 'reviewed', 'cancelled', 'bad_debt'].includes(inv.status) ? 'Balance due' : 'Invoice total'}</span></>}
+            </span>
+          </button>
+          <OverflowMenu label={`Actions for ${inv.invoice_number}`} items={[
+            { label: 'Open invoice', icon: FileText, onClick: () => selectInvoice(inv.id) },
+            { label: 'Copy invoice number', icon: Copy, onClick: () => copyInvNum(inv.invoice_number) },
+            ...(role === 'super_admin' ? [{ label: 'Edit client', icon: Building2, onClick: () => setEditClientId(inv.client_id) }] : []),
+          ]} />
         </div>
       )
     }
@@ -5605,236 +5545,67 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
         </div>
       )}
 
-      {/* ── Stats bar (collapsible) ──
-          When collapsed: a single compact summary row showing the key counts.
-          When expanded: the full 2/6-col grid of stat tiles + action tiles. */}
-      {statsCollapsed ? (
-        <button
-          onClick={toggleStats}
-          className={cn("w-full border-b border-border/40 px-4 py-2.5 flex items-center justify-between text-left", ROW_INTERACTIVE_CLASS)}
-        >
-          <div className="flex items-center gap-2.5 text-xs flex-wrap min-w-0">
-            {/* Portfolio position — every figure here sums across clients, so
-                the whole strip follows billing.view_totals rather than the
-                per-invoice `amounts` grant. */}
-            {showTotals && (
-              <span className="flex items-center gap-1.5">
-                <span className="text-muted-foreground">Outstanding</span>
-                <span className="font-bold text-foreground">{fmt(stats.outstanding)}</span>
-              </span>
-            )}
-            {showTotals && stats.overdueCount > 0 && (
-              <>
-                <span className="text-muted-foreground/30">·</span>
-                <span className="font-semibold text-red-400">{stats.overdueCount} overdue</span>
-              </>
-            )}
-            {showTotals && stats.draftCount > 0 && (
-              <>
-                <span className="text-muted-foreground/30">·</span>
-                <span className="font-semibold text-amber-400 flex items-center gap-1">
-                  <Zap className="w-2.5 h-2.5" />{stats.draftCount} drafts · {fmt(stats.draftTotal)} not sent
-                </span>
-              </>
-            )}
+      <section className={cn("shrink-0 border-b border-border/60 bg-card px-4 py-4 sm:px-6", showRightPanel && "hidden xl:block")} aria-label="Invoice overview">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight">Invoice overview</h1>
+            <p className="mt-1 text-xs text-muted-foreground">Review drafts, track payments, and keep client billing moving.</p>
           </div>
-          <span className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground shrink-0 ml-2">
-            <span className="hidden sm:inline">Show actions</span>
-            <ChevronDown className="w-3.5 h-3.5" />
-          </span>
-        </button>
-      ) : (
-        <div className="border-b border-border/40">
-          <div className="flex items-center justify-end px-4 pt-1.5">
-            <button
-              onClick={toggleStats}
-              className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <span className="hidden sm:inline">Hide</span>
-              <ChevronUp className="w-3.5 h-3.5" />
-            </button>
-          </div>
-          <div className="px-4 pt-1 pb-2.5 grid grid-cols-2 sm:grid-cols-6 gap-3">
-            {/* Same rule as the collapsed strip: these tiles sum across every
-                client, so they follow billing.view_totals. Without it the panel
-                still opens — it just carries the action buttons and not the
-                portfolio position. */}
-            {showTotals && (
-            <div className="bg-foreground/[0.03] rounded-xl p-3 border border-border/30">
-              <div className="text-[10px] text-muted-foreground mb-0.5">Outstanding</div>
-              <div className="text-sm font-bold text-foreground">{fmt(stats.outstanding)}</div>
-            </div>
+          <div className="flex items-center gap-2">
+            <Link href="/dashboard/invoices/follow-ups" className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-xs font-medium hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <CalendarClock className="h-4 w-4" />Follow-ups
+            </Link>
+            {can('billing.edit') && !permUser.isViewAs && (
+              <button onClick={() => { setPanelMode('new'); setSelectedId(null) }} className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                <Plus className="h-4 w-4" />New invoice
+              </button>
             )}
-            {showTotals && (
-            <div className={`bg-foreground/[0.03] rounded-xl p-3 border ${stats.overdueCount > 0 ? 'border-red-500/30' : 'border-border/30'}`}>
-              <div className="text-[10px] text-muted-foreground mb-0.5">Overdue</div>
-              <div className={`text-sm font-bold flex flex-wrap items-baseline gap-1 ${stats.overdueCount > 0 ? 'text-red-400' : 'text-foreground'}`}>
-                <span>{fmt(stats.overdueAmt)}</span>
-                {stats.overdueCount > 0 && <span className="text-[10px]">({stats.overdueCount})</span>}
-              </div>
-            </div>
-            )}
-            <div className={`bg-foreground/[0.03] rounded-xl p-3 border ${stats.draftCount > 0 ? 'border-amber-500/30' : 'border-border/30'}`}>
-              <div className="text-[10px] text-muted-foreground mb-0.5 flex items-center gap-1">
-                <Zap className="w-2.5 h-2.5" />Auto Drafts
-              </div>
-              {/* The count is workload and stays; the value is portfolio money. */}
-              <div className={`text-sm font-bold ${stats.draftCount > 0 ? 'text-amber-400' : 'text-muted-foreground'}`}>
-                {stats.draftCount > 0
-                  ? (showTotals ? `${stats.draftCount} · ${fmt(stats.draftTotal)}` : String(stats.draftCount))
-                  : '—'}
-              </div>
-            </div>
-            <button
-              onClick={() => { setPanelMode('generate'); setSelectedId(null); setGenTasks([]) }}
-              className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'generate' ? 'bg-amber-500/20 border-amber-500/40' : 'bg-amber-50 dark:bg-amber-600/10 hover:bg-amber-100 dark:hover:bg-amber-600/20 border-amber-200 dark:border-amber-500/20'}`}>
-              <Calendar className="w-4 h-4 text-amber-500 dark:text-amber-400 shrink-0" />
-              <div>
-                <div className="text-[10px] text-amber-600/70 dark:text-amber-700 dark:text-amber-300/70">Add-on</div>
-                <div className="text-xs font-semibold text-amber-700 dark:text-amber-300">Generate</div>
-              </div>
-            </button>
-            <button
-              onClick={() => { setPanelMode('batch_generate'); setSelectedId(null); setBatchGroups([]); setBatchDone(0) }}
-              className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'batch_generate' ? 'bg-emerald-500/20 border-emerald-500/40' : 'bg-emerald-50 dark:bg-emerald-600/10 hover:bg-emerald-100 dark:hover:bg-emerald-600/20 border-emerald-200 dark:border-emerald-500/20'}`}>
-              <History className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <div>
-                <div className="text-[10px] text-emerald-700/70 dark:text-emerald-700 dark:text-emerald-300/70">Batch</div>
-                <div className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">Historical</div>
-              </div>
-            </button>
-            <button
-              // Statements moved to their own page (/dashboard/statements): a
-              // running ledger with opening/closing balance and ageing needs the
-              // client's FULL history, which this page no longer loads.
-              onClick={() => router.push('/dashboard/statements')}
-              className="rounded-xl p-3 border flex items-center gap-2 text-left transition-colors bg-blue-50 dark:bg-blue-600/10 hover:bg-blue-100 dark:hover:bg-blue-600/20 border-blue-200 dark:border-blue-500/20">
-              <Receipt className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-              <div>
-                <div className="text-[10px] text-blue-700/70 dark:text-blue-700 dark:text-blue-300/70">Account</div>
-                <div className="text-xs font-semibold text-blue-700 dark:text-blue-300">Statement</div>
-              </div>
-            </button>
-            <button
-              onClick={() => { setPanelMode('discounts'); setSelectedId(null); loadDiscountAnalytics() }}
-              className={`rounded-xl p-3 border flex items-center gap-2 text-left transition-colors ${panelMode === 'discounts' ? 'bg-violet-500/20 border-violet-500/40' : 'bg-violet-50 dark:bg-violet-600/10 hover:bg-violet-100 dark:hover:bg-violet-600/20 border-violet-200 dark:border-violet-500/20'}`}>
-              <TrendingUp className="w-4 h-4 text-violet-600 dark:text-violet-400 shrink-0" />
-              <div>
-                <div className="text-[10px] text-violet-700/70 dark:text-violet-700 dark:text-violet-300/70">Financial</div>
-                <div className="text-xs font-semibold text-violet-700 dark:text-violet-300">Analytics</div>
-              </div>
-            </button>
+            <OverflowMenu label="Invoice tools" items={[
+              ...(can('billing.edit') && !permUser.isViewAs ? [
+                { label: 'Generate from tasks', icon: Calendar, onClick: () => { setPanelMode('generate'); setSelectedId(null); setGenTasks([]) } },
+                { label: 'Generate in bulk', icon: History, onClick: () => { setPanelMode('batch_generate'); setSelectedId(null); setBatchGroups([]); setBatchDone(0) } },
+              ] : []),
+              { label: 'Client statements', icon: Receipt, onClick: () => router.push('/dashboard/statements') },
+              ...(showTotals ? [{ label: 'Financial analytics', icon: TrendingUp, onClick: () => { setPanelMode('discounts'); setSelectedId(null); loadDiscountAnalytics() } }] : []),
+              { label: 'Export all invoices (CSV)', icon: Download, onClick: exportInvoicesCSV, separatorBefore: true },
+            ]} />
           </div>
-
-          {/* ── Stage-wise value cards (click-to-filter) ── */}
-          <div className="px-4 pb-2.5 grid grid-cols-2 sm:grid-cols-5 gap-2">
-            {([
-              { key: 'draft',    label: 'Draft',    active: 'bg-amber-500/15 border-amber-500/40',   dot: 'bg-amber-400' },
-              { key: 'reviewed', label: 'Reviewed', active: 'bg-blue-500/15 border-blue-500/40',     dot: 'bg-blue-400' },
-              { key: 'sent',     label: 'Sent',     active: 'bg-violet-500/15 border-violet-500/40', dot: 'bg-violet-400' },
-              { key: 'partial',  label: 'Partial',  active: 'bg-cyan-500/15 border-cyan-500/40',     dot: 'bg-cyan-400' },
-              { key: 'overdue',  label: 'Overdue',  active: 'bg-red-500/15 border-red-500/40',       dot: 'bg-red-400' },
-            ] as const).map(st => {
-              const s = stats.stages[st.key]
-              const isActive = filterStatus === st.key
-              return (
-                <button
-                  key={st.key}
-                  onClick={() => setFilterStatus(isActive ? '' : st.key)}
-                  title={isActive ? 'Clear filter' : `Show ${st.label.toLowerCase()} invoices`}
-                  className={cn(
-                    'rounded-xl px-3 py-2 border text-left transition-colors',
-                    isActive ? st.active : 'bg-foreground/[0.03] border-border/30 hover:border-foreground/25'
-                  )}
-                >
-                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-0.5">
-                    <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', s.count > 0 ? st.dot : 'bg-border')} />
-                    {st.label}
-                    <span className="ml-auto font-semibold text-foreground/70">{s.count}</span>
-                  </div>
-                  {/* The count is how the work is triaged — nine drafts to send
-                      is the job. The value of those nine is a portfolio figure
-                      and follows showTotals. */}
-                  {showTotals && (
-                    <div className={cn('text-xs font-bold', s.count > 0 ? 'text-foreground' : 'text-muted-foreground')}>
-                      {s.count > 0 ? fmt(s.amount) : '—'}
-                    </div>
-                  )}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* ── Month-wise outstanding dues ── */}
-          {showTotals && stats.monthDues.length > 0 && (
-            <div className="px-4 pb-3 flex items-center gap-1.5 overflow-x-auto hide-scrollbar [&>*]:shrink-0">
-              <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground mr-0.5">Dues by month</span>
-              {stats.monthDues.map(m => (
-                <span
-                  key={m.key}
-                  title={`${m.count} invoice${m.count !== 1 ? 's' : ''} due in ${m.label}`}
-                  className="inline-flex items-baseline gap-1.5 rounded-lg border border-border/40 bg-foreground/[0.03] px-2 py-1"
-                >
-                  <span className="text-[10px] font-medium text-muted-foreground">{m.label}</span>
-                  <span className="text-[11px] font-bold text-foreground">{fmt(m.amount)}</span>
-                  <span className="text-[9px] text-muted-foreground">({m.count})</span>
-                </span>
-              ))}
+        </div>
+        <div className={cn("mt-4 grid gap-3 overflow-x-auto pb-1", showTotals ? "grid-cols-[repeat(3,minmax(150px,1fr))]" : "grid-cols-1", showRightPanel && "hidden")}>
+          {showTotals && (
+            <div className="rounded-xl border border-border/60 bg-background p-3.5">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">Outstanding balance<Wallet className="h-4 w-4" /></div>
+              <div className="mt-2 text-xl font-semibold tracking-tight tabular-nums">{fmt(stats.outstanding)}</div>
+              <p className="mt-1 text-[11px] text-muted-foreground">Unpaid balance on sent invoices · INR</p>
             </div>
           )}
-        </div>
-      )}
-
-      {/* ── Tab bar ── */}
-      <div className="flex items-center gap-0 border-b border-border/40 px-4 pt-1">
-        {(['active', 'closed', 'all'] as const).map(t => (
-          <button key={t}
-            onClick={() => { setTab(t); setFilterStatus('') }}
-            className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${tab === t ? 'border-violet-500 text-violet-700 dark:text-violet-300' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
-            {t === 'active' ? `Active (${invoices.filter(i => STATUS_GROUPS.active.includes(i.status) || (isOverdue(i.due_date || '', i.status, i.issue_date) && i.status !== 'paid')).length})` : t === 'closed' ? `Closed` : `All`}
+          {showTotals && (
+            <button onClick={() => showInvoiceQueue('overdue')} className="rounded-xl border border-border/60 bg-background p-3.5 text-left transition-colors hover:border-red-400/60 hover:bg-red-500/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">Overdue<Clock className="h-4 w-4 text-red-600 dark:text-red-400" /></div>
+              <div className="mt-2 text-xl font-semibold tracking-tight tabular-nums text-red-600 dark:text-red-400">{fmt(stats.overdueAmt)}</div>
+              <p className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">{stats.overdueCount} invoice{stats.overdueCount !== 1 ? 's' : ''} to follow up<ChevronRight className="h-3.5 w-3.5" /></p>
+            </button>
+          )}
+          <button onClick={() => showInvoiceQueue('to_send')} className="rounded-xl border border-primary/20 bg-primary/[0.04] p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-primary/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">Ready to send<Send className="h-4 w-4 text-primary" /></div>
+            <div className="mt-2 flex items-baseline gap-2"><span className="text-xl font-semibold tracking-tight tabular-nums">{stats.toSendCount}</span><span className="text-xs text-muted-foreground">invoice{stats.toSendCount !== 1 ? 's' : ''}{showTotals ? ` · ${fmt(stats.toSendTotal)}` : ''}</span></div>
+            <p className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">Review and send due drafts<ChevronRight className="h-3.5 w-3.5" /></p>
           </button>
-        ))}
-        <div className="flex-1" />
-        <button
-          onClick={() => {
-            const rows = [
-              ['Invoice #', 'Client', 'Status', 'Issue Date', 'Due Date', 'Currency', 'Subtotal', 'Discount', 'Tax', 'Total', 'Paid', 'Balance'],
-              ...invoices.map(inv => [
-                inv.invoice_number,
-                inv.client?.name || '',
-                inv.status,
-                inv.issue_date || '',
-                inv.due_date || '',
-                inv.currency,
-                (inv.subtotal || inv.total_amount || 0).toFixed(2),
-                (inv.discount_amount || 0).toFixed(2),
-                (inv.tax_amount || 0).toFixed(2),
-                (inv.total_amount || 0).toFixed(2),
-                (inv.paid_amount || 0).toFixed(2),
-                balanceDue(inv).toFixed(2),
-              ])
-            ]
-            const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
-            const blob = new Blob([csv], { type: 'text/csv' })
-            const url = URL.createObjectURL(blob)
-            const a = document.createElement('a'); a.href = url
-            a.download = `invoices-${todayISO()}.csv`
-            a.click(); URL.revokeObjectURL(url)
-          }}
-          className="mb-1 flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground border border-border/40 hover:border-border/70 rounded-lg px-2.5 py-1 transition-colors bg-foreground/[0.02] hover:bg-foreground/[0.05]">
-          <Download className="w-3.5 h-3.5" />Export CSV
-        </button>
-        <button
-          onClick={() => { setPanelMode('new'); setSelectedId(null) }}
-          className="mb-1 flex items-center gap-1 text-[11px] font-medium text-violet-400 hover:text-violet-700 dark:text-violet-300 border border-violet-500/30 hover:border-violet-500/60 rounded-lg px-2.5 py-1 transition-colors bg-violet-500/5 hover:bg-violet-500/10">
-          <Plus className="w-3.5 h-3.5" />New Invoice
-        </button>
-      </div>
+        </div>
+        {showTotals && !showRightPanel && stats.monthDues.length > 0 && (
+          <details className="mt-3 hidden text-xs text-muted-foreground sm:block">
+            <summary className="w-fit cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Outstanding by month</summary>
+            <div className="mt-2 flex max-h-24 flex-wrap gap-2 overflow-y-auto">
+              {stats.monthDues.map(m => <span key={m.key} className="rounded-md border border-border/60 px-2.5 py-1.5">{m.label}<span className="ml-2 font-medium text-foreground tabular-nums">{fmt(m.amount)}</span></span>)}
+            </div>
+          </details>
+        )}
+      </section>
 
       {/* ── Main content ── */}
-      <div className="flex-1 overflow-hidden flex">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Left: list */}
-        <div className={`${showRightPanel ? 'hidden sm:flex sm:w-[320px] lg:w-[360px]' : 'flex-1'} flex-col border-r border-border/40 overflow-hidden`}>
+        <div className={`${showRightPanel ? 'hidden xl:flex xl:w-[370px] xl:shrink-0' : 'flex-1 min-w-0'} flex-col border-r border-border/40 overflow-hidden`}>
           {renderList()}
         </div>
 
@@ -5843,11 +5614,11 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
             takes the full width. The split only opens once there's something
             to show in it. */}
         {showRightPanel && (
-          <div className="flex-1 overflow-hidden flex flex-col">
+          <div className="min-w-0 flex-1 overflow-hidden flex flex-col">
             {/* Mobile back button */}
-            <div className="sm:hidden px-3 py-2 border-b border-border/40">
+            <div className="xl:hidden shrink-0 px-3 py-2 border-b border-border/40">
               <button onClick={() => { setSelectedId(null); setPanelMode('detail') }}
-                className="text-xs text-violet-400 flex items-center gap-1">
+                className="flex min-h-9 items-center gap-1 rounded-md px-2 text-sm text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 ← Back to invoices
               </button>
             </div>
