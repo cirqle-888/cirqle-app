@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { safeNextPath } from '@/lib/safe-next-path'
 
 /**
  * Map of pathname prefix -> required permission key.
@@ -303,11 +304,21 @@ export async function updateSession(request: NextRequest) {
     }
     const url = request.nextUrl.clone()
     url.pathname = '/login'
+    url.search = ''
+    // Remember the page. A reload that lands here with no usable session (an
+    // expired token, a refresh that lost a race) used to come back from /login
+    // on the dashboard, whatever page it started on. Only a plain page load
+    // is worth returning to.
+    const back = request.method === 'GET' ? safeNextPath(pathname + request.nextUrl.search) : null
+    if (back) url.searchParams.set('next', back)
     return NextResponse.redirect(url)
   }
 
-  // Signed-in users hitting login are bounced to dashboard (forgot/reset/register stay accessible)
+  // Signed-in users hitting login are bounced back to the page they came from,
+  // else the dashboard (forgot/reset/register stay accessible)
   if (user && pathname.startsWith('/login')) {
+    const back = safeNextPath(request.nextUrl.searchParams.get('next'))
+    if (back) return NextResponse.redirect(new URL(back, request.url))
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return NextResponse.redirect(url)

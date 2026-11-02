@@ -14,6 +14,7 @@ import { DesktopNotifier } from '@/components/desktop/desktop-notifier'
 import { FloatingCommsWidget } from '@/components/comms/floating-comms-widget'
 import { BirthdayCelebration } from '@/components/ui/birthday-celebration'
 import { FxRatesAutoSync } from './fx-rates-auto-sync'
+import { LastPageRestorer } from '@/components/layout/last-page-restorer'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { ViewAsBanner } from '@/components/layout/view-as-banner'
 import { isBirthdayToday } from '@/lib/utils/birthday'
@@ -231,6 +232,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <DesktopNotifier />
             <FloatingCommsWidget />
             <FxRatesAutoSync />
+            <LastPageRestorer />
             {showBirthday && me && (
               <BirthdayCelebration
                 employeeId={me.employeeId}

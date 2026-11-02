@@ -8,6 +8,7 @@ import { Eye, EyeOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { safeNextPath } from '@/lib/safe-next-path'
 import { resolveLoginEmail, getCompanyLogo } from './actions'
 
 const REMEMBER_KEY = 'cirqle-login-id'
@@ -99,7 +100,9 @@ function LoginInner() {
       else window.localStorage.removeItem(REMEMBER_KEY)
     } catch {}
 
-    router.push('/dashboard')
+    // Back to the page the session lapsed on (the proxy adds ?next=), not
+    // always the dashboard.
+    router.push(safeNextPath(searchParams.get('next')) ?? '/dashboard')
   }
 
   return (

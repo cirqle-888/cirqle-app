@@ -16,7 +16,9 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: 'Cirqle',
     description: 'Cirqle business management system',
     // Installed app opens straight into the workspace; middleware handles auth.
-    start_url: '/dashboard',
+    // `source=pwa` marks an app launch so LastPageRestorer can reopen the page
+    // it was left on, rather than always the dashboard.
+    start_url: '/dashboard?source=pwa',
     scope: '/',
     display: 'standalone',
     orientation: 'portrait',
