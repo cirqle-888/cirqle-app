@@ -39,7 +39,11 @@ import {
 const ON = 'bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/30'
 const OFF = 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground'
 
-export function SavedViews({ className = '' }: { className?: string }) {
+export function SavedViews({ className = '', compact = false }: {
+  className?: string
+  /** Icon-only buttons (the labels move to tooltips), for tight toolbars. */
+  compact?: boolean
+}) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const { favorites, upsertFavorite, removeFavoriteEntry } = useFavorites()
@@ -230,10 +234,11 @@ export function SavedViews({ className = '' }: { className?: string }) {
           type="button"
           onClick={() => { setNaming(true); setDraftName(active?.name ?? '') }}
           title={active ? `Update "${active.name}" or save under a new name` : 'Save these filters as a named view'}
-          className={`inline-flex items-center h-[30px] gap-1 px-2.5 rounded-full border text-[11px] font-medium transition-colors cursor-pointer ${OFF}`}
+          aria-label={active ? 'Save as a new view' : 'Save view'}
+          className={`inline-flex items-center justify-center h-[30px] gap-1 rounded-full border text-[11px] font-medium transition-colors cursor-pointer ${compact ? 'w-[30px]' : 'px-2.5'} ${OFF}`}
         >
           <BookmarkPlus className="w-3.5 h-3.5 shrink-0" />
-          {active ? 'Save as…' : 'Save view'}
+          {!compact && (active ? 'Save as…' : 'Save view')}
         </button>
       )}
 
@@ -241,11 +246,12 @@ export function SavedViews({ className = '' }: { className?: string }) {
         <button
           type="button"
           onClick={() => void copyLink()}
-          title="Copy a link to these filters"
-          className={`inline-flex items-center h-[30px] gap-1 px-2.5 rounded-full border text-[11px] font-medium transition-colors cursor-pointer ${OFF}`}
+          title={copied ? 'Link copied' : 'Copy a link to these filters'}
+          aria-label="Copy a link to these filters"
+          className={`inline-flex items-center justify-center h-[30px] gap-1 rounded-full border text-[11px] font-medium transition-colors cursor-pointer ${compact ? 'w-[30px]' : 'px-2.5'} ${OFF}`}
         >
           {copied ? <Check className="w-3.5 h-3.5 shrink-0" /> : <Link2 className="w-3.5 h-3.5 shrink-0" />}
-          {copied ? 'Copied' : 'Copy link'}
+          {!compact && (copied ? 'Copied' : 'Copy link')}
         </button>
       )}
 
