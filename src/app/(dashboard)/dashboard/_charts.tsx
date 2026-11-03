@@ -7,9 +7,14 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts'
 
+// Theme colours, so the box reads right in light and dark mode alike (the
+// hover highlight behind the bars is styled once, in globals.css).
 const TOOLTIP_STYLE = {
-  contentStyle: { background: '#1a1f2e', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, fontSize: 11 },
-  labelStyle: { color: '#9ca3af' },
+  contentStyle: {
+    background: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11,
+    color: 'var(--foreground)', boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
+  },
+  labelStyle: { color: 'var(--muted-foreground)' },
   trigger: 'click' as const,
   wrapperStyle: { zIndex: 50 },
 }
@@ -76,9 +81,8 @@ export function ContributionActivityBar({
         <XAxis dataKey="period" tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} />
         <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} axisLine={false} tickLine={false} allowDecimals={false} />
         <Tooltip
-          contentStyle={{ background: '#1a1f2e', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, fontSize: 12 }}
-          labelStyle={{ color: '#9ca3af', marginBottom: 4 }}
-          cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+          contentStyle={{ ...TOOLTIP_STYLE.contentStyle, fontSize: 12 }}
+          labelStyle={{ color: 'var(--muted-foreground)', marginBottom: 4 }}
           formatter={(val, name) => [val, name === 'count' ? 'Tasks' : 'Creatives']}
         />
         <Bar dataKey="count"     fill="#a855f7" radius={[4, 4, 0, 0]} maxBarSize={28} name="Tasks" />

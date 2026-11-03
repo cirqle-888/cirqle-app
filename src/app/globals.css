@@ -455,3 +455,27 @@ body:has([data-modal-overlay]) [data-chat-launcher] {
   [data-cq-hide-figures] [data-cq-figure],
   [data-cq-hide-figures] [data-cq-hide] { filter: none; letter-spacing: inherit }
 }
+
+/* ── Chart hover highlight ──────────────────────────────────────────────────
+   Recharts draws a flat #ccc block behind the hovered bars — a harsh grey slab
+   in light mode and a white one in dark. Every chart gets the same soft tint
+   of the text colour instead, with rounded corners, so it follows the theme.
+   CSS beats the fill/stroke attributes Recharts writes, including the few
+   charts that pass their own `cursor` colour. */
+.recharts-rectangle.recharts-tooltip-cursor {
+  fill: var(--foreground);
+  fill-opacity: 0.06;
+  rx: 6px;
+}
+.recharts-curve.recharts-tooltip-cursor {
+  stroke: var(--foreground);
+  stroke-opacity: 0.18;
+  stroke-dasharray: 4 4;
+}
+/* Clicking a chart focuses part of it (the SVG, or an inner layer Recharts
+   makes focusable), and the focus ring outlined the whole plot in blue. Keep
+   the ring for keyboard focus only. */
+.recharts-wrapper:focus:not(:focus-visible),
+.recharts-wrapper :focus:not(:focus-visible) {
+  outline: none;
+}
