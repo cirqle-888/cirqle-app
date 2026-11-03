@@ -37,7 +37,7 @@ import {
   Printer, TrendingUp, BadgeCheck, CircleDollarSign, Receipt, Edit2, Save,
   History, Tag, Percent, ChevronDown, ChevronUp, ArrowDownToLine, Gift, ExternalLink, Copy,
   Wallet, Link2, ShoppingBag, Share2, Layers, ListTree, ScrollText, Check, AlertCircle,
-  Maximize2, Minimize2, ZoomIn, ZoomOut, ListPlus,
+  Maximize2, Minimize2, ZoomIn, ZoomOut, ListPlus, PanelLeftOpen, PanelLeftClose,
 } from 'lucide-react'
 import { logFollowup } from "./follow-ups/actions"
 import { recordInvoicePayment, serverResyncInvoiceTasks, getInvoiceDetails, setInvoiceServiceColumn, setClientServiceColumnDefault, findMissedTasks, addTasksToInvoice } from "./actions"
@@ -672,6 +672,19 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
       return next
     })
   }
+  // In Focus, the invoice list can stay beside the open invoice for switching.
+  // On by default; the choice is remembered like Focus itself.
+  const [focusList, setFocusList] = useState(true)
+  useEffect(() => {
+    try { setFocusList(window.localStorage.getItem('invoices-focus-list') !== '0') } catch {}
+  }, [])
+  function toggleFocusList() {
+    setFocusList(prev => {
+      const next = !prev
+      try { window.localStorage.setItem('invoices-focus-list', next ? '1' : '0') } catch {}
+      return next
+    })
+  }
   const [previewZoom, setPreviewZoom] = useState<PreviewZoom>('width')
   const [previewScale, setPreviewScale] = useState(1)
 
@@ -844,6 +857,41 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     return [...map.values()].sort((a, b) => b.balanceInr - a.balanceInr || a.clientName.localeCompare(b.clientName))
   }, [filtered, groupByClient])
 
+  // The list in the order it is shown — what Previous / Next step through.
+  const navList = useMemo(
+    () => groupByClient ? clientGroups.flatMap(g => g.invoices) : filtered,
+    [groupByClient, clientGroups, filtered],
+  )
+  const navIndex = selectedId ? navList.findIndex(i => i.id === selectedId) : -1
+  function stepInvoice(dir: 1 | -1) {
+    if (navIndex < 0) return
+    const next = navList[navIndex + dir]
+    if (next) selectInvoice(next.id, { keepView: true })
+  }
+
+  // Keep the open invoice in view in the list beside it while stepping.
+  useEffect(() => {
+    if (!selectedId) return
+    document.querySelector(`[data-invoice-row="${selectedId}"]`)?.scrollIntoView({ block: 'nearest' })
+  }, [selectedId])
+
+  // J / K step to the next / previous invoice, as in a mail app — never while
+  // typing, and not while a dialog is open over the invoice.
+  useEffect(() => {
+    if (panelMode !== 'detail' || !selectedId || confirmModal || editReasonModal) return
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey || (e.key !== 'j' && e.key !== 'k')) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName))) return
+      e.preventDefault()
+      stepInvoice(e.key === 'j' ? 1 : -1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // stepInvoice reads navIndex/navList from this render; they are the deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panelMode, selectedId, navIndex, navList, confirmModal, editReasonModal])
+
   // Summary stats
   const stats = useMemo(() => {
     // Outstanding is what clients owe: sent and part-paid invoices only, the
@@ -889,10 +937,11 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   }, [invoices])
 
   // ── Actions ────────────────────────────────────────────────────────────────
-  function selectInvoice(id: string) {
+  /** `keepView`: stay on the current tab — stepping through invoices to check them. */
+  function selectInvoice(id: string, opts?: { keepView?: boolean }) {
     if (id !== selectedId) {
       // Reset per-invoice UI state when switching invoices
-      setDetailView('preview')
+      if (!opts?.keepView) setDetailView('preview')
       setMissedSel(new Set())
       setMissedReason('')
       setShowDiscount(false)
@@ -2747,11 +2796,11 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
               ]}
             />
             <div className="flex flex-wrap items-center gap-2">
-              <AppSelect aria-label="Filter by invoice status" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} wrapperClassName="min-w-0 flex-1" className="text-xs">
+              <AppSelect aria-label="Filter by invoice status" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} wrapperClassName="min-w-[8.5rem] flex-1" className="text-xs">
                 <option value="">All statuses</option>
                 {(tab === 'closed' ? ['paid', 'cancelled', 'bad_debt'] : tab === 'all' ? ['to_send', 'draft', 'reviewed', 'sent', 'partial', 'overdue', 'paid', 'cancelled', 'bad_debt'] : ['to_send', 'draft', 'reviewed', 'sent', 'partial', 'overdue']).map(status => <option key={status} value={status}>{getStatusLabel(status)}</option>)}
               </AppSelect>
-              <AppSelect aria-label="Filter by client" value={filterClient} onChange={e => setFilterClient(e.target.value)} wrapperClassName="min-w-0 flex-1" className="text-xs">
+              <AppSelect aria-label="Filter by client" value={filterClient} onChange={e => setFilterClient(e.target.value)} wrapperClassName="min-w-[8.5rem] flex-1" className="text-xs">
                 <option value="">All clients</option>
                 {clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
               </AppSelect>
@@ -2910,7 +2959,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
       const isSelected = selectedInv?.id === inv.id
 
       return (
-        <div key={inv.id} className={cn("group flex items-center gap-3 border-l-2 px-4 py-1 transition-colors sm:px-5", isSelected ? "border-primary bg-primary/[0.06]" : "border-transparent hover:bg-secondary/50")}>
+        <div key={inv.id} data-invoice-row={inv.id} className={cn("group flex items-center gap-3 border-l-2 px-4 py-1 transition-colors sm:px-5", isSelected ? "border-primary bg-primary/[0.06]" : "border-transparent hover:bg-secondary/50")}>
           <input type="checkbox" aria-label={`Select invoice ${inv.invoice_number}`} className="h-4 w-4 shrink-0 accent-violet-600"
             checked={selectedForBulk.has(inv.id)} onChange={e => toggleBulkSelection(e as unknown as React.MouseEvent, inv.id)} />
           <button type="button" onClick={() => selectInvoice(inv.id)} aria-pressed={isSelected}
@@ -3112,6 +3161,15 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
             className="hidden sm:inline-flex min-h-8 min-w-8 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-green-600 hover:bg-green-500/10 transition-colors">
             <Share2 className="w-4 h-4" />
           </button>
+          {focusMode && (
+            <button onClick={toggleFocusList} aria-pressed={focusList}
+              title={focusList ? 'Hide the invoice list' : 'Show the invoice list beside this invoice'}
+              aria-label={focusList ? 'Hide invoice list' : 'Show invoice list'}
+              className={cn("hidden lg:inline-flex min-h-8 min-w-8 items-center justify-center rounded-lg border transition-colors",
+                focusList ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground hover:bg-secondary")}>
+              {focusList ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />}
+            </button>
+          )}
           <button onClick={toggleFocus} aria-pressed={focusMode}
             title={focusMode ? 'Exit focus' : 'Focus — give the invoice the whole screen'}
             aria-label={focusMode ? 'Exit focus' : 'Focus on this invoice'}
@@ -5962,7 +6020,9 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
       {/* ── Main content ── */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Left: list */}
-        <div className={`${showRightPanel ? (focused ? 'hidden' : 'hidden xl:flex xl:w-[370px] xl:shrink-0') : 'flex-1 min-w-0'} flex-col border-r border-border/40 overflow-hidden`}>
+        <div className={`${showRightPanel
+          ? (focused ? (focusList ? 'hidden lg:flex lg:w-[320px] lg:shrink-0' : 'hidden') : 'hidden xl:flex xl:w-[370px] xl:shrink-0')
+          : 'flex-1 min-w-0'} flex-col border-r border-border/40 overflow-hidden`}>
           {renderList()}
         </div>
 
@@ -5973,11 +6033,30 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
         {showRightPanel && (
           <div className="min-w-0 flex-1 overflow-hidden flex flex-col">
             {/* Mobile back button */}
-            <div className={cn("shrink-0 px-3 py-2 border-b border-border/40", !focused && "xl:hidden")}>
+            <div className={cn("shrink-0 flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border/40",
+              !focused && "xl:hidden")}>
               <button onClick={() => { setSelectedId(null); setPanelMode('detail') }}
-                className="flex min-h-9 items-center gap-1 rounded-md px-2 text-sm text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                className={cn("flex min-h-9 items-center gap-1 rounded-md px-2 text-sm text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  focused && focusList && "lg:invisible")}>
                 ← Back to invoices
               </button>
+              {/* Step through the list without going back to it. Only for an
+                  invoice that is in the current (filtered) list. */}
+              {panelMode === 'detail' && navIndex >= 0 && (
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <button onClick={() => stepInvoice(-1)} disabled={navIndex === 0}
+                    title="Previous invoice (K)" aria-label="Previous invoice"
+                    className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-lg border border-border hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent">
+                    <ChevronUp className="w-4 h-4" />
+                  </button>
+                  <span className="min-w-[4.5rem] text-center tabular-nums">{navIndex + 1} of {navList.length}</span>
+                  <button onClick={() => stepInvoice(1)} disabled={navIndex === navList.length - 1}
+                    title="Next invoice (J)" aria-label="Next invoice"
+                    className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-lg border border-border hover:bg-secondary hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent">
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </div>
             {panelMode === 'new'            && renderNewPanel()}
             {panelMode === 'generate'       && renderGeneratePanel()}
