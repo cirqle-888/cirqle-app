@@ -40,8 +40,9 @@ import {
   Maximize2, Minimize2, ZoomIn, ZoomOut, ListPlus, PanelLeftOpen, PanelLeftClose,
 } from 'lucide-react'
 import { logFollowup } from "./follow-ups/actions"
-import { recordInvoicePayment, serverResyncInvoiceTasks, getInvoiceDetails, setInvoiceServiceColumn, setClientServiceColumnDefault, findMissedTasks, addTasksToInvoice } from "./actions"
+import { recordInvoicePayment, serverResyncInvoiceTasks, getInvoiceDetails, setInvoiceServiceColumn, setClientServiceColumnDefault, previewInvoiceRefresh, applyInvoiceRefresh, addTasksToInvoice } from "./actions"
 import type { MissedTask } from '@/lib/invoices/missed-tasks'
+import type { LineRemoval, LineUpdate } from '@/lib/invoices/refresh-diff'
 
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
@@ -411,6 +412,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     // than flashing an empty state.
     setDetailLoaded(new Set())
     setMissedByInv({})
+    setChangesByInv({})
   }, [initialInvoices])
 
   // ── Supabase Realtime: keep the invoice list live ─────────────────────────
@@ -695,6 +697,16 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   const [missedSel, setMissedSel] = useState<Set<string>>(new Set())
   const [missedReason, setMissedReason] = useState('')
   const [addingMissed, setAddingMissed] = useState(false)
+  // Lines whose task changed (or was deleted/cancelled/waived) since they were
+  // written — loaded with the missed tasks, same lifetime.
+  const [changesByInv, setChangesByInv] = useState<Record<string, { update: LineUpdate[]; remove: LineRemoval[] }>>({})
+
+  // Refresh from tasks dialog: one invoice, a pick of each kind of change.
+  const [refreshFor, setRefreshFor] = useState<string | null>(null)
+  const [refreshSel, setRefreshSel] = useState<{ add: Set<string>; update: Set<string>; remove: Set<string> }>(
+    { add: new Set(), update: new Set(), remove: new Set() })
+  const [refreshReason, setRefreshReason] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
 
   // ── Navigation guard: warn before leaving while new invoice form is open ──
   // In-app confirmation. NOT window.confirm: the desktop shell returns false
@@ -771,11 +783,12 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     if (!selectedId || missedByInv[selectedId] !== undefined) return
     const id = selectedId
     setMissedByInv(prev => ({ ...prev, [id]: 'loading' }))
-    findMissedTasks(id).then(res => {
+    previewInvoiceRefresh(id).then(res => {
       setMissedByInv(prev => ({
         ...prev,
-        [id]: res.ok ? (res.data || []).filter(t => !packageCoveredIds.has(t.id)) : 'error',
+        [id]: res.ok ? (res.data?.add || []).filter(t => !packageCoveredIds.has(t.id)) : 'error',
       }))
+      if (res.ok && res.data) setChangesByInv(prev => ({ ...prev, [id]: { update: res.data!.update, remove: res.data!.remove } }))
     }).catch(() => setMissedByInv(prev => ({ ...prev, [id]: 'error' })))
   }, [selectedId, missedByInv, packageCoveredIds])
 
@@ -1619,6 +1632,39 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     mq.addEventListener('change', sync)
     return () => mq.removeEventListener('change', sync)
   }, [])
+
+  /** Open Refresh from tasks with every change ticked — untick what to keep as it is. */
+  function openRefresh(inv: Invoice) {
+    const missed = Array.isArray(missedByInv[inv.id]) ? missedByInv[inv.id] as MissedTask[] : []
+    const ch = changesByInv[inv.id] || { update: [], remove: [] }
+    setRefreshSel({
+      add: new Set(missed.map(t => t.id)),
+      update: new Set(ch.update.map(u => u.itemId)),
+      remove: new Set(ch.remove.map(r => r.itemId)),
+    })
+    setRefreshReason('')
+    setRefreshFor(inv.id)
+  }
+
+  async function applyRefresh(inv: Invoice) {
+    setRefreshing(true)
+    try {
+      const res = await applyInvoiceRefresh(inv.id, {
+        add: [...refreshSel.add], update: [...refreshSel.update], remove: [...refreshSel.remove],
+      }, refreshReason.trim() || undefined)
+      if (!res.ok) { toastError(res.error || 'Could not refresh the invoice'); return }
+      const d = res.data!
+      const parts = [
+        d.added && `${d.added} added`, d.updated && `${d.updated} updated`, d.removed && `${d.removed} removed`,
+      ].filter(Boolean)
+      success(parts.length ? `Lines ${parts.join(', ')}` : 'Nothing needed changing', `${inv.invoice_number} refreshed`)
+      setRefreshFor(null)
+      // The refresh brings back the new lines and totals and re-runs the check.
+      router.refresh()
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   async function addMissedTasks(inv: Invoice) {
     const ids = [...missedSel]
@@ -3010,6 +3056,8 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
 
     const missedState = missedByInv[inv.id]
     const missed = Array.isArray(missedState) ? missedState : []
+    const lineChanges = changesByInv[inv.id] || { update: [], remove: [] }
+    const changeCount = lineChanges.update.length + lineChanges.remove.length
     // Where missed work can go: straight onto a draft/reviewed invoice, onto a
     // sent one with a reason, and never onto a settled or closed one.
     const missedNeedsReason = ['sent', 'partial', 'overdue'].includes(inv.status)
@@ -3117,10 +3165,10 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                   detailView === t.id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                 )}>
                 <t.icon className="w-3.5 h-3.5" /><span className="hidden sm:inline">{t.label}</span>
-                {t.id === 'edit' && (lineIssues.size + missed.length) > 0 && (
-                  <span title={`${lineIssues.size} line${lineIssues.size === 1 ? '' : 's'} to check · ${missed.length} missed task${missed.length === 1 ? '' : 's'}`}
+                {t.id === 'edit' && (lineIssues.size + missed.length + changeCount) > 0 && (
+                  <span title={`${lineIssues.size} line${lineIssues.size === 1 ? '' : 's'} to check · ${missed.length} missed task${missed.length === 1 ? '' : 's'} · ${changeCount} out of date`}
                     className="rounded-full bg-amber-500/20 px-1.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300 tabular-nums">
-                    {lineIssues.size + missed.length}
+                    {lineIssues.size + missed.length + changeCount}
                   </span>
                 )}
               </button>
@@ -3199,6 +3247,9 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                   onClick: () => { if (forceEdit) lockEdit(); else { setDetailView('edit'); requestEditUnlock(inv.id) } }, separatorBefore: true }] : []),
             ...(inv.status === 'draft'
               ? [{ label: 'Re-sync lines from tasks', icon: ListRestart, onClick: () => handleResync(inv.id), disabled: saving }] : []),
+            ...(canEditBilling && !missedClosed
+              ? [{ label: 'Refresh from tasks', icon: RefreshCw, onClick: () => openRefresh(inv),
+                  badge: (missed.length + changeCount) || undefined, separatorBefore: inv.status !== 'draft' && isEditable(inv.status) }] : []),
             { label: 'Delete invoice', icon: Trash2, onClick: () => confirmDelete(inv.id), danger: true, separatorBefore: true },
           ]} />
         </div>
@@ -3269,11 +3320,16 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                     className="px-1.5 py-1 text-muted-foreground hover:text-foreground rounded-r-md"><ZoomIn className="w-3.5 h-3.5" /></button>
                 </div>
               </div>
-              {missed.length > 0 && (
-                <button onClick={() => setDetailView('edit')}
+              {(missed.length + changeCount) > 0 && (
+                <button onClick={() => (canEditBilling && !missedClosed) ? openRefresh(inv) : setDetailView('edit')}
                   className="shrink-0 flex items-center gap-2 px-4 py-1.5 sm:px-5 text-left text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 border-b border-amber-500/20 hover:bg-amber-500/15">
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                  <span className="flex-1">{missed.length} finished task{missed.length === 1 ? '' : 's'} for {inv.client?.name || 'this client'} {missed.length === 1 ? 'is' : 'are'} on no invoice.</span>
+                  <span className="flex-1">
+                    {[
+                      missed.length && `${missed.length} finished task${missed.length === 1 ? '' : 's'} not on any invoice`,
+                      changeCount && `${changeCount} line${changeCount === 1 ? '' : 's'} out of date with ${changeCount === 1 ? 'its task' : 'their tasks'}`,
+                    ].filter(Boolean).join(' · ')}
+                  </span>
                   <span className="font-semibold underline-offset-2 hover:underline">Review</span>
                 </button>
               )}
@@ -3370,6 +3426,24 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                 with your reason: <span className="font-semibold">{forceEditReason}</span>
               </span>
               <button onClick={lockEdit} className="rounded-md border border-amber-500/40 px-2 py-0.5 font-medium hover:bg-amber-500/15">Done correcting</button>
+            </div>
+          )}
+
+          {changeCount > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/[0.06] px-3 py-2.5 text-xs text-amber-800 dark:text-amber-300">
+              <RefreshCw className="w-4 h-4 shrink-0" />
+              <span className="flex-1 min-w-[200px]">
+                {[
+                  lineChanges.update.length && `${lineChanges.update.length} line${lineChanges.update.length === 1 ? '' : 's'} whose task changed`,
+                  lineChanges.remove.length && `${lineChanges.remove.length} line${lineChanges.remove.length === 1 ? '' : 's'} whose task was deleted, cancelled or waived`,
+                ].filter(Boolean).join(' · ')}
+              </span>
+              {canEditBilling && !missedClosed && (
+                <button onClick={() => openRefresh(inv)}
+                  className="rounded-lg bg-amber-600 px-3 py-1.5 font-semibold text-white hover:bg-amber-500">
+                  Review and refresh
+                </button>
+              )}
             </div>
           )}
 
@@ -4394,6 +4468,152 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
         </div>
         </div>
       </div>
+    )
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Refresh from tasks — preview every change, apply the ones ticked
+  // ─────────────────────────────────────────────────────────────────
+  function renderRefreshDialog(inv: Invoice) {
+    const missed = Array.isArray(missedByInv[inv.id]) ? missedByInv[inv.id] as MissedTask[] : []
+    const ch = changesByInv[inv.id] || { update: [], remove: [] }
+    const total = missed.length + ch.update.length + ch.remove.length
+    const picked = refreshSel.add.size + refreshSel.update.size + refreshSel.remove.size
+    const needsReason = ['sent', 'partial', 'overdue'].includes(inv.status)
+    const closed = ['paid', 'cancelled', 'bad_debt'].includes(inv.status)
+    const toggle = (kind: 'add' | 'update' | 'remove', id: string) => setRefreshSel(prev => {
+      const next = new Set(prev[kind]); if (next.has(id)) next.delete(id); else next.add(id)
+      return { ...prev, [kind]: next }
+    })
+    const FIELD_LABEL: Record<string, string> = { description: 'Title', quantity: 'Qty', price: 'Amount' }
+    const WHY_LABEL: Record<string, string> = {
+      deleted: 'Task deleted', cancelled: 'Task cancelled', waived: 'Task marked not billable', missing: 'Task no longer exists',
+    }
+    const show = (field: string, v: string | number | undefined) =>
+      v === undefined ? '' : field === 'price' ? fmt(Number(v), inv.currency) : String(v)
+
+    // Rough new total, for someone who can see prices: what the ticked changes
+    // add to or take off the subtotal, then tax/discount/previous balance as
+    // the invoice already has them. The server recalculates it exactly.
+    let estimate: number | null = null
+    if (showLinePricing) {
+      let delta = 0
+      for (const t of missed) if (refreshSel.add.has(t.id)) delta += Number(t.billing_amount || 0)
+      for (const u of ch.update) {
+        const p = u.changes.find(c => c.field === 'price')
+        if (refreshSel.update.has(u.itemId) && p) delta += Number(p.to || 0) - Number(p.from || 0)
+      }
+      for (const r of ch.remove) if (refreshSel.remove.has(r.itemId)) delta -= Number(r.total || 0)
+      const sub = (inv.subtotal || 0) + delta
+      const tax = (inv.tax_rate || 0) > 0 ? sub * (inv.tax_rate || 0) / 100 : (inv.tax_amount || 0)
+      estimate = Math.max(0, round2(sub + tax - (inv.discount_amount || 0) + (inv.previous_balance || 0)))
+    }
+
+    const section = (title: string, count: number, children: React.ReactNode) => count > 0 && (
+      <div>
+        <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{title} · {count}</div>
+        <div className="divide-y divide-border/40 rounded-xl border border-border/50 bg-background">{children}</div>
+      </div>
+    )
+    const row = (key: string, checked: boolean, onChange: () => void, body: React.ReactNode, amount?: React.ReactNode) => (
+      <label key={key} className="flex cursor-pointer items-start gap-2.5 px-3 py-2 hover:bg-secondary/40">
+        <input type="checkbox" className="mt-0.5 h-4 w-4 accent-violet-600" checked={checked} onChange={onChange} />
+        <span className="min-w-0 flex-1 text-xs">{body}</span>
+        {amount !== undefined && <span className="shrink-0 text-xs font-semibold tabular-nums">{amount}</span>}
+      </label>
+    )
+
+    return (
+      <ModalOverlay onClose={() => !refreshing && setRefreshFor(null)} zIndex="z-[300]">
+        <div className="flex max-h-[90dvh] w-[min(640px,96vw)] flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-2xl">
+          <div className="flex items-start justify-between gap-3 border-b border-border/50 px-5 py-4">
+            <div>
+              <h3 className="flex items-center gap-2 font-semibold"><RefreshCw className="h-4 w-4 text-violet-500" />Refresh from tasks</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {inv.invoice_number} · {inv.client?.name} — bring the lines in line with the tasks as they are now. Untick anything to keep as it is.
+              </p>
+            </div>
+            <button onClick={() => setRefreshFor(null)} disabled={refreshing} aria-label="Close"
+              className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"><X className="h-4 w-4" /></button>
+          </div>
+
+          <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+            {total === 0 && (
+              <div className="flex flex-col items-center gap-2 py-8 text-center text-sm text-muted-foreground">
+                <CheckCircle className="h-6 w-6 text-emerald-500" />
+                Every line matches its task, and no finished task is missing.
+              </div>
+            )}
+            {section('Add — finished tasks on no invoice', missed.length, missed.map(t => row(t.id,
+              refreshSel.add.has(t.id), () => toggle('add', t.id),
+              <>
+                <span className="block truncate font-medium">{t.title}</span>
+                <span className="text-muted-foreground">{t.task_date ? fmtDate(t.task_date) : ''}{t.service_name ? ` · ${t.service_name}` : ''}</span>
+              </>,
+              t.billing_amount !== undefined ? `+${fmt(t.billing_amount, (t.currency || 'INR') as Currency)}` : undefined,
+            )))}
+            {section('Update — the task changed', ch.update.length, ch.update.map(u => row(u.itemId,
+              refreshSel.update.has(u.itemId), () => toggle('update', u.itemId),
+              <>
+                <span className="block truncate font-medium">{u.next.description}</span>
+                {u.changes.map(c => (
+                  <span key={c.field} className="block text-muted-foreground">
+                    {FIELD_LABEL[c.field]}: {c.from === undefined
+                      ? 'changed'
+                      : <><span className="line-through opacity-70">{show(c.field, c.from)}</span> → <span className="font-medium text-foreground">{show(c.field, c.to)}</span></>}
+                  </span>
+                ))}
+              </>,
+            )))}
+            {section('Remove — the task is no longer billable', ch.remove.length, ch.remove.map(r => row(r.itemId,
+              refreshSel.remove.has(r.itemId), () => toggle('remove', r.itemId),
+              <>
+                <span className="block truncate font-medium">{r.description || 'Untitled line'}</span>
+                <span className="text-red-600 dark:text-red-400">{WHY_LABEL[r.why]}</span>
+              </>,
+              r.total !== undefined ? `−${fmt(r.total, inv.currency)}` : undefined,
+            )))}
+          </div>
+
+          <div className="space-y-2.5 border-t border-border/50 px-5 py-3.5">
+            {estimate !== null && picked > 0 && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Invoice total</span>
+                <span className="tabular-nums">
+                  <span className="text-muted-foreground line-through">{fmt(inv.total_amount, inv.currency)}</span>
+                  {' → '}<span className="font-semibold">{fmt(estimate, inv.currency)}</span>
+                  {(inv.paid_amount || 0) > estimate && <span className="ml-2 text-amber-600 dark:text-amber-400">less than already paid</span>}
+                </span>
+              </div>
+            )}
+            {closed ? (
+              <p className="text-xs text-muted-foreground">
+                This invoice is {getStatusLabel(inv.status).toLowerCase()}, so its lines can&apos;t change here. Change its status first, or put the work on the client&apos;s current draft.
+              </p>
+            ) : (
+              <>
+                {needsReason && total > 0 && (
+                  <input value={refreshReason} onChange={e => setRefreshReason(e.target.value)} autoFocus
+                    placeholder="Reason — this invoice was already sent (kept in Edit history)"
+                    className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-xs focus:border-violet-500 focus:outline-none" />
+                )}
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setRefreshFor(null)} disabled={refreshing}
+                    className="rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-secondary">Cancel</button>
+                  {total > 0 && (
+                    <button onClick={() => applyRefresh(inv)}
+                      disabled={refreshing || picked === 0 || (needsReason && !refreshReason.trim())}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-violet-500 disabled:opacity-50">
+                      {refreshing && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
+                      Apply {picked} change{picked === 1 ? '' : 's'}
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </ModalOverlay>
     )
   }
 
@@ -6067,6 +6287,12 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
           </div>
         )}
       </div>
+
+      {refreshFor && (() => {
+        const inv = invoices.find(i => i.id === refreshFor)
+        if (!inv) return null
+        return renderRefreshDialog(inv)
+      })()}
 
       {/* ── Edit Reason Modal ─────────────────────────────────────────────────── */}
       {editReasonModal && (

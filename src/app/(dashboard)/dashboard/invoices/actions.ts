@@ -17,7 +17,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { syncDraftInvoices, syncDraftInvoiceExpenses } from '@/lib/sync/integrity'
 import { syncInvoicePackageLines } from '@/lib/packages/sync-invoice'
 import { round2 as r2 } from '@/lib/calculations/currency'
-import type { MissedTask } from '@/lib/invoices/missed-tasks'
+import type { MissedTask, InvoiceRefreshPreview } from '@/lib/invoices/missed-tasks'
+import { diffInvoiceAgainstTasks, stripDiffPrices, taskLineTotal, type RefreshLine, type RefreshTask } from '@/lib/invoices/refresh-diff'
 
 interface ActionResult<T = void> {
   ok: boolean
@@ -274,54 +275,19 @@ export async function addTasksToInvoice(
   if (!taskIds.length) return { ok: false, error: 'No tasks selected' }
 
   const admin = createAdminClient()
-  const { data: inv } = await admin.from('invoices')
-    .select('id, client_id, status, tax_rate, tax_amount, discount_amount, previous_balance')
-    .eq('id', invoiceId).maybeSingle()
-  if (!inv) return { ok: false, error: 'Invoice not found' }
+  const gate = await loadEditableInvoice(admin, invoiceId, reason)
+  if (!gate.ok) return { ok: false, error: gate.error }
+  const { inv, needsReason } = gate
 
-  const open = (ADD_LINES_OPEN as readonly string[]).includes(inv.status)
-  const needsReason = (ADD_LINES_WITH_REASON as readonly string[]).includes(inv.status)
-  if (!open && !needsReason) {
-    return { ok: false, error: `This invoice is ${inv.status}. Add the tasks to the next draft instead.` }
-  }
-  if (needsReason && !reason?.trim()) {
-    return { ok: false, error: 'This invoice has been sent — give a reason for adding lines.' }
-  }
-
-  const { data: tasks } = await admin.from('tasks')
-    .select('id, title, task_date, client_id, status, quantity, currency, billing_amount, billing_amount_inr, is_billable, deleted_at')
-    .in('id', taskIds)
-  // Re-check on the server: right client, still billable, and not billed in
-  // the meantime by another tab or the automatic sync.
-  const billed = await tasksOnLiveInvoices(admin, taskIds)
-  const eligible = (tasks || []).filter(t =>
-    t.client_id === inv.client_id && !t.deleted_at && t.is_billable !== false
-    && ['done', 'invoiced'].includes(t.status) && !billed.has(t.id))
-  if (!eligible.length) return { ok: false, error: 'Those tasks are already on an invoice.' }
-
-  const { count } = await admin.from('invoice_items')
-    .select('id', { count: 'exact', head: true }).eq('invoice_id', invoiceId)
-  const offset = count || 0
-  // Same convention as Generate from tasks: billing_amount is the line total
-  // in the task's own currency; the rate is derived back out of it.
-  const { error: insErr } = await admin.from('invoice_items').insert(
-    eligible.map((t, idx) => {
-      const qty = Number(t.quantity ?? 1) || 1
-      const total = Number(t.billing_amount ?? t.billing_amount_inr ?? 0)
-      return {
-        invoice_id: invoiceId, task_id: t.id, description: t.title,
-        quantity: qty, unit_price: r2(total / qty), total,
-        currency: t.currency || 'INR', display_order: offset + idx,
-      }
-    }),
-  )
-  if (insErr) return { ok: false, error: insErr.message }
+  const added = await insertTaskLines(admin, inv, taskIds)
+  if (typeof added === 'string') return { ok: false, error: added }
+  if (!added.length) return { ok: false, error: 'Those tasks are already on an invoice.' }
 
   if (needsReason) {
-    await admin.from('tasks').update({ status: 'invoiced' }).in('id', eligible.map(t => t.id))
+    await admin.from('tasks').update({ status: 'invoiced' }).in('id', added.map(t => t.id))
     await admin.from('invoice_change_logs').insert({
       invoice_id: invoiceId, field_name: 'items_added',
-      old_value: '', new_value: eligible.map(t => t.title).join('; '), reason: reason!.trim(),
+      old_value: '', new_value: added.map(t => t.title).join('; '), reason: reason!.trim(),
     })
   } else {
     // A draft's package lines collapse covered tasks back into the fee line.
@@ -330,7 +296,174 @@ export async function addTasksToInvoice(
 
   await recalcInvoiceTotals(admin, invoiceId)
   revalidatePath('/dashboard/invoices')
-  return { ok: true, data: { added: eligible.length } }
+  return { ok: true, data: { added: added.length } }
+}
+
+// ── Refresh from tasks ───────────────────────────────────────────────────────
+//
+// Brings a reviewed or sent invoice back in line with its tasks without
+// deleting it: adds the finished tasks it is missing, rewrites lines whose task
+// changed, and drops lines whose task was deleted, cancelled or waived. The
+// person sees every change first (preview) and picks which to apply.
+
+/**
+ * Everything Refresh would change. Loaded when an invoice opens, so the panel
+ * can say "2 changes since this was sent" without being asked.
+ */
+export async function previewInvoiceRefresh(
+  invoiceId: string,
+): Promise<ActionResult<InvoiceRefreshPreview>> {
+  const guard = await requireReadPermission(PERMS.BILLING_VIEW_INVOICES)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const me = await loadCurrentUser().catch(() => null)
+  const vis = financialVisibility(me)
+  const admin = createAdminClient()
+
+  const missed = await findMissedTasks(invoiceId)
+  if (!missed.ok) return { ok: false, error: missed.error }
+
+  const diff = await loadRefreshDiff(admin, invoiceId)
+  if (typeof diff === 'string') return { ok: false, error: diff }
+
+  const preview: InvoiceRefreshPreview = { add: missed.data || [], update: diff.update, remove: diff.remove }
+  return { ok: true, data: vis.billingLinePricing ? preview : stripDiffPrices(preview) }
+}
+
+/**
+ * Apply the chosen parts of a refresh. The diff is worked out again here and
+ * only ids still in it are applied, so a stale screen can't write stale lines.
+ */
+export async function applyInvoiceRefresh(
+  invoiceId: string,
+  selection: { add: string[]; update: string[]; remove: string[] },
+  reason?: string,
+): Promise<ActionResult<{ added: number; updated: number; removed: number }>> {
+  const guard = await requirePermission(PERMS.BILLING_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!selection.add.length && !selection.update.length && !selection.remove.length) {
+    return { ok: false, error: 'Nothing selected' }
+  }
+
+  const admin = createAdminClient()
+  const gate = await loadEditableInvoice(admin, invoiceId, reason)
+  if (!gate.ok) return { ok: false, error: gate.error }
+  const { inv, needsReason } = gate
+
+  const diff = await loadRefreshDiff(admin, invoiceId)
+  if (typeof diff === 'string') return { ok: false, error: diff }
+  const updates = diff.update.filter(u => selection.update.includes(u.itemId))
+  const removals = diff.remove.filter(r => selection.remove.includes(r.itemId))
+
+  for (const u of updates) {
+    await admin.from('invoice_items').update({
+      description: u.next.description, quantity: u.next.quantity,
+      unit_price: u.next.unit_price, total: u.next.total,
+    }).eq('id', u.itemId)
+  }
+  if (removals.length) {
+    await admin.from('invoice_items').delete().in('id', removals.map(r => r.itemId))
+  }
+  const added = selection.add.length ? await insertTaskLines(admin, inv, selection.add) : []
+  if (typeof added === 'string') return { ok: false, error: added }
+
+  if (needsReason) {
+    if (added.length) await admin.from('tasks').update({ status: 'invoiced' }).in('id', added.map(t => t.id))
+    const r = reason!.trim()
+    const logs = [
+      ...(added.length ? [{ field_name: 'items_added', old_value: '', new_value: added.map(t => t.title).join('; ') }] : []),
+      ...updates.map(u => ({
+        field_name: 'item_refreshed',
+        old_value: u.changes.map(c => `${c.field}: ${c.from ?? ''}`).join('; '),
+        new_value: u.changes.map(c => `${c.field}: ${c.to ?? ''}`).join('; '),
+      })),
+      ...removals.map(x => ({ field_name: 'item_removed', old_value: x.description, new_value: `task ${x.why}` })),
+    ]
+    if (logs.length) await admin.from('invoice_change_logs').insert(logs.map(l => ({ ...l, invoice_id: invoiceId, reason: r })))
+  } else {
+    try { await syncInvoicePackageLines(admin, invoiceId) } catch { /* best-effort */ }
+  }
+
+  await recalcInvoiceTotals(admin, invoiceId)
+  revalidatePath('/dashboard/invoices')
+  return { ok: true, data: { added: added.length, updated: updates.length, removed: removals.length } }
+}
+
+/**
+ * Who may change an invoice's lines, and on what terms: draft and reviewed
+ * freely, sent ones only with a reason, settled or closed ones not at all.
+ */
+async function loadEditableInvoice(
+  admin: ReturnType<typeof createAdminClient>,
+  invoiceId: string,
+  reason?: string,
+): Promise<{ ok: true; inv: { id: string; client_id: string; status: string }; needsReason: boolean } | { ok: false; error: string }> {
+  const { data: inv } = await admin.from('invoices')
+    .select('id, client_id, status').eq('id', invoiceId).maybeSingle()
+  if (!inv) return { ok: false, error: 'Invoice not found' }
+  const open = (ADD_LINES_OPEN as readonly string[]).includes(inv.status)
+  const needsReason = (ADD_LINES_WITH_REASON as readonly string[]).includes(inv.status)
+  if (!open && !needsReason) {
+    return { ok: false, error: `This invoice is ${inv.status}. Change its status first, or put the work on the next draft.` }
+  }
+  if (needsReason && !reason?.trim()) {
+    return { ok: false, error: 'This invoice has been sent — give a reason for changing its lines.' }
+  }
+  return { ok: true, inv, needsReason }
+}
+
+/**
+ * Add finished tasks as lines, priced from the task exactly as Generate from
+ * tasks does. Re-checks each task on the server — right client, still billable,
+ * not under a package, not billed meanwhile — and returns the ones added.
+ */
+async function insertTaskLines(
+  admin: ReturnType<typeof createAdminClient>,
+  inv: { id: string; client_id: string },
+  taskIds: string[],
+): Promise<{ id: string; title: string }[] | string> {
+  const { data: tasks } = await admin.from('tasks')
+    .select('id, title, client_id, status, quantity, currency, billing_amount, billing_amount_inr, is_billable, deleted_at, package_id')
+    .in('id', taskIds)
+  const billed = await tasksOnLiveInvoices(admin, taskIds)
+  const eligible = (tasks || []).filter(t =>
+    t.client_id === inv.client_id && !t.deleted_at && t.is_billable !== false && !t.package_id
+    && ['done', 'invoiced'].includes(t.status) && !billed.has(t.id))
+  if (!eligible.length) return []
+
+  const { count } = await admin.from('invoice_items')
+    .select('id', { count: 'exact', head: true }).eq('invoice_id', inv.id)
+  const offset = count || 0
+  const { error } = await admin.from('invoice_items').insert(
+    eligible.map((t, idx) => {
+      const qty = Number(t.quantity ?? 1) || 1
+      const total = taskLineTotal(t)
+      return {
+        invoice_id: inv.id, task_id: t.id, description: t.title,
+        quantity: qty, unit_price: r2(total / qty), total,
+        currency: t.currency || 'INR', display_order: offset + idx,
+      }
+    }),
+  )
+  if (error) return error.message
+  return eligible.map(t => ({ id: t.id, title: t.title }))
+}
+
+/** This invoice's task lines compared with their tasks as they are now. */
+async function loadRefreshDiff(admin: ReturnType<typeof createAdminClient>, invoiceId: string) {
+  const { data: lines, error } = await admin.from('invoice_items')
+    .select('id, task_id, package_id, description, quantity, unit_price, total, currency')
+    .eq('invoice_id', invoiceId)
+  if (error) return error.message
+  const taskIds = [...new Set((lines || []).map(l => l.task_id).filter(Boolean))] as string[]
+  const tasks = new Map<string, RefreshTask>()
+  for (let i = 0; i < taskIds.length; i += 200) {
+    const { data } = await admin.from('tasks')
+      .select('id, title, quantity, billing_amount, billing_amount_inr, currency, status, deleted_at, is_billable, package_id')
+      .in('id', taskIds.slice(i, i + 200))
+    for (const t of (data || []) as RefreshTask[]) tasks.set(t.id, t)
+  }
+  return diffInvoiceAgainstTasks((lines || []) as RefreshLine[], tasks)
 }
 
 /** Task ids that already sit on a line of any invoice that is not cancelled. */
