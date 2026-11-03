@@ -328,7 +328,7 @@ export default async function SocialCalendarPage({
   // Services power the item modal's Service picker — the same catalogue the
   // Requests form uses, so calendar items align with request types.
   const services = (await admin
-    .from('services').select('id, name').eq('is_active', true)
+    .from('services').select('id, name, category_id').eq('is_active', true)
     .order('display_order').order('name')).data || []
 
   // Full settings map: the PDF export borrows the invoice template's branding

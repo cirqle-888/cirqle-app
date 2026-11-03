@@ -30,7 +30,7 @@ import {
   PLATFORMS, PLATFORM_LABEL, platformLabels, contentTypeWithVariants,
   PROGRESS_LABEL, PROGRESS_CHIP, resolveItemProgress, isClosedRequestStatus,
   isUnrouted, canPullBack, isPlanFrozen, isFinishedItem,
-  formatShortDateRange, suggestServiceId, type CaptionCanvas,
+  formatShortDateRange, suggestServiceId, suggestContentType, type CaptionCanvas,
   type ItemProgress,
 } from '@/lib/social/plan'
 import {
@@ -121,7 +121,7 @@ interface Props {
     task_date: string; status: string; service_name: string | null
   }[]
   clients: { id: string; name: string; code: string; is_draft?: boolean | null }[]
-  services?: { id: string; name: string }[]
+  services?: { id: string; name: string; category_id?: string | null }[]
   /** Variant tags used across every plan — autocomplete for the "Also as" field. */
   knownVariants?: string[]
   /** Active employees for the designer picker. CQID ONLY — employee names are
@@ -141,10 +141,11 @@ interface Props {
   canManage: boolean
 }
 
-// Service assignment is fully automatic (server-side, from the Service-defaults
-// mapping + keyword fallback in @/lib/social/plan) — planners never pick one.
-// The gear-icon "Service defaults" modal below is where the team edits that
-// mapping; `services`/`serviceMap` props exist only to power it.
+// The item form asks for the SERVICE (what pricing, routing and the designer
+// picker run on) and derives the content type from it, so any service —
+// Logo Design as much as a Social Media Poster — can be planned. Quick add
+// still types a content type and lets the server resolve the service from
+// the gear-icon "Service defaults" mapping.
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December']
@@ -330,6 +331,35 @@ export default function SocialCalendarClient({
   // straight after. Reading storage in the initialiser would hydrate a different
   // tree than the server sent.
   const serviceNameById = (id: string) => services.find(s => s.id === id)?.name ?? 'Deliverable'
+
+  // Service picker order: what this calendar already plans, then social media
+  // services, then everything else. "Social" is the category of the services
+  // the Service-defaults mapping points at (so Stories, DPs and covers come
+  // along with the Poster), with a name match when nothing is mapped yet.
+  const serviceGroups = useMemo(() => {
+    const byId = new Map(services.map(s => [s.id, s]))
+    const recent: string[] = []
+    for (const it of [...items].sort((a, b) => (b.scheduled_date ?? '').localeCompare(a.scheduled_date ?? ''))) {
+      const sid = it.service_id
+      if (sid && byId.has(sid) && !recent.includes(sid)) recent.push(sid)
+      if (recent.length >= 6) break
+    }
+    const socialCats = new Set(Object.values(serviceMap)
+      .map(id => byId.get(id)?.category_id).filter(Boolean) as string[])
+    const isSocial = (s: { name: string; category_id?: string | null }) => socialCats.size
+      ? !!s.category_id && socialCats.has(s.category_id)
+      : /social|post|reel|story|stories|carousel/i.test(s.name)
+    const rest = services.filter(s => !recent.includes(s.id))
+    const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name)
+    return {
+      recent: recent.map(id => byId.get(id)!),
+      social: rest.filter(isSocial),
+      other: rest.filter(s => !isSocial(s)).sort(byName),
+    }
+  }, [items, services, serviceMap])
+  /** A new item starts on the service this calendar planned last, else the Post default. */
+  const defaultServiceId = (): string | null =>
+    serviceGroups.recent[0]?.id ?? suggestServiceId('post', services, serviceMap) ?? serviceGroups.social[0]?.id ?? null
 
   const [showHints, setShowHints] = useState(true)
   useEffect(() => {
@@ -595,6 +625,9 @@ export default function SocialCalendarClient({
       scheduledDate: it.scheduled_date ?? '', scheduledEndDate: it.scheduled_end_date ?? '',
       scheduledTime: it.scheduled_time ?? null, postAsap: !!it.post_asap,
       title: it.title, contentType: it.content_type, platforms: it.platforms ?? [],
+      // Keep the item's service; an older item without one shows the service
+      // its content type resolves to, which is what the server would assign.
+      serviceId: it.service_id ?? suggestServiceId(it.content_type, services, serviceMap),
       assignedEmployeeId: it.assigned_employee_id ?? null,
       caption: it.caption ?? '', notes: it.notes ?? '',
       variants: it.variants ?? [], referenceUrls: itemRefs(it),
@@ -1374,7 +1407,7 @@ export default function SocialCalendarClient({
                         className={`flex flex-col h-full w-full p-1.5 ${canManage && cell.inMonth ? 'cursor-pointer hover:bg-secondary/30 transition-colors' : ''}`}
                         onClick={() => {
                           if (!canManage || !cell.inMonth) return
-                          setItemForm({ ...EMPTY_ITEM, scheduledDate: cell.key })
+                          setItemForm({ ...EMPTY_ITEM, scheduledDate: cell.key, serviceId: defaultServiceId() })
                           setShowAllDesigners(false)
                           setItemModal({ mode: 'add' })
                         }}
@@ -1779,33 +1812,61 @@ export default function SocialCalendarClient({
                   links: d.links,
                 }))}
                 disabled={editingFrozen}
-                contentTypeRequired
+                showContentType={false}
                 titlePlaceholder="e.g. Diwali teaser reel"
                 onError={(t, d) => toast.toastError(t, d)}
                 typeSide={
                 <div>
+                  <label className="block text-xs font-medium text-foreground/80 mb-1.5">
+                    Service <span className="text-red-500">*</span>
+                  </label>
+                  {/* The service decides pricing, routing and who can draw it;
+                      the content type (chip colour, brief) follows from it. */}
+                  <Combobox
+                    options={[
+                      ...serviceGroups.recent.map(s => ({ id: s.id, label: s.name, group: 'Planned on this calendar' })),
+                      ...serviceGroups.social.map(s => ({ id: s.id, label: s.name, group: 'Social media' })),
+                      // Ungrouped: the rest keeps the picker's own
+                      // recently / frequently used order, searchable.
+                      ...serviceGroups.other.map(s => ({ id: s.id, label: s.name })),
+                    ]}
+                    value={itemForm.serviceId ?? ''}
+                    disabled={editingFrozen}
+                    placeholder="Search services…"
+                    sortKey="services"
+                    onChange={id => {
+                      const serviceId = id || null
+                      const contentType = suggestContentType(serviceId, services, serviceMap) ?? 'other'
+                      setItemForm(p => ({
+                        ...p, serviceId, contentType,
+                        variants: (p.variants ?? []).filter(v => v !== contentType),
+                      }))
+                    }}
+                  />
+                </div>
+                }
+              >
+                <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+                <div>
                   <label className="block text-xs font-medium text-foreground/80 mb-1.5" title="Leave blank to keep it on the Idea Board">
-                    {itemForm.scheduledEndDate ? 'Start date' : 'Date'} <span className="text-muted-foreground/60">(blank = idea)</span>
+                    {itemForm.scheduledEndDate ? 'Start date' : 'Date'} <span className="text-muted-foreground/60 font-normal">(blank = idea)</span>
                   </label>
                   <input
                     type="date" value={itemForm.scheduledDate ?? ''} disabled={editingFrozen}
                     onChange={e => setItemForm(p => ({ ...p, scheduledDate: e.target.value }))}
                     className="w-full h-10 bg-background border border-border rounded-lg px-3 text-sm focus:outline-none focus:border-violet-500/50 disabled:opacity-60"
                   />
-                  <div className="mt-3">
-                    <PostingTimeField
-                      clientId={selected?.client_id}
-                      isoDate={itemForm.scheduledDate || null}
-                      value={itemForm.scheduledTime}
-                      asap={itemForm.postAsap}
-                      disabled={editingFrozen}
-                      onChange={({ time, asap }) => setItemForm(p => ({ ...p, scheduledTime: time, postAsap: asap }))}
-                    />
-                  </div>
                 </div>
-                }
-              >
-                <div className="space-y-3">
+                <PostingTimeField
+                  clientId={selected?.client_id}
+                  isoDate={itemForm.scheduledDate || null}
+                  value={itemForm.scheduledTime}
+                  asap={itemForm.postAsap}
+                  disabled={editingFrozen}
+                  onChange={({ time, asap }) => setItemForm(p => ({ ...p, scheduledTime: time, postAsap: asap }))}
+                />
+              </div>
               {/* Multi-day run (campaigns, SEO sprints, email series). */}
               {itemForm.scheduledEndDate ? (
                 <div className="flex items-end gap-2">
@@ -1933,7 +1994,7 @@ export default function SocialCalendarClient({
                 // cannot be trusted: no resolvable service, or nobody assigned
                 // to it yet. A half-configured catalogue must never leave the
                 // planner with an empty picker.
-                const scopedServiceId = suggestServiceId(itemForm.contentType, services, serviceMap)
+                const scopedServiceId = itemForm.serviceId ?? suggestServiceId(itemForm.contentType, services, serviceMap)
                 const matches = scopedServiceId
                   ? employees.filter(e => (employeeServices[e.id] || []).includes(scopedServiceId))
                   : []
@@ -2121,7 +2182,7 @@ export default function SocialCalendarClient({
               {!editingFrozen && (
                 <button
                   onClick={submitItem}
-                  disabled={savingItem || !itemForm.title.trim()}
+                  disabled={savingItem || !itemForm.title.trim() || !itemForm.serviceId}
                   className="gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 disabled:opacity-50"
                 >
                   {savingItem ? 'Saving…' : itemModal.mode === 'add' ? 'Plan Item' : 'Save Changes'}
