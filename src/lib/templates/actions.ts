@@ -52,8 +52,13 @@ const REVALIDATE = '/dashboard/requests'
  * the same preview, the same duplicate rule and the same writer. Built-ins
  * cannot be edited or deleted — `validateTemplate` refuses the reserved id
  * prefix — which is also why the old button keeps working unchanged.
+ *
+ * Not exported: a 'use server' module may only export async functions. An
+ * exported array here made the module throw on load, which failed EVERY
+ * server action on the Requests page — the request timeline sat on
+ * "Loading…" forever. Read them through `listTemplates()`.
  */
-export const BUILT_IN_TEMPLATES: readonly TaskTemplate[] = [
+const BUILT_IN_TEMPLATES: readonly TaskTemplate[] = [
   {
     id: `${BUILTIN_PREFIX}brand-onboarding`,
     name: 'Brand onboarding',

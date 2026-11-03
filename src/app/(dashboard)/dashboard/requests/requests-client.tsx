@@ -700,9 +700,16 @@ export default function RequestsClient({
       void markRequestViewed(r.id)
       setRequests(prev => prev.map(x => x.id === r.id ? { ...x, last_staff_viewed_at: new Date().toISOString() } : x))
     }
+    // A failed call must still end the spinner — otherwise "Loading…" is all
+    // the panel ever shows, with nothing to say the timeline didn't load.
     if (perms.activity) {
-      const res = await getRequestTimeline(r.id)
-      if (res.ok && res.data) { setTimeline(res.data.rows); setRevisions(res.data.revisions) }
+      try {
+        const res = await getRequestTimeline(r.id)
+        if (res.ok && res.data) { setTimeline(res.data.rows); setRevisions(res.data.revisions) }
+        else toastError("Couldn't load the activity", res.error)
+      } catch {
+        toastError("Couldn't load the activity", 'Close and reopen the request to try again.')
+      }
     }
     setTlLoading(false)
   }
