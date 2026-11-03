@@ -16,6 +16,8 @@ import type { RecordInvoicePaymentInput } from '@/lib/finance/record-payment'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { syncDraftInvoices, syncDraftInvoiceExpenses } from '@/lib/sync/integrity'
 import { syncInvoicePackageLines } from '@/lib/packages/sync-invoice'
+import { round2 as r2 } from '@/lib/calculations/currency'
+import type { MissedTask } from '@/lib/invoices/missed-tasks'
 
 interface ActionResult<T = void> {
   ok: boolean
@@ -181,6 +183,182 @@ export async function getInvoiceDetails(
     { amounts: vis.billingAmounts, linePricing: vis.billingLinePricing },
   )
   return { ok: true, data: stripped }
+}
+
+// ── Missed tasks ─────────────────────────────────────────────────────────────
+//
+// The automatic sync only ever adds a finished task to its own month's DRAFT.
+// A task finished late — after that month's invoice went out — or one whose
+// month had no draft at all is therefore never billed anywhere, and the only
+// remedy used to be deleting the invoice and regenerating it. These two
+// actions find such tasks for an invoice's client and add them to it.
+
+/** Statuses an invoice can still take new lines in. Sent ones need a reason. */
+const ADD_LINES_OPEN = ['draft', 'reviewed'] as const
+const ADD_LINES_WITH_REASON = ['sent', 'partial', 'overdue'] as const
+
+/** How far back to look for unbilled work, counted from the invoice's period end. */
+const MISSED_LOOKBACK_MONTHS = 12
+
+/**
+ * Done, billable tasks for this invoice's client, dated up to the end of its
+ * billing period, that are not on any live (non-cancelled) invoice.
+ *
+ * Tasks a package fee covers have no line of their own by design; the caller
+ * filters those out with the agreement breakdowns it already holds.
+ */
+export async function findMissedTasks(
+  invoiceId: string,
+): Promise<ActionResult<MissedTask[]>> {
+  const guard = await requireReadPermission(PERMS.BILLING_VIEW_INVOICES)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const me = await loadCurrentUser().catch(() => null)
+  const vis = financialVisibility(me)
+  const admin = createAdminClient()
+
+  const { data: inv } = await admin.from('invoices')
+    .select('client_id, billing_period_end, issue_date')
+    .eq('id', invoiceId).maybeSingle()
+  if (!inv?.client_id) return { ok: false, error: 'Invoice not found' }
+
+  const until = String(inv.billing_period_end || inv.issue_date || new Date().toISOString()).slice(0, 10)
+  const since = new Date(`${until}T00:00:00Z`)
+  since.setUTCMonth(since.getUTCMonth() - MISSED_LOOKBACK_MONTHS)
+
+  const { data: tasks, error } = await admin.from('tasks')
+    .select('id, title, task_date, status, quantity, currency, billing_amount, billing_amount_inr, service:services!service_id(name)')
+    .eq('client_id', inv.client_id)
+    .is('deleted_at', null)
+    .not('is_billable', 'is', false)
+    .in('status', ['done', 'invoiced'])
+    .gte('task_date', since.toISOString().slice(0, 10))
+    .lte('task_date', until)
+    .order('task_date')
+  if (error) return { ok: false, error: error.message }
+  if (!tasks?.length) return { ok: true, data: [] }
+
+  const billed = await tasksOnLiveInvoices(admin, tasks.map(t => t.id))
+  const missed: MissedTask[] = tasks
+    .filter(t => !billed.has(t.id))
+    .map((t: any) => ({
+      id: t.id,
+      title: t.title,
+      task_date: t.task_date,
+      status: t.status,
+      quantity: t.quantity,
+      currency: t.currency,
+      ...(vis.billingLinePricing ? { billing_amount: t.billing_amount ?? t.billing_amount_inr ?? 0 } : {}),
+      service_name: t.service?.name ?? null,
+    }))
+  return { ok: true, data: missed }
+}
+
+/**
+ * Add finished tasks to an invoice as lines, priced from the task exactly as
+ * Generate from tasks does. A draft or reviewed invoice takes them directly; a
+ * sent one only with a reason, which goes to its edit history, and its new
+ * tasks are marked invoiced like the rest of its lines. A paid or closed
+ * invoice is refused — the client has settled it.
+ */
+export async function addTasksToInvoice(
+  invoiceId: string,
+  taskIds: string[],
+  reason?: string,
+): Promise<ActionResult<{ added: number }>> {
+  const guard = await requirePermission(PERMS.BILLING_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!taskIds.length) return { ok: false, error: 'No tasks selected' }
+
+  const admin = createAdminClient()
+  const { data: inv } = await admin.from('invoices')
+    .select('id, client_id, status, tax_rate, tax_amount, discount_amount, previous_balance')
+    .eq('id', invoiceId).maybeSingle()
+  if (!inv) return { ok: false, error: 'Invoice not found' }
+
+  const open = (ADD_LINES_OPEN as readonly string[]).includes(inv.status)
+  const needsReason = (ADD_LINES_WITH_REASON as readonly string[]).includes(inv.status)
+  if (!open && !needsReason) {
+    return { ok: false, error: `This invoice is ${inv.status}. Add the tasks to the next draft instead.` }
+  }
+  if (needsReason && !reason?.trim()) {
+    return { ok: false, error: 'This invoice has been sent — give a reason for adding lines.' }
+  }
+
+  const { data: tasks } = await admin.from('tasks')
+    .select('id, title, task_date, client_id, status, quantity, currency, billing_amount, billing_amount_inr, is_billable, deleted_at')
+    .in('id', taskIds)
+  // Re-check on the server: right client, still billable, and not billed in
+  // the meantime by another tab or the automatic sync.
+  const billed = await tasksOnLiveInvoices(admin, taskIds)
+  const eligible = (tasks || []).filter(t =>
+    t.client_id === inv.client_id && !t.deleted_at && t.is_billable !== false
+    && ['done', 'invoiced'].includes(t.status) && !billed.has(t.id))
+  if (!eligible.length) return { ok: false, error: 'Those tasks are already on an invoice.' }
+
+  const { count } = await admin.from('invoice_items')
+    .select('id', { count: 'exact', head: true }).eq('invoice_id', invoiceId)
+  const offset = count || 0
+  // Same convention as Generate from tasks: billing_amount is the line total
+  // in the task's own currency; the rate is derived back out of it.
+  const { error: insErr } = await admin.from('invoice_items').insert(
+    eligible.map((t, idx) => {
+      const qty = Number(t.quantity ?? 1) || 1
+      const total = Number(t.billing_amount ?? t.billing_amount_inr ?? 0)
+      return {
+        invoice_id: invoiceId, task_id: t.id, description: t.title,
+        quantity: qty, unit_price: r2(total / qty), total,
+        currency: t.currency || 'INR', display_order: offset + idx,
+      }
+    }),
+  )
+  if (insErr) return { ok: false, error: insErr.message }
+
+  if (needsReason) {
+    await admin.from('tasks').update({ status: 'invoiced' }).in('id', eligible.map(t => t.id))
+    await admin.from('invoice_change_logs').insert({
+      invoice_id: invoiceId, field_name: 'items_added',
+      old_value: '', new_value: eligible.map(t => t.title).join('; '), reason: reason!.trim(),
+    })
+  } else {
+    // A draft's package lines collapse covered tasks back into the fee line.
+    try { await syncInvoicePackageLines(admin, invoiceId) } catch { /* best-effort */ }
+  }
+
+  await recalcInvoiceTotals(admin, invoiceId)
+  revalidatePath('/dashboard/invoices')
+  return { ok: true, data: { added: eligible.length } }
+}
+
+/** Task ids that already sit on a line of any invoice that is not cancelled. */
+async function tasksOnLiveInvoices(admin: ReturnType<typeof createAdminClient>, taskIds: string[]): Promise<Set<string>> {
+  const billed = new Set<string>()
+  // Chunked: a year of tasks for a busy client overflows a single IN list.
+  for (let i = 0; i < taskIds.length; i += 200) {
+    const { data } = await admin.from('invoice_items')
+      .select('task_id, invoice:invoices!inner(status)')
+      .in('task_id', taskIds.slice(i, i + 200))
+    for (const row of (data || []) as any[]) {
+      if (row.task_id && row.invoice?.status !== 'cancelled') billed.add(row.task_id)
+    }
+  }
+  return billed
+}
+
+/** Recompute subtotal, tax and total from the lines actually on the invoice. */
+async function recalcInvoiceTotals(admin: ReturnType<typeof createAdminClient>, invoiceId: string) {
+  const [{ data: items }, { data: exps }, { data: inv }] = await Promise.all([
+    admin.from('invoice_items').select('total').eq('invoice_id', invoiceId),
+    admin.from('invoice_expense_items').select('amount').eq('invoice_id', invoiceId),
+    admin.from('invoices').select('tax_rate, tax_amount, discount_amount, previous_balance').eq('id', invoiceId).single(),
+  ])
+  const subtotal = r2((items || []).reduce((s, r) => s + (r.total || 0), 0) + (exps || []).reduce((s, r) => s + (r.amount || 0), 0))
+  const rate = Number(inv?.tax_rate || 0)
+  const tax = rate > 0 ? r2(subtotal * rate / 100) : Number(inv?.tax_amount || 0)
+  const total = Math.max(0, r2(subtotal + tax - Number(inv?.discount_amount || 0) + Number(inv?.previous_balance || 0)))
+  await admin.from('invoices').update({
+    subtotal, tax_amount: tax, total_amount: total, updated_at: new Date().toISOString(),
+  }).eq('id', invoiceId)
 }
 
 // ── Service column on the printed invoice ────────────────────────────────────

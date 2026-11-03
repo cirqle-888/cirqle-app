@@ -92,11 +92,15 @@ describe('invoice portfolio aggregates are gated on billing.view_totals', () => 
 
   it('every aggregate render sits behind showTotals, not showAmounts', () => {
     // stats.* are sums across every client; visibility.amounts is per-invoice.
-    for (const agg of ['stats.outstanding', 'stats.overdueAmt', 'stats.draftTotal']) {
-      const idx = invoices.indexOf(`fmt(${agg})`)
-      expect(idx, `${agg} is not rendered`).toBeGreaterThan(-1)
-      const before = invoices.slice(Math.max(0, idx - 500), idx)
-      expect(before.includes('showTotals'), `${agg} is not guarded by showTotals`).toBe(true)
+    // Every render is checked rather than a fixed list, so a figure added to
+    // the overview later is covered without anyone remembering to add it here.
+    // The window is wide because a card's class list can sit between its
+    // guard and its figure.
+    const renders = [...invoices.matchAll(/fmt\(stats\.\w+\)/g)]
+    expect(renders.length, 'no stats.* aggregate is rendered — did the markup change?').toBeGreaterThan(0)
+    for (const m of renders) {
+      const before = invoices.slice(Math.max(0, m.index! - 900), m.index!)
+      expect(before.includes('showTotals'), `${m[0]} is not guarded by showTotals`).toBe(true)
     }
   })
 
@@ -182,7 +186,6 @@ describe('portfolio aggregates are gated on showTotals, not showAmounts', () => 
    * below was doing that, or nothing at all, before 2026-08-31.
    */
   const cases: Array<[string, string, string]> = [
-    ['invoices-client.tsx', 'list footer portfolio total', 'Total: {fmt(filtered.reduce'],
     ['invoices-client.tsx', 'bulk-selection sum', 'Due: {fmt(invoices.filter(i => selectedForBulk'],
     ['follow-ups/follow-ups-client.tsx', 'section aggregate', '{fmtINR(groupOutstanding)}'],
   ]
@@ -197,18 +200,27 @@ describe('portfolio aggregates are gated on showTotals, not showAmounts', () => 
     })
   }
 
-  it('the stage-value cards show counts without showTotals, but not amounts', () => {
+  it('the list footer total and stage-value amounts, if they come back, are behind showTotals', () => {
+    // Both were dropped when the page became preview-first. They are checked
+    // only while present, so bringing either back unguarded fails here.
     const src = read3('src/app/(dashboard)/dashboard/invoices/invoices-client.tsx')
-    const at = src.indexOf("{s.count > 0 ? fmt(s.amount) : '—'}")
-    expect(at, 'stage card amount not found').toBeGreaterThan(-1)
-    expect(src.slice(Math.max(0, at - 300), at)).toContain('showTotals &&')
-    // The count itself must stay — nine drafts to send is the work, not a figure.
-    expect(src).toContain("<span className=\"ml-auto font-semibold text-foreground/70\">{s.count}</span>")
+    for (const needle of ['Total: {fmt(filtered.reduce', "{s.count > 0 ? fmt(s.amount) : '—'}"]) {
+      const at = src.indexOf(needle)
+      if (at === -1) continue
+      expect(src.slice(Math.max(0, at - 400), at), `${needle} must be guarded by showTotals`).toContain('showTotals &&')
+    }
+  })
+
+  it('the Ready to send card keeps its count without showTotals, but not its amount', () => {
+    const src = read3('src/app/(dashboard)/dashboard/invoices/invoices-client.tsx')
+    // The count is the work to do, not a figure; only the amount is portfolio data.
+    expect(src).toContain('{stats.toSendCount}')
+    expect(src).toContain("{showTotals ? ` · ${fmt(stats.toSendTotal)}` : ''}")
   })
 
   it('dues-by-month is hidden wholesale, being nothing but money', () => {
     const src = read3('src/app/(dashboard)/dashboard/invoices/invoices-client.tsx')
-    expect(src).toContain('{showTotals && stats.monthDues.length > 0 && (')
+    expect(src).toContain('{showTotals && !showRightPanel && stats.monthDues.length > 0 && (')
   })
 
   it('per-client and per-invoice figures still follow showAmounts', () => {

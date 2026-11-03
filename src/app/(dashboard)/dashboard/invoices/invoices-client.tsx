@@ -37,14 +37,16 @@ import {
   Printer, TrendingUp, BadgeCheck, CircleDollarSign, Receipt, Edit2, Save,
   History, Tag, Percent, ChevronDown, ChevronUp, ArrowDownToLine, Gift, ExternalLink, Copy,
   Wallet, Link2, ShoppingBag, Share2, Layers, ListTree, ScrollText, Check, AlertCircle,
+  Maximize2, Minimize2, ZoomIn, ZoomOut, ListPlus,
 } from 'lucide-react'
 import { logFollowup } from "./follow-ups/actions"
-import { recordInvoicePayment, serverResyncInvoiceTasks, getInvoiceDetails, setInvoiceServiceColumn, setClientServiceColumnDefault } from "./actions"
+import { recordInvoicePayment, serverResyncInvoiceTasks, getInvoiceDetails, setInvoiceServiceColumn, setClientServiceColumnDefault, findMissedTasks, addTasksToInvoice } from "./actions"
+import type { MissedTask } from '@/lib/invoices/missed-tasks'
 
 import Combobox from '@/components/ui/combobox'
 import AppSelect from '@/components/ui/app-select'
 import { OverflowMenu } from '@/components/ui/overflow-menu'
-import { InvoicePreviewFrame } from '@/components/invoices/invoice-preview-frame'
+import { InvoicePreviewFrame, type PreviewZoom } from '@/components/invoices/invoice-preview-frame'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -236,6 +238,13 @@ const STATUS_GROUPS = {
 // stripped server-side (user lacks billing.view_amounts or .view_line_pricing).
 // This is the ONLY display path for invoice money in this file, so a single
 // `n == null` check guarantees the UI never tries to render hidden values.
+/** Next preview zoom step up (+1) or down (-1) from the scale now in use. */
+const ZOOM_STEPS = [0.5, 0.67, 0.8, 1, 1.25, 1.5, 2]
+function stepZoom(current: number, dir: 1 | -1): number {
+  if (dir > 0) return ZOOM_STEPS.find(z => z > current + 0.01) ?? ZOOM_STEPS[ZOOM_STEPS.length - 1]
+  return [...ZOOM_STEPS].reverse().find(z => z < current - 0.01) ?? ZOOM_STEPS[0]
+}
+
 function fmt(n: number | undefined | null, currency: Currency = 'INR') {
   if (n == null) return '—'
   return formatCurrency(n, currency)
@@ -401,6 +410,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     // screen; until it lands the panel keeps showing the previous lines rather
     // than flashing an empty state.
     setDetailLoaded(new Set())
+    setMissedByInv({})
   }, [initialInvoices])
 
   // ── Supabase Realtime: keep the invoice list live ─────────────────────────
@@ -647,6 +657,32 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   // the line-item editor. Reset to the document whenever another invoice opens.
   const [detailView, setDetailView] = useState<'preview' | 'edit'>('preview')
 
+  // Focus: the open invoice takes the whole screen — the list, the overview
+  // bar and the page header step aside. Remembered in this browser, because
+  // someone checking a month of invoices wants it on for every one of them.
+  // Read after mount (not in the initialiser) so the server render matches.
+  const [focusMode, setFocusMode] = useState(false)
+  useEffect(() => {
+    try { setFocusMode(window.localStorage.getItem('invoices-focus') === '1') } catch {}
+  }, [])
+  function toggleFocus() {
+    setFocusMode(prev => {
+      const next = !prev
+      try { window.localStorage.setItem('invoices-focus', next ? '1' : '0') } catch {}
+      return next
+    })
+  }
+  const [previewZoom, setPreviewZoom] = useState<PreviewZoom>('width')
+  const [previewScale, setPreviewScale] = useState(1)
+
+  // Finished tasks for the open invoice's client that are on no invoice at
+  // all — work done late, after its month's invoice went out. Loaded once per
+  // invoice; cleared whenever the page refreshes, since a task save can change it.
+  const [missedByInv, setMissedByInv] = useState<Record<string, MissedTask[] | 'loading' | 'error'>>({})
+  const [missedSel, setMissedSel] = useState<Set<string>>(new Set())
+  const [missedReason, setMissedReason] = useState('')
+  const [addingMissed, setAddingMissed] = useState(false)
+
   // ── Navigation guard: warn before leaving while new invoice form is open ──
   // In-app confirmation. NOT window.confirm: the desktop shell returns false
   // from it immediately without ever drawing a dialog, which silently trapped
@@ -711,6 +747,24 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     // would refetch endlessly. `detailLoaded` is the real guard.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, detailLoaded, detailFailed])
+
+  // A package fee replaces the lines of the tasks it covers, so those are not
+  // "missed" — leave them out using the breakdowns the page already has.
+  const packageCoveredIds = useMemo(() => new Set(
+    Object.values(agreementBreakdowns || {}).flat().flatMap(ag => ag.covered.map(c => c.id)),
+  ), [agreementBreakdowns])
+
+  useEffect(() => {
+    if (!selectedId || missedByInv[selectedId] !== undefined) return
+    const id = selectedId
+    setMissedByInv(prev => ({ ...prev, [id]: 'loading' }))
+    findMissedTasks(id).then(res => {
+      setMissedByInv(prev => ({
+        ...prev,
+        [id]: res.ok ? (res.data || []).filter(t => !packageCoveredIds.has(t.id)) : 'error',
+      }))
+    }).catch(() => setMissedByInv(prev => ({ ...prev, [id]: 'error' })))
+  }, [selectedId, missedByInv, packageCoveredIds])
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const selectedInv = useMemo(() => invoices.find(i => i.id === selectedId) || null, [invoices, selectedId])
@@ -839,6 +893,8 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     if (id !== selectedId) {
       // Reset per-invoice UI state when switching invoices
       setDetailView('preview')
+      setMissedSel(new Set())
+      setMissedReason('')
       setShowDiscount(false)
       setShowChangeLogs(false)
       setChangeLogs([])
@@ -924,10 +980,12 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   async function removeItem(invoiceId: string, itemId: string) {
     setRemovingItemId(itemId)
     const inv = invoices.find(i => i.id === invoiceId)
-    if (!inv || !isEditable(inv.status)) { setRemovingItemId(null); return }
+    // A sent invoice can lose a line only under Force edit, which logs it.
+    if (!inv || !(isEditable(inv.status) || forceEditId === invoiceId)) { setRemovingItemId(null); return }
 
     const item = inv.items?.find(it => it.id === itemId)
     await supabase.from('invoice_items').delete().eq('id', itemId)
+    if (forceEditId === invoiceId) await logChange(invoiceId, 'item_removed', item?.description || '', '')
 
     // Free task back to 'done' if it was invoiced
     if (item?.task_id) {
@@ -1240,6 +1298,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     const newTotal = Math.max(0, sub + taxAmt - amt + (inv.previous_balance || 0))
 
     await supabase.from('invoices').update({ discount_amount: amt, total_amount: newTotal }).eq('id', invoiceId)
+    if (forceEditId === invoiceId) await logChange(invoiceId, 'discount', String(inv.discount_amount || 0), String(amt))
     // Log discount (reason optional) — replaces this invoice's earlier log.
     await writeDiscountLog(invoiceId, clientId, amt, sub, inv.total_amount, discountReason || 'No reason provided')
     setInvoices(prev => prev.map(i => i.id === invoiceId
@@ -1288,7 +1347,10 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     await supabase.from('invoices').update({
       discount_amount: discount, total_amount: total, updated_at: new Date().toISOString(),
     }).eq('id', invoiceId)
-    if (discount !== (inv.discount_amount || 0)) await writeDiscountLog(invoiceId, inv.client_id, discount, sub, inv.total_amount)
+    if (discount !== (inv.discount_amount || 0)) {
+      await writeDiscountLog(invoiceId, inv.client_id, discount, sub, inv.total_amount)
+      if (forceEditId === invoiceId) await logChange(invoiceId, 'discount', String(inv.discount_amount || 0), String(discount))
+    }
     setInvoices(prev => prev.map(i => i.id === invoiceId
       ? { ...i, discount_amount: discount, total_amount: total, total_amount_inr: round2(total * (i.exchange_rate || 1)) }
       : i
@@ -1482,6 +1544,25 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
 
   async function deletePayment(invoiceId: string, paymentId: string) {
     toastError('Payments cannot be deleted directly. Manage allocations via the Cash Book.')
+  }
+
+  async function addMissedTasks(inv: Invoice) {
+    const ids = [...missedSel]
+    if (!ids.length) return
+    setAddingMissed(true)
+    try {
+      const res = await addTasksToInvoice(inv.id, ids, missedReason.trim() || undefined)
+      if (!res.ok) { toastError(res.error || 'Could not add the tasks'); return }
+      const n = res.data?.added || 0
+      success(`${n} task${n === 1 ? '' : 's'} added to ${inv.invoice_number}`)
+      setMissedSel(new Set())
+      setMissedReason('')
+      // The refresh brings back the new lines and totals, and clears the
+      // missed-task cache so the list is fetched again.
+      router.refresh()
+    } finally {
+      setAddingMissed(false)
+    }
   }
 
   async function handleResync(invoiceId: string) {
@@ -2850,6 +2931,45 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     const overdue = isOverdue(inv.due_date || '', inv.status, inv.issue_date)
     const nextAct = getNextAction(inv.status)
     const periodLabel = inv.billing_period_start ? formatBillingPeriod(inv.billing_period_start) : null
+    const canEditBilling = can('billing.edit') && !permUser.isViewAs
+    const splitEdit = focusMode && detailView === 'edit'
+
+    const missedState = missedByInv[inv.id]
+    const missed = Array.isArray(missedState) ? missedState : []
+    // Where missed work can go: straight onto a draft/reviewed invoice, onto a
+    // sent one with a reason, and never onto a settled or closed one.
+    const missedNeedsReason = ['sent', 'partial', 'overdue'].includes(inv.status)
+    const missedClosed = ['paid', 'cancelled', 'bad_debt'].includes(inv.status)
+    const clientDraft = missedClosed
+      ? invoices.find(i => i.client_id === inv.client_id && i.status === 'draft' && i.id !== inv.id)
+      : undefined
+
+    // Line checks — what to look at before the invoice goes out. A price check
+    // only for someone who can see prices; an earlier-month line is noted, not
+    // flagged, since adding missed work from a past month is deliberate.
+    const lineIssues = new Map<string, string[]>()
+    const earlierLines = new Set<string>()
+    {
+      const lines = inv.items || []
+      const byTask = new Map<string, number>()
+      const byText = new Map<string, number>()
+      const textKey = (it: InvoiceItem) => `${(it.description || '').trim().toLowerCase()}|${it.task?.task_date || ''}`
+      for (const it of lines) {
+        if (it.task_id) byTask.set(it.task_id, (byTask.get(it.task_id) || 0) + 1)
+        if (it.description?.trim()) byText.set(textKey(it), (byText.get(textKey(it)) || 0) + 1)
+      }
+      for (const it of lines) {
+        const found: string[] = []
+        if (showLinePricing && !((it.total ?? 0) > 0)) found.push('No price')
+        if ((it.task_id && (byTask.get(it.task_id) || 0) > 1) || (byText.get(textKey(it)) || 0) > 1) found.push('Duplicate')
+        if (it.task && !['done', 'invoiced'].includes(it.task.status)) found.push(`Task ${getStatusLabel(it.task.status).toLowerCase()}`)
+        if (found.length) lineIssues.set(it.id, found)
+        const d = it.task?.task_date
+        if (d && inv.billing_period_start && d < inv.billing_period_start) earlierLines.add(it.id)
+      }
+    }
+    const issueCounts = new Map<string, number>()
+    lineIssues.forEach(list => list.forEach(x => issueCounts.set(x, (issueCounts.get(x) || 0) + 1)))
 
     return (
       <div className="flex flex-col h-full overflow-hidden">
@@ -2922,6 +3042,12 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                   detailView === t.id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                 )}>
                 <t.icon className="w-3.5 h-3.5" />{t.label}
+                {t.id === 'edit' && (lineIssues.size + missed.length) > 0 && (
+                  <span title={`${lineIssues.size} line${lineIssues.size === 1 ? '' : 's'} to check · ${missed.length} missed task${missed.length === 1 ? '' : 's'}`}
+                    className="rounded-full bg-amber-500/20 px-1.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300 tabular-nums">
+                    {lineIssues.size + missed.length}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -2972,6 +3098,13 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
             className="min-h-8 min-w-8 inline-flex items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-green-600 hover:bg-green-500/10 transition-colors">
             <Share2 className="w-4 h-4" />
           </button>
+          <button onClick={toggleFocus} aria-pressed={focusMode}
+            title={focusMode ? 'Exit focus' : 'Focus — give the invoice the whole screen'}
+            aria-label={focusMode ? 'Exit focus' : 'Focus on this invoice'}
+            className={cn("min-h-8 min-w-8 inline-flex items-center justify-center rounded-lg border transition-colors",
+              focusMode ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground hover:bg-secondary")}>
+            {focusMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
           <OverflowMenu label="More invoice actions" items={[
             { label: 'Print', icon: Printer, onClick: () => printInvoice(inv), disabled: !canSharePdf },
             { label: 'Reload invoice', icon: RotateCw, onClick: () => refreshInvoice(inv.id) },
@@ -2990,22 +3123,26 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
           ]} />
         </div>
 
+        {/* Preview and editor share this row. Normally one shows at a time;
+            in Focus on a wide screen, Edit puts the live document beside the
+            editor so every correction is seen as the client will see it. */}
+        <div className="flex-1 min-h-0 flex">
         {/* ── Preview — the invoice as the client receives it ─────────────── */}
-        {detailView === 'preview' && (() => {
+        {(detailView === 'preview' || splitEdit) && (() => {
           // A total with no itemised lines is the one output here that can do
           // real damage once printed or sent, so the paper is not drawn (and
           // Print/Download stay off) until the lines are actually in hand.
           const previewReady = detailLoaded.has(inv.id)
           const previewFailed = detailFailed.has(inv.id)
           return (
-            <div className="flex-1 min-h-0 flex flex-col bg-secondary/50">
+            <div className={cn("order-2 flex-1 min-w-0 min-h-0 flex-col bg-secondary/50", splitEdit ? "hidden lg:flex" : "flex")}>
               {!canSharePdf && (
                 <div className="shrink-0 px-4 py-2 text-[11px] leading-relaxed text-amber-600 dark:text-amber-400 bg-amber-500/10 border-b border-amber-500/20">
                   {noShareReason}
                 </div>
               )}
               <div className="shrink-0 flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-1.5 sm:px-5 border-b border-border/40 text-xs text-muted-foreground">
-                <span className="mr-auto">Exactly what {inv.client?.name || 'the client'} receives</span>
+                <span className="mr-auto hidden sm:inline">Exactly what {inv.client?.name || 'the client'} receives</span>
                 <label
                   title="Add the client's other overdue/pending invoices as an extra line on this PDF — not saved to the invoice, for sharing only"
                   className="inline-flex items-center gap-1.5 cursor-pointer font-medium text-foreground">
@@ -3038,7 +3175,28 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                     Always for {inv.client?.name ?? 'this client'}
                   </button>
                 )}
+                <div className="inline-flex items-center rounded-md border border-border/60 bg-card text-[11px] font-medium" aria-label="Preview size">
+                  {([['width', 'Fit width'], ['page', 'Whole page']] as const).map(([z, label]) => (
+                    <button key={z} onClick={() => setPreviewZoom(z)} aria-pressed={previewZoom === z}
+                      className={cn("px-2 py-1 transition-colors first:rounded-l-md", previewZoom === z ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground")}>
+                      {label}
+                    </button>
+                  ))}
+                  <button onClick={() => setPreviewZoom(stepZoom(previewScale, -1))} aria-label="Zoom out"
+                    className="border-l border-border/60 px-1.5 py-1 text-muted-foreground hover:text-foreground"><ZoomOut className="w-3.5 h-3.5" /></button>
+                  <span className="w-9 text-center tabular-nums text-muted-foreground">{Math.round(previewScale * 100)}%</span>
+                  <button onClick={() => setPreviewZoom(stepZoom(previewScale, 1))} aria-label="Zoom in"
+                    className="px-1.5 py-1 text-muted-foreground hover:text-foreground rounded-r-md"><ZoomIn className="w-3.5 h-3.5" /></button>
+                </div>
               </div>
+              {missed.length > 0 && (
+                <button onClick={() => setDetailView('edit')}
+                  className="shrink-0 flex items-center gap-2 px-4 py-1.5 sm:px-5 text-left text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 border-b border-amber-500/20 hover:bg-amber-500/15">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span className="flex-1">{missed.length} finished task{missed.length === 1 ? '' : 's'} for {inv.client?.name || 'this client'} {missed.length === 1 ? 'is' : 'are'} on no invoice.</span>
+                  <span className="font-semibold underline-offset-2 hover:underline">Review</span>
+                </button>
+              )}
               <div className="flex-1 min-h-0 overflow-auto px-3 py-4 sm:px-6 sm:py-6">
                 {previewReady ? (
                   // key forces a full remount on toggle — changing srcDoc on an
@@ -3046,6 +3204,8 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                   <InvoicePreviewFrame
                     key={`${inv.id}-${includeOutstanding.has(inv.id)}`}
                     html={buildInvoiceHtml(inv)}
+                    zoom={previewZoom}
+                    onScale={setPreviewScale}
                   />
                 ) : (
                   <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
@@ -3080,7 +3240,8 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
         })()}
 
         {/* Scrollable body */}
-        <div className={cn("flex-1 overflow-y-auto px-4 py-3 space-y-4", detailView !== 'edit' && "hidden")}>
+        <div className={cn("order-1 flex-1 min-w-0 overflow-y-auto px-4 py-3 space-y-4", detailView !== 'edit' && "hidden",
+          splitEdit && "lg:max-w-[min(680px,50%)] lg:border-r lg:border-border/40")}>
 
           {/* Where this invoice is in its life, and the manual override. The
               next step itself is the button in the toolbar above. */}
@@ -3119,6 +3280,93 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
               </div>
             </details>
           </div>
+
+
+          {forceEdit && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+              <Lock className="w-3.5 h-3.5 shrink-0" />
+              <span className="flex-1 min-w-[180px]">
+                Correcting a {getStatusLabel(inv.status).toLowerCase()} invoice. Every change goes to Edit history
+                with your reason: <span className="font-semibold">{forceEditReason}</span>
+              </span>
+              <button onClick={lockEdit} className="rounded-md border border-amber-500/40 px-2 py-0.5 font-medium hover:bg-amber-500/15">Done correcting</button>
+            </div>
+          )}
+
+          {/* ── Missed tasks — finished work that is on no invoice ──────────
+              The fix for "a task was missed last month" used to be deleting
+              the invoice and regenerating it. Now the missed tasks are listed
+              here and go onto this invoice in one step. */}
+          {missedState === 'loading' && (
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground px-1">
+              <RefreshCw className="w-3 h-3 animate-spin" />Checking for finished tasks that aren&apos;t billed…
+            </div>
+          )}
+          {missed.length > 0 && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.06] overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 border-b border-amber-500/20">
+                <h4 className="text-xs font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                  <ListPlus className="w-4 h-4" />
+                  {missed.length} finished task{missed.length === 1 ? '' : 's'} not on any invoice
+                </h4>
+                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer">
+                  <input type="checkbox" className="h-3.5 w-3.5 accent-amber-600"
+                    checked={missed.every(t => missedSel.has(t.id))}
+                    onChange={e => setMissedSel(e.target.checked ? new Set(missed.map(t => t.id)) : new Set())} />
+                  Select all
+                </label>
+              </div>
+              <div className="max-h-64 overflow-y-auto divide-y divide-amber-500/10">
+                {missed.map(t => (
+                  <label key={t.id} className="flex items-start gap-2.5 px-3 py-2 cursor-pointer hover:bg-amber-500/[0.06]">
+                    <input type="checkbox" className="mt-0.5 h-3.5 w-3.5 accent-amber-600"
+                      checked={missedSel.has(t.id)}
+                      onChange={e => setMissedSel(prev => { const n = new Set(prev); if (e.target.checked) n.add(t.id); else n.delete(t.id); return n })} />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-xs font-medium text-foreground truncate">{t.title}</span>
+                      <span className="flex flex-wrap gap-x-2 text-[11px] text-muted-foreground">
+                        {t.task_date && <span>{fmtDate(t.task_date)}</span>}
+                        {t.service_name && <span>{t.service_name}</span>}
+                        {t.status === 'invoiced' && <span title="Marked invoiced, but its invoice no longer has it">marked invoiced</span>}
+                      </span>
+                    </span>
+                    {t.billing_amount !== undefined && (
+                      <span className="text-xs font-semibold tabular-nums shrink-0">{fmt(t.billing_amount, (t.currency || 'INR') as Currency)}</span>
+                    )}
+                  </label>
+                ))}
+              </div>
+              <div className="px-3 py-2.5 border-t border-amber-500/20 space-y-2">
+                {missedClosed ? (
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                    <span className="flex-1">This invoice is {getStatusLabel(inv.status).toLowerCase()}, so new lines go on the client&apos;s current draft.</span>
+                    {clientDraft && (
+                      <button onClick={() => selectInvoice(clientDraft.id)}
+                        className="rounded-md border border-border px-2 py-1 font-medium text-foreground hover:bg-secondary">
+                        Open {clientDraft.invoice_number}
+                      </button>
+                    )}
+                  </div>
+                ) : canEditBilling ? (
+                  <>
+                    {missedNeedsReason && (
+                      <input value={missedReason} onChange={e => setMissedReason(e.target.value)}
+                        placeholder="Reason — this invoice was already sent (kept in Edit history)"
+                        className="w-full rounded-lg border border-border/60 bg-background px-2.5 py-1.5 text-xs focus:outline-none focus:border-amber-500" />
+                    )}
+                    <button onClick={() => addMissedTasks(inv)}
+                      disabled={addingMissed || missedSel.size === 0 || (missedNeedsReason && !missedReason.trim())}
+                      className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-500 disabled:opacity-50">
+                      {addingMissed ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                      Add {missedSel.size || ''} to {inv.invoice_number}
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-[11px] text-muted-foreground">Ask someone with invoice edit access to add these.</span>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Client Expenses section — hidden here, expenses now shown inline in LINE ITEMS above */}
           {false && (inv.expense_items || []).length > 0 && (() => {
@@ -3227,6 +3475,23 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                 )}
               </div>
             </div>
+            {!detailPending && !detailFailedHere && (inv.items || []).length > 0 && (
+              <div className={cn("flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2 text-[11px] border-b border-border/40",
+                lineIssues.size ? "bg-amber-500/[0.08] text-amber-800 dark:text-amber-300" : "bg-emerald-500/[0.05] text-emerald-700 dark:text-emerald-400")}>
+                {lineIssues.size ? (
+                  <>
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span className="font-semibold">{lineIssues.size} line{lineIssues.size === 1 ? '' : 's'} to check</span>
+                    <span className="opacity-80">{[...issueCounts].map(([k, n]) => `${n} ${k.toLowerCase()}`).join(' · ')}</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                    {showLinePricing ? 'Every line has a price, no duplicates' : 'No duplicate lines'}
+                  </>
+                )}
+              </div>
+            )}
             {/* Column rule — mirrors a printed invoice's table header */}
             <div className="hidden sm:flex items-center gap-3 px-4 py-1.5 text-[9px] font-bold uppercase tracking-widest text-muted-foreground/50 bg-secondary/30 border-b border-border/40">
               <span className="w-5 text-right shrink-0">#</span>
@@ -3264,8 +3529,10 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
               )}
               {/* Copy before sorting — Array#sort mutates, and `inv.items` is React state. */}
               {[...(inv.items || [])].sort(compareInvoiceItems).map((item, idx) => (
-                <div key={item.id} className="relative flex items-start gap-3 px-4 py-3 hover:bg-violet-500/[0.04] transition-colors group">
-                  <span className="absolute left-0 top-0 bottom-0 w-0.5 bg-violet-500/0 group-hover:bg-violet-500/60 transition-colors" />
+                <div key={item.id} className={cn("relative flex items-start gap-3 px-4 py-3 transition-colors group",
+                  lineIssues.has(item.id) ? "bg-amber-500/[0.06] hover:bg-amber-500/[0.1]" : "hover:bg-violet-500/[0.04]")}>
+                  <span className={cn("absolute left-0 top-0 bottom-0 w-0.5 transition-colors",
+                    lineIssues.has(item.id) ? "bg-amber-500" : "bg-violet-500/0 group-hover:bg-violet-500/60")} />
                   <span className="w-5 text-right shrink-0 pt-0.5 text-[10px] font-mono text-muted-foreground/50 tabular-nums select-none">
                     {String(idx + 1).padStart(2, '0')}
                   </span>
@@ -3287,6 +3554,12 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                         <span className={cn("px-1.5 py-0.5 rounded-md", getStatusColor(item.task.status))}>
                           {getStatusLabel(item.task.status)}
                         </span>
+                      )}
+                      {lineIssues.get(item.id)?.map(x => (
+                        <span key={x} className="px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-800 dark:text-amber-300 font-medium">{x}</span>
+                      ))}
+                      {earlierLines.has(item.id) && (
+                        <span className="px-1.5 py-0.5 rounded-md bg-secondary text-muted-foreground" title="Dated before this invoice's billing month">Earlier month</span>
                       )}
                       {/* Straight to the task's edit form, so a title, amount or
                           date can be fixed at the source before the invoice goes
@@ -3334,7 +3607,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                       aria-label="Remove item"
                       onClick={e => { e.stopPropagation(); removeItem(inv.id, item.id) }}
                       disabled={removingItemId === item.id}
-                      className="opacity-0 group-hover:opacity-100 p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all shrink-0 mt-0.5">
+                      className="sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all shrink-0 mt-0.5">
                       <X className="w-3.5 h-3.5" />
                     </button>
                   )}
@@ -3598,11 +3871,14 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
               </div>
             )}
 
-            {(editable || (inv.discount_amount || 0) > 0) && (
+            {(editable || (inv.discount_amount || 0) > 0 || (canEditBilling && !['cancelled', 'bad_debt'].includes(inv.status))) && (
               <div className="flex justify-between items-center text-sm">
                 <span className="text-muted-foreground font-medium">Discount</span>
                 {editable ? (
                   <div className="flex items-center gap-1.5">
+                    {(inv.discount_amount || 0) > 0 && (inv.subtotal || 0) > 0 && (
+                      <span className="text-[11px] text-muted-foreground tabular-nums">{(((inv.discount_amount || 0) / (inv.subtotal || 1)) * 100).toFixed(1)}%</span>
+                    )}
                     <span className="text-muted-foreground text-xs font-semibold">−{getCurrencySymbol(inv.currency)}</span>
                     <input
                       type="number" min="0"
@@ -3613,7 +3889,19 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                     />
                   </div>
                 ) : (
-                  <span className="text-orange-500 dark:text-orange-400 font-semibold">−{fmt(inv.discount_amount || 0, inv.currency)}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="text-orange-500 dark:text-orange-400 font-semibold">
+                      {(inv.discount_amount || 0) > 0 ? `−${fmt(inv.discount_amount || 0, inv.currency)}` : '—'}
+                    </span>
+                    {/* A wrong discount on a sent invoice is corrected here,
+                        under Force edit, so the reason is on record. */}
+                    {canEditBilling && !['cancelled', 'bad_debt'].includes(inv.status) && (
+                      <button onClick={() => requestEditUnlock(inv.id)}
+                        className="rounded-md border border-border/60 px-2 py-0.5 text-[11px] font-medium text-foreground hover:bg-secondary">
+                        Correct
+                      </button>
+                    )}
+                  </span>
                 )}
               </div>
             )}
@@ -4021,6 +4309,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
               </div>
             </div>
           )}
+        </div>
         </div>
       </div>
     )
@@ -5545,10 +5834,13 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   // MAIN RENDER
   // ─────────────────────────────────────────────────────────────────────────
   const showRightPanel = selectedInv || ['new', 'generate', 'batch_generate', 'discounts'].includes(panelMode)
+  // Focus only applies while an invoice is open — with nothing selected the
+  // list is the page, so it must not disappear.
+  const focused = focusMode && panelMode === 'detail' && !!selectedInv
 
   return (
     <div className="flex flex-col h-dvh bg-background text-foreground">
-      <Header title="Invoices" />
+      {!focused && <Header title="Invoices" />}
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
 
       {leaveGuard && (
@@ -5588,7 +5880,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
         </div>
       )}
 
-      <section className={cn("shrink-0 border-b border-border/60 bg-card px-4 sm:px-6", showRightPanel ? "hidden xl:block py-2" : "py-4")} aria-label="Invoice overview">
+      <section className={cn("shrink-0 border-b border-border/60 bg-card px-4 sm:px-6", showRightPanel ? (focused ? "hidden" : "hidden xl:block py-2") : "py-4")} aria-label="Invoice overview">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className={cn("font-semibold tracking-tight", showRightPanel ? "text-sm" : "text-lg")}>Invoice overview</h1>
@@ -5598,13 +5890,11 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
             <Link href="/dashboard/invoices/follow-ups" className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-xs font-medium hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <CalendarClock className="h-4 w-4" />Follow-ups
             </Link>
-            {can('billing.edit') && !permUser.isViewAs && (
-              <button onClick={() => { setPanelMode('new'); setSelectedId(null) }} className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                <Plus className="h-4 w-4" />New invoice
-              </button>
-            )}
             <OverflowMenu label="Invoice tools" items={[
               ...(can('billing.edit') && !permUser.isViewAs ? [
+                // Invoices are generated automatically, so a blank one is a
+                // rare need — it lives here rather than as the page's button.
+                { label: 'New blank invoice', icon: Plus, onClick: () => { setPanelMode('new'); setSelectedId(null) } },
                 { label: 'Generate from tasks', icon: Calendar, onClick: () => { setPanelMode('generate'); setSelectedId(null); setGenTasks([]) } },
                 { label: 'Generate in bulk', icon: History, onClick: () => { setPanelMode('batch_generate'); setSelectedId(null); setBatchGroups([]); setBatchDone(0) } },
               ] : []),
@@ -5648,7 +5938,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
       {/* ── Main content ── */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Left: list */}
-        <div className={`${showRightPanel ? 'hidden xl:flex xl:w-[370px] xl:shrink-0' : 'flex-1 min-w-0'} flex-col border-r border-border/40 overflow-hidden`}>
+        <div className={`${showRightPanel ? (focused ? 'hidden' : 'hidden xl:flex xl:w-[370px] xl:shrink-0') : 'flex-1 min-w-0'} flex-col border-r border-border/40 overflow-hidden`}>
           {renderList()}
         </div>
 
@@ -5659,7 +5949,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
         {showRightPanel && (
           <div className="min-w-0 flex-1 overflow-hidden flex flex-col">
             {/* Mobile back button */}
-            <div className="xl:hidden shrink-0 px-3 py-2 border-b border-border/40">
+            <div className={cn("shrink-0 px-3 py-2 border-b border-border/40", !focused && "xl:hidden")}>
               <button onClick={() => { setSelectedId(null); setPanelMode('detail') }}
                 className="flex min-h-9 items-center gap-1 rounded-md px-2 text-sm text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 ← Back to invoices
