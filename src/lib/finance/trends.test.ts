@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  resolveComparisonPeriods, buildTrendSeries, alignComparison,
+  resolveComparisonPeriods, resolveLastPeriods, buildTrendSeries, alignComparison,
   seriesTotals, pctChange, addDays, rangeDays,
 } from './trends'
 
@@ -193,5 +193,29 @@ describe('addDays', () => {
   it('crosses month and year boundaries', () => {
     expect(addDays('2026-01-01', -1)).toBe('2025-12-31')
     expect(addDays('2026-02-28', 1)).toBe('2026-03-01')
+  })
+})
+
+describe('resolveLastPeriods', () => {
+  const today = '2026-11-03'   // a Tuesday, early in Q4
+  it('gives the whole previous month against the month before it', () => {
+    expect(resolveLastPeriods('month', today)).toMatchObject({
+      current: { from: '2026-10-01', to: '2026-10-31' },
+      previous: { from: '2026-09-01', to: '2026-09-30' },
+    })
+  })
+  it('gives last quarter, last year and last week in full', () => {
+    expect(resolveLastPeriods('quarter', today).current).toEqual({ from: '2026-07-01', to: '2026-09-30' })
+    expect(resolveLastPeriods('quarter', today).previous).toEqual({ from: '2026-04-01', to: '2026-06-30' })
+    expect(resolveLastPeriods('year', today).current).toEqual({ from: '2025-01-01', to: '2025-12-31' })
+    expect(resolveLastPeriods('week', today).current).toEqual({ from: '2026-10-26', to: '2026-11-01' })
+  })
+  it('crosses a year boundary', () => {
+    expect(resolveLastPeriods('month', '2026-01-15').current).toEqual({ from: '2025-12-01', to: '2025-12-31' })
+    expect(resolveLastPeriods('quarter', '2026-02-10').current).toEqual({ from: '2025-10-01', to: '2025-12-31' })
+  })
+  it('leaves a custom range alone', () => {
+    const r = { from: '2026-10-05', to: '2026-11-03' }
+    expect(resolveLastPeriods('custom', today, r)).toEqual(resolveComparisonPeriods('custom', today, r))
   })
 })

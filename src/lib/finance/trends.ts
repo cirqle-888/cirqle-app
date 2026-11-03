@@ -132,6 +132,22 @@ export function resolveComparisonPeriods(
   }
 }
 
+/**
+ * "Last week / month / quarter / year": the complete period before the one
+ * `today` is in, compared with the one before THAT. Resolved as the current
+ * period on the last day of the previous one, so it uses exactly the same
+ * boundaries (and granularity) as resolveComparisonPeriods. A custom range has
+ * no "last" and comes back unchanged.
+ */
+export function resolveLastPeriods(
+  mode: ComparisonMode,
+  today: string,
+  custom?: PeriodRange,
+): ReturnType<typeof resolveComparisonPeriods> {
+  if (mode === 'custom') return resolveComparisonPeriods(mode, today, custom)
+  return resolveComparisonPeriods(mode, resolveComparisonPeriods(mode, today).previous.to)
+}
+
 // ── Series building ───────────────────────────────────────────────────────────
 
 /**

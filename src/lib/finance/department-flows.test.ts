@@ -33,6 +33,19 @@ describe('departmentFlows', () => {
     expect(departmentFlows(facts, oct, 5500).at(-1)!.deptId).toBe(UNASSIGNED_DEPT)
   })
 
+  it('never shares out a negative remainder when earned pay exceeds the cash outflow', () => {
+    // Pay earned 1500, cash out only 400: the 1100 gap is pay not yet paid,
+    // not a refund to spread across departments.
+    const rows = departmentFlows(facts, oct, 400)
+    for (const r of rows) {
+      expect(r.sharedCostInr).toBe(0)
+      expect(r.outflowInr).toBeGreaterThanOrEqual(0)
+    }
+    expect(rows.find(r => r.deptId === 'design')!.outflowInr).toBe(1000)
+    expect(rows.find(r => r.deptId === 'video')!.outflowInr).toBe(500)
+    expect(rows.find(r => r.deptId === UNASSIGNED_DEPT)!.outflowInr).toBe(0)
+  })
+
   it('puts the whole outflow on Unassigned when nothing was billed or done', () => {
     const rows = departmentFlows([fact({ date: '2026-10-02', deptId: UNASSIGNED_DEPT, inflowInr: 100 })], oct, 900)
     expect(rows).toEqual([expect.objectContaining({ deptId: UNASSIGNED_DEPT, outflowInr: 900, netInr: -800 })])

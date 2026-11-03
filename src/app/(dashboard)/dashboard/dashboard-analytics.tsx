@@ -16,7 +16,7 @@
 // data-fetch timing changed.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { Suspense, useState, useMemo, use } from 'react'
+import { Suspense, useState, useMemo, useCallback, use } from 'react'
 import Link from 'next/link'
 import { matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
 import { sliceView, type AnalyticsView } from '@/lib/analytics/view'
@@ -110,6 +110,11 @@ export default function DashboardAnalytics({
   const opFiltered = useMemo(() => operatingRows(filteredCashbook), [filteredCashbook])
   const { inflow: periodInflow, outflow: periodOutflow, net: netCash } = cashFlowTotals(opFiltered)
   const deptWindow = useMemo(() => dateFilterWindow(dateFilter), [dateFilter])
+  // The Departments panel can also pick its own period; its outflow has to be
+  // the operating outflow of that same window.
+  const outflowFor = useCallback((w: { from: string; to: string } | null) => cashFlowTotals(
+    w ? opCashbook.filter(e => e.entry_date >= w.from && e.entry_date <= w.to) : opCashbook,
+  ).outflow, [opCashbook])
 
   // ── Trend chart data ───────────────────────────────────────────────────────
   const trendData = useMemo(() => {
@@ -371,6 +376,7 @@ export default function DashboardAnalytics({
           factsPromise={departmentFactsPromise}
           window={deptWindow}
           outflowInr={periodOutflow}
+          outflowFor={outflowFor}
           periodLabel={periodLabel}
           fmt={f} />
       </Suspense>

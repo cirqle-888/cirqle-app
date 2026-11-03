@@ -17,7 +17,12 @@
  *
  * Built from day facts so the dashboard's date filter can slice it, and so
  * Σ inflow and Σ outflow equal the dashboard's own Income and Outflow cards
- * for the same window, to the paisa.
+ * for the same window, to the paisa — with one exception: a window where
+ * earned contribution pay exceeds the cash that went out (pay earned but not
+ * yet paid, usual for a few days into a month). Spreading that negative
+ * remainder pushed departments to a negative outflow, so it is not spread
+ * (decided 2026-11-03): each department shows at least its own earned pay,
+ * shared costs are zero, and Σ outflow is the pay, above the card.
  */
 
 import { splitByWeight } from '@/lib/reports/ownership-allocation'
@@ -88,7 +93,8 @@ export function departmentFlows(
 
   const rows = [...by.values()]
   const pay = r2(rows.reduce((s, r) => s + r.contributionPayInr, 0))
-  const pool = r2(outflowInr - pay)
+  // Never negative — see the header: earned-but-unpaid pay is not "negative cost".
+  const pool = r2(Math.max(0, outflowInr - pay))
   // Share by Billed; a window with no invoices falls back to job value; with
   // neither, the whole pool is Unassigned.
   const billed = rows.map(r => Math.max(0, r.billedInr))

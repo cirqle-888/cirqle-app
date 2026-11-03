@@ -15,7 +15,7 @@ import {
   ComposedChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts'
 import {
-  resolveComparisonPeriods, buildTrendSeries, alignComparison, seriesTotals, pctChange,
+  resolveComparisonPeriods, resolveLastPeriods, buildTrendSeries, alignComparison, seriesTotals, pctChange,
   addDays, type ComparisonMode, type TrendCashPoint, type TrendTaskPoint,
 } from '@/lib/finance/trends'
 import { todayISO } from '@/lib/utils/local-date'
@@ -64,12 +64,12 @@ const PLOT_META: Record<PlotKey, { label: string; money: boolean }> = {
 /** Keys that get %-of-peak rescaled in the combined view. */
 const SCALED_KEYS: PlotKey[] = ['jobs', 'jobValueInr', 'inflowInr', 'outflowInr', 'balanceInr']
 
-const MODES: { key: ComparisonMode; label: string; prevLabel: string }[] = [
-  { key: 'week',    label: 'Week',    prevLabel: 'last week' },
-  { key: 'month',   label: 'Month',   prevLabel: 'last month' },
-  { key: 'quarter', label: 'Quarter', prevLabel: 'last quarter' },
-  { key: 'year',    label: 'Year',    prevLabel: 'last year' },
-  { key: 'custom',  label: 'Custom',  prevLabel: 'previous period of same length' },
+const MODES: { key: ComparisonMode; label: string; prevLabel: string; beforeLastLabel: string }[] = [
+  { key: 'week',    label: 'Week',    prevLabel: 'last week',    beforeLastLabel: 'the week before' },
+  { key: 'month',   label: 'Month',   prevLabel: 'last month',   beforeLastLabel: 'the month before' },
+  { key: 'quarter', label: 'Quarter', prevLabel: 'last quarter', beforeLastLabel: 'the quarter before' },
+  { key: 'year',    label: 'Year',    prevLabel: 'last year',    beforeLastLabel: 'the year before' },
+  { key: 'custom',  label: 'Custom',  prevLabel: 'previous period of same length', beforeLastLabel: 'previous period of same length' },
 ]
 
 export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
@@ -79,6 +79,10 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
 }) {
   const today = todayISO()
   const [mode, setMode] = useState<ComparisonMode>('month')
+  // This month / Last month: 'last' is the previous complete period, compared
+  // with the one before it. Custom ranges ignore it.
+  const [which, setWhich] = useState<'this' | 'last'>('this')
+  const isLast = which === 'last' && mode !== 'custom'
   const [customFrom, setCustomFrom] = useState(addDays(today, -29))
   const [customTo, setCustomTo] = useState(today)
   const [compare, setCompare] = useState(true)
@@ -120,7 +124,7 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
   }), [cashbook, tasks])
 
   const { rows, curTotals, prevTotals, prevTruncated, periods } = useMemo(() => {
-    const periods = resolveComparisonPeriods(
+    const periods = (isLast ? resolveLastPeriods : resolveComparisonPeriods)(
       mode, today,
       mode === 'custom' && customFrom && customTo && customFrom <= customTo
         ? { from: customFrom, to: customTo } : undefined,
@@ -140,7 +144,7 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
       prevTruncated: compare && prev.length > cur.length,
       periods,
     }
-  }, [inputs, mode, today, customFrom, customTo, compare])
+  }, [inputs, mode, today, customFrom, customTo, compare, isLast])
 
   // Combined view: rescale every series to % of its own period peak (current
   // and previous share the series' max so their waves stay comparable). The
@@ -196,6 +200,22 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 bg-secondary rounded-lg p-1" role="group" aria-label="This or last period">
+            {(['this', 'last'] as const).map(w => (
+              <button
+                key={w}
+                onClick={() => setWhich(w)}
+                disabled={mode === 'custom'}
+                aria-pressed={which === w}
+                title={w === 'last' ? 'The previous complete period — last month, last quarter…' : 'The period we are in, to date'}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors disabled:opacity-40 ${which === w && mode !== 'custom'
+                  ? 'bg-card text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {w === 'this' ? 'This' : 'Last'}
+              </button>
+            ))}
+          </div>
           <div className="flex items-center gap-1 bg-secondary rounded-lg p-1">
             {MODES.map(m => (
               <button
@@ -232,7 +252,7 @@ export function DashboardTrendGraph({ cashbook, tasks, fmt }: {
               onChange={e => setCompare(e.target.checked)}
               className="w-3.5 h-3.5 rounded accent-violet-500"
             />
-            <span className="text-muted-foreground">vs {modeMeta.prevLabel}</span>
+            <span className="text-muted-foreground">vs {isLast ? modeMeta.beforeLastLabel : modeMeta.prevLabel}</span>
           </label>
         </div>
       </div>
