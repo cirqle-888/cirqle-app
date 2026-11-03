@@ -204,8 +204,10 @@ const MISSED_LOOKBACK_MONTHS = 12
  * Done, billable tasks for this invoice's client, dated up to the end of its
  * billing period, that are not on any live (non-cancelled) invoice.
  *
- * Tasks a package fee covers have no line of their own by design; the caller
- * filters those out with the agreement breakdowns it already holds.
+ * Tasks a package fee covers have no line of their own by design, so a task
+ * tagged to a package is never "missed" — an over-allowance extra gets its own
+ * repriced line from the package sync, which this check then sees as billed.
+ * The caller also drops tasks the agreement breakdowns list as covered.
  */
 export async function findMissedTasks(
   invoiceId: string,
@@ -231,6 +233,7 @@ export async function findMissedTasks(
     .eq('client_id', inv.client_id)
     .is('deleted_at', null)
     .not('is_billable', 'is', false)
+    .is('package_id', null)
     .in('status', ['done', 'invoiced'])
     .gte('task_date', since.toISOString().slice(0, 10))
     .lte('task_date', until)

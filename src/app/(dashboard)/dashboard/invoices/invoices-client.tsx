@@ -1546,6 +1546,31 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     toastError('Payments cannot be deleted directly. Manage allocations via the Cash Book.')
   }
 
+  function shareOnWhatsApp(inv: Invoice) {
+    const text = buildInvoiceShareText({
+      invoiceNumber: inv.invoice_number,
+      clientName:    inv.client?.name ?? null,
+      companyName:   companySettings.company_name || 'Cirqle Works',
+      amount:        inv.total_amount,
+      dueDate:       inv.due_date,
+      showAmounts,
+      link:          publicInvoiceUrl((inv as any).public_token),
+      template:      companySettings[TEMPLATE_KEYS.invoiceShare],
+    })
+    window.open(whatsappShareUrl(text, inv.client?.phone ?? null), '_blank', 'noopener,noreferrer')
+  }
+
+  // Phones have room for the toolbar's main actions only; the rest of what the
+  // wider toolbar shows moves into its "…" menu there.
+  const [isPhone, setIsPhone] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)')
+    const sync = () => setIsPhone(mq.matches)
+    sync()
+    mq.addEventListener('change', sync)
+    return () => mq.removeEventListener('change', sync)
+  }, [])
+
   async function addMissedTasks(inv: Invoice) {
     const ids = [...missedSel]
     if (!ids.length) return
@@ -2992,10 +3017,10 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                 <span className="text-[10px] uppercase tracking-wider font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md">Editable</span>
               )}
             </div>
-            <h3 className="text-lg font-bold text-foreground truncate">{inv.client?.name}</h3>
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs text-muted-foreground font-medium">
+            <h3 className="text-base sm:text-lg font-bold text-foreground truncate">{inv.client?.name}</h3>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-0.5 text-xs text-muted-foreground font-medium">
               {periodLabel && <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" />{periodLabel}</span>}
-              <span className="flex items-center gap-1.5"><span className="opacity-50">Issued</span> {fmtDate(inv.issue_date)}</span>
+              <span className="hidden sm:flex items-center gap-1.5"><span className="opacity-50">Issued</span> {fmtDate(inv.issue_date)}</span>
               {editable ? (
                 <span className="flex items-center gap-1.5">
                   <span className="opacity-50">Due</span>
@@ -3020,7 +3045,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
           {showAmounts && (
             <div className="text-right shrink-0">
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{(inv.paid_amount ?? 0) > 0 ? 'Balance due' : 'Total'}</div>
-              <div className="text-xl font-bold tabular-nums">{fmt((inv.paid_amount ?? 0) > 0 ? balance : inv.total_amount, inv.currency)}</div>
+              <div className="text-lg sm:text-xl font-bold tabular-nums">{fmt((inv.paid_amount ?? 0) > 0 ? balance : inv.total_amount, inv.currency)}</div>
               {(inv.paid_amount ?? 0) > 0 && (
                 <div className="text-[11px] text-muted-foreground tabular-nums">of {fmt(inv.total_amount, inv.currency)}</div>
               )}
@@ -3030,18 +3055,19 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
 
         {/* Toolbar — the two views on the left, the actions that matter now
             on the right, everything else behind the "…". */}
-        <div className="px-4 py-2 sm:px-5 border-b border-border/40 bg-card shrink-0 flex flex-wrap items-center gap-2">
+        <div className="px-4 py-2 sm:px-5 border-b border-border/40 bg-card shrink-0 flex flex-wrap items-center gap-1.5 sm:gap-2">
           <div role="tablist" aria-label="Invoice view" className="inline-flex rounded-lg border border-border/60 bg-secondary/40 p-0.5">
             {([
               { id: 'preview', label: 'Preview', icon: Eye },
               { id: 'edit', label: editable ? 'Edit lines' : 'Details', icon: editable ? Edit2 : ListTree },
             ] as const).map(t => (
               <button key={t.id} role="tab" aria-selected={detailView === t.id} onClick={() => setDetailView(t.id)}
+                aria-label={t.label} title={t.label}
                 className={cn(
-                  "inline-flex min-h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "inline-flex min-h-8 items-center gap-1.5 rounded-md px-2.5 sm:px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   detailView === t.id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                 )}>
-                <t.icon className="w-3.5 h-3.5" />{t.label}
+                <t.icon className="w-3.5 h-3.5" /><span className="hidden sm:inline">{t.label}</span>
                 {t.id === 'edit' && (lineIssues.size + missed.length) > 0 && (
                   <span title={`${lineIssues.size} line${lineIssues.size === 1 ? '' : 's'} to check · ${missed.length} missed task${missed.length === 1 ? '' : 's'}`}
                     className="rounded-full bg-amber-500/20 px-1.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300 tabular-nums">
@@ -3057,10 +3083,10 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
               onClick={() => updateStatus(inv.id, nextAct.next)}
               disabled={saving}
               className="min-h-8 py-1.5 px-3.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-50">
-              {nextAct.next === 'reviewed' && <Eye className="w-3.5 h-3.5" />}
-              {nextAct.next === 'sent' && <Send className="w-3.5 h-3.5" />}
-              {nextAct.next === 'partial' && <CreditCard className="w-3.5 h-3.5" />}
-              {nextAct.next === 'paid' && <CheckCircle className="w-3.5 h-3.5" />}
+              {nextAct.next === 'reviewed' && <Eye className="hidden sm:block w-3.5 h-3.5" />}
+              {nextAct.next === 'sent' && <Send className="hidden sm:block w-3.5 h-3.5" />}
+              {nextAct.next === 'partial' && <CreditCard className="hidden sm:block w-3.5 h-3.5" />}
+              {nextAct.next === 'paid' && <CheckCircle className="hidden sm:block w-3.5 h-3.5" />}
               {nextAct.label}
             </button>
           )}
@@ -3068,7 +3094,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
             <button
               onClick={() => openPayPanel(inv)}
               className="min-h-8 py-1.5 px-3.5 bg-green-600 hover:bg-green-500 text-white text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors">
-              <CreditCard className="w-3.5 h-3.5" />Record Payment
+              <CreditCard className="hidden sm:block w-3.5 h-3.5" />Record Payment
             </button>
           )}
           <button onClick={() => downloadInvoicePdf(inv)} disabled={!canSharePdf || downloadingInvId === inv.id}
@@ -3080,33 +3106,29 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
             <span className="hidden sm:inline">Download</span>
           </button>
           <button
-            onClick={() => {
-              const text = buildInvoiceShareText({
-                invoiceNumber: inv.invoice_number,
-                clientName:    inv.client?.name ?? null,
-                companyName:   companySettings.company_name || 'Cirqle Works',
-                amount:        inv.total_amount,
-                dueDate:       inv.due_date,
-                showAmounts,
-                link:          publicInvoiceUrl((inv as any).public_token),
-                template:      companySettings[TEMPLATE_KEYS.invoiceShare],
-              })
-              window.open(whatsappShareUrl(text, inv.client?.phone ?? null), '_blank', 'noopener,noreferrer')
-            }}
+            onClick={() => shareOnWhatsApp(inv)}
             title="Share via WhatsApp"
             aria-label="Share via WhatsApp"
-            className="min-h-8 min-w-8 inline-flex items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-green-600 hover:bg-green-500/10 transition-colors">
+            className="hidden sm:inline-flex min-h-8 min-w-8 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-green-600 hover:bg-green-500/10 transition-colors">
             <Share2 className="w-4 h-4" />
           </button>
           <button onClick={toggleFocus} aria-pressed={focusMode}
             title={focusMode ? 'Exit focus' : 'Focus — give the invoice the whole screen'}
             aria-label={focusMode ? 'Exit focus' : 'Focus on this invoice'}
-            className={cn("min-h-8 min-w-8 inline-flex items-center justify-center rounded-lg border transition-colors",
+            className={cn("hidden sm:inline-flex min-h-8 min-w-8 items-center justify-center rounded-lg border transition-colors",
               focusMode ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground hover:bg-secondary")}>
             {focusMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
           <OverflowMenu label="More invoice actions" items={[
-            { label: 'Print', icon: Printer, onClick: () => printInvoice(inv), disabled: !canSharePdf },
+            ...(isPhone ? [
+              { label: focusMode ? 'Exit focus' : 'Focus on this invoice', icon: focusMode ? Minimize2 : Maximize2, onClick: toggleFocus },
+              { label: 'Share via WhatsApp', icon: Share2, onClick: () => shareOnWhatsApp(inv) },
+              { label: 'Include outstanding on PDF', icon: Receipt, onClick: () => toggleIncludeOutstanding(inv),
+                badge: includeOutstanding.has(inv.id) ? 'On' : 'Off' },
+              { label: 'Service column', icon: Layers, onClick: () => toggleServiceColumn(inv),
+                badge: showServiceColumn(inv, inv.client) ? 'On' : 'Off' },
+            ] : []),
+            { label: 'Print', icon: Printer, onClick: () => printInvoice(inv), disabled: !canSharePdf, separatorBefore: isPhone },
             { label: 'Reload invoice', icon: RotateCw, onClick: () => refreshInvoice(inv.id) },
             ...(inv.status === 'draft' ? [{ label: 'Quick pay', icon: CreditCard, onClick: () => openPayPanel(inv), separatorBefore: true }] : []),
             { label: 'Request approval', icon: CheckCircle, onClick: () => setApprovalInvoice({ id: inv.id, invoice_number: inv.invoice_number, client_id: inv.client_id ?? null }), separatorBefore: inv.status !== 'draft' },
@@ -3145,7 +3167,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                 <span className="mr-auto hidden sm:inline">Exactly what {inv.client?.name || 'the client'} receives</span>
                 <label
                   title="Add the client's other overdue/pending invoices as an extra line on this PDF — not saved to the invoice, for sharing only"
-                  className="inline-flex items-center gap-1.5 cursor-pointer font-medium text-foreground">
+                  className="hidden sm:inline-flex items-center gap-1.5 cursor-pointer font-medium text-foreground">
                   {loadingOutstandingId === inv.id
                     ? <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
                     : <input type="checkbox" checked={includeOutstanding.has(inv.id)}
@@ -3159,7 +3181,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                   title={serviceColumnSource(inv, inv.client) === 'client'
                     ? `On by default for ${inv.client?.name ?? 'this client'}`
                     : 'Show which service each line belongs to'}
-                  className="inline-flex items-center gap-1.5 cursor-pointer font-medium text-foreground">
+                  className="hidden sm:inline-flex items-center gap-1.5 cursor-pointer font-medium text-foreground">
                   <input type="checkbox"
                     checked={showServiceColumn(inv, inv.client)}
                     onChange={() => toggleServiceColumn(inv)}
@@ -3529,14 +3551,16 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
               )}
               {/* Copy before sorting — Array#sort mutates, and `inv.items` is React state. */}
               {[...(inv.items || [])].sort(compareInvoiceItems).map((item, idx) => (
-                <div key={item.id} className={cn("relative flex items-start gap-3 px-4 py-3 transition-colors group",
+                <div key={item.id} className={cn("relative flex flex-wrap sm:flex-nowrap items-start gap-x-3 gap-y-1.5 px-4 py-3 transition-colors group",
                   lineIssues.has(item.id) ? "bg-amber-500/[0.06] hover:bg-amber-500/[0.1]" : "hover:bg-violet-500/[0.04]")}>
                   <span className={cn("absolute left-0 top-0 bottom-0 w-0.5 transition-colors",
                     lineIssues.has(item.id) ? "bg-amber-500" : "bg-violet-500/0 group-hover:bg-violet-500/60")} />
                   <span className="w-5 text-right shrink-0 pt-0.5 text-[10px] font-mono text-muted-foreground/50 tabular-nums select-none">
                     {String(idx + 1).padStart(2, '0')}
                   </span>
-                  <div className="flex-1 min-w-0">
+                  {/* On a phone the description takes the full row and the
+                      price drops below it, instead of truncating the text. */}
+                  <div className="flex-1 min-w-[calc(100%-2rem)] sm:min-w-0">
                     {editable ? (
                       <input
                         defaultValue={item.description}
@@ -3577,7 +3601,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                   {/* The editable field is the RATE, the read-only figure is the
                       LINE TOTAL. They differ whenever quantity > 1, so the total
                       is always spelled out rather than left to be inferred. */}
-                  <div className="text-right shrink-0">
+                  <div className="text-right shrink-0 ml-auto sm:ml-0">
                     {editable ? (
                       <input
                         type="number" min="0" step="0.01"
