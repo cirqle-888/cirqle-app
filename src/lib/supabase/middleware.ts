@@ -260,6 +260,7 @@ export async function updateSession(request: NextRequest) {
                                                          // monitor only ever sees the 307 to /login and reports "up"
                                                          // while the database is unreachable. Returns booleans only.
                   || pathname.startsWith('/api/shortcut') // iOS Shortcuts API — its own bearer-token auth
+                  || pathname.startsWith('/api/mcp')      // MCP server — its own MCP_API_TOKEN bearer auth, fail-closed in the route (no Supabase session).
                   || pathname.startsWith('/api/calendar/') // Subscribed posting calendars — the token in the URL IS the
                                                          // auth (the route fails closed on an unknown one). A calendar
                                                          // client sends no cookie and no header: iOS Calendar follows
