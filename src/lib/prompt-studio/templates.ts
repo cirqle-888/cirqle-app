@@ -54,6 +54,70 @@ const VIDEO_TOOL: PromptField = {
 
 const AVOID_LINE = 'Then one line starting "Avoid:" with 5 short things to avoid.'
 
+// ── Campaign title kit ──────────────────────────────────────────────────────
+// Styles, occasions and treatments from flyer benchmarks around the world.
+// The same list is in Offer Studio (src/lib/parity/title-kit.ts) and its
+// Figma plugin; keep the names in step when one changes.
+const TITLE_STYLE_OPTIONS = [
+  'Gulf 3D gold — glossy gold 3D letters, red ribbon, sparkles and light rays',
+  'Chirashi burst — huge red and yellow letters, thick outlines, jagged starburst',
+  'Discounter block — heavy condensed letters on flat yellow and blue blocks, red arrow',
+  'US circular clean — white letters on a colour band, one ribbon tag, lots of space',
+  'Price-drop red — white letters on bright red, big down arrow, yellow tag',
+  'Arabesque lantern — gold calligraphy-style letters, lanterns, crescent, arabesque pattern',
+  'Market chalkboard — hand-lettered chalk on dark green, fruit doodles, wooden frame',
+  'Leafy organic — rounded green letters, real leaves and herbs, water drops, cream',
+  'Pookalam festive — yellow and orange letters, flower-carpet ring, marigolds, banana leaves',
+  'Diya glow — glowing golden letters, oil lamps, rangoli, deep purple and magenta',
+  'Winter festive — red and white letters, snowy tops, pine, baubles, bokeh lights',
+  'Neon night — pink and cyan neon tube letters on a dark wall',
+  'Paper cut — layered paper letters with soft shadows, pastel shapes',
+  'Sticker pop — die-cut sticker letters with a thick white border, bright flat colours',
+  'Comic pop-art — comic letters, halftone dots, speech-bubble burst, primary colours',
+  'Premium minimal — refined serif in deep green or black, thin gold lines, lots of space',
+  'Fresh splash — bold letters with water and juice splashes, flying fruit',
+  'Big number — a giant number or % as the hero, title smaller beside it',
+  'Celebration ribbon — golden ribbon around the title, confetti, balloons, years badge',
+  'Crayon school — hand-drawn crayon letters, pencils and notebooks, lined paper',
+]
+const TITLE_OCCASIONS = [
+  'Ramadan', 'Eid', 'UAE National Day', 'Saudi National Day', 'Onam', 'Vishu', 'Diwali', 'Christmas', 'New Year',
+  'Back to school', 'Summer', 'Monsoon', 'Weekend', 'Fresh week', 'Mega or clearance sale', 'Anniversary or opening',
+]
+const TITLE_TREATMENTS = [
+  '3D extruded letters with a ribbon for the subline', 'Title inside a badge or seal', 'Stacked block letters with a burst behind',
+  'Script and bold word pair', 'Ribbon banner across the title', 'Neon outline letters', 'Die-cut sticker letters',
+  'Gold foil embossed letters', 'Arched text', 'Split two-colour letters', 'Title inside a price burst', 'Hand-lettered title',
+]
+const TITLE_SPACE_OPTIONS = [
+  'Cover title, 2:1 landscape', 'Full-width cover band, 8:3 landscape', 'Title strip, 5:1 wide banner', 'Square post or badge, 1:1', 'Story or status, 9:16 vertical',
+]
+
+// Product background scene sets — the same list as Offer Studio's
+// /backgrounds page and the plugin (offer-studio src/lib/parity/flyer-look.ts).
+// Every product on a flyer shares one: the same table, light and backdrop.
+const SCENE_SET_OPTIONS = [
+  'Fresh market: a light oak wooden table with fine grain, in front of a soft cream wall, out of focus',
+  'Gulf gold: white marble with soft grey veins and a thin gold edge, in front of a warm beige to gold gradient',
+  'Kerala harvest: a fresh banana leaf laid on dark wood, in front of soft yellow with a light marigold bokeh',
+  'Clean modern: a matte pastel counter with a rounded front edge, in front of the same pastel one shade lighter',
+  'Cold aisle: a frosted white surface with a few small ice crystals, in front of an icy light blue',
+  'Kraft deal: a sheet of brown kraft paper, in front of a plain warm grey',
+  'Festive night: dark navy velvet, in front of deep navy with soft golden lights out of focus',
+]
+const CATEGORY_PROP_OPTIONS = [
+  'Vegetables: two mint leaves and a few water drops', 'Fruits: one green leaf and a cut fruit slice', 'Dairy: a small milk splash',
+  'Frozen: a few ice cubes', 'Bakery: a little flour dust and two wheat ears', 'Spices and staples: a small wooden scoop of spice powder',
+  'Cleaning: a few soap bubbles', 'Drinks: condensation drops and two ice cubes', 'Snacks: a few loose pieces of the snack',
+  'Personal care: a small folded white towel and a green leaf',
+]
+const BACKDROP_SHAPE_OPTIONS = [
+  'Soft rounded blob', 'Tall arch (for bottles and cartons)', 'Upright rounded rectangle (for boxes and packs)',
+  'Circle (for fruit, tins and jars)', 'Oval (for wide packs)', 'Low pill (for bars and multipacks)',
+]
+const SCENE_CAMERA_LIGHT = `Camera: front view, about 15 degrees from above, 50 mm lens look.
+Light: soft main light from the top left, gentle shadow falling to the bottom right.`
+
 // ── Offer Flyer ─────────────────────────────────────────────────────────────
 // Built from the team's "auto-generate prompts" sheet (theme, light, depth,
 // material, text finish, effects, reference attached …), cut down to the
@@ -384,6 +448,304 @@ ELEMENTS: <things around the text, or none>
 Avoid: <5 short things>
 No explanation.`,
     tip: 'Paste the answer back into the Answer box, then press “Save as a style”. Saved styles can be mixed into any template, or turned into your own text template.',
+  },
+  // ── Campaign titles ────────────────────────────────────────────────────────
+  // The Campaign Title Prompt Kit (same styles and occasions as Offer Studio's
+  // /titles page and the Figma plugin): words first, then the whole title
+  // artwork, a client's reference, and the parts on their own.
+  {
+    key: 'flyer-title-ideas', name: 'Campaign title ideas', category: 'flyer',
+    purpose: 'Ten campaign titles with sublines (and the same title in Arabic or Malayalam) for an offer flyer',
+    useIn: 'ChatGPT, Claude or Gemini (text)', usesClientCard: true,
+    fields: [
+      { key: 'occasion', label: 'Occasion', type: 'select', required: true, options: TITLE_OCCASIONS },
+      { key: 'offer', label: 'Main deals (optional)', type: 'text', placeholder: 'Rice, oil, fresh fruit, up to 40% off' },
+      { key: 'dates', label: 'Dates (optional)', type: 'text', placeholder: '25 Aug – 5 Sep' },
+      { key: 'second', label: 'Also in (optional)', type: 'select', options: ['Arabic', 'Malayalam', 'Hindi', 'Tamil'] },
+      { key: 'tone', label: 'Tone', type: 'multi', options: ['Festive', 'Price-driven', 'Fresh and quality', 'Playful', 'Premium'] },
+    ],
+    defaults: { tone: 'Festive; Price-driven; Fresh and quality; Playful' },
+    body: `You are a retail copywriter for supermarket and hypermarket offer flyers. Use the CLIENT CARD above.
+
+Occasion: {{occasion}}
+Main deals: {{offer}}
+Dates: {{dates}}
+Also write each title in: {{second}}
+Tone mix: {{tone}}
+
+Task: write 10 campaign titles for this flyer.
+Rules:
+- 1 to 4 words each, punchy, easy to read from 2 metres.
+- Each with a short subline of at most 6 words.
+- If a second language is given, add the same title in it, written correctly.
+- Never use other stores' names, prices or claims that are not in the deals.
+
+Output only a numbered list: title — subline — second language. No explanation.`,
+    tip: 'Pick one, then use it in “Campaign title artwork”. Have a native reader check Arabic and Malayalam before printing.',
+  },
+  {
+    key: 'flyer-campaign-title', name: 'Campaign title artwork', category: 'flyer',
+    purpose: 'The flyer’s whole title area — lettering, elements and background — in a style from flyers around the world',
+    useIn: 'ChatGPT images, Gemini (Nano Banana), Ideogram, Firefly — Midjourney for art only', usesClientCard: true,
+    fields: [
+      { key: 'title', label: 'Campaign title (spelled exactly)', type: 'text', required: true, placeholder: 'ONAM MEGA OFFERS' },
+      { key: 'subline', label: 'Subline (optional)', type: 'text', placeholder: 'Up to 40% off' },
+      { key: 'dates', label: 'Dates (optional)', type: 'text', placeholder: '25 Aug – 5 Sep' },
+      { key: 'localTitle', label: 'Title in Arabic or Malayalam (optional)', type: 'text', placeholder: 'ഓണം ഓഫർ',
+        help: 'Image tools often break these letters: check it, or type it in Figma later.' },
+      { key: 'occasion', label: 'Occasion', type: 'select', options: TITLE_OCCASIONS },
+      { key: 'style', label: 'Title style', type: 'select', options: TITLE_STYLE_OPTIONS,
+        help: 'Collected from flyers in the Gulf, Japan, Europe, the US, Australia and Kerala.' },
+      { key: 'elements', label: 'Elements around the title (optional)', type: 'text', placeholder: 'Pookalam, banana leaf, nilavilakku, marigolds' },
+      { key: 'background', label: 'Background (optional)', type: 'text', placeholder: 'Yellow to orange with a traditional border' },
+      { key: 'space', label: 'Title space on the flyer', type: 'select', options: TITLE_SPACE_OPTIONS },
+      { key: 'logo', label: 'Store logo space', type: 'select', options: ['Empty area on the right', 'Empty area on the left', 'Empty strip along the top', 'No logo space'] },
+      { key: 'versions', label: 'Versions', type: 'multi', options: TITLE_TREATMENTS,
+        help: 'Tick up to 4: each version gets a different title treatment.' },
+      { key: 'refUse', label: 'Reference picture (optional)', type: 'multi', attach: true,
+        options: ['Colours', 'Theme and mood', 'Elements', 'Lettering style'],
+        help: 'Attach it in the AI tool too. Only these are taken from it — never its layout, words or logo.' },
+    ],
+    defaults: {
+      style: TITLE_STYLE_OPTIONS[0], space: TITLE_SPACE_OPTIONS[0], logo: 'Empty area on the right',
+      versions: TITLE_TREATMENTS.slice(0, 4).join('; '),
+    },
+    presets: [
+      { name: 'Gulf mega sale', note: '3D gold, red ribbon', values: { occasion: 'Mega or clearance sale', style: TITLE_STYLE_OPTIONS[0] } },
+      { name: 'Onam', note: 'Pookalam, banana leaf', values: { occasion: 'Onam', style: TITLE_STYLE_OPTIONS[8] } },
+      { name: 'Ramadan', note: 'Lanterns, arabesque, gold', values: { occasion: 'Ramadan', style: TITLE_STYLE_OPTIONS[5] } },
+      { name: 'Weekend burst', note: 'Japanese chirashi energy', values: { occasion: 'Weekend', style: TITLE_STYLE_OPTIONS[1] } },
+      { name: 'Fresh week', note: 'Leaves and water drops', values: { occasion: 'Fresh week', style: TITLE_STYLE_OPTIONS[7] } },
+    ],
+    body: `You write prompts for AI image tools that make the campaign title area of shop offer flyers. Use the CLIENT CARD above.
+
+TITLE (spell exactly): "{{title}}"
+Subline: "{{subline}}"
+Dates: "{{dates}}"
+Second language line: "{{localTitle}}"
+Occasion: {{occasion}}
+Title style: {{style}}
+Elements around the title: {{elements}}
+Background: {{background}}
+Title space: {{space}}
+Store logo: {{logo}}
+Versions (one per treatment): {{versions}}
+Reference picture attached — take only its: {{refUse}}
+
+Task: write ONE image prompt for the whole title artwork, asking for one version per treatment listed.
+Rules:
+- Show only the words above, spelled exactly, letter by letter. No other words, logos or prices.
+- The title is the hero: 55-65% of the width, extra-bold, readable from 2 metres; the subline clearly smaller.
+- Elements sit at the edges and corners, never over a letter. If no elements or background are given, choose ones that suit the occasion and the client's colours.
+- Keep the logo space completely empty.
+- Flat, finished, print-ready artwork in the space's shape: crisp edges, print-safe colours, no mock-up, no watermark.
+- Maximum 130 words.
+
+Output only the prompt. ${AVOID_LINE} No explanation.`,
+    tip: 'If the tool misspells the title twice, ask for the background only and type the title in Figma. Use the same style for every page of one flyer.',
+  },
+  {
+    key: 'flyer-title-reference', name: 'Title from a reference', category: 'flyer',
+    purpose: 'The client sent a sample: four new titles in its theme and colours, each with a different lettering design',
+    useIn: 'ChatGPT images or Gemini — attach the reference picture', usesClientCard: false,
+    direct: true,
+    fields: [
+      { key: 'title', label: 'Campaign title (spelled exactly)', type: 'text', required: true, placeholder: 'MEGA SAVINGS', attach: true,
+        help: 'Add the client’s reference picture here and attach it in the AI tool too.' },
+      { key: 'subline', label: 'Subline (optional)', type: 'text', placeholder: 'Up to 50% off' },
+      { key: 'dates', label: 'Dates (optional)', type: 'text', placeholder: '6 – 9 NOV' },
+      { key: 'localTitle', label: 'Title in Arabic or Malayalam (optional)', type: 'text' },
+      { key: 'colours', label: 'Store colours to blend in (optional)', type: 'text', placeholder: '#D7261E red, #FFC93C gold' },
+      { key: 'space', label: 'Title space on the flyer', type: 'select', options: TITLE_SPACE_OPTIONS },
+      { key: 'logo', label: 'Store logo space', type: 'select', options: ['Empty area on the right', 'Empty area on the left', 'Empty strip along the top', 'No logo space'] },
+      { key: 'versions', label: 'Four designs', type: 'multi', options: TITLE_TREATMENTS, help: 'Tick 4: each design gets one.' },
+    ],
+    defaults: { space: TITLE_SPACE_OPTIONS[0], logo: 'Empty area on the right', versions: TITLE_TREATMENTS.slice(0, 4).join('; ') },
+    body: `Use the attached image ONLY as a theme and mood reference: keep its colour palette, motifs, mood and level of decoration. Do NOT copy its layout, its words, its characters, its logos or any brand.
+
+Create one campaign title design for a printed supermarket flyer for each of these lettering treatments: {{versions}}.
+
+TITLE (spell exactly): "{{title}}"
+SUBLINE: "{{subline}}"
+DATES: "{{dates}}"
+Second language line: "{{localTitle}}"
+Store colours to blend in: {{colours}}
+Title space: {{space}}
+Store logo: {{logo}}, kept completely plain.
+
+Same for all designs: the title takes 55-65% of the width, bold and readable from 2 metres, print-ready, no extra words, no watermark, no spelling mistakes.
+
+Output only the images.`,
+    tip: 'Want the reference read first? Run “Style from a picture” on it, save the style, then use “Campaign title artwork”.',
+  },
+  {
+    key: 'flyer-title-background', name: 'Title background only', category: 'flyer',
+    purpose: 'A background with elements for the title area, with room left for lettering you type in Figma',
+    useIn: 'Any image tool — Midjourney, Firefly, ChatGPT images, Gemini', usesClientCard: false,
+    direct: true,
+    fields: [
+      { key: 'occasion', label: 'Occasion', type: 'select', options: TITLE_OCCASIONS },
+      { key: 'background', label: 'Background', type: 'text', required: true, placeholder: 'Deep red radial burst with gold light rays' },
+      { key: 'elements', label: 'Elements at the edges (optional)', type: 'text', placeholder: 'Confetti, gift boxes, a shopping bag' },
+      { key: 'colours', label: 'Colours (optional)', type: 'text', placeholder: '#D7261E red, #FFC93C gold' },
+      { key: 'space', label: 'Title space on the flyer', type: 'select', options: TITLE_SPACE_OPTIONS },
+      { key: 'logo', label: 'Store logo space', type: 'select', options: ['Empty area on the right', 'Empty area on the left', 'Empty strip along the top', 'No logo space'] },
+    ],
+    defaults: { space: TITLE_SPACE_OPTIONS[0], logo: 'Empty area on the right' },
+    body: `A background for the title area of a supermarket offer flyer.
+Occasion: {{occasion}}
+{{background}}
+Colours: {{colours}}
+Decorative elements only along the edges and corners: {{elements}}
+Keep the centre-left 65% calm and empty for a big title. Store logo: {{logo}}, kept plain.
+No text, no letters, no logos. Flat finished artwork, print-ready, shaped for: {{space}}.
+
+Output only the image.`,
+    tip: 'Best when the client has its own title font, or when a tool keeps misspelling: type the title on top in Figma.',
+  },
+  {
+    key: 'flyer-title-elements', name: 'Title elements (cut-outs)', category: 'flyer',
+    purpose: 'Separate decorations (lanterns, confetti, leaves…) on a transparent background to build a title by hand',
+    useIn: 'ChatGPT images (transparent PNG), or any tool on plain white', usesClientCard: false,
+    direct: true,
+    fields: [
+      { key: 'elements', label: 'Elements', type: 'text', required: true, placeholder: 'Lanterns, crescent moon, stars, a dates bowl' },
+      { key: 'count', label: 'How many pieces', type: 'select', options: ['4', '6', '8', '10'] },
+      { key: 'occasion', label: 'Occasion (optional)', type: 'select', options: TITLE_OCCASIONS },
+      { key: 'style', label: 'Style', type: 'select', options: TITLE_STYLE_OPTIONS },
+      { key: 'colours', label: 'Colours (optional)', type: 'text', placeholder: 'Gold, deep navy, emerald' },
+    ],
+    defaults: { count: '6', style: TITLE_STYLE_OPTIONS[0] },
+    body: `A set of {{count}} separate decorative elements for a supermarket offer flyer: {{elements}}.
+Occasion: {{occasion}}
+Style: {{style}}
+Colours: {{colours}}
+Each element isolated with clear space around it, the same lighting and style for all.
+Transparent background (PNG); if not possible, plain pure white. No text, no logos, high resolution.
+
+Output only the image.`,
+    tip: 'No transparent option in the tool? Use the white version and click Remove background in Figma.',
+  },
+  {
+    key: 'flyer-scene-empty', name: 'Empty product scene', category: 'flyer',
+    purpose: 'One empty table scene for the whole flyer — every product cutout is placed on it, so all photos match',
+    useIn: 'ChatGPT images, Gemini, Firefly, Midjourney', usesClientCard: false,
+    direct: true,
+    fields: [
+      { key: 'scene', label: 'Scene set', type: 'select', required: true, options: SCENE_SET_OPTIONS },
+      { key: 'size', label: 'Size', type: 'select', options: ['Square 1:1, 2048 × 2048 px', 'Portrait 4:5, 1638 × 2048 px', 'Wide 3:2, 2048 × 1365 px'] },
+    ],
+    defaults: { scene: SCENE_SET_OPTIONS[0], size: 'Square 1:1, 2048 × 2048 px' },
+    body: `The image must contain no products of any kind.
+Create an empty product photography background for a supermarket flyer.
+Table and backdrop: {{scene}}. The table fills the bottom 35% of the image, its front edge running straight across.
+${SCENE_CAMERA_LIGHT}
+Leave the centre completely empty: no packs, no people, no text, no logos.
+{{size}}, sharp, natural colours.
+
+Output only the image.`,
+    tip: 'Make it once per flyer and keep it. Place every product cutout on it in Figma, with Backdrop shapes in the plugin if you want a shape behind each one.',
+  },
+  {
+    key: 'flyer-scene-props', name: 'Scene with category props', category: 'flyer',
+    purpose: 'The same empty scene with small props for one category (leaves for vegetables, ice for frozen…)',
+    useIn: 'ChatGPT images or Gemini, with the empty scene attached', usesClientCard: false,
+    direct: true,
+    fields: [
+      { key: 'category', label: 'Category and props', type: 'select', required: true, options: CATEGORY_PROP_OPTIONS },
+      { key: 'props', label: 'Other props (optional)', type: 'text', placeholder: 'Two lemon slices and a sprig of coriander' },
+    ],
+    defaults: { category: CATEGORY_PROP_OPTIONS[0] },
+    body: `Use the attached image as the base. Keep the table, backdrop, camera angle and light exactly the same.
+Add only small props at the far left and far right edges for this category: {{category}}
+Instead, use these props: {{props}}
+The props stay small, low on the table and out of the centre, which stays empty for the product.
+No products, packs, text or logos. Same size as the base image.
+
+Output only the image.`,
+    tip: 'Attach the empty scene every time, so the table never changes.',
+  },
+  {
+    key: 'flyer-product-on-scene', name: 'Product on the scene', category: 'flyer',
+    purpose: 'Puts a weak product photo onto the empty scene with a matching shadow, keeping its label as it is',
+    useIn: 'ChatGPT images or Gemini, with the cutout and the empty scene attached', usesClientCard: false,
+    direct: true,
+    fields: [
+      { key: 'surface', label: 'Table surface', type: 'select', options: ['Matte, no reflection', 'Glossy, a faint reflection under the product'] },
+      { key: 'height', label: 'Product size', type: 'select', options: ['About 60% of the image height', 'About 45% of the image height', 'About 75% of the image height'] },
+    ],
+    defaults: { surface: 'Matte, no reflection', height: 'About 60% of the image height' },
+    body: `Place the attached product cutout on the attached empty scene.
+Do not redraw, restyle or re-letter the product: keep its shape, colours, label text and logo exactly as in the cutout.
+Stand it in the centre of the table, front facing. Size: {{height}}.
+Add a soft contact shadow under it falling to the bottom right, matching the scene light.
+Surface: {{surface}}.
+Nothing else changes.
+
+Output only the image.`,
+    tip: 'Only for a poor photo. Check the label word by word afterwards. If anything changed, place the cutout on the scene in Figma instead.',
+  },
+  {
+    key: 'flyer-pattern-tile', name: 'Pattern background tile', category: 'flyer',
+    purpose: 'A seamless repeating pattern for a patterned flyer background or to fill backdrop shapes',
+    useIn: 'ChatGPT images, Gemini, Firefly', usesClientCard: false,
+    direct: true,
+    fields: [
+      { key: 'theme', label: 'Pattern theme', type: 'text', required: true, placeholder: 'Fresh vegetables line icons' },
+      { key: 'colours', label: 'Colours', type: 'text', placeholder: '#7DB343 green and #F2B705 yellow' },
+      { key: 'base', label: 'Base colour', type: 'text', placeholder: 'Very light cream' },
+    ],
+    defaults: { base: 'Very light cream' },
+    body: `Create a seamless, repeating background pattern for a supermarket flyer.
+Theme: {{theme}}
+Colours: {{colours}}
+Base colour: {{base}}
+Flat and simple, low contrast, so prices and product photos stay easy to read on top.
+Icons small and evenly spaced. No text, no logos.
+The left edge must join the right edge, and the top must join the bottom, with no visible seam.
+Square tile, 1024 × 1024 px.
+
+Output only the image.`,
+    tip: 'In Figma, fill a rectangle with it and set the image to Tile.',
+  },
+  {
+    key: 'flyer-hero-stage', name: 'Hero product stage', category: 'flyer',
+    purpose: 'A podium on the same scene for a highlighted product, with a glow behind it',
+    useIn: 'ChatGPT images or Gemini, with the empty scene attached', usesClientCard: false,
+    direct: true,
+    fields: [
+      { key: 'podium', label: 'Podium colour', type: 'text', required: true, placeholder: 'Gold' },
+      { key: 'behind', label: 'Behind the podium (optional)', type: 'text', placeholder: 'A few flying fresh leaves' },
+    ],
+    body: `Use the attached image as the base. Keep the table, backdrop, camera angle and light exactly the same.
+Add a low round podium in {{podium}} standing on the table, centred, its top surface empty.
+Behind the podium, a soft glow and {{behind|a few small sparkles}}.
+The podium top must be empty for the product. No text, no logos. Same size as the base image.
+
+Output only the image.`,
+    tip: 'Place the hero product cutout on the podium in Figma.',
+  },
+  {
+    key: 'flyer-backdrop-shape', name: 'Backdrop shape', category: 'flyer',
+    purpose: 'One decorative shape to sit behind a product, at the exact size the plugin measured',
+    useIn: 'ChatGPT images (transparent PNG), Gemini, Firefly', usesClientCard: false,
+    direct: true,
+    fields: [
+      { key: 'shape', label: 'Shape', type: 'select', required: true, options: BACKDROP_SHAPE_OPTIONS },
+      { key: 'width', label: 'Width (px)', type: 'number', required: true, placeholder: '600', help: 'In the Figma plugin, select a backdrop shape and the size is filled in for you.' },
+      { key: 'height', label: 'Height (px)', type: 'number', required: true, placeholder: '800' },
+      { key: 'look', label: 'Look', type: 'text', placeholder: 'Soft gradient from #FFE7A3 to #FFC93C with a thin white inner edge' },
+      { key: 'scene', label: 'Scene set (optional)', type: 'select', options: SCENE_SET_OPTIONS },
+    ],
+    defaults: { shape: BACKDROP_SHAPE_OPTIONS[0] },
+    body: `Create a single decorative background shape to sit behind a product on a supermarket flyer.
+Shape: {{shape}}, {{width}} × {{height}} px, on a transparent background.
+Look: {{look|soft gradient in a light warm tint with a thin white inner edge}}
+To match this scene: {{scene}}
+The shape is empty inside: no product, no text, no logo.
+Exactly {{width}} × {{height}} px.
+
+Output only the image.`,
   },
 ]
 
