@@ -122,6 +122,7 @@ const PROBES = [
   { m: 'loose: phase3_allocations',           kind: 'table',  table: 'cashbook_invoice_allocations', col: 'id' },
   { m: 'loose: phase10_invoice_expense_items', kind: 'table', table: 'invoice_expense_items', col: 'id' },
   { m: 'loose: phase11_expense_markup',       kind: 'column', table: 'invoice_expense_items', col: 'markup_type' },
+  { m: 'supabase/migrations/20261110100000_task_referral_commission', kind: 'column', table: 'tasks', col: 'referred_by' },
 ]
 
 // Not probeable via the REST API — run these in the Supabase SQL editor:

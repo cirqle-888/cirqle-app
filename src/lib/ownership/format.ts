@@ -30,6 +30,7 @@ export const BASIS_CHOICE_LABEL: Record<OwnershipBasis, string> = {
   clients_handled: 'Client handling (₹ per client or % of their billing)',
   planned: 'Content planning (₹ per task or % of its billing)',
   activities: '₹ per activity (pick the kinds)',
+  referrals: 'Referral commission (the % set on each job)',
 }
 
 /** Bases whose rule can ONLY be a rupee rate per unit — a % of a count means nothing. */
@@ -41,6 +42,7 @@ export const PER_PERSON_UNIT: Record<string, { one: string; many: string; money?
   activities: { one: 'activity', many: 'activities' },
   clients_handled: { one: 'client', many: 'clients', money: 'their clients’ billing' },
   planned: { one: 'planned task', many: 'planned tasks', money: 'billing they planned' },
+  referrals: { one: 'referred job', many: 'referred jobs', money: 'jobs referred' },
 }
 
 /** The plural noun each basis measures, for "2% of collections". */
@@ -52,6 +54,7 @@ export const BASIS_NOUN: Record<string, string> = {
   clients_handled: 'their clients’ billing',
   planned: 'billing they planned',
   activities: 'activities',
+  referrals: 'jobs referred',
 }
 
 export interface RateShape {
@@ -71,6 +74,9 @@ const inr = (n: number) => Math.round(n).toLocaleString('en-IN')
  * explanation beside it is exactly the thing this is for.
  */
 export function rateLabel(a: RateShape): string {
+  // Each referred job carries its own %, so there is no single rate to print —
+  // and the rule's stored 100% would read as "100% of jobs referred".
+  if (a.basis === 'referrals') return `each job's own % (₹${inr(a.basisAmountInr)})`
   const unit = PER_PERSON_UNIT[a.basis]
   if (unit && a.percent == null) {
     const units = Math.round(a.basisAmountInr)
@@ -89,6 +95,7 @@ export function rateLabel(a: RateShape): string {
  */
 export function explainAward(a: RateShape & { earnedInr: number }): string {
   const earned = `₹${inr(a.earnedInr)}`
+  if (a.basis === 'referrals') return `Referred jobs, each at its own % = ${earned}`
   const unit = PER_PERSON_UNIT[a.basis]
   if (unit && a.percent == null) {
     const units = Math.round(a.basisAmountInr)

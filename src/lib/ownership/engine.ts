@@ -21,7 +21,7 @@ import { fetchJournalLines } from '@/lib/finance/journal'
 import { loadOrgGraph, resolveScope, matchesScope } from '@/lib/org/units'
 import { computeAwards, resolveParticipants } from './compute'
 import { loadEntryCounts } from './entry-count'
-import { loadClientHandling, loadPlanned, loadActivities, type PersonMeasure } from './work-measures'
+import { loadClientHandling, loadPlanned, loadActivities, loadReferrals, type PersonMeasure } from './work-measures'
 import { monthsInPeriod, periodForBookingMonth, activeForPeriod } from './periods'
 import type {
   BasisLine, OwnershipAward, OwnershipPeriod, OwnershipProgram, OwnershipRule, PeriodAggregates,
@@ -165,6 +165,7 @@ export async function loadPeriodAggregates(
     program.basis === 'clients_handled' ? await loadClientHandling(admin, period, employeeIds, clientsByEmployee)
     : program.basis === 'planned' ? await loadPlanned(admin, period, employeeIds)
     : program.basis === 'activities' ? await loadActivities(admin, period, employeeIds, program.activityKinds ?? [])
+    : program.basis === 'referrals' ? await loadReferrals(admin, period)
     : null
   if (perPerson) {
     unitsByEmployee = Object.fromEntries(Object.entries(perPerson).map(([k, v]) => [k, v.units]))
@@ -331,9 +332,15 @@ export async function computeAwardsForMonth(
   if (programs.length === 0) return []
   const membersByDesignation = await loadMembersByDesignation(admin)
 
+  // Exactly one program pays referrals: the oldest active one. A second would
+  // pay every referred job twice, and nothing in the form stops a copy being
+  // made — so the engine refuses to rather than trusting it never happens.
+  const referralProgramId = programs.find(p => p.isActive && p.basis === 'referrals')?.id ?? null
+
   const out: OwnershipAward[] = []
   for (const program of programs) {
     if (!program.isActive) continue
+    if (program.basis === 'referrals' && program.id !== referralProgramId) continue
     const period = periodForBookingMonth(
       program.periodType, month, year,
       { start: program.periodStart, end: program.periodEnd },
@@ -343,6 +350,20 @@ export async function computeAwardsForMonth(
 
     const live = rules.filter(r =>
       r.programId === program.id && activeForPeriod(r.effectiveFrom, r.effectiveTo, period))
+
+    // Referrals: the JOBS say who is paid. Everyone named on a job dated in
+    // the period takes part, each under the program's rule — which exists
+    // only because an award row must reference one (see the migration).
+    if (program.basis === 'referrals') {
+      const rule = live.find(r => r.isActive)
+      if (!rule) continue
+      const agg = await loadPeriodAggregates(admin, program, period)
+      const referrers = Object.keys(agg.amountByEmployee ?? {})
+      if (referrers.length === 0) continue
+      out.push(...computeAwards(program, referrers.map(employeeId => ({ employeeId, rule })), agg, period))
+      continue
+    }
+
     const participants = resolveParticipants(live, membersByDesignation)
     if (participants.length === 0) continue
 

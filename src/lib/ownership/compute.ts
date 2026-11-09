@@ -83,7 +83,8 @@ export function basisAmount(basis: OwnershipBasis, agg: PeriodAggregates): numbe
     case 'entries':   return 0     // per participant; see measuredFor
     case 'clients_handled':
     case 'planned':
-    case 'activities': return 0    // per participant; see measuredFor
+    case 'activities':
+    case 'referrals': return 0     // per participant; see measuredFor
   }
 }
 
@@ -101,6 +102,9 @@ export function measuredFor(
   /** A per-person % rule is measured on the person's MONEY; a ₹ rule on their COUNT. */
   rule?: Pick<OwnershipRule, 'percent' | 'fixedAmountInr'>,
 ): number {
+  // Referrals are always money: the person's measured amount is already the
+  // commission, each job at its own %, whatever shape the rule has.
+  if (basis === 'referrals') return agg.amountByEmployee?.[employeeId] ?? 0
   if (PER_PERSON_BASES.includes(basis)) {
     if (rule && rule.fixedAmountInr == null && rule.percent != null) return agg.amountByEmployee?.[employeeId] ?? 0
     return agg.unitsByEmployee?.[employeeId] ?? 0
@@ -121,6 +125,10 @@ export function earningFor(
   measured: number,
   rule: OwnershipRule,
 ): number {
+  // Referrals: what was measured IS the earning — Σ job billing × that job's
+  // own %. Ignoring the rule is deliberate: a rule's % on top would apply the
+  // percentage twice (10% of a job, then 10% of that).
+  if (basis === 'referrals') return r2(Math.max(0, measured))
   // A per-unit basis reads `fixedAmountInr` as the RATE PER UNIT. This branch
   // must precede the flat-amount short-circuit below, or a ₹5-per-entry rule
   // would pay ₹5 once instead of ₹5 × the count.

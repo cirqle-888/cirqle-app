@@ -13,6 +13,9 @@ import { TaskBillingSection } from './task-billing-section'
 import { DerivedBillingPanel } from './derived-billing-panel'
 import { parseBillingRule, type BillingRule } from '@/lib/tasks/derived-billing'
 import { computeTaskAmount, resolveTaskQuantity, resolveUnitPrice } from '@/lib/tasks/pricing'
+import { usePermissions } from '@/contexts/permission-context'
+import { getTaskReferral, setTaskReferral } from '@/app/(dashboard)/dashboard/tasks/referral-actions'
+import { TaskReferralSection, EMPTY_REFERRAL, referralDirty, type ReferralDraft } from './task-referral-section'
 
 const ContributionEntryPanel = dynamic(
   () => import('./contribution-entry-panel').then(m => m.ContributionEntryPanel),
@@ -122,6 +125,26 @@ export function TaskEditModal({
     return parsed.ok ? parsed.rule : null
   })
 
+  // ── Referral commission ────────────────────────────────────────────────────
+  // Only for people who manage rewards; loaded on open, saved with the task.
+  const { can } = usePermissions()
+  const canSetReferral = can('payroll.manage_ownership')
+  const [referral, setReferral] = useState<ReferralDraft>(EMPTY_REFERRAL)
+  useEffect(() => {
+    if (!canSetReferral) return
+    let cancelled = false
+    getTaskReferral(task.id).then(res => {
+      if (cancelled || !res.ok) return
+      const by = res.data.referredBy ?? ''
+      const pct = res.data.percent == null ? '' : String(res.data.percent)
+      setReferral({
+        loaded: true, available: res.data.available, locked: res.data.locked,
+        employees: res.data.employees, by, pct, initialBy: by, initialPct: pct,
+      })
+    }).catch(() => { /* section simply stays hidden */ })
+    return () => { cancelled = true }
+  }, [canSetReferral, task.id])
+
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -204,9 +227,28 @@ export function TaskEditModal({
       taskDate:         form.task_date || null,
     })
 
+    if (!res.ok || !res.data) {
+      setSaving(false)
+      setSaveError(res.error ?? 'Save failed. Please try again.')
+      return
+    }
+
+    // The referral saves AFTER the task, against the task's saved date — so a
+    // job moved to another month pays in the month it now belongs to. If this
+    // half fails, the task stays saved and the modal stays open to say why.
+    if (canSetReferral && referralDirty(referral)) {
+      const r = await setTaskReferral(task.id, referral.by || null, referral.pct.trim() === '' ? null : Number(referral.pct))
+      if (!r.ok) {
+        setSaving(false)
+        onSaved(res.data)
+        setSaveError(`Task saved, but the referral was not: ${r.error}`)
+        return
+      }
+    }
+
     setSaving(false)
-    if (res.ok && res.data) { onSaved(res.data); onClose() }
-    else setSaveError(res.error ?? 'Save failed. Please try again.')
+    onSaved(res.data)
+    onClose()
   }
 
   async function handleDelete() {
@@ -394,6 +436,16 @@ export function TaskEditModal({
                   </>
                 }
               />
+              )}
+
+              {canSetReferral && (
+                <TaskReferralSection
+                  value={referral}
+                  onChange={patch => setReferral(p => ({ ...p, ...patch }))}
+                  billingInr={Number(task.billing_amount_inr ?? 0)}
+                  taskDate={form.task_date}
+                  showAmounts={showFinancials}
+                />
               )}
 
               {/* Description */}

@@ -35,9 +35,16 @@ export type OwnershipBasis =
   | 'planned'
   /** Recorded work of chosen kinds (program.activityKinds): ₹ per item. */
   | 'activities'
+  /**
+   * Jobs that came through a person (tasks.referred_by): each job pays its
+   * OWN % (tasks.referral_percent) of its billing. The rule decides nothing
+   * here — the jobs say who is paid and how much — so one built-in program
+   * covers every referral. See work-measures.ts attributeReferrals.
+   */
+  | 'referrals'
 
 /** Bases measured per participant rather than program-wide. */
-export const PER_PERSON_BASES: readonly OwnershipBasis[] = ['entries', 'clients_handled', 'planned', 'activities']
+export const PER_PERSON_BASES: readonly OwnershipBasis[] = ['entries', 'clients_handled', 'planned', 'activities', 'referrals']
 /** Per-person bases that also measure money, so a % rule means something. */
 export const PER_PERSON_MONEY_BASES: readonly OwnershipBasis[] = ['clients_handled', 'planned']
 

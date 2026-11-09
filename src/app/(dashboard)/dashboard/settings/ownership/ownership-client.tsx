@@ -394,7 +394,19 @@ export default function OwnershipClient(p: Props) {
                 </div>
               </div>
 
-              {open && (
+              {open && prog.basis === 'referrals' && (
+                // The built-in referral program has no rules worth editing:
+                // each job says who is paid and at what %. Showing its
+                // placeholder rule ("Admin · 100%") would invite edits that
+                // change nothing, so the card explains the program instead.
+                // Pausing it above is the off switch for every referral.
+                <div className="p-4 text-xs leading-relaxed text-muted-foreground">
+                  Pays whoever is named as <span className="font-medium text-foreground">Referred by</span> on a job,
+                  at the % set on that job, into the payslip of the month the job is dated.
+                  Set it in the job&apos;s edit window under <span className="font-medium text-foreground">Referral commission</span>.
+                </div>
+              )}
+              {open && prog.basis !== 'referrals' && (
                 <div className="p-4 space-y-2">
                   {progRules.length === 0 ? (
                     <p className="text-xs text-muted-foreground">No rules yet — nobody earns from this program.</p>
@@ -577,9 +589,14 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, activi
                 setBasis(b)
                 if (b === 'profit') { setScopeKind('company'); setScopeId('') }
               }}>
-                {(Object.keys(BASIS_LABEL) as OwnershipBasis[]).map(b => (
-                  <option key={b} value={b}>{BASIS_LABEL[b]}</option>
-                ))}
+                {/* Referrals is built in — one program, created by its
+                    migration. A second copy would pay every referral twice
+                    (the engine refuses to, but the choice should not exist). */}
+                {(Object.keys(BASIS_LABEL) as OwnershipBasis[])
+                  .filter(b => b !== 'referrals' || initial?.basis === 'referrals')
+                  .map(b => (
+                    <option key={b} value={b}>{BASIS_LABEL[b]}</option>
+                  ))}
               </AppSelect>
             </div>
             <div>

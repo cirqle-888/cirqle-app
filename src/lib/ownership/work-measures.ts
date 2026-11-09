@@ -24,6 +24,7 @@ import type { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAll } from '@/lib/supabase/server'
 import { periodWindow, allocatedEntryIds, isInvoicePayment } from './entry-count'
 import type { OwnershipPeriod } from './types'
+import { referralCommission } from './referral'
 
 type Admin = ReturnType<typeof createAdminClient>
 
@@ -137,6 +138,51 @@ export function attributePlanned(
   return out
 }
 
+/** A task as the referral measure needs it. */
+export interface ReferralTaskRow {
+  id: string; task_number: number | null; title: string | null; task_date: string
+  billing_amount_inr: number | null; status: string | null
+  referred_by: string | null; referral_percent: number | string | null
+}
+
+/**
+ * What each referrer earned: every job they are named on, at that job's own %.
+ *
+ * Unlike the other per-person measures this is NOT limited to a list of
+ * participants — whoever a job names is paid, which is what lets one built-in
+ * program cover every referral with no rule per person.
+ *
+ *   units  = referred jobs dated in the period
+ *   amount = Σ job billing × job % — already the commission, not a base
+ *
+ * A cancelled job pays nothing, and a waived (no-charge) one still pays: the
+ * billing amount is untouched by waiving, exactly as the designer's own
+ * commission on a free job is (see serverSaveTask). A % outside 0–100 is
+ * clamped, so a bad row can underpay but never pay more than the job.
+ */
+export function attributeReferrals(tasks: ReferralTaskRow[]): Record<string, PersonMeasure> {
+  const out: Record<string, PersonMeasure> = {}
+  for (const t of tasks) {
+    if (!t.referred_by || t.status === 'cancelled') continue
+    const pct = Math.min(100, Math.max(0, Number(t.referral_percent) || 0))
+    if (pct === 0) continue
+    const billing = Number(t.billing_amount_inr) || 0
+    // One arithmetic for the editor's preview and the payslip (lib/ownership/referral).
+    const commission = referralCommission(billing, pct)
+    const m = (out[t.referred_by] ??= { units: 0, amountInr: 0, items: [] })
+    m.units += 1
+    m.amountInr += commission
+    m.items.push({
+      label: `#${t.task_number ?? '—'} ${t.title ?? ''} · ${pct}% of ₹${Math.round(billing).toLocaleString('en-IN')}`.trim(),
+      date: t.task_date,
+      amountInr: commission,
+      refId: t.id,
+    })
+  }
+  for (const m of Object.values(out)) { m.amountInr = r2(m.amountInr); m.items.sort((a, b) => a.date.localeCompare(b.date)) }
+  return out
+}
+
 // ── Loaders ──────────────────────────────────────────────────────────────────
 
 async function tasksInPeriod(admin: Admin, period: OwnershipPeriod): Promise<TaskRow[]> {
@@ -183,6 +229,22 @@ export async function loadPlanned(admin: Admin, period: OwnershipPeriod, employe
     }
     return attributePlanned(tasks, items, requests, employeeIds)
   } catch { return empty(employeeIds) }
+}
+
+/**
+ * Every referrer's commission for the period. Returns {} before the referral
+ * migration (the columns do not exist), so the program simply pays nothing.
+ */
+export async function loadReferrals(admin: Admin, period: OwnershipPeriod): Promise<Record<string, PersonMeasure>> {
+  try {
+    const { data, error } = await fetchAll(admin.from('tasks')
+      .select('id, task_number, title, task_date, billing_amount_inr, status, referred_by, referral_percent')
+      .not('referred_by', 'is', null)
+      .gte('task_date', period.start).lte('task_date', period.end).is('deleted_at', null)
+      .order('task_date', { ascending: true }).order('id', { ascending: true }))
+    if (error) return {}
+    return attributeReferrals((data ?? []) as ReferralTaskRow[])
+  } catch { return {} }
 }
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
