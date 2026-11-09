@@ -63,6 +63,8 @@ function mapProgram(r: Record<string, unknown>): OwnershipProgram {
     periodType: (r.period_type as OwnershipProgram['periodType']) ?? 'monthly',
     scopeKind: (r.scope_kind as OwnershipProgram['scopeKind']) ?? 'company',
     scopeId: (r.scope_id as string) ?? null,
+    // Absent before 20261110110000 — reads as "the whole client", as before.
+    scopeServiceId: (r.scope_service_id as string) ?? null,
     periodStart: (r.period_start as string) ?? null,
     periodEnd: (r.period_end as string) ?? null,
     effectiveFrom: r.effective_from as string,
@@ -263,7 +265,7 @@ async function loadBillingLines(
       let include = false
       switch (program.scopeKind) {
         case 'company':          include = true; break
-        case 'client':           include = clientId === program.scopeId; break
+        case 'client':           include = inClientScope(program, clientId, serviceId); break
         case 'service':          include = serviceId === program.scopeId; break
         case 'service_category': include = categoryId === program.scopeId; break
         case 'org_unit':
@@ -285,6 +287,22 @@ async function loadBillingLines(
     }
   } catch { /* leave empty — an unreadable period measures nothing */ }
   return out
+}
+
+/**
+ * Does a task belong to a client-scoped program?
+ *
+ * The client must match; and when the program is narrowed to one service of
+ * that client, the task's service must match too. A task with no service never
+ * matches a narrowed program — it cannot be "that service".
+ */
+export function inClientScope(
+  program: Pick<OwnershipProgram, 'scopeId' | 'scopeServiceId'>,
+  clientId: string | null,
+  serviceId: string | null,
+): boolean {
+  if (clientId !== program.scopeId) return false
+  return !program.scopeServiceId || serviceId === program.scopeServiceId
 }
 
 /** Revenue actually received inside a collected program's scope. */

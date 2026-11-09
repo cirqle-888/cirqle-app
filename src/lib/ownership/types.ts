@@ -62,6 +62,11 @@ export interface OwnershipProgram {
   periodType: OwnershipPeriodType
   scopeKind: OwnershipScopeKind
   scopeId: string | null
+  /**
+   * Client-scoped billing programs only: count just this one service of that
+   * client ("Sea Star's Social Media Posters"). Null = all of the client's work.
+   */
+  scopeServiceId?: string | null
   /** one_time programs only. */
   periodStart: string | null
   periodEnd: string | null

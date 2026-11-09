@@ -23,6 +23,7 @@ import { computeAwards, resolveParticipants, totalProfitSharePercent } from '@/l
 import { periodForBookingMonth, activeForPeriod } from '@/lib/ownership/periods'
 import { PER_PERSON_BASES, PER_PERSON_MONEY_BASES, type OwnershipBasis, type OwnershipPeriodType, type OwnershipScopeKind } from '@/lib/ownership/types'
 import { isActivityKind } from '@/lib/ownership/work-measures'
+import { isMissingColumn, withoutColumn, type PgError } from '@/lib/db/missing-column'
 
 const REVALIDATE = '/dashboard/settings/ownership'
 const MIGRATION = 'supabase/migrations/20260807100000_ownership_platform.sql'
@@ -53,6 +54,8 @@ export interface ProgramInput {
   periodType: OwnershipPeriodType
   scopeKind: OwnershipScopeKind
   scopeId?: string | null
+  /** Client scope + billing only: narrow to one service of that client. */
+  scopeServiceId?: string | null
   periodStart?: string | null
   periodEnd?: string | null
   effectiveFrom: string
@@ -89,6 +92,13 @@ export async function saveProgram(input: ProgramInput): Promise<ActionResult<{ i
   if (input.periodType === 'one_time' && (!input.periodStart || !input.periodEnd)) {
     return { ok: false, error: 'A one-time program needs a start and end date.' }
   }
+  // One service OF one client: billing only (collections carry no service).
+  const scopeServiceId = input.scopeKind === 'client' && input.basis === 'billing'
+    ? (input.scopeServiceId || null)
+    : null
+  if (input.scopeServiceId && !scopeServiceId) {
+    return { ok: false, error: 'A single service can only be picked for a "% of billing" program limited to one client.' }
+  }
 
   const admin = createAdminClient()
   const row = {
@@ -105,19 +115,38 @@ export async function saveProgram(input: ProgramInput): Promise<ActionResult<{ i
     updated_at: new Date().toISOString(),
     // Only written when used, so programs keep saving before 20261006100000 runs.
     ...(input.basis === 'activities' ? { activity_kinds: activityKinds } : {}),
+    // Always written, so un-picking the service is saved too. Before
+    // 20261110110000 runs, a null is quietly dropped (nothing to clear) and a
+    // real service is refused below with a sentence instead of lost.
+    scope_service_id: scopeServiceId,
   }
+  /**
+   * Run a write; if the database has no scope_service_id yet, retry without
+   * it — unless a service was actually picked, which would then be silently
+   * lost, so that is refused instead.
+   */
+  async function writeTolerant<R extends { error: PgError }>(attempt: (r: typeof row | Partial<typeof row>) => PromiseLike<R>): Promise<R | 'needs-migration'> {
+    const first = await attempt(row)
+    if (!isMissingColumn(first.error, 'scope_service_id')) return first
+    if (scopeServiceId !== null) return 'needs-migration'
+    return attempt(withoutColumn(row, 'scope_service_id'))
+  }
+  const MIGRATION_HINT = 'Limiting to one service of a client needs the database migration 20261110110000_ownership_client_service_scope first.'
 
   if (input.id) {
-    const { error } = await admin.from('ownership_programs').update(row).eq('id', input.id)
-    if (error) return { ok: false, error: friendly(error.message) }
+    const res = await writeTolerant(r => admin.from('ownership_programs').update(r).eq('id', input.id!))
+    if (res === 'needs-migration') return { ok: false, error: MIGRATION_HINT }
+    if (res.error) return { ok: false, error: friendly(res.error.message ?? '') }
     void logActivity({ actorId: guard.employeeId, entityType: 'payroll', entityId: input.id, action: 'updated', detail: { ownership_program: name } }).catch(() => {})
     revalidatePath(REVALIDATE)
     return { ok: true, data: { id: input.id } }
   }
 
-  const { data, error } = await admin.from('ownership_programs')
-    .insert({ ...row, created_by: guard.employeeId }).select('id').single()
-  if (error) return { ok: false, error: friendly(error.message) }
+  const res = await writeTolerant(r => admin.from('ownership_programs')
+    .insert({ ...r, created_by: guard.employeeId }).select('id').single())
+  if (res === 'needs-migration') return { ok: false, error: MIGRATION_HINT }
+  const { data, error } = res
+  if (error || !data) return { ok: false, error: friendly(error?.message ?? 'Could not save the program.') }
   void logActivity({ actorId: guard.employeeId, entityType: 'payroll', entityId: data.id, action: 'created', detail: { ownership_program: name } }).catch(() => {})
   revalidatePath(REVALIDATE)
   return { ok: true, data: { id: data.id } }

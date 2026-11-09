@@ -123,7 +123,11 @@ export default function OwnershipClient(p: Props) {
       : prog.scopeKind === 'service' ? find(p.services)
       : prog.scopeKind === 'service_category' ? find(p.categories)
       : p.orgUnits.find(u => u.id === prog.scopeId)?.name
-    return name ? `${SCOPE_LABEL[prog.scopeKind]}: ${name}` : SCOPE_LABEL[prog.scopeKind]
+    // "One client: Sea Star · Social Media Poster" when narrowed to a service.
+    const svc = prog.scopeKind === 'client' && prog.scopeServiceId
+      ? p.services.find(x => x.id === prog.scopeServiceId)?.name : null
+    const label = name ? `${SCOPE_LABEL[prog.scopeKind]}: ${name}` : SCOPE_LABEL[prog.scopeKind]
+    return svc ? `${label} · ${svc}` : label
   }
 
   async function onPreview() {
@@ -527,6 +531,8 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, activi
   const [periodType, setPeriodType] = useState<OwnershipPeriodType>(initial?.periodType ?? 'monthly')
   const [scopeKind, setScopeKind] = useState<OwnershipScopeKind>(initial?.scopeKind ?? 'company')
   const [scopeId, setScopeId] = useState(initial?.scopeId ?? '')
+  // One service OF the chosen client — client scope on a billing program only.
+  const [scopeServiceId, setScopeServiceId] = useState(initial?.scopeServiceId ?? '')
   const [periodStart, setPeriodStart] = useState(initial?.periodStart ?? today())
   const [periodEnd, setPeriodEnd] = useState(initial?.periodEnd ?? today())
   const [effectiveFrom, setEffectiveFrom] = useState(initial?.effectiveFrom ?? today())
@@ -558,6 +564,7 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, activi
       basis, periodType,
       scopeKind: scopeOptions.includes(scopeKind) ? scopeKind : 'company',
       scopeId: scopeKind === 'company' ? null : scopeId,
+      scopeServiceId: scopeKind === 'client' && basis === 'billing' ? (scopeServiceId || null) : null,
       periodStart: periodType === 'one_time' ? periodStart : null,
       periodEnd: periodType === 'one_time' ? periodEnd : null,
       effectiveFrom,
@@ -669,18 +676,35 @@ function ProgramModal({ initial, clients, services, categories, orgUnits, activi
             <div className="grid grid-cols-2 gap-3 px-3 pb-3">
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1.5">Counted across</label>
-                <AppSelect value={scopeKind} onChange={e => { setScopeKind(e.target.value as OwnershipScopeKind); setScopeId('') }}>
+                <AppSelect value={scopeKind} onChange={e => { setScopeKind(e.target.value as OwnershipScopeKind); setScopeId(''); setScopeServiceId('') }}>
                   {scopeOptions.map(s => <option key={s} value={s}>{SCOPE_LABEL[s]}</option>)}
                 </AppSelect>
               </div>
               {scopeKind !== 'company' && (
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1.5">Which one?</label>
-                  <AppSelect value={scopeId} onChange={e => setScopeId(e.target.value)}>
+                  <AppSelect value={scopeId} onChange={e => { setScopeId(e.target.value); setScopeServiceId('') }}>
                     <option value="">— select —</option>
                     {scopeList.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
                   </AppSelect>
                 </div>
+              )}
+              {/* One service OF that client: "Sea Star's Social Media Posters".
+                  Billing only — collections are receipts and carry no service. */}
+              {scopeKind === 'client' && basis === 'billing' && scopeId && (
+                <div className="col-span-2">
+                  <label className="block text-xs font-medium text-muted-foreground mb-1.5">Only this service <span className="font-normal">(optional)</span></label>
+                  <AppSelect value={scopeServiceId} onChange={e => setScopeServiceId(e.target.value)}>
+                    <option value="">All of this client’s work</option>
+                    {services.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+                  </AppSelect>
+                </div>
+              )}
+              {basis === 'profit' && (
+                <p className="col-span-2 text-[11px] leading-relaxed text-muted-foreground">
+                  Profit is worked out for the whole company, so it can’t be limited to one client.
+                  To pay a share of one client’s work, choose <span className="font-medium text-foreground">% of billing</span>.
+                </p>
               )}
             </div>
             </details>
