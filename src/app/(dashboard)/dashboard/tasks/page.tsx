@@ -1,4 +1,5 @@
-import { createAdminClient, fetchAll, stablePaginationQuery, safeQuery, columnExists } from '@/lib/supabase/server'
+import { createAdminClient, fetchAll, fetchAllParallel, stablePaginationQuery, safeQuery, columnExists } from '@/lib/supabase/server'
+import { getCompanySettings } from '@/lib/settings/company-settings'
 import { withDraftFlag } from '@/lib/clients/draft'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, stripTaskListPricing, userCanSee } from '@/lib/permissions/strip'
@@ -79,36 +80,27 @@ async function fetchAllTasks(
    */
   fullHistory = false,
 ) {
-  const PAGE = 1000
-  const MAX_PAGES = 50
-  const all: any[] = []
   const cutoff = historyCutoffISO(TASKS_HISTORY_MONTHS)
   // "Every live task, whatever its age" OR "anything dated inside the window".
   // `task_date.is.null` keeps undated rows, which a bare `gte` would drop.
   const windowFilter =
     `status.in.(${LIVE_TASK_STATUSES.join(',')}),task_date.gte.${cutoff},task_date.is.null`
 
-  for (let page = 0; page < MAX_PAGES; page++) {
+  // The 12-month window is ~2,000 rows, three pages. They used to be fetched
+  // one after another; fetchAllParallel builds a fresh builder per page and
+  // asks for them together, so the list costs one round trip, not three.
+  const { data, error } = await fetchAllParallel(() => {
     let q = supabase
       .from('tasks')
       .select(selectClause)
       .order('task_number', { ascending: false, nullsFirst: false })
       .order('id', { ascending: true })
-      .range(page * PAGE, (page + 1) * PAGE - 1)
     if (!fullHistory) q = q.or(windowFilter)
     if (hasDeletedAt) q = q.is('deleted_at', null)
-
-    const { data, error } = await q
-    if (error) {
-      console.error('[tasks/page] fetchAllTasks query error', { page, message: error.message })
-      break
-    }
-    if (!data) break
-    all.push(...data)
-    if (data.length < PAGE) break
-  }
-
-  return all
+    return q
+  })
+  if (error) console.error('[tasks/page] fetchAllTasks query error', { message: error.message })
+  return (data || []) as any[]
 }
 
 /**
@@ -313,8 +305,9 @@ export default async function TasksPage({
   const [allTasks, dbCountRes, clientsRes, servicesRes, clientPricingsRes, employeesRes, taskAssignmentsRes,
     groupsRes, paramsRes, groupServicesRes, paramServicesRes,
     taskGroupsRes, taskGroupAssignmentsRes, taskParamAssignmentsRes, myTaskIds,
-    visibilityBillingRes, visibilityContribRes, visibilityNamesRes, myServiceIds, unitScope,
-    packagesRes, packageItemsRes] = await Promise.all([
+    companySettings, myServiceIds, unitScope,
+    packagesRes, packageItemsRes,
+    trashRes, pendingPricing, requestRefByTaskId, pendingRequestCount, visibleEmpIds, departments] = await Promise.all([
     fetchAllTasks(supabase, hasDeletedAt, selectClause, fullHistory),
     // Real DB count of all tasks (used for the "DB search" fallback in the UI).
     hasDeletedAt
@@ -365,9 +358,11 @@ export default async function TasksPage({
     me?.employeeId
       ? fetchEmployeeOwnTaskIds(supabase, me.employeeId)
       : Promise.resolve([] as string[]),
-    supabase.from('company_settings').select('value').eq('key', 'visibility_billing').maybeSingle(),
-    supabase.from('company_settings').select('value').eq('key', 'visibility_contributions').maybeSingle(),
-    supabase.from('company_settings').select('value').eq('key', 'visibility_employee_names').maybeSingle(),
+    // The three visibility_* rows, from the shared 5-minute settings cache
+    // instead of three separate reads. Three fewer connections to open on
+    // every load — and from a laptop each new TLS handshake to the database
+    // is a second, which is what a wide fan-out was really paying for.
+    getCompanySettings(),
     // Services assigned to the viewer (employee_services) — only needed when
     // their designation restricts task visibility by service.
     visibilityMode === 'services' && me?.employeeId
@@ -388,22 +383,68 @@ export default async function TasksPage({
       ? safeQuery('client_package_items', supabase.from('client_package_items')
           .select('id, package_id, service_id, included_quantity, display_order'))
       : Promise.resolve({ data: [] as any[], error: null }),
+
+    // ── Everything from here down used to run AFTER this batch, one await at a
+    // time — six more round trips in a row on every load of the busiest page
+    // in the app. None of them needs the batch's results; they need only the
+    // viewer and the flags already resolved above, so they start here and
+    // land with it.
+    // Trash: same pricing-aware select, so a non-pricing viewer never receives
+    // financial fields even for soft-deleted rows.
+    hasDeletedAt
+      ? fetchAll(stablePaginationQuery(supabase
+          .from('tasks')
+          .select(selectClause)
+          .not('deleted_at', 'is', null)
+          .gte('deleted_at', cutoff)
+          .order('deleted_at', { ascending: false })))
+      : Promise.resolve({ data: [] as any[] }),
+    // Pending-to-price banner — only for users who can see/set pricing.
+    vis.tasksPricing ? getPendingPricing(supabase) : Promise.resolve({ clients: [], services: [], total: 0 }),
+    // Tasks promoted from external requests → "REQ-xxxx" chip on task rows so
+    // employees can open the request brief from the task. Defensive: the
+    // portal tables may not exist pre-migration.
+    (async () => {
+      const byTask: Record<string, { id: string; ref_no: number }> = {}
+      try {
+        const { data: promoted } = await supabase
+          .from('task_requests')
+          .select('id, ref_no, promoted_task_id')
+          .not('promoted_task_id', 'is', null)
+        for (const r of promoted || []) {
+          if (r.promoted_task_id) byTask[r.promoted_task_id] = { id: r.id, ref_no: r.ref_no }
+        }
+      } catch { /* portal not migrated */ }
+      return byTask
+    })(),
+    // Pending (new, unstarted) external requests — the Requests button badge.
+    (async () => {
+      try {
+        const { count } = await supabase
+          .from('task_requests')
+          .select('id', { count: 'exact', head: true })
+          .in('status', ['submitted', 'under_review', 'approved'])
+        return count ?? 0
+      } catch { return 0 /* portal not migrated */ }
+    })(),
+    // Colleague visibility: task scoping says whose WORK you see; this says
+    // which PEOPLE exist for you. Two dependent reads, chained inside one
+    // slot so the second starts the moment the first lands. Same fail-open
+    // contract as the task filter: null = no narrowing.
+    loadServiceScope(supabase, me, 'tasks').then(scope => visibleEmployeeIds(supabase, scope)),
+    // Departments, for the admin-only Department filter (see the comment where
+    // they are passed to the client). Empty for everyone else.
+    isAdmin
+      ? supabase
+          .from('service_categories')
+          .select('id, name, display_order')
+          .eq('is_active', true)
+          .order('display_order')
+          .order('name')
+          .then(({ data }) => ((data || []) as { id: string; name: string }[]).map(d => ({ id: d.id, name: d.name })))
+      : Promise.resolve([] as { id: string; name: string }[]),
   ])
 
-  // Fetch trash only if column exists. Trash uses the same pricing-aware
-  // select so a non-pricing viewer never receives financial fields even for
-  // soft-deleted rows.
-  let trashRes = { data: [] as any[] }
-  if (hasDeletedAt) {
-    const q = supabase
-      .from('tasks')
-      .select(selectClause)
-      .not('deleted_at', 'is', null)
-      .gte('deleted_at', cutoff)
-      .order('deleted_at', { ascending: false })
-
-    trashRes = await fetchAll(stablePaginationQuery(q)) as any
-  }
   // Belt-and-suspenders: even with the right select, run the strip helper to
   // guarantee no late-added column slips through if a future select switches
   // to `*`. Cheap no-op when vis.tasksPricing is true.
@@ -432,33 +473,6 @@ export default async function TasksPage({
     visibilityMode, myServiceIds, myTaskIds,
   ))
 
-  // Pending-to-price banner — only for users who can see/set pricing.
-  const pendingPricing = vis.tasksPricing ? await getPendingPricing(supabase) : { clients: [], services: [], total: 0 }
-
-  // Tasks promoted from external requests → "REQ-xxxx" chip on task rows so
-  // employees can open the request brief (design plan, links) from the task.
-  // Defensive: the portal tables may not exist pre-migration.
-  const requestRefByTaskId: Record<string, { id: string; ref_no: number }> = {}
-  try {
-    const { data: promoted } = await supabase
-      .from('task_requests')
-      .select('id, ref_no, promoted_task_id')
-      .not('promoted_task_id', 'is', null)
-    for (const r of promoted || []) {
-      if (r.promoted_task_id) requestRefByTaskId[r.promoted_task_id] = { id: r.id, ref_no: r.ref_no }
-    }
-  } catch { /* portal not migrated */ }
-
-  // Pending (new, unstarted) external requests — count for the Requests button
-  // badge. Server-side (admin client) since task_requests is admin-scoped.
-  let pendingRequestCount = 0
-  try {
-    const { count } = await supabase
-      .from('task_requests')
-      .select('id', { count: 'exact', head: true })
-      .in('status', ['submitted', 'under_review', 'approved'])
-    pendingRequestCount = count ?? 0
-  } catch { /* portal not migrated */ }
 
   // ?q=… deep link (e.g. "View Task #42" from a request) pre-fills the search.
   // `?task=` (resolved further down) may override it with the exact task
@@ -545,8 +559,6 @@ export default async function TasksPage({
   //
   // Same fail-open contract as the task filter: null = no narrowing, which is
   // what an admin and a half-configured account both get.
-  const employeeScope = await loadServiceScope(supabase, me, 'tasks')
-  const visibleEmpIds = await visibleEmployeeIds(supabase, employeeScope)
   const canRevealNames = isAdmin || userCanSee(me, PERMS.EMPLOYEES_REVEAL_NAMES)
   const scopedEmployees = stripEmployeeNames(
     scopeEmployeeList((employeesRes.data || []) as { id: string; name?: string | null }[], visibleEmpIds),
@@ -569,17 +581,6 @@ export default async function TasksPage({
   // nothing to narrow. Sending an empty array is what hides the dropdown, so
   // a pre-migration database (no service_categories table) degrades to the
   // page exactly as it was.
-  let departments: { id: string; name: string }[] = []
-  if (isAdmin) {
-    const { data } = await supabase
-      .from('service_categories')
-      .select('id, name, display_order')
-      .eq('is_active', true)
-      .order('display_order')
-      .order('name')
-    departments = ((data || []) as { id: string; name: string }[]).map(d => ({ id: d.id, name: d.name }))
-  }
-
   return (
     <>
     {vis.tasksPricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
@@ -614,9 +615,9 @@ export default async function TasksPage({
       taskParamAssignments={(taskParamAssignmentsRes.data || []) as any[]}
       myTaskIds={myTaskIds}
       visibilitySettings={{
-        billing:        (visibilityBillingRes.data?.value as string) || 'all',
-        contributions:  (visibilityContribRes.data?.value as string) || 'all',
-        employee_names: (visibilityNamesRes.data?.value as string) || 'all',
+        billing:        companySettings['visibility_billing'] || 'all',
+        contributions:  companySettings['visibility_contributions'] || 'all',
+        employee_names: companySettings['visibility_employee_names'] || 'all',
       }}
       permissionFlags={{
         pricing: vis.tasksPricing,

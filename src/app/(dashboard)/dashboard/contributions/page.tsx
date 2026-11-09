@@ -1,4 +1,5 @@
-import { createAdminClient, fetchAll } from '@/lib/supabase/server'
+import { createAdminClient, fetchAll, fetchAllParallel } from '@/lib/supabase/server'
+import { getCompanySettings } from '@/lib/settings/company-settings'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, userCanSee } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
@@ -75,7 +76,9 @@ export default async function ContributionsPage() {
   const contribWindowFrom = new Date()
   contribWindowFrom.setMonth(contribWindowFrom.getMonth() - 24)
   const contribWindowFromStr =toISODate( contribWindowFrom)
-  const tasksQuery = supabase
+  // A factory, not a built query: fetchAllParallel builds one builder per
+  // page so the pages can be requested together (see server.ts).
+  const tasksQuery = () => supabase
     .from('tasks')
     .select(vis.tasksPricing ? taskSelectWithPricing : taskSelectWithoutPricing)
     .in('status', ['pending', 'in_progress', 'done', 'delivered', 'invoiced', 'paid'])
@@ -105,12 +108,13 @@ export default async function ContributionsPage() {
     paramServicesRes, toolServicesRes, groupServicesRes,
     scoresRes, clientsRes, servicesRes, assignmentsRes,
     contributorRecordsRes, taskToolRecordsRes, pricingRes,
-    visibilityBillingRes, visibilityContribRes, visibilityNamesRes,
+    companySettings,
     taskGroupAssignmentsRes, taskParamAssignmentsRes, performanceHistoryRes,
     employeeServicesRes, employeeServiceCategoriesRes, serviceCategoryMapRes, unitScope,
+    visibleEmpIds, departments,
   ] = await Promise.all([
     // Tasks — same shape for both roles, employee select drops billing_amount_inr.
-    timed('tasks',                  fetchAll(tasksQuery)),
+    timed('tasks',                  fetchAllParallel(tasksQuery)),
     // Employee roster: both roles get the full active list so the UI can
     // resolve names on contributor chips and offer the assignee filter.
     timed('employees',              supabase.from('employees').select('id, cqid, name, performance_rating, role').eq('is_active', true).order('cqid')),
@@ -128,9 +132,11 @@ export default async function ContributionsPage() {
     // older than this can't surface in the UI anyway because the tasks list
     // doesn't include those rows. HAR showed this was the slowest call on the
     // page (2477ms unbounded); the date filter drops it dramatically.
+    // The page's slowest read — ~5,600 rows is six pages, and in sequence
+    // that was 2.3 s of this page's load. Paged together instead.
     timed('contribution_scores', vis.contributionEarnings
-      ? fetchAll(supabase.from('contribution_scores').select('task_id, employee_id, earnings_inr, score_percentage, calculated_at').gte('calculated_at', contribWindowFromStr).order('id', { ascending: true }))
-      : fetchAll(supabase.from('contribution_scores').select('task_id, employee_id, score_percentage, calculated_at').gte('calculated_at', contribWindowFromStr).order('id', { ascending: true }))),
+      ? fetchAllParallel(() => supabase.from('contribution_scores').select('task_id, employee_id, earnings_inr, score_percentage, calculated_at').gte('calculated_at', contribWindowFromStr).order('id', { ascending: true }))
+      : fetchAllParallel(() => supabase.from('contribution_scores').select('task_id, employee_id, score_percentage, calculated_at').gte('calculated_at', contribWindowFromStr).order('id', { ascending: true }))),
     timed('clients',                supabase.from('clients').select('id, name, code').order('name')),
     // category_id is the service's DEPARTMENT (a service_categories row) —
     // the admin-only Department filter derives each task's department from it,
@@ -140,7 +146,7 @@ export default async function ContributionsPage() {
     // and the assignee filter work the same way for everyone.
     timed('task_assignments',       fetchAll(supabase.from('task_assignments').select('task_id, employee_id').order('task_id', { ascending: true }).order('employee_id', { ascending: true }))),
     // Contributions ledger (numeric weights, not money) — visible to all.
-    timed('contributions',          fetchAll(supabase.from('contributions').select('task_id, employee_id, parameter_id, value').gt('value', 0).order('id', { ascending: true }))),
+    timed('contributions',          fetchAllParallel(() => supabase.from('contributions').select('task_id, employee_id, parameter_id, value').gt('value', 0).order('id', { ascending: true }))),
     timed('task_tools', isAdmin
       ? fetchAll(supabase.from('task_tools').select('task_id, tool_id').order('task_id', { ascending: true }).order('tool_id', { ascending: true }))
       : noData),
@@ -150,9 +156,9 @@ export default async function ContributionsPage() {
     timed('pricing', vis.tasksPricing
       ? supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage, price, currency')
       : noData),
-    timed('vis_billing',            supabase.from('company_settings').select('value').eq('key', 'visibility_billing').maybeSingle()),
-    timed('vis_contrib',            supabase.from('company_settings').select('value').eq('key', 'visibility_contributions').maybeSingle()),
-    timed('vis_names',              supabase.from('company_settings').select('value').eq('key', 'visibility_employee_names').maybeSingle()),
+    // The three visibility_* rows from the shared 5-minute settings cache —
+    // three fewer connections to open on every load (see tasks/page.tsx).
+    timed('company_settings',       getCompanySettings()),
     timed('task_group_assigns',     fetchAll(supabase.from('task_group_assignments').select('task_id, group_id, employee_id'))),
     timed('task_param_assigns',     fetchAll(supabase.from('task_parameter_assignments').select('task_id, employee_id'))),
     timed('performance_history',    fetchAll(supabase.from('employee_performance_history').select('*').order('effective_from', { ascending: false }))),
@@ -170,6 +176,22 @@ export default async function ContributionsPage() {
     // Org-unit scope (contributions.view_unit). Short-circuits to an empty
     // scope without a query for every viewer who isn't unit-scoped.
     timed('unit_scope',             loadUnitScope(supabase, me, 'contributions')),
+    // Departmental isolation for the PEOPLE list: a viewer restricted to their
+    // own services sees only colleagues they share services with. Two
+    // dependent reads chained in one slot. These used to run after the batch,
+    // one await at a time — two extra round trips on every load.
+    timed('employee_scope',         loadServiceScope(supabase, me, 'contributions').then(scope => visibleEmployeeIds(supabase, scope))),
+    // Departments, for the admin-only Department filter. Empty for everyone
+    // else, which is what hides the dropdown.
+    timed('departments', isAdmin
+      ? supabase
+          .from('service_categories')
+          .select('id, name, display_order')
+          .eq('is_active', true)
+          .order('display_order')
+          .order('name')
+          .then(({ data }) => ((data || []) as { id: string; name: string }[]).map(d => ({ id: d.id, name: d.name })))
+      : Promise.resolve([] as { id: string; name: string }[])),
   ])
 
   // Merge all assignment types into a unique list for visibility filtering
@@ -218,10 +240,7 @@ export default async function ContributionsPage() {
 
   // Departmental isolation, applied AFTER the existing contribution-scope
   // narrowing so it can only ever remove people, never re-add someone the
-  // view-scope already excluded. A viewer restricted to their own services
-  // sees only colleagues they share services with.
-  const contribScope = await loadServiceScope(supabase, me, 'contributions')
-  const visibleEmpIds = await visibleEmployeeIds(supabase, contribScope)
+  // view-scope already excluded (visibleEmpIds is resolved in the batch above).
   const outEmployees = scopeEmployeeList(
     outEmployeesRaw as { id: string }[],
     visibleEmpIds,
@@ -260,17 +279,6 @@ export default async function ContributionsPage() {
   // already scoped to one department has nothing to narrow. An empty list is
   // what hides the dropdown, so a database without the table degrades to the
   // page exactly as it was.
-  let departments: { id: string; name: string }[] = []
-  if (isAdmin) {
-    const { data } = await supabase
-      .from('service_categories')
-      .select('id, name, display_order')
-      .eq('is_active', true)
-      .order('display_order')
-      .order('name')
-    departments = ((data || []) as { id: string; name: string }[]).map(d => ({ id: d.id, name: d.name }))
-  }
-
   // ── Service-scoped task visibility (tasks.view_by_service) ────────────────
   // Opt-in restriction: viewers with the perm (and without tasks.view_all) see
   // only tasks of their assigned services, plus tasks they personally worked on.
@@ -346,9 +354,9 @@ export default async function ContributionsPage() {
       pricingMatrix={pricingRes.data || []}
       performanceHistory={performanceHistoryRes.data || []}
       visibilitySettings={{
-        billing:        (visibilityBillingRes.data?.value as string) || 'all',
-        contributions:  (visibilityContribRes.data?.value as string) || 'all',
-        employee_names: (visibilityNamesRes.data?.value as string) || 'all',
+        billing:        companySettings['visibility_billing'] || 'all',
+        contributions:  companySettings['visibility_contributions'] || 'all',
+        employee_names: companySettings['visibility_employee_names'] || 'all',
       }}
       permissionFlags={{
         earnings:     vis.contributionEarnings,

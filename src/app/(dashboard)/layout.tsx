@@ -74,11 +74,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
     ),
     fetchLogoUrls(),
   ])
-  // Favorites need the employee id from meResult, so this can't join the
-  // Promise.all above — fetched right after, still before first paint.
-  const initialFavorites = meResult.user
-    ? await listFavoritesForEmployee(meResult.user.employeeId).catch(() => [])
-    : []
+  // Favorites and workspace state both need only the employee, so they run
+  // TOGETHER once it is known. This layout wraps every dashboard page, and
+  // these used to be awaited one after the other — two extra round trips to
+  // the database before any page could start, on every navigation.
+  const [initialFavorites, wsState] = meResult.user
+    ? await Promise.all([
+        listFavoritesForEmployee(meResult.user.employeeId).catch(() => []),
+        getMyWorkspaceState().catch(() => null),
+      ])
+    : [[], null]
 
   // Graceful pre-migration fallback: if migration 022 isn't applied yet, the
   // workspaces table doesn't exist — fall back to a single synthetic
@@ -89,9 +94,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
     defaultLandingHref: '/dashboard', isSystem: true,
     ownerEmployeeId: null, memberIds: [],
   }
-  const wsState = meResult.user
-    ? await getMyWorkspaceState().catch(() => null)
-    : null
   const initialWorkspaceState = wsState?.ok
     ? wsState.data
     : { current: FALLBACK_ALL_WORKSPACE, available: [FALLBACK_ALL_WORKSPACE], canManage: false }

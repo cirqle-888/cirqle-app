@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { fetchAll, fetchAllIn } from '@/lib/supabase/server'
+import { fetchAll, fetchAllIn, fetchAllParallel } from '@/lib/supabase/server'
 import { round2 } from '@/lib/calculations/currency'
 import { cashFlowContribution, type CashFlowRow } from '@/lib/finance/cash-flow'
 import { recognisedRevenue } from '@/lib/finance/invoice-revenue'
@@ -26,7 +26,8 @@ export async function loadDepartmentFacts(
   const [catsRes, svcRes, tasksRes, invRes, allocRes] = await Promise.all([
     fetchAll(admin.from('service_categories').select('id, name').order('display_order').order('name')),
     fetchAll(admin.from('services').select('id, category_id').order('id')),
-    fetchAll(admin.from('tasks')
+    // 36 months is ~2,000 rows, three pages: paged together, not in sequence.
+    fetchAllParallel(() => admin.from('tasks')
       .select('id, task_date, service_id, billing_amount_inr')
       .not('status', 'eq', 'cancelled').is('deleted_at', null)
       .gte('task_date', tasksFrom)

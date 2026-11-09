@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
-const mocks = vi.hoisted(() => ({ getUser: vi.fn(), from: vi.fn(), signOut: vi.fn() }))
+const mocks = vi.hoisted(() => ({ getUser: vi.fn(), getClaims: vi.fn(), from: vi.fn(), signOut: vi.fn() }))
 vi.mock('@supabase/ssr', () => ({
-  createServerClient: () => ({ auth: { getUser: mocks.getUser, signOut: mocks.signOut }, from: mocks.from }),
+  createServerClient: () => ({ auth: { getUser: mocks.getUser, getClaims: mocks.getClaims, signOut: mocks.signOut }, from: mocks.from }),
 }))
 import { updateSession } from '@/lib/supabase/middleware'
 
@@ -22,6 +22,7 @@ describe('dashboard route authorization', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.getUser.mockResolvedValue({ data: { user: { id: 'signed-in-user' } } })
+    mocks.getClaims.mockResolvedValue({ data: { claims: { sub: 'signed-in-user' } } })
     mocks.from.mockImplementation(() => query({ id: 'employee', is_archived: false, designation: null }))
   })
 

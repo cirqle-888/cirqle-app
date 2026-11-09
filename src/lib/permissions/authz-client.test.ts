@@ -26,6 +26,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const sessionFrom = vi.fn()
 const adminFrom = vi.fn()
 const getUser = vi.fn()
+const getClaims = vi.fn()
 
 /** A chainable Supabase query stub that resolves to `rows`. */
 function queryStub(rows: unknown) {
@@ -40,7 +41,7 @@ function queryStub(rows: unknown) {
 }
 
 vi.mock('@/lib/supabase/server', () => ({
-  createClient: async () => ({ auth: { getUser }, from: sessionFrom }),
+  createClient: async () => ({ auth: { getUser, getClaims }, from: sessionFrom }),
   createAdminClient: () => ({ from: adminFrom }),
 }))
 vi.mock('react', async (orig) => {
@@ -61,6 +62,8 @@ describe('loadCurrentUser reads through the service role', () => {
     vi.clearAllMocks()
     userSeq += 1
     getUser.mockResolvedValue({ data: { user: { id: `auth-user-${userSeq}` } } })
+    // Identity is read from the verified JWT, locally — never from the Auth server.
+    getClaims.mockResolvedValue({ data: { claims: { sub: `auth-user-${userSeq}` } } })
 
     adminFrom.mockImplementation((table: string) => {
       if (table === 'employees') {
@@ -90,8 +93,10 @@ describe('loadCurrentUser reads through the service role', () => {
     expect(user).not.toBeNull()
     expect(user?.employeeId).toBe('emp-1')
 
-    // The session client is for establishing identity, and nothing else.
-    expect(getUser).toHaveBeenCalledTimes(1)
+    // The session client is for establishing identity, and nothing else — and
+    // it does so by verifying the JWT locally, not by asking the Auth server.
+    expect(getClaims).toHaveBeenCalledTimes(1)
+    expect(getUser).not.toHaveBeenCalled()
     expect(
       sessionFrom.mock.calls.map((c) => c[0]),
       'loadCurrentUser queried these on the cookie-session client. They run as ' +

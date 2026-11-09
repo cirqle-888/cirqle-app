@@ -198,6 +198,117 @@ export default async function DashboardPage() {
   // fail the whole cash-book query, so ask first.
   const hasReversalColumn = isAdmin && await columnExists(supabase, 'cashbook_entries', 'reversal_of')
 
+  // ── Everything below the main batch used to run AFTER it, one await at a
+  // time: credit movements, pending pricing, notifications, requests, the
+  // billing queue, my actions, the finance journal — seven more round trips
+  // in a row, each ~50 ms on Vercel and ~380 ms from a laptop. None of them
+  // needs the batch's results, so they start here and land with it. Only the
+  // follow-up counts genuinely need the invoices, and they stay after.
+  const canSeePricing = isAdmin || !!me?.permissions?.has('tasks.view_pricing')
+  const canReviewRequests = isAdmin
+    || hasPermission(me, PERMS.REQUESTS_REVIEW)
+    || hasPermission(me, PERMS.REQUESTS_MANAGE)
+  const canSeeInvoices = isAdmin || hasPermission(me, PERMS.BILLING_VIEW_INVOICES)
+
+  const creditMovementsPromise = fetchCreditMovements(supabase)
+  const pendingPricingPromise = canSeePricing
+    ? getPendingPricing(supabase)
+    : Promise.resolve({ clients: [], services: [], total: 0 })
+  // Notifications are the viewer's OWN unread mail, addressed to them by id.
+  // Gating that on isAdmin was simply a bug: an employee never saw a count for
+  // messages that were already theirs to read.
+  const notifPromise = getMyNotifications(5).catch(() => null)
+  const pendingRequestsPromise: Promise<{ count: number; items: { id: string; title: string }[] }> = canReviewRequests
+    ? (async () => {
+        try {
+          const { data: reqRows } = await supabase
+            .from('task_requests')
+            .select('id, title')
+            .in('status', ['submitted', 'under_review'])
+            .order('created_at', { ascending: true })
+            .limit(50)
+          return { count: reqRows?.length || 0, items: (reqRows || []).slice(0, 3) }
+        } catch { return { count: 0, items: [] } /* table not migrated yet */ }
+      })()
+    : Promise.resolve({ count: 0, items: [] })
+  // Billing buckets for a non-admin who holds billing.view_invoices.
+  //
+  // Counts and invoice numbers only — never an amount column. The queue needs
+  // "twelve are overdue", not what they are worth, and selecting no money
+  // fields means this cannot leak a portfolio total to someone holding
+  // view_invoices without view_totals. Admins already have both figures from
+  // the full invoice fetch, so this runs only for everyone else.
+  const billingQueuePromise = (!isAdmin && canSeeInvoices)
+    ? (async () => {
+        try {
+          // Sent and part-paid only, as for admins: a draft is not overdue, and
+          // written-off invoices are `bad_debt` (there is no `written_off`).
+          const [overdueRes, draftRes] = await Promise.all([
+            supabase.from('invoices')
+              .select('invoice_number, due_date', { count: 'exact' })
+              .in('status', ['sent', 'partial', 'overdue'])
+              .lt('due_date', todayStr)
+              .order('due_date', { ascending: true })
+              .limit(3),
+            supabase.from('invoices')
+              .select('invoice_number', { count: 'exact' })
+              .eq('status', 'draft')
+              .order('issue_date', { ascending: true })
+              .limit(3),
+          ])
+          return {
+            overdue: overdueRes.count ?? 0,
+            drafts: draftRes.count ?? 0,
+            overdueSample: (overdueRes.data || []).map((r: { invoice_number: string | null }) => r.invoice_number).filter((n): n is string => !!n),
+            draftSample: (draftRes.data || []).map((r: { invoice_number: string | null }) => r.invoice_number).filter((n): n is string => !!n),
+          }
+        } catch { return { overdue: 0, drafts: 0, overdueSample: [] as string[], draftSample: [] as string[] } }
+      })()
+    : Promise.resolve({ overdue: 0, drafts: 0, overdueSample: [] as string[], draftSample: [] as string[] })
+  // ── My pending actions (employee view) ───────────────────────────────────
+  // What needs THIS employee's attention right now: open tasks assigned to
+  // them + done tasks where they haven't logged their contribution yet.
+  // Bounded to the 90-day display window like the other widgets.
+  const myActionsPromise: Promise<{ active: any[]; needContribution: any[] }> = (!isAdmin && employeeId)
+    ? (async () => {
+        try {
+          const { data: assigns } = await supabase
+            .from('task_assignments')
+            .select('task_id, task:tasks!inner(id, task_number, title, status, task_date, deleted_at, client:clients(id, name))')
+            .eq('employee_id', employeeId)
+            .is('task.deleted_at', null)
+            .gte('task.task_date', displayFromStr)
+          const rows = (assigns || []).map((a: any) => a.task).filter(Boolean)
+          const ids = rows.map((t: any) => t.id)
+          let contributed = new Set<string>()
+          if (ids.length) {
+            const { data: contribs } = await supabase
+              .from('contributions')
+              .select('task_id')
+              .eq('employee_id', employeeId)
+              .gt('value', 0)
+              .in('task_id', ids)
+            contributed = new Set((contribs || []).map((c: any) => c.task_id))
+          }
+          return {
+            active: rows
+              .filter((t: any) => t.status === 'pending' || t.status === 'in_progress')
+              .sort((a: any, b: any) => (a.task_date || '').localeCompare(b.task_date || '')),
+            needContribution: rows
+              .filter((t: any) => t.status === 'done' && !contributed.has(t.id))
+              .sort((a: any, b: any) => (b.task_date || '').localeCompare(a.task_date || '')),
+          }
+        } catch { return { active: [], needContribution: [] } /* defensive — widget simply stays hidden */ }
+      })()
+    : Promise.resolve({ active: [], needContribution: [] })
+  // Company Ops strip inputs (Finance Engine). Admin-only. Trailing 4 months
+  // covers the 3-month burn window. Tolerant of the unapplied scope migration
+  // — a null journal hides the strip.
+  const stripFrom = (() => { const now = new Date(); return toISODate(new Date(now.getFullYear(), now.getMonth() - 3, 1)) })()
+  const journalPromise = isAdmin
+    ? fetchJournalLines(supabase, { from: stripFrom }).catch(() => null)
+    : Promise.resolve(null)
+
   // Only fetch invoices, cashbook, and all payroll history if admin
   const [
     invoicesRes,
@@ -208,6 +319,13 @@ export default async function DashboardPage() {
     scoredTaskIdsRes,
     todayTasksRes,
     payrollRes,
+    creditMovements,
+    pendingPricing,
+    notifRes,
+    pendingRequests,
+    billingQueue,
+    myActions,
+    journal,
   ] = await Promise.all([
     isAdmin
       ? fetchAll(supabase
@@ -301,7 +419,14 @@ export default async function DashboardPage() {
           .eq('status', 'paid')
           .order('year', { ascending: false })
           .order('month', { ascending: false })
-          .limit(36)
+          .limit(36),
+    creditMovementsPromise,
+    pendingPricingPromise,
+    notifPromise,
+    pendingRequestsPromise,
+    billingQueuePromise,
+    myActionsPromise,
+    journalPromise,
   ])
 
   const invoices           = invoicesRes.data || []
@@ -357,7 +482,6 @@ export default async function DashboardPage() {
   // Only the OUTSTANDING part. A credit converted to the owner's share or
   // to somebody's pay is spent, not owed, and counting it here would
   // promise cash that is never arriving.
-  const creditMovements = await fetchCreditMovements(supabase)
   const creditOutstanding = buildCreditLedger(creditMovements).totalOutstandingInr
 
   // ── Invoice stats (no double-counting) ──────────────────────────────────────
@@ -427,10 +551,6 @@ export default async function DashboardPage() {
   const unscoredDoneTasks = displayTasks.filter(t => t.status === 'done' && !scoredTaskIds.has(t.id))
   const activeTasks      = displayTasks.filter(t => t.status === 'pending' || t.status === 'in_progress')
 
-  // Pending-to-price banner — only for users who can see/set pricing.
-  const canSeePricing = isAdmin || !!me?.permissions?.has('tasks.view_pricing')
-  const pendingPricing = canSeePricing ? await getPendingPricing(supabase) : { clients: [], services: [], total: 0 }
-
   // ── Action-queue extras ─────────────────────────────────────────────────────
   // Everything else this section needs (overdueInvoices, draftInvoices,
   // unscoredDoneTasks, payrollRecords) is ALREADY computed above — these are
@@ -441,104 +561,11 @@ export default async function DashboardPage() {
   // not see the overdue queue that is their whole job, and a manager could not
   // see the approvals queued on them by name. Each read is now gated on the
   // permission that governs the data it returns.
-  let notifications: { rows: any[]; unreadCount: number } = { rows: [], unreadCount: 0 }
-  let pendingRequests: { count: number; items: { id: string; title: string }[] } = { count: 0, items: [] }
-
-  const canReviewRequests = isAdmin
-    || hasPermission(me, PERMS.REQUESTS_REVIEW)
-    || hasPermission(me, PERMS.REQUESTS_MANAGE)
-  const canSeeInvoices = isAdmin || hasPermission(me, PERMS.BILLING_VIEW_INVOICES)
-
-  // Notifications are the viewer's OWN unread mail, addressed to them by id.
-  // Gating that on isAdmin was simply a bug: an employee never saw a count for
-  // messages that were already theirs to read.
-  const notifRes = await getMyNotifications(5).catch(() => null)
-  if (notifRes?.ok && notifRes.data) notifications = notifRes.data
-
-  if (canReviewRequests) {
-    try {
-      const { data: reqRows } = await supabase
-        .from('task_requests')
-        .select('id, title')
-        .in('status', ['submitted', 'under_review'])
-        .order('created_at', { ascending: true })
-        .limit(50)
-      pendingRequests = { count: reqRows?.length || 0, items: (reqRows || []).slice(0, 3) }
-    } catch { /* table not migrated yet */ }
-  }
-
-  // Billing buckets for a non-admin who holds billing.view_invoices.
-  //
-  // Counts and invoice numbers only — never an amount column. The queue needs
-  // "twelve are overdue", not what they are worth, and selecting no money
-  // fields means this cannot leak a portfolio total to someone holding
-  // view_invoices without view_totals. Admins already have both figures from
-  // the full invoice fetch above, so this runs only for everyone else.
-  let billingQueue = { overdue: 0, drafts: 0, overdueSample: [] as string[], draftSample: [] as string[] }
-  if (!isAdmin && canSeeInvoices) {
-    try {
-      // Sent and part-paid only, as for admins: a draft is not overdue, and
-      // written-off invoices are `bad_debt` (there is no `written_off`).
-      const [overdueRes, draftRes] = await Promise.all([
-        supabase.from('invoices')
-          .select('invoice_number, due_date', { count: 'exact' })
-          .in('status', ['sent', 'partial', 'overdue'])
-          .lt('due_date', todayStr)
-          .order('due_date', { ascending: true })
-          .limit(3),
-        supabase.from('invoices')
-          .select('invoice_number', { count: 'exact' })
-          .eq('status', 'draft')
-          .order('issue_date', { ascending: true })
-          .limit(3),
-      ])
-      billingQueue = {
-        overdue: overdueRes.count ?? 0,
-        drafts: draftRes.count ?? 0,
-        overdueSample: (overdueRes.data || []).map((r: { invoice_number: string | null }) => r.invoice_number).filter((n): n is string => !!n),
-        draftSample: (draftRes.data || []).map((r: { invoice_number: string | null }) => r.invoice_number).filter((n): n is string => !!n),
-      }
-    } catch { /* invoices unreadable for this role — queue simply stays empty */ }
-  }
+  const notifications: { rows: any[]; unreadCount: number } =
+    (notifRes?.ok && notifRes.data) ? notifRes.data : { rows: [], unreadCount: 0 }
   const draftInvoicesSample = draftInvoices.slice(0, 3).map(i => `${i.invoice_number} — ${i.client?.name || ''}`)
 
   const payrollPendingCount = isAdmin ? payrollRecords.filter((p: any) => p.status === 'pending').length : 0
-
-  // ── My pending actions (employee view) ─────────────────────────────────────
-  // What needs THIS employee's attention right now: open tasks assigned to
-  // them + done tasks where they haven't logged their contribution yet.
-  // Bounded to the 90-day display window like the other widgets.
-  let myActions: { active: any[]; needContribution: any[] } = { active: [], needContribution: [] }
-  if (!isAdmin && employeeId) {
-    try {
-      const { data: assigns } = await supabase
-        .from('task_assignments')
-        .select('task_id, task:tasks!inner(id, task_number, title, status, task_date, deleted_at, client:clients(id, name))')
-        .eq('employee_id', employeeId)
-        .is('task.deleted_at', null)
-        .gte('task.task_date', displayFromStr)
-      const rows = (assigns || []).map((a: any) => a.task).filter(Boolean)
-      const ids = rows.map((t: any) => t.id)
-      let contributed = new Set<string>()
-      if (ids.length) {
-        const { data: contribs } = await supabase
-          .from('contributions')
-          .select('task_id')
-          .eq('employee_id', employeeId)
-          .gt('value', 0)
-          .in('task_id', ids)
-        contributed = new Set((contribs || []).map((c: any) => c.task_id))
-      }
-      myActions = {
-        active: rows
-          .filter((t: any) => t.status === 'pending' || t.status === 'in_progress')
-          .sort((a: any, b: any) => (a.task_date || '').localeCompare(b.task_date || '')),
-        needContribution: rows
-          .filter((t: any) => t.status === 'done' && !contributed.has(t.id))
-          .sort((a: any, b: any) => (b.task_date || '').localeCompare(a.task_date || '')),
-      }
-    } catch { /* defensive — widget simply stays hidden */ }
-  }
 
   // The non-admin action queue. Admins keep the existing Smart Focus grid,
   // which is already wired to the full dataset they fetch above; this fills the
@@ -574,12 +601,10 @@ export default async function DashboardPage() {
   // count is window-scoped (the Company Operations report shows the full queue).
   // Tolerant of the unapplied scope migration — the strip simply stays hidden.
   let companyOps: CompanyOpsStrip | null = null
-  if (isAdmin) {
+  if (isAdmin && journal) {
     try {
       const now = new Date()
-      const stripFrom =toISODate( new Date(now.getFullYear(), now.getMonth() - 3, 1))
       const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-      const journal = await fetchJournalLines(supabase, { from: stripFrom })
       // Credit converted to salary is payroll spend with no cashbook entry.
       // The Company Operations report adds it the same way; leaving it out
       // here is how this strip and that report end up disagreeing.

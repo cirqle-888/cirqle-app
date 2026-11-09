@@ -80,7 +80,7 @@ export default async function CashBookPage() {
   const vis = financialVisibility(me)
   const supabase = createAdminClient()
 
-  const [entriesRes, categoriesRes, bankAccountsRes, exchangeRatesRes, dueInvoicesRes, employeesRes, clientsRes, creditsRes, pendingPayrollsRes, companySettingsRes, tagsRes] = await Promise.all([
+  const [entriesRes, categoriesRes, bankAccountsRes, exchangeRatesRes, dueInvoicesRes, employeesRes, clientsRes, creditsRes, pendingPayrollsRes, companySettingsRes, tagsRes, adAccountsRes] = await Promise.all([
     fetchCashbookEntries(supabase),
     supabase.from('cashbook_categories').select('*').order('type').order('name'),
     supabase.from('bank_accounts').select('id, name, type, is_active, is_default, currency').order('name'),
@@ -129,6 +129,12 @@ export default async function CashBookPage() {
     // is null (not thrown) if the tags migration (20260714160000) isn't
     // applied yet — the `|| []` below covers it.
     supabase.from('cashbook_tags').select('id, name').order('name'),
+    // Ad accounts for the rebill-cushion picker. In the batch, not after it:
+    // it depends on nothing above, and as a trailing await it was a round
+    // trip the page waited for on its own.
+    hasPermission(me, PERMS.CASHBOOK_EDIT)
+      ? supabase.from('ad_accounts').select('id, name').eq('is_active', true).order('name')
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
   ])
 
   // Materialise the key/value pairs into a flat object. Empty strings collapse
@@ -148,9 +154,7 @@ export default async function CashBookPage() {
   // has run. Without the columns the entry still saves (the write strips
   // them), but the cushion would be silently dropped — so the form hides the
   // section rather than taking an answer it cannot keep.
-  const { data: adAccounts } = hasPermission(me, PERMS.CASHBOOK_EDIT)
-    ? await supabase.from('ad_accounts').select('id, name').eq('is_active', true).order('name')
-    : { data: [] }
+  const adAccounts = (adAccountsRes.data || []) as { id: string; name: string }[]
   const markupAvailable = await columnExists(supabase, 'cashbook_entries', 'markup_type')
   // Return / Reverse needs migration 20261016100000; until then it is not offered.
   const reversalsAvailable = await columnExists(supabase, 'cashbook_entries', 'reversal_of')

@@ -324,10 +324,13 @@ export async function getMyWorkspaceState(): Promise<Result<{ current: Workspace
   const me = auth.me
   const admin = createAdminClient()
 
-  const list = await listWorkspaces()
+  // The list and the viewer's current pointer are independent reads; they
+  // used to run back to back on every page load (this feeds the layout).
+  const [list, { data: emp }] = await Promise.all([
+    listWorkspaces(),
+    admin.from('employees').select('current_workspace_id').eq('id', me.employeeId).maybeSingle(),
+  ])
   if (!list.ok) return list
-
-  const { data: emp } = await admin.from('employees').select('current_workspace_id').eq('id', me.employeeId).maybeSingle()
   const currentId = emp?.current_workspace_id ?? null
   // A stale current_workspace_id (assignment revoked since they last switched)
   // simply falls back to "All Workspace" — the list is membership-filtered, so

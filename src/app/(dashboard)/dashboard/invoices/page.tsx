@@ -19,7 +19,10 @@ export default async function InvoicesPage() {
   const vis = financialVisibility(me)
   const supabase = createAdminClient()
 
-  const [invoicesRes, clientsRes, bankRes, servicesRes, settingsRes, ratesRes, categoriesRes] = await Promise.all([
+  // Pending-to-price banner — only for users who can see invoice amounts/pricing.
+  const canSeePricing = (me?.isAdmin ?? false) || vis.billingAmounts || vis.billingLinePricing
+
+  const [invoicesRes, clientsRes, bankRes, servicesRes, settingsRes, ratesRes, categoriesRes, serviceColumnDefaults, pendingPricing] = await Promise.all([
     // The list query. `items` and `cashbook_invoice_allocations` are
     // deliberately NOT joined here: measured across 270 invoices they were
     // 988 KB and 154 KB of a 1375 KB payload, and nothing on the LIST needs
@@ -67,6 +70,26 @@ export default async function InvoicesPage() {
       .select('*')
       .order('type')
       .order('name'),
+    // The client's standing rule for the printed Service column, fetched on
+    // its own and tolerantly ON PURPOSE. Folding `invoice_show_services` into
+    // the main invoice join would take the whole page down with a "column does
+    // not exist" until migration 20260902100000 is applied; a separate query
+    // that is allowed to fail just leaves every client on the default instead.
+    // In the batch rather than after it: it depends on nothing above, and as a
+    // trailing await it was a full round trip the page waited for alone.
+    (async () => {
+      try {
+        const r = await supabase.from('clients').select('id, invoice_show_services')
+        if (r.error) return new Map<string, boolean>()
+        return new Map<string, boolean>(
+          (r.data as { id: string; invoice_show_services: boolean | null }[])
+            .map(c => [c.id, c.invoice_show_services === true]),
+        )
+      } catch {
+        return new Map<string, boolean>()
+      }
+    })(),
+    canSeePricing ? getPendingPricing(supabase) : Promise.resolve({ clients: [], services: [], total: 0 }),
   ])
 
   // Already a key→value map (getCompanySettings).
@@ -79,24 +102,6 @@ export default async function InvoicesPage() {
     (invoicesRes.data || []) as any[],
     { amounts: vis.billingAmounts, linePricing: vis.billingLinePricing },
   )
-
-  // The client's standing rule for the printed Service column, fetched on its
-  // own and tolerantly ON PURPOSE. Folding `invoice_show_services` into the
-  // main invoice join would take the whole page down with a "column does not
-  // exist" until migration 20260902100000 is applied; a separate query that is
-  // allowed to fail just leaves every client on the default instead.
-  const serviceColumnDefaults = await (async () => {
-    try {
-      const r = await supabase.from('clients').select('id, invoice_show_services')
-      if (r.error) return new Map<string, boolean>()
-      return new Map<string, boolean>(
-        (r.data as { id: string; invoice_show_services: boolean | null }[])
-          .map(c => [c.id, c.invoice_show_services === true]),
-      )
-    } catch {
-      return new Map<string, boolean>()
-    }
-  })()
 
   for (const inv of initialInvoices as { client?: { id: string; invoice_show_services?: boolean } | null }[]) {
     if (inv.client?.id) inv.client.invoice_show_services = serviceColumnDefaults.get(inv.client.id) === true
@@ -114,10 +119,6 @@ export default async function InvoicesPage() {
     initialInvoices as any[],
     serviceNames,
   )
-
-  // Pending-to-price banner — only for users who can see invoice amounts/pricing.
-  const canSeePricing = (me?.isAdmin ?? false) || vis.billingAmounts || vis.billingLinePricing
-  const pendingPricing = canSeePricing ? await getPendingPricing(supabase) : { clients: [], services: [], total: 0 }
 
   return (
     <>

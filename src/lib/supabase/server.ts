@@ -136,6 +136,85 @@ export async function fetchAll(query: any): Promise<{ data: any[]; error?: any }
 }
 
 /**
+ * Which pages to request next, and whether the fetch is finished.
+ *
+ * Pure half of {@link fetchAllParallel}. `sizes` is how many rows each page
+ * requested so far returned, in page order. The fetch is done once any page
+ * came back short of PAGE_SIZE — everything after it is empty by definition —
+ * and the rows to keep are those pages up to and including the short one.
+ */
+export function planNextWindow(
+  sizes: readonly number[],
+  pageSize: number,
+  window: number,
+): { done: boolean; keepPages: number; nextPages: number[] } {
+  const short = sizes.findIndex(n => n < pageSize)
+  if (short !== -1) return { done: true, keepPages: short + 1, nextPages: [] }
+  const from = sizes.length
+  return { done: false, keepPages: sizes.length, nextPages: Array.from({ length: window }, (_, i) => from + i) }
+}
+
+/**
+ * {@link fetchAll} with the pages fetched TOGETHER instead of one after another.
+ *
+ * PostgREST caps a response at 1,000 rows, so a 5,600-row table is six
+ * requests — and fetchAll makes them in sequence, each a full round trip
+ * (~380 ms from a laptop, ~50 ms on Vercel). The Contributions page's score
+ * rows alone were 2.3 s of that; the tasks list and the dashboard's department
+ * panel each page three deep. This asks for `window` pages at once, keeps
+ * asking in windows until a page comes back short, and so costs one round
+ * trip for anything up to `window` pages.
+ *
+ * Takes a FACTORY, like fetchAllIn, for the reason fetchAll cannot do this
+ * itself: a PostgrestFilterBuilder is mutable, and `.range()` on one shared
+ * builder before awaiting makes every request fetch the same page — tried,
+ * and it silently dropped rows. Each page here is built fresh.
+ *
+ * Over-asking is cheap: a page past the end is an empty 200. Ordering must be
+ * stable (`.order('id')` last) exactly as for fetchAll — the pages are the
+ * same `.range()` windows, just not in sequence. Same contract on failure:
+ * `error` is set and `data` holds what was read before it.
+ */
+export async function fetchAllParallel(
+  makeQuery: () => any,
+  window = 6,
+): Promise<{ data: any[]; error?: any }> {
+  const PAGE = 1000
+  const table = getQueryTable(makeQuery())
+  if (table && MISSING_TABLES.has(table)) return { data: [] as any[] }
+
+  const pages = new Map<number, any[]>()
+  let failure: any
+  let plan = planNextWindow([], PAGE, window)
+  // 100 pages = the same 100,000-row ceiling fetchAll has.
+  while (!plan.done && pages.size < 100) {
+    const results = await Promise.all(plan.nextPages.map(async p => {
+      const { data, error } = await makeQuery().range(p * PAGE, (p + 1) * PAGE - 1)
+      return { p, data: (data || []) as any[], error }
+    }))
+    for (const r of results) {
+      if (r.error) {
+        if ((r.error as any).code === 'PGRST205' && table) { MISSING_TABLES.add(table); return { data: [] as any[] } }
+        if (!failure) failure = r.error
+        continue
+      }
+      pages.set(r.p, r.data)
+    }
+    if (failure) break
+    const sizes = Array.from({ length: pages.size }, (_, i) => pages.get(i)?.length ?? 0)
+    plan = planNextWindow(sizes, PAGE, window)
+  }
+
+  const allData: any[] = []
+  const keep = failure ? pages.size : plan.keepPages
+  for (let i = 0; i < keep; i++) allData.push(...(pages.get(i) ?? []))
+  if (process.env.NODE_ENV === 'development' && hasDuplicateRows(allData)) {
+    console.warn('[fetchAllParallel] Duplicate rows detected — ensure the query has a stable .order("id") before paging.')
+  }
+  return failure ? { data: allData, error: failure } : { data: allData }
+}
+
+/**
  * The `.in(column, ids)` companion to {@link fetchAll}.
  *
  * A plain `.in()` lookup has TWO independent ceilings, and hitting either one
@@ -185,7 +264,12 @@ export async function fetchAllIn(
   // PostgrestFilterBuilder, which is mutable — calling .range() on it twice
   // before awaiting makes both requests fetch the same page, which silently
   // dropped rows when that was tried. See the comment there.
-  const LANES = 4
+  // 8, up from 4 (2026-11-09): the dashboard's department panel looks up
+  // scores for ~2,000 task ids — 21 chunks — and at 4 lanes that is six
+  // rounds of ~380 ms from a laptop (~2.3 s); at 8 it is three (~1.2 s,
+  // measured). PostgREST serves eight concurrent reads without strain, and
+  // every chunk is an independent `.in()` query, so nothing shares state.
+  const LANES = 8
   const results: { data: any[]; error?: any }[] = new Array(chunks.length)
   let next = 0
   let failure: any

@@ -241,7 +241,28 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
+  // WHO IS THIS, without a network hop.
+  //
+  // `getUser()` asks the Supabase Auth server on every single request — every
+  // page, every RSC navigation, every server action, every prefetch. Measured
+  // at 270–1,200 ms per request in proxy.ts, which was the single largest
+  // fixed cost of every click in the app.
+  //
+  // `getClaims()` verifies the session JWT's signature locally instead. The
+  // project signs with an asymmetric ES256 key (see its JWKS at
+  // /auth/v1/.well-known/jwks.json), so the public key is fetched once per
+  // isolate and every verification after that is a few microseconds of
+  // WebCrypto. An expired token is still refreshed through the cookie
+  // handlers above exactly as before; a forged or tampered token fails
+  // signature verification and is treated as signed out.
+  //
+  // The trade: a user banned or deleted mid-session stays recognised until
+  // their access token expires (one hour by default) rather than instantly.
+  // That is the documented trade-off Supabase recommends taking in
+  // middleware, and the 60 s profile cookie below already accepted a smaller
+  // version of it.
+  const { data: claimsData } = await supabase.auth.getClaims()
+  const user = claimsData?.claims?.sub ? { id: claimsData.claims.sub } : null
   const pathname = request.nextUrl.pathname
 
   const isAuthPage = pathname.startsWith('/login')

@@ -179,7 +179,14 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   // row RLS would have allowed.
   const supabase = await createClient()
   const db = createAdminClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  // Local JWT verification, not a round trip to the Auth server. This ran
+  // BEFORE the 30 s cache check below, so the cache only ever saved the
+  // employee/permission reads — every page still paid one network hop (~50 ms
+  // on Vercel, ~380 ms from a laptop) just to learn the auth id. The
+  // middleware makes the same change for the same reason; see the note there
+  // for the (accepted) banned-mid-session trade-off.
+  const { data: claimsData } = await supabase.auth.getClaims()
+  const user = claimsData?.claims?.sub ? { id: claimsData.claims.sub } : null
   if (!user) return null
 
   // ── View-as ────────────────────────────────────────────────────────────────
