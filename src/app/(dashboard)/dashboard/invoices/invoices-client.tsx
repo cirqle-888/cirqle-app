@@ -37,7 +37,7 @@ import {
   Printer, TrendingUp, BadgeCheck, CircleDollarSign, Receipt, Edit2, Save,
   History, Tag, Percent, ChevronDown, ChevronUp, ArrowDownToLine, Gift, ExternalLink, Copy,
   Wallet, Link2, ShoppingBag, Share2, Layers, ListTree, ScrollText, Check, AlertCircle,
-  Maximize2, Minimize2, ZoomIn, ZoomOut, ListPlus, PanelLeftOpen, PanelLeftClose, BarChart3,
+  Maximize2, Minimize2, ZoomIn, ZoomOut, ListPlus, PanelLeftOpen, PanelLeftClose, Columns2, BarChart3,
 } from 'lucide-react'
 import { logFollowup } from "./follow-ups/actions"
 import { recordInvoicePayment, serverResyncInvoiceTasks, getInvoiceDetails, setInvoiceServiceColumn, setClientServiceColumnDefault, previewInvoiceRefresh, applyInvoiceRefresh, addTasksToInvoice } from "./actions"
@@ -243,6 +243,28 @@ const STATUS_GROUPS = {
  *  side (about 320px each, line rows wrapping as on a phone). A laptop with
  *  the list and an expanded menu open gives ~670px. */
 const SPLIT_MIN_WIDTH = 640
+
+/**
+ * The status the Invoices list opens on: the drafts that are due to go out.
+ *
+ * Billing is a queue, not an archive — "what do I have to send today?" is the
+ * question somebody opens this page with, and the whole list of 30 invoices
+ * is the answer to a different one. The chip above the list names the filter
+ * and removes it in one click, so nothing is hidden, just ordered.
+ *
+ * Only ever applied to the Active tab: Closed and All are deliberate requests
+ * for something else, and the tab buttons clear the status filter anyway.
+ */
+const DEFAULT_STATUS_FILTER = 'to_send'
+
+/**
+ * `?status=all` — "I cleared the status filter on purpose".
+ *
+ * Without a value for it, an empty filter and a missing parameter look the
+ * same in a URL, so clearing the filter and reloading would hand back the
+ * default and look like the page ignoring the click.
+ */
+const STATUS_ANY = 'all'
 /** Statuses that have not gone to the client yet. */
 const UNSENT = ['draft', 'reviewed']
 
@@ -382,7 +404,12 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   const [otherOutstandingByInvoice, setOtherOutstandingByInvoice] = useState<Record<string, number>>({})
   const [loadingOutstandingId, setLoadingOutstandingId] = useState<string | null>(null)
 
-  const [filterStatus, setFilterStatus] = useState<string>(searchParams.get('status') || '')
+  const [filterStatus, setFilterStatus] = useState<string>(() => {
+    const q = searchParams.get('status')
+    if (q) return q === STATUS_ANY ? '' : q
+    // No parameter at all = a fresh open, which starts on the send queue.
+    return (searchParams.get('tab') || 'active') === 'active' ? DEFAULT_STATUS_FILTER : ''
+  })
   const [filterClient, setFilterClient] = useState<string>(searchParams.get('client') || '')
   const [groupByClient, setGroupByClient] = useState(false)
   const [sortBy, setSortBy] = useState(searchParams.get('sort') || 'workflow')
@@ -490,7 +517,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString())
 
-    if (filterStatus) params.set('status', filterStatus); else params.delete('status')
+    if (filterStatus) params.set('status', filterStatus); else params.set('status', STATUS_ANY)
     if (filterClient) params.set('client', filterClient); else params.delete('client')
     if (sortBy !== 'workflow') params.set('sort', sortBy); else params.delete('sort')
     if (searchFacets.length) params.set('sf', JSON.stringify(searchFacets)); else params.delete('sf')
@@ -712,6 +739,31 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     setFocusList(prev => {
       const next = !prev
       try { window.localStorage.setItem('invoices-focus-list', next ? '1' : '0') } catch {}
+      return next
+    })
+  }
+  /**
+   * Keep the paper preview beside the editor on a wide panel?
+   *
+   * OFF by default (changed 2026-11-09). The split used to be forced on by
+   * width alone, with no way out: on a wide screen half the panel was a PDF
+   * nobody had asked to see, and the lines being edited were squeezed into
+   * the other half. Seeing the paper is something you want at a moment — before
+   * sending, after a correction — not for every invoice you open.
+   *
+   * The Preview tab is unaffected and still shows it full width, so nothing
+   * is lost; this only decides whether it is there uninvited. Remembered in
+   * this browser, like Focus, because it is a working habit rather than a
+   * per-invoice choice. Read after mount so the server render matches.
+   */
+  const [splitPreview, setSplitPreview] = useState(false)
+  useEffect(() => {
+    try { setSplitPreview(window.localStorage.getItem('invoices-split-preview') === '1') } catch {}
+  }, [])
+  function toggleSplitPreview() {
+    setSplitPreview(prev => {
+      const next = !prev
+      try { window.localStorage.setItem('invoices-split-preview', next ? '1' : '0') } catch {}
       return next
     })
   }
@@ -981,6 +1033,26 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   // headline figures. By ISSUE month, ₹ snapshots, cancelled and bad-debt
   // invoices left out — they were never (or no longer are) billable.
   const [showSummary, setShowSummary] = useState(false)
+  /**
+   * Has the invoice list been scrolled far enough to fold the overview away?
+   *
+   * The overview band sits ABOVE the scrolling list rather than inside it, so
+   * its three cards held their full height forever and ate the top third of
+   * the screen on a laptop. Folding it on scroll gives that back the moment
+   * somebody starts working down the list, and unfolds it when they come back
+   * to the top — nothing is permanently hidden and nothing is pinned over the
+   * list.
+   *
+   * Hysteresis (48px down, 8px back up) on purpose: with one threshold the
+   * band's own collapse shortens the page, which scrolls the list, which
+   * re-expands it — a flicker loop at exactly the scroll position people stop
+   * at.
+   */
+  const [overviewCollapsed, setOverviewCollapsed] = useState(false)
+  const handleListScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const y = e.currentTarget.scrollTop
+    setOverviewCollapsed(prev => (prev ? y > 8 : y > 48))
+  }, [])
   const summary = useMemo(() => {
     const live = invoices.filter(i => !['cancelled', 'bad_debt'].includes(i.status))
     const thisMonth = todayISO().slice(0, 7)
@@ -3031,7 +3103,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
         </div>
 
         {/* List */}
-        <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-border/50">
+        <div onScroll={handleListScroll} className="flex-1 min-h-0 overflow-y-auto divide-y divide-border/50">
           {filtered.length === 0 && (
             <div className="flex flex-col items-center px-6 py-14 text-center">
               <div className="mb-4 rounded-2xl bg-secondary p-4"><FileText className="h-7 w-7 text-muted-foreground" /></div>
@@ -3115,10 +3187,12 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     const periodLabel = inv.billing_period_start ? formatBillingPeriod(inv.billing_period_start) : null
     const canEditBilling = can('billing.edit') && !permUser.isViewAs
     // What is on screen: split (details + preview), the preview alone, or
-    // details alone (narrow panel).
+    // details alone. The split needs BOTH the room and the viewer's say-so;
+    // without it an invoice opens on its lines and the paper is one tab away.
     const view: 'split' | 'preview' | 'edit' = detailView === 'preview' ? 'preview'
-      : detailWide ? 'split'
-      : detailView === 'edit' ? 'edit' : 'preview'
+      : detailWide && splitPreview ? 'split'
+      : detailView === 'edit' ? 'edit'
+      : splitPreview ? 'preview' : 'edit'
     const splitEdit = view === 'split'
     const activeTab: 'preview' | 'edit' = view === 'preview' ? 'preview' : 'edit'
 
@@ -3242,6 +3316,20 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
               </button>
             ))}
           </div>
+          {/* Side-by-side is offered, not imposed: only where there is room
+              for it, and only as something to turn on. */}
+          {detailWide && (
+            <button onClick={toggleSplitPreview} aria-pressed={splitPreview}
+              title={splitPreview ? 'Hide the preview beside the lines' : 'Show the preview beside the lines'}
+              className={cn(
+                "inline-flex min-h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                splitPreview
+                  ? "border-primary/30 bg-primary/10 text-primary"
+                  : "border-border/60 text-muted-foreground hover:text-foreground",
+              )}>
+              <Columns2 className="w-3.5 h-3.5" /><span className="hidden lg:inline">Split</span>
+            </button>
+          )}
           <div className="flex-1" />
           {nextAct && (
             <button
@@ -6211,6 +6299,10 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   // Focus only applies while an invoice is open — with nothing selected the
   // list is the page, so it must not disappear.
   const focused = focusMode && panelMode === 'detail' && !!selectedInv
+  // The overview folds only in the full-width list view: with the split open
+  // it is already down to one compact line, and folding that would leave an
+  // empty strip.
+  const folded = overviewCollapsed && !showRightPanel
 
   return (
     <div className="flex flex-col h-dvh bg-background text-foreground">
@@ -6254,13 +6346,44 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
         </div>
       )}
 
-      <section className={cn("shrink-0 border-b border-border/60 bg-card px-4 sm:px-6", showRightPanel ? (focused ? "hidden" : "hidden xl:block py-2") : "py-4")} aria-label="Invoice overview">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className={cn("font-semibold tracking-tight", showRightPanel ? "text-sm" : "text-lg")}>Invoice overview</h1>
-            {!showRightPanel && <p className="mt-1 text-xs text-muted-foreground">Review drafts, track payments, and keep client billing moving.</p>}
+      <section className={cn("shrink-0 border-b border-border/60 bg-card px-4 transition-[padding] duration-200 ease-out sm:px-6",
+        showRightPanel ? (focused ? "hidden" : "hidden xl:block py-2") : folded ? "py-2" : "py-4")} aria-label="Invoice overview">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <div className={cn("flex min-w-0 items-center gap-3", folded && "flex-1")}>
+            <h1 className={cn("font-semibold tracking-tight transition-[font-size] duration-200", showRightPanel || folded ? "text-sm" : "text-lg")}>Invoice overview</h1>
+            {/* Folded: the three cards' numbers, on one line and still
+                clickable, so scrolling the list never costs the figures.
+                Dropped below sm — a phone has no room for them beside the
+                buttons, and they collided with Summary at 375px. */}
+            {folded && (
+              <div className="hidden min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums sm:flex">
+                {showTotals && (
+                  <span className="text-muted-foreground">Outstanding<span className="ml-1.5 font-semibold text-foreground">{fmt(stats.outstanding)}</span></span>
+                )}
+                {/* These two FILTER the list; Outstanding above is a figure
+                    and nothing more. They are drawn as buttons — border, hover,
+                    pointer — because side by side with a plain number they
+                    read as a label, and a stray click silently narrows the
+                    list to three invoices. */}
+                {showTotals && (
+                  <button onClick={() => showInvoiceQueue('overdue')}
+                    title="Show only overdue invoices"
+                    className="cursor-pointer rounded-md border border-border/60 px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    Overdue<span className="ml-1.5 font-semibold text-red-600 dark:text-red-400">{fmt(stats.overdueAmt)}</span>
+                  </button>
+                )}
+                <button onClick={() => showInvoiceQueue('to_send')}
+                  title="Show only the drafts that are ready to send"
+                  className="cursor-pointer rounded-md border border-border/60 px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  Ready<span className="ml-1.5 font-semibold text-foreground">{stats.toSendCount}</span>
+                </button>
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-2">
+          {!showRightPanel && !folded && (
+            <p className="order-last w-full text-xs text-muted-foreground">Review drafts, track payments, and keep client billing moving.</p>
+          )}
+          <div className="flex shrink-0 items-center gap-2">
             {showTotals && (
               <button onClick={() => setShowSummary(true)}
                 className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-xs font-medium hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -6284,6 +6407,11 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
             ]} />
           </div>
         </div>
+        {/* The cards fold away on scroll. grid-rows 1fr→0fr animates to the
+            content's own height, which a max-height guess cannot do without
+            either clipping a card or easing through empty space. */}
+        <div className={cn("grid transition-[grid-template-rows] duration-200 ease-out", folded ? "grid-rows-[0fr]" : "grid-rows-[1fr]", showRightPanel && "hidden")}>
+        <div className="min-h-0 overflow-hidden">
         <div className={cn("mt-4 grid gap-3 overflow-x-auto pb-1", showTotals ? "grid-cols-[repeat(3,minmax(150px,1fr))]" : "grid-cols-1", showRightPanel && "hidden")}>
           {showTotals && (
             <div className="rounded-xl border border-border/60 bg-background p-3.5">
@@ -6313,6 +6441,8 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
             </div>
           </details>
         )}
+        </div>
+        </div>
       </section>
 
       {/* ── Main content ── */}
