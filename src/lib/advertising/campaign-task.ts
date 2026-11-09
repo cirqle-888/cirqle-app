@@ -29,7 +29,9 @@ export async function createCampaignTask(
   admin: SupabaseClient,
   opts: {
     projectId: string; campaignName: string; clientId: string | null;
-    serviceId: string | null; serviceCharge: number; currency: string; employeeId: string;
+    serviceId: string | null; serviceCharge: number; currency: string;
+    /** Who created it. Null for a task the billing engine re-creates itself. */
+    employeeId: string | null;
   },
 ): Promise<string | null> {
   try {
@@ -47,7 +49,7 @@ export async function createCampaignTask(
       billing_amount: opts.serviceCharge,
       billing_amount_inr: billingInr,
       currency: opts.currency,
-      created_by: opts.employeeId,
+      created_by: opts.employeeId ?? null,
       scope: deriveWorkScope(opts.clientId),
     }
     const { data: t } = await retryWithoutScope(strip =>

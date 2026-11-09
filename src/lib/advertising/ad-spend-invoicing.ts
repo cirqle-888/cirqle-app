@@ -37,27 +37,109 @@ export interface CampaignSpendDay { date: string; spendExGst: number }
 export type SpendProject = Pick<AdProjectLite, 'id' | 'ad_account_id' | 'provider_metadata'>
 
 /**
+ * Do two projects' ad-account ids refer to the same campaign owner?
+ *
+ * A platform campaign id is unique on the platform, so two live projects
+ * carrying the same one are the same campaign. The account id only has to
+ * AGREE — and a project imported before ad accounts were recorded carries
+ * none, so a null on either side agrees with anything.
+ *
+ * Requiring both ids to be present (the rule until 2026-11-09) let a
+ * re-import of a pre-account campaign look like a brand-new campaign: both
+ * copies counted as owners, and the client could be billed the spend and the
+ * service charge twice for one campaign.
+ */
+export function sharesAdAccount(a: string | null | undefined, b: string | null | undefined): boolean {
+  return !a || !b || a === b
+}
+
+/** The set of those task ids that are not in the trash. */
+export async function liveTaskIds(admin: SupabaseClient, ids: readonly string[]): Promise<ReadonlySet<string>> {
+  if (ids.length === 0) return new Set()
+  const { data, error } = await admin.from('tasks').select('id').in('id', [...ids]).is('deleted_at', null)
+  // Pre-soft-delete schema: there is no deleted_at, so nothing is deleted.
+  if (error) return new Set(ids)
+  return new Set(asRows<{ id: string }>(data).map(t => t.id))
+}
+
+/** A project among several for one campaign, as the ownership rule sees it. */
+export interface CampaignProjectRef {
+  id: string
+  created_at: string
+  /** Does it still have a live task to put the service charge on? */
+  hasLiveBillingTask?: boolean
+}
+
+/**
+ * Which of several projects for one campaign is allowed to bill it.
+ *
+ * In order:
+ *   1. a project that CAN bill — one with a live billing task. Billing never
+ *      moves off a project that has been charging the client onto an empty
+ *      re-import: that would leave the old task's money stranded on the list
+ *      and write the same fee again on a new one.
+ *   2. among those, the project the campaign registry maps the campaign to,
+ *   3. else the oldest of them.
+ *
+ * With no billable project anywhere, the registry pointer and then age decide,
+ * which is what the rule has always been.
+ *
+ * Sorts defensively rather than trusting the caller's order — "oldest" is half
+ * the rule, and getting it wrong silently moves a client's billing.
+ */
+export function campaignOwnerId(
+  live: readonly CampaignProjectRef[],
+  registryProjectId?: string | null,
+): string | null {
+  if (live.length === 0) return null
+  const billable = live.filter(p => p.hasLiveBillingTask)
+  const pool = billable.length > 0 ? billable : live
+  const ordered = [...pool].sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''))
+  if (registryProjectId && ordered.some(p => p.id === registryProjectId)) return registryProjectId
+  return ordered[0].id
+}
+
+/** project id → does it still have a live task the service charge can land on? */
+export async function projectsWithLiveTask(
+  admin: SupabaseClient, projectIds: readonly string[],
+): Promise<ReadonlySet<string>> {
+  if (projectIds.length === 0) return new Set()
+  const { data } = await admin.from('ad_project_tasks')
+    .select('project_id, task_id').in('project_id', [...projectIds])
+  const links = asRows<{ project_id: string; task_id: string | null }>(data)
+    .filter(l => !!l.task_id)
+  const live = await liveTaskIds(admin, links.map(l => l.task_id as string))
+  return new Set(links.filter(l => live.has(l.task_id as string)).map(l => l.project_id))
+}
+
+/**
  * Several live projects can point at the same platform campaign (e.g. a
- * second "Create Single Project" for a campaign that already had one). Only
- * ONE may bill it, or the client is invoiced the spend — and the service
- * charge — once per project. The owner is the project the campaign registry
- * maps it to; failing that, the oldest live project. True for every other one.
+ * second "Create Single Project" for a campaign that already had one, or a
+ * re-import of one mapped before ad accounts were recorded). Only ONE may
+ * bill it, or the client is invoiced the spend — and the service charge —
+ * once per project. The owner is the project the campaign registry maps it
+ * to; failing that, the oldest live project. True for every other one.
  */
 export async function isDuplicateCampaignProject(admin: SupabaseClient, project: SpendProject): Promise<boolean> {
   const cid = project.provider_metadata?.campaign_id
-  if (!project.ad_account_id || cid == null) return false
-  const { data } = await admin.from('ad_projects').select('id, created_at')
-    .eq('ad_account_id', project.ad_account_id)
+  if (cid == null) return false
+  // Matched on the campaign id alone, then narrowed by account: a project
+  // with no ad_account_id has to be able to find its re-imported twin, which
+  // an `.eq('ad_account_id', …)` filter in the query could never return.
+  const { data } = await admin.from('ad_projects').select('id, created_at, ad_account_id')
     .eq('provider_metadata->>campaign_id', String(cid))
     .is('deleted_at', null)
     .order('created_at', { ascending: true })
-  const live = asRows<{ id: string; created_at: string }>(data)
-  if (live.length <= 1) return false
-  const { data: reg } = await admin.from('ad_campaigns').select('project_id')
-    .eq('ad_account_id', project.ad_account_id).eq('external_campaign_id', String(cid)).maybeSingle()
-  const regId = asRow<{ project_id: string | null }>(reg)?.project_id
-  const owner = regId && live.some(p => p.id === regId) ? regId : live[0].id
-  return owner !== project.id
+  const siblings = asRows<{ id: string; created_at: string; ad_account_id: string | null }>(data)
+    .filter(p => sharesAdAccount(p.ad_account_id, project.ad_account_id))
+  if (siblings.length <= 1) return false
+  const { data: reg } = await admin.from('ad_campaigns').select('project_id, ad_account_id')
+    .eq('external_campaign_id', String(cid))
+  const regId = asRows<{ project_id: string | null; ad_account_id: string | null }>(reg)
+    .find(r => sharesAdAccount(r.ad_account_id, project.ad_account_id))?.project_id
+  const billable = await projectsWithLiveTask(admin, siblings.map(p => p.id))
+  const live = siblings.map(p => ({ ...p, hasLiveBillingTask: billable.has(p.id) }))
+  return campaignOwnerId(live, regId) !== project.id
 }
 
 /** Daily spend (excl. GST, INR) for one campaign. Empty for a duplicate project. */

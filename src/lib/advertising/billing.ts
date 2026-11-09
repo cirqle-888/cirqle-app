@@ -21,7 +21,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { computeBudgetTotals, computeServiceCharge } from './budget'
 import { PLATFORM_LABEL } from './types'
 import { resolveAutomaticAdvertisingRate, campaignBillingIsLocked } from './automatic-pricing'
-import { getSpendBasis, isDuplicateCampaignProject, type SpendProject } from './ad-spend-invoicing'
+import { getSpendBasis, isDuplicateCampaignProject, liveTaskIds, type SpendProject } from './ad-spend-invoicing'
+import { createCampaignTask } from './campaign-task'
 
 const round2 = (v: number) => Math.round((Number(v || 0) + Number.EPSILON) * 100) / 100
 
@@ -103,6 +104,45 @@ export async function getBillingBasisNative(admin: SupabaseClient, project: Spen
 }
 
 /**
+ * The first linked task that still exists, from links in creation order.
+ *
+ * Pure half of findBillingTaskId — the rule is "earliest link whose task is
+ * not in the trash", and it is worth testing without a database.
+ */
+export function firstLiveTaskId(
+  orderedTaskIds: readonly string[],
+  liveTaskIds: ReadonlySet<string>,
+): string | null {
+  return orderedTaskIds.find(id => liveTaskIds.has(id)) ?? null
+}
+
+/**
+ * The campaign's billing task: the earliest-linked task that is still LIVE.
+ *
+ * Deleted tasks are skipped. Until 2026-11-09 the earliest link won outright,
+ * so a campaign whose ₹0 task had been thrown away kept having its recomputed
+ * service charge written onto that tombstone — invisible in Tasks, never
+ * invoiced, and the campaign silently stopped billing for good. Soft-deleting
+ * a task is an ordinary thing to do; permanently unbilling a live campaign is
+ * not, so the deleted row no longer counts.
+ *
+ * An install whose tasks table predates soft deletes has no deleted_at to
+ * filter on: there, every linked task is live, which is exactly the old
+ * behaviour.
+ */
+export async function findBillingTaskId(admin: SupabaseClient, projectId: string): Promise<string | null> {
+  const { data: links, error } = await admin
+    .from('ad_project_tasks').select('task_id, created_at')
+    .eq('project_id', projectId)
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  const ids = ((links || []) as { task_id: string | null }[])
+    .map(l => l.task_id).filter((id): id is string => !!id)
+  if (ids.length === 0) return null
+  return firstLiveTaskId(ids, await liveTaskIds(admin, ids))
+}
+
+/**
  * Re-derives the campaign task's billing from actual GST-inclusive spend and
  * resyncs the campaign's draft invoice. Call after ANY event that changes the
  * basis: allocation added/removed, service charge % edited, funding entry
@@ -122,16 +162,12 @@ export async function recomputeCampaignBilling(admin: SupabaseClient, projectId:
     if ((project as any).scope === 'company' || !project.client_id) return
     if (await isDuplicateCampaignProject(admin, project)) return
 
-    // The campaign's billing task = the earliest-linked task (created with the
-    // campaign; extra tasks added later are work items, not the billing line).
-    const { data: link, error: linkError } = await admin
-      .from('ad_project_tasks').select('task_id')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: true }).limit(1).maybeSingle()
-
-    if (linkError) throw linkError
-    if (!link?.task_id) throw new Error('Campaign billing task is missing')
-    if (await campaignBillingIsLocked(admin, projectId, link?.task_id)) return
+    // The campaign's billing task = the earliest-linked task that is still
+    // live (created with the campaign; extra tasks added later are work items,
+    // not the billing line). None is not fatal any more — a campaign with a
+    // real fee to bill gets a replacement below.
+    const billingTaskId = await findBillingTaskId(admin, projectId)
+    if (await campaignBillingIsLocked(admin, projectId, billingTaskId ?? undefined)) return
 
     // Repair only active imported campaigns with the old empty pricing shape.
     // Preserve explicitly selected services and nonzero/manual campaign fees.
@@ -156,7 +192,7 @@ export async function recomputeCampaignBilling(admin: SupabaseClient, projectId:
       spendBasis, (project as any).service_charge_type, Number((project as any).service_charge_value || 0),
     )
 
-    if ((link as any)?.task_id) {
+    if (billingTaskId) {
       const billingInr = await toInr(admin, serviceCharge, currency)
       // The auto_attach_task_to_invoice trigger propagates this onto any
       // draft/reviewed monthly invoice line and recalculates its totals.
@@ -165,8 +201,26 @@ export async function recomputeCampaignBilling(admin: SupabaseClient, projectId:
         billing_amount: serviceCharge,
         billing_amount_inr: billingInr,
         updated_at: new Date().toISOString(),
-      }).eq('id', (link as any).task_id)
+      }).eq('id', billingTaskId)
       if (taskError) throw taskError
+    } else if (serviceCharge > 0) {
+      // No live task, but there IS a fee to charge — so the campaign would
+      // otherwise bill nothing at all. Re-create the billing line rather than
+      // dropping real money on the floor.
+      //
+      // Only when the fee is nonzero, on purpose: the ₹0 tasks that imported
+      // campaigns leave behind are routinely thrown away, and resurrecting
+      // those on every sync would be noise, not a fix.
+      const recreated = await createCampaignTask(admin, {
+        projectId,
+        campaignName: (project as any).campaign_name || 'Campaign',
+        clientId: project.client_id,
+        serviceId: (project as any).service_id ?? null,
+        serviceCharge,
+        currency,
+        employeeId: (project as any).created_by ?? null,
+      })
+      if (!recreated) throw new Error('Campaign billing task is missing and could not be re-created')
     }
 
     await resyncInvoiceForProject(admin, projectId)
