@@ -17,6 +17,10 @@ import { usePrivacy } from '@/contexts/privacy-context'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { DateFilter, matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
+import {
+  serviceDepartmentMap, taskDepartmentId, matchesDepartments,
+  departmentFilterOptions, departmentLabel, type Department,
+} from '@/lib/departments/work-departments'
 import { SavedViews } from '@/components/ui/saved-views'
 import { useScrollRestore } from '@/lib/lists/use-scroll-restore'
 import { TokenizedSearch, type SearchFacet, type FacetOp } from '@/components/ui/tokenized-search'
@@ -81,7 +85,13 @@ interface Props {
   employeeServices?: { employee_id: string; service_id: string }[]
   scores: Score[]
   clients: { id: string; name: string; code?: string }[]
-  services: { id: string; name: string }[]
+  services: { id: string; name: string; category_id?: string | null }[]
+  /**
+   * Active departments (service categories), in Settings order. Empty for
+   * every viewer who is not an admin — which is what hides the Department
+   * filter, so there is no second gate to keep in sync.
+   */
+  departments?: Department[]
   taskAssignments: Assignment[]
   contributorRecords: { task_id: string; employee_id: string; parameter_id?: string; value: number }[]
   taskToolRecords: { task_id: string; tool_id: string }[]
@@ -179,7 +189,7 @@ export default function ContributionsClient({
   tasks: initialTasks, employees, groups, parameters, tools,
   parameterServices, toolServices, groupServices: groupServicesFromDB,
   employeeServices = [],
-  scores, clients, services, taskAssignments: taskAssignmentsFromDB,
+  scores, clients, services, departments = [], taskAssignments: taskAssignmentsFromDB,
   contributorRecords, taskToolRecords, pricingMatrix,
   performanceHistory, visibilitySettings,
   permissionFlags, suggestionEvidence = {},
@@ -196,6 +206,9 @@ export default function ContributionsClient({
   // the Tasks page. Local lists so newly added ones appear immediately.
   const [clientList, setClientList] = useState(clients)
   const [serviceList, setServiceList] = useState(services)
+  // service id → department id. One map behind the filter, the options and the
+  // chips, so they can never disagree about where a job sat.
+  const serviceDepartments = useMemo(() => serviceDepartmentMap(serviceList), [serviceList])
   const [quickCreate, setQuickCreate] = useState<{ kind: 'client' | 'service'; query: string } | null>(null)
   const canAddRealClient = can('clients.create') || can('settings.access')
   const canCreateClient  = canAddRealClient || can('clients.create_draft')
@@ -248,10 +261,22 @@ export default function ContributionsClient({
   // Client & Service are multi-value (stack several, OR within the category).
   const [filterClients, setFilterClients] = useState<string[]>(() => (searchParams.get('client') || '').split(',').filter(Boolean))
   const [filterServices, setFilterServices] = useState<string[]>(() => (searchParams.get('service') || '').split(',').filter(Boolean))
+  // Department — the coarser cut above Service, and multi-value like it.
+  const [filterDepartments, setFilterDepartments] = useState<string[]>(() => (searchParams.get('dept') || '').split(',').filter(Boolean))
   const [filterEmployee, setFilterEmployee] = useState(searchParams.get('employee') || '')
   // Toggle helpers for the multi-select dropdowns.
   const toggleClient  = (id: string) => setFilterClients(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   const toggleService = (id: string) => setFilterServices(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  // Turning a department ON also drops any selected service from OUTSIDE the
+  // chosen departments: the two would otherwise AND into an empty list with no
+  // visible reason why.
+  const toggleDepartment = (id: string) => setFilterDepartments(prev => {
+    const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    if (next.length) {
+      setFilterServices(svc => svc.filter(sid => next.includes(taskDepartmentId(sid, serviceDepartments))))
+    }
+    return next
+  })
   const [filterEmployeeMode, setFilterEmployeeMode] = useState<'worked' | 'solo' | 'any' | 'without'>((searchParams.get('empmode') as any) || 'worked')
   // "My Tasks" / "Not Assigned to Me" quick toggle — independent of the Employee
   // dropdown (which picks any single teammate). Available to anyone with an
@@ -273,6 +298,7 @@ export default function ContributionsClient({
     if (searchFacets.length) params.set('sf', JSON.stringify(searchFacets)); else params.delete('sf')
     if (filterClients.length) params.set('client', filterClients.join(',')); else params.delete('client')
     if (filterServices.length) params.set('service', filterServices.join(',')); else params.delete('service')
+    if (filterDepartments.length) params.set('dept', filterDepartments.join(',')); else params.delete('dept')
     if (filterEmployee) params.set('employee', filterEmployee); else params.delete('employee')
     if (filterEmployeeMode && filterEmployeeMode !== 'worked') params.set('empmode', filterEmployeeMode); else params.delete('empmode')
     if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter); else params.delete('status')
@@ -283,7 +309,7 @@ export default function ContributionsClient({
     if (newQueryString !== searchParams.toString()) {
       router.replace(`${pathname}?${newQueryString}`, { scroll: false })
     }
-  }, [listViewMode, searchFacets, filterClients, filterServices, filterEmployee, filterEmployeeMode, statusFilter, sortBy, filterDate, pathname, router, searchParams])
+  }, [listViewMode, searchFacets, filterClients, filterServices, filterDepartments, filterEmployee, filterEmployeeMode, statusFilter, sortBy, filterDate, pathname, router, searchParams])
   const autoRecalcRan = useRef(false)
 
   // ── Financial visibility ─────────────────────────────
@@ -810,11 +836,25 @@ export default function ContributionsClient({
     return all.filter(o => ids.has(o.value) || filterClients.includes(o.value))
   }, [dateScopedTasks, clients, filterClients])
   const scopedServiceOptions = useMemo(() => {
-    const all = services.map(s => ({ value: s.id, label: s.name }))
+    // With departments picked, the Service picker offers only their services —
+    // otherwise the obvious next click empties the list.
+    const pool = filterDepartments.length
+      ? services.filter(s => filterDepartments.includes(taskDepartmentId(s.id, serviceDepartments)))
+      : services
+    const all = pool.map(s => ({ value: s.id, label: s.name }))
     if (!dateScopedTasks) return all
     const ids = new Set(dateScopedTasks.map((t: any) => t.service_id).filter(Boolean))
     return all.filter(o => ids.has(o.value) || filterServices.includes(o.value))
-  }, [dateScopedTasks, services, filterServices])
+  }, [dateScopedTasks, services, filterServices, filterDepartments, serviceDepartments])
+  // Department options, narrowed by the date filter like the others: a period
+  // with no Print work does not offer Print, and "No department" shows only
+  // when there is unclassified work to find.
+  const scopedDepartmentOptions = useMemo(() => {
+    const all = departmentFilterOptions(departments)
+    const pool = dateScopedTasks ?? localTasks
+    const present = new Set(pool.map((t: any) => taskDepartmentId(t.service_id, serviceDepartments)))
+    return all.filter(o => present.has(o.value) || filterDepartments.includes(o.value))
+  }, [departments, dateScopedTasks, localTasks, serviceDepartments, filterDepartments])
 
   async function toggleAssignment(taskId: string, empId: string) {
     const isAssigned = taskAssignmentMap[taskId]?.has(empId)
@@ -847,6 +887,7 @@ export default function ContributionsClient({
       }
       if (filterClients.length && !filterClients.includes(t.client?.id)) return false
       if (filterServices.length && !filterServices.includes(t.service_id)) return false
+      if (!matchesDepartments(filterDepartments, t.service_id, serviceDepartments)) return false
       if (!matchesDateFilter(t.task_date, filterDate)) return false
       const contributed = taskScoreMap[t.id]
       const doneCount = contributed ? contributed.size : 0
@@ -888,7 +929,7 @@ export default function ContributionsClient({
       }
       return true
     })
-  }, [localTasks, activeFacets, filterClients, filterServices, filterDate, filterEmployee, filterEmployeeMode, statusFilter, taskScoreMap, taskAssignmentMap, employees, myScope, currentEmployee, suggestionEvidence])
+  }, [localTasks, activeFacets, filterClients, filterServices, filterDepartments, serviceDepartments, filterDate, filterEmployee, filterEmployeeMode, statusFilter, taskScoreMap, taskAssignmentMap, employees, myScope, currentEmployee, suggestionEvidence])
 
   // canSeeFinancials: requires (a) the legacy visibility-settings gate AND
   // (b) the new granular `contributions.view_earnings` permission. Both
@@ -1404,6 +1445,7 @@ export default function ContributionsClient({
 
     // Count of active filters inside the Filter popover (excludes statusFilter — that's the tabs row)
     const activeFilterCount =
+      filterDepartments.length +
       filterClients.length +
       filterServices.length +
       (filterDate ? 1 : 0) +
@@ -1411,7 +1453,7 @@ export default function ContributionsClient({
       (myScope ? 1 : 0)
     const hasAnyFilter = activeFilterCount > 0 || hasSearch || statusFilter !== 'all'
     // What the mobile Filters panel holds (scope and status sit outside it).
-    const mobileFilterCount = filterClients.length + filterServices.length + (filterDate ? 1 : 0) + (filterEmployee ? 1 : 0) + (sortBy !== 'today_first' ? 1 : 0)
+    const mobileFilterCount = filterDepartments.length + filterClients.length + filterServices.length + (filterDate ? 1 : 0) + (filterEmployee ? 1 : 0) + (sortBy !== 'today_first' ? 1 : 0)
 
     const headerActions = (
       <>
@@ -1632,6 +1674,23 @@ export default function ContributionsClient({
                   </button>
                 </div>
               )}
+              {/* Department — admin-only (the server sends an empty list to
+                  everyone else). The widest cut, so it comes first:
+                  department → client → service. */}
+              {departments.length > 0 && (
+                <FilterDropdown
+                  compact
+                  multiple
+                  options={scopedDepartmentOptions}
+                  value=""
+                  onChange={() => {}}
+                  values={filterDepartments}
+                  onToggle={toggleDepartment}
+                  onClear={() => setFilterDepartments([])}
+                  placeholder="Department"
+                  sortKey="departments"
+                />
+              )}
               <FilterDropdown
                 compact
                 multiple
@@ -1671,7 +1730,7 @@ export default function ContributionsClient({
               />
               {hasAnyFilter && (
                 <button
-                  onClick={() => { setSearchFacets([]); setSearchDraft(''); setFilterClients([]); setFilterServices([]); setFilterEmployee(''); setFilterEmployeeMode('worked'); setFilterDate(null); setStatusFilter('all'); setMyScope(null) }}
+                  onClick={() => { setSearchFacets([]); setSearchDraft(''); setFilterClients([]); setFilterServices([]); setFilterDepartments([]); setFilterEmployee(''); setFilterEmployeeMode('worked'); setFilterDate(null); setStatusFilter('all'); setMyScope(null) }}
                   className="ml-1 text-xs text-muted-foreground hover:text-foreground px-2 py-1.5 rounded-md hover:bg-foreground/[0.04] transition-colors flex items-center gap-1 shrink-0"
                 >
                   <X size={12} /> Clear all
@@ -1696,10 +1755,11 @@ export default function ContributionsClient({
               // One chip per selected client / service (multi-value).
               ...filterClients.map((id: string) => ({ key: 'client:' + id, label: 'Client', value: clients.find((c: any) => c.id === id)?.name || 'Selected', onRemove: () => toggleClient(id) })),
               ...filterServices.map((id: string) => ({ key: 'service:' + id, label: 'Service', value: services.find((s: any) => s.id === id)?.name || 'Selected', onRemove: () => toggleService(id) })),
+              ...filterDepartments.map((id: string) => ({ key: 'dept:' + id, label: 'Department', value: departmentLabel(id, departments) || 'Selected', onRemove: () => toggleDepartment(id) })),
               ...(filterEmployee ? [{ key: 'employee', label: 'Employee', value: dn(employees.find((e: any) => e.id === filterEmployee)) || 'Selected', onRemove: () => { setFilterEmployee(''); setFilterEmployeeMode('worked') } }] : []),
               ...(filterDate ? [{ key: 'date', label: 'Date', value: getDateFilterLabel(filterDate), onRemove: () => setFilterDate(null) }] : []),
             ]}
-            onClearAll={() => { setSearchFacets([]); setSearchDraft(''); setFilterClients([]); setFilterServices([]); setFilterEmployee(''); setFilterEmployeeMode('worked'); setFilterDate(null); setStatusFilter('all'); setMyScope(null) }}
+            onClearAll={() => { setSearchFacets([]); setSearchDraft(''); setFilterClients([]); setFilterServices([]); setFilterDepartments([]); setFilterEmployee(''); setFilterEmployeeMode('worked'); setFilterDate(null); setStatusFilter('all'); setMyScope(null) }}
           />
 
           {/* ── Missing-scores toast (bottom-right) — list view only ──

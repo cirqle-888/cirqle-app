@@ -294,7 +294,10 @@ export default async function TasksPage({
   // supabase-js's literal-type parser hits TS2589 (excessively deep) on it.
   // Plain `string` for the same reason as selectClause below: a template
   // literal here trips supabase-js's select-literal parser (TS2589-adjacent).
-  const serviceSelect: string = 'id, name, default_price, default_currency, pricing_type'
+  // category_id is the service's DEPARTMENT (see lib/departments/work-departments)
+  // — the Department filter derives each task's department from it client-side,
+  // so no extra query and no new column on tasks.
+  const serviceSelect: string = 'id, name, category_id, default_price, default_currency, pricing_type'
   const selectClause: string = (vis.tasksPricing ? ADMIN_TASK_SELECT : EMPLOYEE_TASK_SELECT)
     + (vis.tasksPricing && hasNoChargeReason ? ', no_charge_reason' : '')
     + (vis.tasksPricing && hasPackageCountsAs ? ', package_counts_as_service_id' : '')
@@ -323,7 +326,7 @@ export default async function TasksPage({
     // pricing_type so admin task editors can use them; others get name only.
     vis.tasksPricing
       ? supabase.from('services').select(serviceSelect).eq('is_active', true).order('display_order').order('name')
-      : supabase.from('services').select('id, name').eq('is_active', true).order('display_order').order('name'),
+      : supabase.from('services').select('id, name, category_id').eq('is_active', true).order('display_order').order('name'),
     // Pricing matrix is pure money — only sent to viewers with tasks.view_pricing.
     vis.tasksPricing
       ? supabase.from('client_service_pricing').select('client_id, service_id, price, currency')
@@ -552,11 +555,30 @@ export default async function TasksPage({
 
   // Cast: the pricing branch selects through a plain string variable, which
   // supabase-js cannot type statically.
-  const allServices = (servicesRes.data || []) as { id: string; name: string }[]
+  const allServices = (servicesRes.data || []) as { id: string; name: string; category_id?: string | null }[]
   const scopedServices =
     visibilityMode === 'services' && myServiceIds.length > 0
       ? allServices.filter(s => myServiceIds.includes(s.id))
       : allServices
+
+  // ── Departments, for the admin-only Department filter ─────────────────────
+  // A department is a service category (Settings → Departments), and a task's
+  // department is its service's category — the same derivation the department
+  // P&L and the Clients page use. Admin-only by decision: the filter is a
+  // cross-department lens, and a viewer already scoped to one department has
+  // nothing to narrow. Sending an empty array is what hides the dropdown, so
+  // a pre-migration database (no service_categories table) degrades to the
+  // page exactly as it was.
+  let departments: { id: string; name: string }[] = []
+  if (isAdmin) {
+    const { data } = await supabase
+      .from('service_categories')
+      .select('id, name, display_order')
+      .eq('is_active', true)
+      .order('display_order')
+      .order('name')
+    departments = ((data || []) as { id: string; name: string }[]).map(d => ({ id: d.id, name: d.name }))
+  }
 
   return (
     <>
@@ -577,6 +599,7 @@ export default async function TasksPage({
       initialTrash={initialTrash}
       clients={(clientsRes.data || []) as unknown as { id: string; name: string; code: string; is_draft?: boolean | null }[]}
       services={scopedServices}
+      departments={departments}
       packages={(packagesRes.data || []) as any[]}
       packageItems={(packageItemsRes.data || []) as any[]}
       clientPricings={(clientPricingsRes.data || []) as any[]}

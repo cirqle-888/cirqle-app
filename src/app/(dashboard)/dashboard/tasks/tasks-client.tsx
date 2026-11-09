@@ -93,6 +93,11 @@ import {
   emptyBillingRule, isBasisTask, sumBasis, computeRule, findDuplicateRules,
   type BillingRule,
 } from '@/lib/tasks/derived-billing'
+import {
+  NO_DEPARTMENT, serviceDepartmentMap, taskDepartmentId,
+  departmentFilterOptions, departmentLabel, servicesInDepartment,
+  type Department,
+} from '@/lib/departments/work-departments'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
 import { formatTaskDate, fullTaskDate } from '@/lib/utils/format-date'
@@ -176,6 +181,8 @@ interface Task {
 interface Service {
   id: string
   name: string
+  /** The service's DEPARTMENT (a service_categories row). Drives the Department filter. */
+  category_id?: string | null
   pricing_type?: string
   default_price?: number
   default_currency?: string
@@ -251,6 +258,12 @@ interface Props {
   initialTrash: (Task & { deleted_at: string })[]
   clients: { id: string; name: string; code: string; is_draft?: boolean | null }[]
   services: Service[]
+  /**
+   * Active departments (service categories), in Settings order. Empty for
+   * every viewer who is not an admin — which is what hides the Department
+   * filter, so there is no second gate to keep in sync.
+   */
+  departments?: Department[]
   clientPricings: { client_id: string; service_id: string; price: number; currency: string }[]
   /** Active packages + their included lines — the list's Package/Extra labels. */
   packages?: CoveragePackage[]
@@ -440,7 +453,7 @@ function SortablePanelRow({ id, label, onUp, onDown, isFirst, isLast }: {
   )
 }
 
-export default function TasksClient({ promotionRequest, promotionSocialItem, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', focusTaskMissing = false, initialClient = '', initialService = '', initialDateRange = null, dbTaskTotal, fullHistory = false, initialTasks, initialTrash, clients, services: initialServices, clientPricings: initialClientPricings, packages = [], packageItems = [], employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
+export default function TasksClient({ promotionRequest, promotionSocialItem, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', focusTaskMissing = false, initialClient = '', initialService = '', initialDateRange = null, dbTaskTotal, fullHistory = false, initialTasks, initialTrash, clients, services: initialServices, departments = [], clientPricings: initialClientPricings, packages = [], packageItems = [], employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
   // Coming back from a record lands where the list was left, not at the top.
   // See lib/lists/scroll-restore for the rules.
   useScrollRestore('tasks')
@@ -598,6 +611,18 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       if (filterStatus)  q = q.eq('status', filterStatus)
       if (filterClient)  q = filterClient === INTERNAL_CLIENT ? q.is('client_id', null) : q.eq('client_id', filterClient)
       if (filterService) q = q.eq('service_id', filterService)
+      // tasks carry a service, not a department — so a department becomes the
+      // list of its service ids. "No department" must also catch tasks with no
+      // service at all, which no `in` list can express.
+      if (filterDepartment) {
+        const ids = servicesInDepartment(filterDepartment, services)
+        if (filterDepartment === NO_DEPARTMENT) {
+          q = ids.length ? q.or(`service_id.is.null,service_id.in.(${ids.join(',')})`) : q.is('service_id', null)
+        } else {
+          // An empty department sells nothing, so nothing can match it.
+          q = q.in('service_id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000'])
+        }
+      }
 
       // Search query
       if (searchQ) {
@@ -684,6 +709,10 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
   const [filterStatus, setFilterStatus] = useState('')
   const [filterClient, setFilterClient] = useState(initialClient)
   const [filterService, setFilterService] = useState(initialService)
+  // Department — the coarser cut above Service. One service belongs to exactly
+  // one department, so this is a single select like the Service filter beside
+  // it, not a stack. '' = every department (and no department).
+  const [filterDepartment, setFilterDepartment] = useState('')
   // Package / Extra / Waived / Billable — how the CLIENT is charged, which is
   // a different question from status and worth filtering on its own.
   const [filterBilling, setFilterBilling] = useState<'' | TaskBillingStatus>('')
@@ -704,6 +733,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     setSearchDraft('')
     setFilterClient(initialClient)
     setFilterService(initialService)
+    setFilterDepartment('')
     setFilterStatus('')
     setFilterBilling('')
   }, [initialSearch, initialClient, initialService])
@@ -793,6 +823,9 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
 
   // Local copies so quick-set price updates reflect immediately without page reload
   const [services, setServices] = useState(initialServices)
+  // service id → department id. One map, reused by the filter, the counts, the
+  // chips and the DB-search query, so they can never disagree.
+  const serviceDepartments = useMemo(() => serviceDepartmentMap(services), [services])
   const [clientList, setClientList] = useState(clients)
   const [clientPricings, setClientPricings] = useState(initialClientPricings)
 
@@ -2177,6 +2210,9 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     if (filterBilling) t = t.filter(x => taskBillingStatus(x, coverageIndex) === filterBilling)
     if (filterClient)  t = filterClient === INTERNAL_CLIENT ? t.filter(x => !x.client_id) : t.filter(x => x.client?.id === filterClient)
     if (filterService) t = t.filter(x => x.service?.id === filterService)
+    // Department before Service in the list's logic as well as the toolbar:
+    // picking a department and then a service inside it narrows, as expected.
+    if (filterDepartment) t = t.filter(x => taskDepartmentId(x.service?.id, serviceDepartments) === filterDepartment)
     // Named search facets (Title / Client / Service / Task # / Amount) with
     // operators — OR within a field, AND across. Generic text is handled by the
     // searchQ block below (preserves #number exact + float-to-top).
@@ -2239,7 +2275,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     if (sortBy === 'amount_desc') t = [...t].sort((a, b) => ((b.billing_amount_inr ?? 0)) - ((a.billing_amount_inr ?? 0)))
     if (sortBy === 'client')      t = [...t].sort((a, b) => (a.client?.name || '').localeCompare(b.client?.name || ''))
     return t
-  }, [tasks, filterStatus, filterBilling, coverageIndex, filterClient, filterService, searchQ, namedFacets, sortBy, filterDate, assigneeTaskIdSet, myScope, myTaskIdSet])
+  }, [tasks, filterStatus, filterBilling, coverageIndex, filterClient, filterService, filterDepartment, serviceDepartments, searchQ, namedFacets, sortBy, filterDate, assigneeTaskIdSet, myScope, myTaskIdSet])
 
   // visibleTasks is a passthrough — filtering is fully handled by filteredTasks above.
   // (The comment "only show their assigned tasks" was stale — server already scopes the array.)
@@ -2287,10 +2323,10 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     ? dbModeResults.slice(0, mobileLimit)
     : visibleTasks.slice(0, mobileLimit)
 
-  const hasActiveFilters = !!(filterStatus || filterBilling || filterClient || filterService || searchQ || sortBy !== 'today_first' || !!filterAssignee || !!filterDate || !!myScope)
+  const hasActiveFilters = !!(filterStatus || filterBilling || filterClient || filterService || filterDepartment || searchQ || sortBy !== 'today_first' || !!filterAssignee || !!filterDate || !!myScope)
   // What the mobile Filters panel holds — its button shows this count.
-  const mobileFilterCount = [filterDate, filterClient, filterService, filterAssignee, filterBilling, sortBy !== 'today_first'].filter(Boolean).length
-  const activeFilterCount = [filterClient, filterService, filterBilling, filterAssignee, sortBy !== 'today_first' ? 'sort' : '', myScope || ''].filter(Boolean).length
+  const mobileFilterCount = [filterDate, filterDepartment, filterClient, filterService, filterAssignee, filterBilling, sortBy !== 'today_first'].filter(Boolean).length
+  const activeFilterCount = [filterDepartment, filterClient, filterService, filterBilling, filterAssignee, sortBy !== 'today_first' ? 'sort' : '', myScope || ''].filter(Boolean).length
 
   // Status counts — computed from tasks before status filter is applied so all
   // tabs show real numbers. Reuses the same assigneeTaskIdSet so the inner
@@ -2299,6 +2335,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     const base = tasks.filter(t => {
       if (filterClient === INTERNAL_CLIENT ? !!t.client_id : (filterClient && t.client?.id !== filterClient)) return false
       if (filterService && t.service?.id !== filterService) return false
+      if (filterDepartment && taskDepartmentId(t.service?.id, serviceDepartments) !== filterDepartment) return false
       if (assigneeTaskIdSet && !assigneeTaskIdSet.has(t.id)) return false
       if (filterDate && !matchesDateFilter(t.task_date, filterDate)) return false
       return true
@@ -2310,7 +2347,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       if (counts[t.status] !== undefined) counts[t.status]++
     }
     return counts
-  }, [tasks, filterClient, filterService, filterDate, assigneeTaskIdSet])
+  }, [tasks, filterClient, filterService, filterDepartment, serviceDepartments, filterDate, assigneeTaskIdSet])
 
   // Settled statuses (done / invoiced / cancelled) are only loaded inside the
   // TASKS_HISTORY_MONTHS window, so their counts are a FLOOR, not a total. Live
@@ -2359,11 +2396,26 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       ids.has(o.value) || o.value === filterClient || (o.value === INTERNAL_CLIENT && hasInternal))
   }, [dateScopedTasks, clientFilterOptions, filterClient])
   const scopedServiceOptions = useMemo(() => {
-    const all = services.map(s => ({ value: s.id, label: s.name }))
+    // With a department picked, the Service picker offers only that
+    // department's services — otherwise the two filters fight each other and
+    // the obvious next click empties the list.
+    const pool = filterDepartment
+      ? services.filter(s => (s.category_id ?? NO_DEPARTMENT) === filterDepartment)
+      : services
+    const all = pool.map(s => ({ value: s.id, label: s.name }))
     if (!dateScopedTasks) return all
     const ids = new Set(dateScopedTasks.map(t => t.service?.id).filter(Boolean))
     return all.filter(o => ids.has(o.value) || o.value === filterService)
-  }, [dateScopedTasks, services, filterService])
+  }, [dateScopedTasks, services, filterService, filterDepartment])
+  // Department options, narrowed by the date filter the same way the others
+  // are: a period with no Print work does not offer Print. "No department" is
+  // offered only when some unclassified task is actually there to find.
+  const scopedDepartmentOptions = useMemo(() => {
+    const all = departmentFilterOptions(departments)
+    const pool = dateScopedTasks ?? tasks
+    const present = new Set(pool.map(t => taskDepartmentId(t.service?.id, serviceDepartments)))
+    return all.filter(o => present.has(o.value) || o.value === filterDepartment)
+  }, [departments, dateScopedTasks, tasks, serviceDepartments, filterDepartment])
   const scopedAssigneeOptions = useMemo(() => {
     const all = employees.map(emp => ({ value: emp.id, label: dn(emp) }))
     if (!dateScopedTasks) return all
@@ -2851,6 +2903,27 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
             <div className={`${showMobileFilters ? 'flex' : 'hidden'} sm:flex flex-wrap items-center gap-1.5 w-full sm:w-auto`}>
               <ToolbarDivider />
               <DateFilter compact value={filterDate} onChange={setFilterDate} />
+              {/* Department — admin-only (the server sends an empty list to
+                  everyone else). First of the three because it is the widest
+                  cut: department → client → service. */}
+              {departments.length > 0 && (
+                <FilterDropdown compact
+                  options={scopedDepartmentOptions}
+                  value={filterDepartment}
+                  onChange={v => {
+                    setFilterDepartment(v)
+                    // A service from another department would leave the list
+                    // empty and the reason invisible — drop it instead.
+                    if (v && filterService) {
+                      const svc = services.find(x => x.id === filterService)
+                      if ((svc?.category_id ?? NO_DEPARTMENT) !== v) setFilterService('')
+                    }
+                  }}
+                  placeholder="Department"
+                  sortKey="departments"
+                  maxLabelWidth="max-w-[90px]"
+                />
+              )}
               <FilterDropdown compact options={scopedClientOptions} value={filterClient} onChange={setFilterClient} placeholder="Client" sortKey="clients" maxLabelWidth="max-w-[90px]" />
               <FilterDropdown compact options={scopedServiceOptions} value={filterService} onChange={setFilterService} placeholder="Service" sortKey="services" maxLabelWidth="max-w-[90px]" />
               <FilterDropdown compact options={scopedAssigneeOptions} value={filterAssignee} onChange={setFilterAssignee} placeholder="Assignee" sortKey="employees" maxLabelWidth="max-w-[90px]" />
@@ -2880,7 +2953,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                 </select>
               )}
               {hasActiveFilters && (
-                <button onClick={() => { setFilterStatus(''); setFilterBilling(''); setFilterClient(''); setFilterService(''); clearSearch(); setSortBy('today_first'); setFilterAssignee(''); setFilterDate(null); setMyScope(null) }}
+                <button onClick={() => { setFilterStatus(''); setFilterBilling(''); setFilterClient(''); setFilterService(''); setFilterDepartment(''); clearSearch(); setSortBy('today_first'); setFilterAssignee(''); setFilterDate(null); setMyScope(null) }}
                   className="text-xs text-muted-foreground hover:text-foreground px-1.5 py-1 rounded-md hover:bg-foreground/[0.04] transition-colors flex items-center gap-0.5 shrink-0">
                   <X size={11} /> Clear
                 </button>
@@ -2978,11 +3051,12 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
               ...(filterStatus ? [{ key: 'status', label: 'Status', value: getStatusLabel(filterStatus), onRemove: () => setFilterStatus('') }] : []),
               ...(filterClient ? [{ key: 'client', label: 'Client', value: filterClient === INTERNAL_CLIENT ? 'Internal' : clientList.find(c => c.id === filterClient)?.name || 'Selected', onRemove: () => setFilterClient('') }] : []),
               ...(filterService ? [{ key: 'service', label: 'Service', value: services.find(s => s.id === filterService)?.name || 'Selected', onRemove: () => setFilterService('') }] : []),
+              ...(filterDepartment ? [{ key: 'department', label: 'Department', value: departmentLabel(filterDepartment, departments) || 'Selected', onRemove: () => setFilterDepartment('') }] : []),
               ...(filterBilling ? [{ key: 'billing', label: 'Billing', value: TASK_BILLING_LABEL[filterBilling], onRemove: () => setFilterBilling('') }] : []),
               ...(filterAssignee ? [{ key: 'assignee', label: 'Assignee', value: (() => { const e = employees.find(e => e.id === filterAssignee); return e ? dn(e) : 'Selected' })(), onRemove: () => setFilterAssignee('') }] : []),
               ...(filterDate ? [{ key: 'date', label: 'Date', value: getDateFilterLabel(filterDate), onRemove: () => setFilterDate(null) }] : []),
             ]}
-            onClearAll={() => { clearSearch(); setFilterStatus(''); setFilterBilling(''); setFilterClient(''); setFilterService(''); setFilterAssignee(''); setFilterDate(null) }}
+            onClearAll={() => { clearSearch(); setFilterStatus(''); setFilterBilling(''); setFilterClient(''); setFilterService(''); setFilterDepartment(''); setFilterAssignee(''); setFilterDate(null) }}
           />
 
           {/* ── Free work, in one line ────────────────────────────────────────

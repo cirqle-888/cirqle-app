@@ -132,7 +132,10 @@ export default async function ContributionsPage() {
       ? fetchAll(supabase.from('contribution_scores').select('task_id, employee_id, earnings_inr, score_percentage, calculated_at').gte('calculated_at', contribWindowFromStr).order('id', { ascending: true }))
       : fetchAll(supabase.from('contribution_scores').select('task_id, employee_id, score_percentage, calculated_at').gte('calculated_at', contribWindowFromStr).order('id', { ascending: true }))),
     timed('clients',                supabase.from('clients').select('id, name, code').order('name')),
-    timed('services',               supabase.from('services').select('id, name').order('name')),
+    // category_id is the service's DEPARTMENT (a service_categories row) —
+    // the admin-only Department filter derives each task's department from it,
+    // so no extra query and nothing new stored. See lib/departments/work-departments.
+    timed('services',               supabase.from('services').select('id, name, category_id').order('name')),
     // Full task_assignments graph — both roles get it so contributor strips
     // and the assignee filter work the same way for everyone.
     timed('task_assignments',       fetchAll(supabase.from('task_assignments').select('task_id, employee_id').order('task_id', { ascending: true }).order('employee_id', { ascending: true }))),
@@ -251,6 +254,23 @@ export default async function ContributionsPage() {
     }
   }
 
+  // ── Departments, for the admin-only Department filter ─────────────────────
+  // Same derivation as everywhere else: a department is a service category and
+  // a task's department is its service's. Admin-only by decision — a viewer
+  // already scoped to one department has nothing to narrow. An empty list is
+  // what hides the dropdown, so a database without the table degrades to the
+  // page exactly as it was.
+  let departments: { id: string; name: string }[] = []
+  if (isAdmin) {
+    const { data } = await supabase
+      .from('service_categories')
+      .select('id, name, display_order')
+      .eq('is_active', true)
+      .order('display_order')
+      .order('name')
+    departments = ((data || []) as { id: string; name: string }[]).map(d => ({ id: d.id, name: d.name }))
+  }
+
   // ── Service-scoped task visibility (tasks.view_by_service) ────────────────
   // Opt-in restriction: viewers with the perm (and without tasks.view_all) see
   // only tasks of their assigned services, plus tasks they personally worked on.
@@ -319,6 +339,7 @@ export default async function ContributionsPage() {
       scores={outScores}
       clients={clientsRes.data || []}
       services={servicesRes.data || []}
+      departments={departments}
       taskAssignments={outAssignments}
       contributorRecords={outContributorRecords}
       taskToolRecords={taskToolRecordsRes.data || []}
