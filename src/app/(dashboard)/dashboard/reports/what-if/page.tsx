@@ -84,7 +84,7 @@ export default async function WhatIfPage() {
     const monthKey = (y: number, m: number) => `${y}-${String(m).padStart(2, '0')}`
     const [awardsRes, payrollRes] = await Promise.all([
       fetchAll(supabase.from('ownership_awards')
-        .select('employee_id, basis, earned_inr, booked_month, booked_year, program:ownership_programs(name)')
+        .select('employee_id, rule_id, basis, percent, fixed_amount_inr, earned_inr, booked_month, booked_year, program:ownership_programs(name), rule:ownership_rules(label)')
         .gte('booked_year', fy)
         .order('id', { ascending: true })),
       fetchAll(supabase.from('payroll')
@@ -92,10 +92,22 @@ export default async function WhatIfPage() {
         .gte('year', fy)
         .order('id', { ascending: true })),
     ])
-    for (const a of (awardsRes.data ?? []) as { employee_id: string; basis: string; earned_inr: number | string; booked_month: number; booked_year: number; program: { name?: string } | null }[]) {
+    type AwardRow = {
+      employee_id: string; rule_id: string; basis: string; percent: number | string | null; fixed_amount_inr: number | string | null
+      earned_inr: number | string; booked_month: number; booked_year: number
+      program: { name?: string } | null; rule: { label?: string | null } | null
+    }
+    for (const a of (awardsRes.data ?? []) as AwardRow[]) {
       const amt = Number(a.earned_inr) || 0
       if (!amt || !inWindow(a.booked_year, a.booked_month)) continue
-      extras.push({ employeeId: a.employee_id, month: monthKey(a.booked_year, a.booked_month), kind: 'ownership', basis: a.basis, programName: a.program?.name ?? 'Ownership reward', amountInr: amt })
+      extras.push({
+        employeeId: a.employee_id, month: monthKey(a.booked_year, a.booked_month), kind: 'ownership',
+        basis: a.basis, programName: a.program?.name ?? 'Ownership reward',
+        ruleId: a.rule_id, ruleLabel: a.rule?.label ?? null,
+        percent: a.percent == null ? null : Number(a.percent),
+        fixedAmountInr: a.fixed_amount_inr == null ? null : Number(a.fixed_amount_inr),
+        amountInr: amt,
+      })
     }
     for (const p of (payrollRes.data ?? []) as { employee_id: string; month: number; year: number; bonus: number | string | null; adjustment_earned: number | string | null }[]) {
       if (!inWindow(p.year, p.month)) continue

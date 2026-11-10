@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   emptyScenario, isScenarioEmpty, baselineRows, simulateScenario,
-  compareScenario, goalSeek, resolveIncrement, simulateOwnership, simulateExtra,
+  compareScenario, goalSeek, resolveIncrement, simulateOwnership, simulateExtra, liveOwnershipRules,
   type WhatIfRawInputs, type DraftOwnershipRule, type PayrollExtraLine,
 } from './what-if'
 import type { EmployeeColumn } from './contribution-analysis'
@@ -323,5 +323,54 @@ describe('the rest of payroll', () => {
       { extras: [{ employeeId: 'e1', month: '2026-06', kind: 'bonus', amountInr: 5000 }] })
     // A fixed ₹5,000 more payroll needs more revenue to get down to 50%.
     expect(withExtras.value!).toBeGreaterThan(without.value!)
+  })
+})
+
+describe('changing a live ownership rate', () => {
+  const now = { billingInr: 30000, profitInr: 20300 }
+  const pctLine: PayrollExtraLine = { employeeId: 'e1', month: '2026-06', kind: 'ownership', basis: 'billing', programName: 'Operations', ruleId: 'r-ops', ruleLabel: 'Operation Manager', percent: 3, fixedAmountInr: null, amountInr: 900 }
+  const unitLine: PayrollExtraLine = { employeeId: 'e2', month: '2026-06', kind: 'ownership', basis: 'entries', programName: 'Accounts Entries', ruleId: 'r-ent', ruleLabel: 'Data Entry', percent: null, fixedAmountInr: 5, amountInr: 50 }
+  const refLine: PayrollExtraLine = { employeeId: 'e2', month: '2026-06', kind: 'ownership', basis: 'referrals', programName: 'Referral commission', ruleId: 'r-ref', ruleLabel: null, percent: 100, fixedAmountInr: null, amountInr: 300 }
+  const zeroLine: PayrollExtraLine = { employeeId: 'e2', month: '2026-06', kind: 'ownership', basis: 'billing', programName: 'Trial', ruleId: 'r-zero', ruleLabel: null, percent: 0, fixedAmountInr: null, amountInr: 0 }
+
+  it('scales a % award by new ÷ old rate', () => {
+    expect(simulateExtra(pctLine, now, now, { 'r-ops': 4 })).toBe(1200)   // 900 × 4/3
+  })
+
+  it('scales a per-unit ₹ award by new ÷ old rate', () => {
+    expect(simulateExtra(unitLine, now, now, { 'r-ent': 10 })).toBe(100)
+  })
+
+  it('combines a new rate with simulated revenue', () => {
+    expect(simulateExtra(pctLine, now, { billingInr: 36000, profitInr: 20300 }, { 'r-ops': 4 })).toBe(1440)  // 900 × 4/3 × 1.2
+  })
+
+  it('leaves referrals (each job sets its own %) and 0-rate awards alone', () => {
+    expect(simulateExtra(refLine, now, now, { 'r-ref': 50 })).toBe(300)
+    expect(simulateExtra(zeroLine, now, now, { 'r-zero': 5 })).toBe(0)
+  })
+
+  it('a rule cut to 0% pays nothing', () => {
+    expect(simulateExtra(pctLine, now, now, { 'r-ops': 0 })).toBe(0)
+  })
+
+  it('flows into the comparison', () => {
+    const raw = fixture()
+    const s = emptyScenario('s1', 'A')
+    s.ownershipRateOverrides = { 'r-ops': 4 }
+    const cmp = compareScenario(baselineRows(raw), simulateScenario(raw, s), EMPLOYEES, { e1: 0, e2: 0 }, s, { extras: [pctLine, unitLine] })
+    expect(cmp.liveOwnership.current).toBe(950)
+    expect(cmp.liveOwnership.simulated).toBe(1250)
+    expect(cmp.payrollCost.delta).toBe(300)
+    expect(isScenarioEmpty(s)).toBe(false)
+  })
+
+  it('lists each changeable rule once, without referrals', () => {
+    const rules = liveOwnershipRules([pctLine, { ...pctLine, month: '2026-07', percent: 3.5, amountInr: 1000 }, unitLine, refLine])
+    expect(rules.map(r => r.ruleId)).toEqual(['r-ent', 'r-ops'])
+    const ops = rules.find(r => r.ruleId === 'r-ops')!
+    expect(ops.paidInr).toBe(1900)
+    expect(ops.percent).toBe(3.5)          // the latest rate in force
+    expect(ops.employeeIds).toEqual(['e1'])
   })
 })

@@ -69,6 +69,12 @@ export interface Scenario {
   billingGrowthPct: number
   /** roles you might delegate — simulation-only, never applied */
   draftOwnershipRules: DraftOwnershipRule[]
+  /**
+   * Live ownership rule id → a different rate: the new % on a percentage rule,
+   * the new ₹ on a flat or per-unit rule. Simulation-only — the real rate is
+   * changed in Settings → Ownership.
+   */
+  ownershipRateOverrides?: Record<string, number>
 }
 
 export function emptyScenario(id: string, name: string): Scenario {
@@ -80,6 +86,7 @@ export function emptyScenario(id: string, name: string): Scenario {
     salaryIncrements: {},
     billingGrowthPct: 0,
     draftOwnershipRules: [],
+    ownershipRateOverrides: {},
   }
 }
 
@@ -91,6 +98,7 @@ export function isScenarioEmpty(s: Scenario): boolean {
     && Object.keys(s.salaryIncrements).length === 0
     && s.billingGrowthPct === 0
     && (s.draftOwnershipRules?.length ?? 0) === 0
+    && Object.keys(s.ownershipRateOverrides ?? {}).length === 0
 }
 
 // ─── Ownership: what a delegated role would cost ──────────────────────────────
@@ -168,6 +176,14 @@ export interface PayrollExtraLine {
   basis?: string
   /** ownership only — the program, for showing where it came from. */
   programName?: string
+  /** ownership only — the rule that paid it, so its rate can be changed. */
+  ruleId?: string
+  /** ownership only — the rule's hat ("Operation Manager"). */
+  ruleLabel?: string | null
+  /** ownership only — the rate the award was paid at: a % … */
+  percent?: number | null
+  /** … or ₹ (flat, or per unit on a per-unit basis). */
+  fixedAmountInr?: number | null
   amountInr: number
 }
 
@@ -188,15 +204,35 @@ export function simulateExtra(
   line: PayrollExtraLine,
   current: { billingInr: number; profitInr: number },
   simulated: { billingInr: number; profitInr: number },
+  rateOverrides: Record<string, number> = {},
 ): number {
   if (line.kind !== 'ownership' || !line.basis) return line.amountInr
+  const amount = line.amountInr * rateFactor(line, rateOverrides)
   if (BILLING_LIKE_BASES.has(line.basis)) {
-    return current.billingInr > 0 ? r2(line.amountInr * Math.max(0, simulated.billingInr) / current.billingInr) : line.amountInr
+    return current.billingInr > 0 ? r2(amount * Math.max(0, simulated.billingInr) / current.billingInr) : r2(amount)
   }
   if (line.basis === 'profit') {
-    return current.profitInr > 0 ? r2(line.amountInr * Math.max(0, simulated.profitInr) / current.profitInr) : line.amountInr
+    return current.profitInr > 0 ? r2(amount * Math.max(0, simulated.profitInr) / current.profitInr) : r2(amount)
   }
-  return line.amountInr
+  return r2(amount)
+}
+
+/** Ownership bases whose rate can be changed in the planner (referrals: each job sets its own %). */
+export const RATE_CHANGEABLE = (basis: string | undefined) => !!basis && basis !== 'referrals'
+
+/**
+ * How much a changed rate moves an award. Every ownership award is linear in
+ * its rate — a % of an amount, ₹ × units, or a flat ₹ — so 4% instead of 3%
+ * pays 4/3 of what was paid. An award paid at a rate of 0 has nothing to scale
+ * from, so it stays as it was.
+ */
+function rateFactor(line: PayrollExtraLine, overrides: Record<string, number>): number {
+  if (!line.ruleId || !RATE_CHANGEABLE(line.basis)) return 1
+  const next = overrides[line.ruleId]
+  if (next == null || !Number.isFinite(next)) return 1
+  const was = line.percent != null ? line.percent : line.fixedAmountInr
+  if (was == null || was <= 0) return 1
+  return Math.max(0, next) / was
 }
 
 /** Per-employee totals of the extras, now and under the scenario. */
@@ -204,19 +240,61 @@ function extrasByEmployee(
   extras: PayrollExtraLine[],
   current: { billingInr: number; profitInr: number },
   simulated: { billingInr: number; profitInr: number },
+  rateOverrides: Record<string, number> = {},
 ) {
   const out = new Map<string, { ownershipNow: number; ownershipSim: number; other: number }>()
   for (const l of extras) {
     const e = out.get(l.employeeId) ?? { ownershipNow: 0, ownershipSim: 0, other: 0 }
     if (l.kind === 'ownership') {
       e.ownershipNow += l.amountInr
-      e.ownershipSim += simulateExtra(l, current, simulated)
+      e.ownershipSim += simulateExtra(l, current, simulated, rateOverrides)
     } else {
       e.other += l.amountInr
     }
     out.set(l.employeeId, e)
   }
   return out
+}
+
+/** One live ownership rule as the rate lever shows it. */
+export interface LiveOwnershipRule {
+  ruleId: string
+  programName: string
+  ruleLabel: string | null
+  basis: string
+  /** The rate in force: a % (percent set) or ₹ (fixedAmountInr set). */
+  percent: number | null
+  fixedAmountInr: number | null
+  employeeIds: string[]
+  /** What it paid across the baseline. */
+  paidInr: number
+}
+
+/**
+ * The live rules behind the baseline's ownership awards, one per rule. The
+ * rate shown is the latest one paid — a rule changed mid-period still scales
+ * each month by its own rate in simulateExtra.
+ */
+export function liveOwnershipRules(extras: PayrollExtraLine[]): LiveOwnershipRule[] {
+  const out = new Map<string, LiveOwnershipRule & { month: string }>()
+  for (const l of extras) {
+    if (l.kind !== 'ownership' || !l.ruleId || !RATE_CHANGEABLE(l.basis)) continue
+    const r = out.get(l.ruleId) ?? {
+      ruleId: l.ruleId, programName: l.programName ?? 'Ownership reward', ruleLabel: l.ruleLabel ?? null,
+      basis: l.basis!, percent: l.percent ?? null, fixedAmountInr: l.fixedAmountInr ?? null,
+      employeeIds: [], paidInr: 0, month: l.month,
+    }
+    if (l.month > r.month) { r.month = l.month; r.percent = l.percent ?? null; r.fixedAmountInr = l.fixedAmountInr ?? null }
+    if (!r.employeeIds.includes(l.employeeId)) r.employeeIds.push(l.employeeId)
+    r.paidInr = r2(r.paidInr + l.amountInr)
+    out.set(l.ruleId, r)
+  }
+  return [...out.values()]
+    .map((r): LiveOwnershipRule => ({
+      ruleId: r.ruleId, programName: r.programName, ruleLabel: r.ruleLabel, basis: r.basis,
+      percent: r.percent, fixedAmountInr: r.fixedAmountInr, employeeIds: r.employeeIds, paidInr: r.paidInr,
+    }))
+    .sort((a, b) => a.programName.localeCompare(b.programName) || (a.ruleLabel ?? '').localeCompare(b.ruleLabel ?? ''))
 }
 
 /** How the comparison counts payroll beyond task commission. */
@@ -428,7 +506,7 @@ export function compareScenario(
   const months = Math.max(1, payroll.months ?? 1)
   const curTotals = { billingInr: current.totalBilling, profitInr: current.totalProfit }
   const simTotals = { billingInr: simulated.totalBilling, profitInr: simulated.totalProfit }
-  const extras = extrasByEmployee(payroll.extras ?? [], curTotals, simTotals)
+  const extras = extrasByEmployee(payroll.extras ?? [], curTotals, simTotals, scenario.ownershipRateOverrides ?? {})
 
   const perEmployee: EmployeeImpact[] = employees.map(e => {
     const curEarn = sumEarnings(currentRows, e.id)
@@ -546,7 +624,7 @@ function goalValue(
   rows: AnalysisRow[],
   goal: GoalMetric,
   baseSalaries: Record<string, number> | null,
-  payroll: PayrollContext & { baseline?: Summary } = {},
+  payroll: PayrollContext & { baseline?: Summary; rateOverrides?: Record<string, number> } = {},
 ): number {
   const s = computeSummary(rows)
   switch (goal.kind) {
@@ -564,7 +642,7 @@ function goalValue(
         ? { billingInr: payroll.baseline.totalBilling, profitInr: payroll.baseline.totalProfit }
         : { billingInr: s.totalBilling, profitInr: s.totalProfit }
       for (const l of payroll.extras ?? []) {
-        cost += simulateExtra(l, now, { billingInr: s.totalBilling, profitInr: s.totalProfit })
+        cost += simulateExtra(l, now, { billingInr: s.totalBilling, profitInr: s.totalProfit }, payroll.rateOverrides)
       }
       return s.totalBilling > 0 ? cost / s.totalBilling * 100 : 0
     }
@@ -621,7 +699,7 @@ export function goalSeek(
   payroll: PayrollContext = {},
 ): GoalSeekResult {
   let [lo, hi] = leverBounds(lever)
-  const ctx = { ...payroll, baseline: computeSummary(baselineRows(raw)) }
+  const ctx = { ...payroll, baseline: computeSummary(baselineRows(raw)), rateOverrides: base.ownershipRateOverrides ?? {} }
   const evalAt = (v: number) =>
     goalValue(simulateScenario(raw, scenarioWithLever(base, lever, v, raw)), goal, baseSalaries, ctx)
 

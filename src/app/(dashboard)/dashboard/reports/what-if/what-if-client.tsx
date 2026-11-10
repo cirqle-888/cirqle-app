@@ -19,7 +19,7 @@ import {
 import type { EmployeeColumn } from '@/lib/reports/contribution-analysis'
 import {
   emptyScenario, isScenarioEmpty, baselineRows, simulateScenario, compareScenario,
-  goalSeek, resolveIncrement,
+  goalSeek, resolveIncrement, liveOwnershipRules, simulateExtra,
   type Scenario, type WhatIfRawInputs, type ScenarioComparison, type MetricDelta,
   type DraftOwnershipRule, type GoalMetric, type GoalLever, type PayrollExtraLine, type PayrollContext,
 } from '@/lib/reports/what-if'
@@ -126,6 +126,7 @@ export default function WhatIfClient({ raw, employees: rawEmployees, baseSalarie
     return map
   }, [baseline, filteredRaw, scenarios, employees, baseSalaries, payroll])
   const activeCmp = comparisons.get(active.id)!
+  const liveRules = useMemo(() => liveOwnershipRules(payroll.extras ?? []), [payroll])
 
   // Pairings present in the baseline (drive the commission/price levers).
   const pairings = useMemo(() => {
@@ -215,6 +216,23 @@ export default function WhatIfClient({ raw, employees: rawEmployees, baseSalarie
               >
                 <BillingGrowthLever active={active} updateActive={updateActive} />
               </LeverSection>
+              {liveRules.length > 0 && (
+                <LeverSection
+                  title="Ownership programs"
+                  subtitle="What if a program paid a different % or ₹ rate?"
+                  active={Object.keys(active.ownershipRateOverrides ?? {}).length > 0}
+                >
+                  <OwnershipRatesLever
+                    rules={liveRules}
+                    extras={payroll.extras ?? []}
+                    employees={employees}
+                    cmp={activeCmp}
+                    active={active}
+                    updateActive={updateActive}
+                    divisor={divisor}
+                  />
+                </LeverSection>
+              )}
               <LeverSection
                 title="Roles to delegate"
                 subtitle="What would it cost to pay someone for Accounts, HR or Ops?"
@@ -478,6 +496,101 @@ const ROLE_BASIS_LABEL: Record<DraftOwnershipRule['basis'], string> = {
 
 /** inputCls without its `w-full` — that width fights flex sizing in a shared row. */
 const roleFieldCls = 'bg-secondary border border-border rounded-lg px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50'
+
+const PCT_OF: Record<string, string> = {
+  billing: 'of billing', collected: 'of collections', profit: 'of profit',
+  clients_handled: "of their clients' billing", planned: 'of planned billing',
+}
+const PER_UNIT: Record<string, string> = {
+  entries: 'per entry', activities: 'per activity', clients_handled: 'per client', planned: 'per planned task', fixed: 'flat',
+}
+
+/**
+ * Change the % or ₹ rate of a LIVE ownership program and see what it does to
+ * payroll and profit. Each award is linear in its rate, so the planner scales
+ * what was actually paid (see simulateExtra). Simulation only — the real rate
+ * is changed in Settings → Ownership.
+ */
+function OwnershipRatesLever({ rules, extras, employees, cmp, active, updateActive, divisor }: {
+  rules: ReturnType<typeof liveOwnershipRules>
+  extras: PayrollExtraLine[]
+  employees: EmployeeColumn[]
+  cmp: ScenarioComparison
+  active: Scenario
+  updateActive: (m: (s: Scenario) => Scenario) => void
+  divisor: number
+}) {
+  const overrides = active.ownershipRateOverrides ?? {}
+  const cqid = (id: string) => employees.find(e => e.id === id)?.cqid ?? '—'
+  const now = { billingInr: cmp.revenue.current, profitInr: cmp.profit.current }
+  const sim = { billingInr: cmp.revenue.simulated, profitInr: cmp.profit.simulated }
+
+  function setRate(ruleId: string, current: number, raw: string) {
+    updateActive(s => {
+      const next = { ...(s.ownershipRateOverrides ?? {}) }
+      const v = Number(raw)
+      if (raw.trim() === '' || !Number.isFinite(v) || v < 0 || v === current) delete next[ruleId]
+      else next[ruleId] = v
+      return { ...s, ownershipRateOverrides: next }
+    })
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] text-muted-foreground">
+        Type a different rate — payroll and profit update on the right. Simulation only; change the real rate in Settings → Ownership.
+      </p>
+      {rules.map(r => {
+        const isPct = r.percent != null
+        const current = (isPct ? r.percent : r.fixedAmountInr) ?? 0
+        const changed = overrides[r.ruleId] != null
+        const lines = extras.filter(l => l.ruleId === r.ruleId)
+        const simPaid = lines.reduce((t, l) => t + simulateExtra(l, now, sim, overrides), 0)
+        return (
+          <div key={r.ruleId} className={`rounded-lg border px-2.5 py-2 ${changed ? 'border-primary/50 bg-primary/5' : 'border-border bg-secondary/60'}`}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-xs font-medium text-foreground truncate">
+                  {r.programName}{r.ruleLabel && r.ruleLabel !== r.programName ? <span className="text-muted-foreground font-normal"> · {r.ruleLabel}</span> : null}
+                </p>
+                <p className="text-[10px] text-muted-foreground truncate">
+                  {r.employeeIds.map(cqid).join(', ')} · now {isPct ? `${current}% ${PCT_OF[r.basis] ?? ''}` : `₹${current} ${PER_UNIT[r.basis] ?? ''}`}
+                </p>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                {!isPct && <span className="text-xs text-muted-foreground">₹</span>}
+                <input
+                  type="number" inputMode="decimal" min={0} step={isPct ? 0.25 : 1}
+                  aria-label={`New rate for ${r.programName}${r.ruleLabel && r.ruleLabel !== r.programName ? ` · ${r.ruleLabel}` : ''}`}
+                  value={changed ? String(overrides[r.ruleId]) : String(current)}
+                  onChange={e => setRate(r.ruleId, current, e.target.value)}
+                  className={`${inputCls} w-20 text-right`}
+                />
+                {isPct && <span className="text-xs text-muted-foreground">%</span>}
+              </div>
+            </div>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              Paid {inr(r.paidInr / divisor)}
+              {Math.round(simPaid) !== Math.round(r.paidInr) && (
+                <> → <span className="font-medium text-foreground">{inr(simPaid / divisor)}</span>{' '}
+                  <DeltaBadge d={(simPaid - r.paidInr) / divisor} invert /></>
+              )}
+              {divisor > 1 ? ' a month' : ''}
+            </p>
+          </div>
+        )
+      })}
+      {Object.keys(overrides).length > 0 && (
+        <button
+          onClick={() => updateActive(s => ({ ...s, ownershipRateOverrides: {} }))}
+          className="text-[11px] text-muted-foreground hover:text-foreground underline"
+        >
+          Reset all rates
+        </button>
+      )}
+    </div>
+  )
+}
 
 /**
  * Draft roles — "what would delegating Accounts cost me".
