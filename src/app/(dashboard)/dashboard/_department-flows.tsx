@@ -8,6 +8,7 @@
 import { use, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { departmentFlows, UNASSIGNED_DEPT } from '@/lib/finance/department-flows'
+import { departmentComparison, previousWindow, type CompareMetric, type MetricChange } from '@/lib/finance/department-compare'
 import type { DepartmentFacts } from '@/lib/dashboard/department-facts'
 import { resolveComparisonPeriods, resolveLastPeriods, addDays, type ComparisonMode } from '@/lib/finance/trends'
 import { todayISO } from '@/lib/utils/local-date'
@@ -28,6 +29,25 @@ const PERIOD_OPTIONS: { value: Exclude<PeriodChoice, 'page'>; label: string }[] 
   { value: 'this:week', label: 'This week' },
   { value: 'last:week', label: 'Last week' },
   { value: 'custom', label: 'Custom range…' },
+]
+
+type CompareMode = 'off' | Exclude<ComparisonMode, 'custom'>
+const COMPARE_MODES: { value: CompareMode; label: string; current: string; previous: string }[] = [
+  { value: 'off', label: 'Off', current: '', previous: '' },
+  { value: 'week', label: 'Week', current: 'This week', previous: 'last week' },
+  { value: 'month', label: 'Month', current: 'This month', previous: 'last month' },
+  { value: 'quarter', label: 'Quarter', current: 'This quarter', previous: 'last quarter' },
+  { value: 'year', label: 'Year', current: 'This year', previous: 'last year' },
+]
+
+// Colours from Business Trends, so the two read as one system.
+const METRICS: { key: CompareMetric; label: string; color: string; money: boolean; lowerIsBetter?: boolean }[] = [
+  { key: 'jobs', label: 'Jobs', color: '#8b5cf6', money: false },
+  { key: 'jobValueInr', label: 'Job value', color: '#8b5cf6', money: true },
+  { key: 'billedInr', label: 'Revenue', color: '#2563eb', money: true },
+  { key: 'inflowInr', label: 'Inflow', color: '#059669', money: true },
+  { key: 'outflowInr', label: 'Outflow', color: '#dc2626', money: true, lowerIsBetter: true },
+  { key: 'netInr', label: 'Net', color: '#2563eb', money: true },
 ]
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -85,6 +105,10 @@ export function DepartmentFlowsPanel({ factsPromise, window: pageWindow, outflow
   const [choice, setChoice] = useState<PeriodChoice>('page')
   const [customFrom, setCustomFrom] = useState(addDays(today, -29))
   const [customTo, setCustomTo] = useState(today)
+  // Compare: this period vs the previous one, period-to-date like Business Trends.
+  const [compare, setCompare] = useState<CompareMode>('off')
+  const [toDate, setToDate] = useState(true)
+  const [barMetric, setBarMetric] = useState<CompareMetric>('billedInr')
 
   const own = useMemo<DateWindow | null>(() => {
     if (choice === 'page') return null
@@ -107,6 +131,21 @@ export function DepartmentFlowsPanel({ factsPromise, window: pageWindow, outflow
     () => (data ? departmentFlows(data.facts, activeWindow, activeOutflow) : []),
     [data, activeWindow, activeOutflow],
   )
+
+  const comparison = useMemo(() => {
+    if (!data || compare === 'off') return null
+    const periods = resolveComparisonPeriods(compare, today)
+    const prevWin = previousWindow(periods.current, periods.previous, toDate)
+    return {
+      current: periods.current,
+      previous: prevWin,
+      ...departmentComparison(
+        data.facts,
+        { window: periods.current, outflowInr: outflowFor(periods.current) },
+        { window: prevWin, outflowInr: outflowFor(prevWin) },
+      ),
+    }
+  }, [data, compare, today, toDate, outflowFor])
   if (!data) return null
 
   const name = new Map(data.departments.map(d => [d.id, d.name]))
@@ -126,10 +165,30 @@ export function DepartmentFlowsPanel({ factsPromise, window: pageWindow, outflow
       <div className="px-4 py-3.5 border-b border-border flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h2 className="font-semibold text-sm">Departments</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {comparison
+              ? <>{rangeLabel(comparison.current)} <span className="text-muted-foreground/60">vs</span> {rangeLabel(comparison.previous)}{toDate ? ' · to date' : ''}</>
+              : subtitle}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {choice === 'custom' && (
+          <div role="group" aria-label="Compare with the previous period" className="flex items-center rounded-lg border border-border bg-secondary/40 p-0.5 text-xs">
+            <span className="px-2 text-muted-foreground">Compare</span>
+            {COMPARE_MODES.map(m => (
+              <button key={m.value} type="button" aria-pressed={compare === m.value} onClick={() => setCompare(m.value)}
+                className={`rounded-md px-2 py-1 font-medium transition-colors ${compare === m.value ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+          {comparison && (
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none"
+              title="To date compares the same number of days — 1–11 Nov with 1–11 Oct — like Business Trends. Off compares with the whole previous period.">
+              <input type="checkbox" checked={toDate} onChange={e => setToDate(e.target.checked)} />
+              To date
+            </label>
+          )}
+          {!comparison && choice === 'custom' && (
             <div className="flex items-center gap-1.5 text-xs">
               <input type="date" value={customFrom} max={customTo} onChange={e => setCustomFrom(e.target.value)}
                 aria-label="From"
@@ -140,15 +199,28 @@ export function DepartmentFlowsPanel({ factsPromise, window: pageWindow, outflow
                 className="h-9 bg-background border border-input rounded-lg px-2.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/20" />
             </div>
           )}
-          <AppSelect aria-label="Period" value={choice} onChange={e => setChoice(e.target.value as PeriodChoice)}
-            wrapperClassName="w-44" className="text-xs">
-            <option value="page">{periodLabel}{periodLabel === 'All time' ? '' : ' (dashboard filter)'}</option>
-            {PERIOD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </AppSelect>
+          {!comparison && (
+            <AppSelect aria-label="Period" value={choice} onChange={e => setChoice(e.target.value as PeriodChoice)}
+              wrapperClassName="w-44" className="text-xs">
+              <option value="page">{periodLabel}{periodLabel === 'All time' ? '' : ' (dashboard filter)'}</option>
+              {PERIOD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </AppSelect>
+          )}
           <Link href="/dashboard/reports/department-pnl" className="text-xs text-primary hover:underline whitespace-nowrap">Department P&amp;L →</Link>
         </div>
       </div>
-      {rows.length === 0 ? (
+      {comparison ? (
+        <DepartmentComparison
+          rows={comparison.rows}
+          total={comparison.total}
+          label={label}
+          money={money}
+          metric={barMetric}
+          onMetric={setBarMetric}
+          currentLabel={COMPARE_MODES.find(m => m.value === compare)!.current}
+          previousLabel={`${toDate ? '' : 'all of '}${COMPARE_MODES.find(m => m.value === compare)!.previous}`}
+        />
+      ) : rows.length === 0 ? (
         <p className="px-4 py-8 text-center text-sm text-muted-foreground">No department activity in this period</p>
       ) : (
         <div className="overflow-x-auto">
@@ -214,5 +286,117 @@ export function DepartmentFlowsPanel({ factsPromise, window: pageWindow, outflow
         </div>
       )}
     </section>
+  )
+}
+
+/** "+12.5%" / "−₹4.2K" in green or red; "new" when there was nothing before. */
+function Change({ c, money, lowerIsBetter, fmt }: { c: MetricChange; money: boolean; lowerIsBetter?: boolean; fmt: (v: number) => string }) {
+  if (Math.abs(c.delta) < 0.005) return <span className="text-muted-foreground/60">no change</span>
+  const up = c.delta > 0
+  const good = lowerIsBetter ? !up : up
+  const cls = good ? 'text-emerald-600 dark:text-emerald-500' : 'text-red-600 dark:text-red-500'
+  const sign = up ? '+' : '−'
+  const text = c.pct != null
+    ? `${sign}${Math.abs(c.pct)}%`
+    : c.previous === 0 ? 'new' : `${sign}${money ? fmt(Math.abs(c.delta)) : Math.abs(c.delta)}`
+  return <span className={`font-medium ${cls}`} title={`${sign}${money ? fmt(Math.abs(c.delta)) : Math.abs(c.delta)}`}>{text}</span>
+}
+
+/**
+ * Departments, this period vs the previous: bars for one metric (solid = now,
+ * faded = before, the same reading as the Business Trends lines), then every
+ * column side by side. Numbers come from department-compare.ts.
+ */
+function DepartmentComparison({ rows, total, label, money, metric, onMetric, currentLabel, previousLabel }: {
+  rows: ReturnType<typeof departmentComparison>['rows']
+  total: ReturnType<typeof departmentComparison>['total']
+  label: (id: string) => string
+  money: (v: number) => string
+  metric: CompareMetric
+  onMetric: (m: CompareMetric) => void
+  currentLabel: string
+  previousLabel: string
+}) {
+  if (rows.length === 0) {
+    return <p className="px-4 py-8 text-center text-sm text-muted-foreground">No department activity in either period</p>
+  }
+  const meta = METRICS.find(m => m.key === metric)!
+  const show = (v: number, isMoney: boolean) => (isMoney ? money(v) : String(Math.round(v)))
+  const max = Math.max(1, ...rows.flatMap(r => [Math.abs(r.metrics[metric].current), Math.abs(r.metrics[metric].previous)]))
+  const width = (v: number) => `${Math.max(Math.abs(v) / max * 100, v !== 0 ? 1.5 : 0)}%`
+  const num = 'px-4 py-2.5 text-right tabular-nums whitespace-nowrap align-top'
+  const th = 'px-4 py-2.5 font-medium'
+
+  return (
+    <div>
+      <div className="px-4 pt-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-1" role="group" aria-label="Bars show">
+          {METRICS.map(m => (
+            <button key={m.key} type="button" aria-pressed={metric === m.key} onClick={() => onMetric(m.key)}
+              className={`rounded-full border px-2.5 py-0.5 text-xs ${metric === m.key ? 'border-primary/50 bg-primary/10 text-primary font-medium' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+          <span className="flex items-center gap-1.5"><span className="h-2 w-4 rounded-sm" style={{ background: meta.color }} />{currentLabel}</span>
+          <span className="flex items-center gap-1.5"><span className="h-2 w-4 rounded-sm opacity-35" style={{ background: meta.color }} />{previousLabel}</span>
+        </div>
+      </div>
+
+      <div className="px-4 py-3 space-y-2.5">
+        {rows.map(r => {
+          const c = r.metrics[metric]
+          return (
+            <div key={r.deptId} className="grid grid-cols-[minmax(0,8rem)_1fr_auto] sm:grid-cols-[minmax(0,11rem)_1fr_7.5rem] items-center gap-x-3">
+              <span className={`truncate text-xs ${r.deptId === UNASSIGNED_DEPT ? 'text-muted-foreground' : 'font-medium'}`}>{label(r.deptId)}</span>
+              <div className="space-y-1" title={`${currentLabel}: ${show(c.current, meta.money)} · ${previousLabel}: ${show(c.previous, meta.money)}`}>
+                <div className="h-2.5 rounded-sm" style={{ width: width(c.current), background: c.current < 0 ? '#dc2626' : meta.color }} />
+                <div className="h-2.5 rounded-sm opacity-35" style={{ width: width(c.previous), background: c.previous < 0 ? '#dc2626' : meta.color }} />
+              </div>
+              <div className="text-right text-xs tabular-nums leading-tight">
+                <div className={c.current < -0.005 ? 'text-red-600 dark:text-red-500' : 'text-foreground'}>{show(c.current, meta.money)}</div>
+                <div className="text-[11px]"><Change c={c} money={meta.money} lowerIsBetter={meta.lowerIsBetter} fmt={money} /></div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="overflow-x-auto border-t border-border">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-xs text-muted-foreground border-b border-border bg-secondary/30">
+              <th className={`${th} text-left`}>Department</th>
+              {METRICS.map(m => <th key={m.key} className={`${th} text-right`}>{m.label}</th>)}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/60">
+            {[...rows, { deptId: '__total__', metrics: total }].map(r => {
+              const isTotal = r.deptId === '__total__'
+              return (
+                <tr key={r.deptId} className={isTotal ? 'border-t border-border font-semibold bg-secondary/20' : r.deptId === UNASSIGNED_DEPT ? 'text-muted-foreground' : ''}>
+                  <td className="px-4 py-2.5 font-medium align-top">{isTotal ? 'Total' : label(r.deptId)}</td>
+                  {METRICS.map(m => {
+                    const c = r.metrics[m.key]
+                    return (
+                      <td key={m.key} className={num}>
+                        <div className={m.key === 'netInr' && c.current < -0.005 ? 'text-red-600 dark:text-red-500' : ''}>{show(c.current, m.money)}</div>
+                        <div className="text-[11px] font-normal text-muted-foreground">
+                          was {show(c.previous, m.money)} · <Change c={c} money={m.money} lowerIsBetter={m.lowerIsBetter} fmt={money} />
+                        </div>
+                      </td>
+                    )
+                  })}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="px-4 py-2 text-[11px] text-muted-foreground border-t border-border/60">
+        Each side is what this card shows for that period on its own. Outflow shares each period&apos;s own running costs by revenue, so it is an estimate; jobs, revenue and inflow are measured.
+      </p>
+    </div>
   )
 }
