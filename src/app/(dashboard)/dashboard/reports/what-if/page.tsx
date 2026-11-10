@@ -3,7 +3,7 @@ import { createAdminClient, fetchAll } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import type { RawTask, RawScore, RawPricing, EmployeeColumn } from '@/lib/reports/contribution-analysis'
-import type { WhatIfRawInputs } from '@/lib/reports/what-if'
+import type { WhatIfRawInputs, PayrollExtraLine } from '@/lib/reports/what-if'
 import { defaultWindow, scoreWindowFor } from '@/lib/reports/date-bounds'
 import WhatIfClient from './what-if-client'
 
@@ -73,6 +73,39 @@ export default async function WhatIfPage() {
       )
     : null
 
+  // The rest of payroll: live ownership awards, bonuses and back-pay
+  // adjustments, booked in the planning window. Pay like base salary, so the
+  // same gate — without it the planner stays commission-only.
+  const extras: PayrollExtraLine[] = []
+  if (canSeeSalaries) {
+    const [fy, fm] = planningWindow.from!.split('-').map(Number)
+    const fromKey = fy * 12 + fm
+    const inWindow = (y: number, m: number) => y * 12 + m >= fromKey
+    const monthKey = (y: number, m: number) => `${y}-${String(m).padStart(2, '0')}`
+    const [awardsRes, payrollRes] = await Promise.all([
+      fetchAll(supabase.from('ownership_awards')
+        .select('employee_id, basis, earned_inr, booked_month, booked_year, program:ownership_programs(name)')
+        .gte('booked_year', fy)
+        .order('id', { ascending: true })),
+      fetchAll(supabase.from('payroll')
+        .select('employee_id, month, year, bonus, adjustment_earned')
+        .gte('year', fy)
+        .order('id', { ascending: true })),
+    ])
+    for (const a of (awardsRes.data ?? []) as { employee_id: string; basis: string; earned_inr: number | string; booked_month: number; booked_year: number; program: { name?: string } | null }[]) {
+      const amt = Number(a.earned_inr) || 0
+      if (!amt || !inWindow(a.booked_year, a.booked_month)) continue
+      extras.push({ employeeId: a.employee_id, month: monthKey(a.booked_year, a.booked_month), kind: 'ownership', basis: a.basis, programName: a.program?.name ?? 'Ownership reward', amountInr: amt })
+    }
+    for (const p of (payrollRes.data ?? []) as { employee_id: string; month: number; year: number; bonus: number | string | null; adjustment_earned: number | string | null }[]) {
+      if (!inWindow(p.year, p.month)) continue
+      const bonus = Number(p.bonus) || 0
+      const adj = Number(p.adjustment_earned) || 0
+      if (bonus) extras.push({ employeeId: p.employee_id, month: monthKey(p.year, p.month), kind: 'bonus', amountInr: bonus })
+      if (adj) extras.push({ employeeId: p.employee_id, month: monthKey(p.year, p.month), kind: 'adjustment', amountInr: adj })
+    }
+  }
+
   // employeeId → performance rating (current values; the simulation overrides these in-memory)
   const empRating: Record<string, number> = {}
   for (const e of (ratingsRes.data || []) as { id: string; performance_rating: number | null }[]) {
@@ -114,6 +147,7 @@ export default async function WhatIfPage() {
       raw={raw}
       employees={employees}
       baseSalaries={baseSalaries}
+      payrollExtras={extras}
       currentPrices={currentPrices}
       canApply={{
         rating: hasPermission(me, PERMS.PAYROLL_EDIT),

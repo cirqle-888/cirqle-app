@@ -21,7 +21,7 @@ import {
   emptyScenario, isScenarioEmpty, baselineRows, simulateScenario, compareScenario,
   goalSeek, resolveIncrement,
   type Scenario, type WhatIfRawInputs, type ScenarioComparison, type MetricDelta,
-  type DraftOwnershipRule, type GoalMetric, type GoalLever,
+  type DraftOwnershipRule, type GoalMetric, type GoalLever, type PayrollExtraLine, type PayrollContext,
 } from '@/lib/reports/what-if'
 import { applyWhatIfScenario, type SelectedChange } from './apply-actions'
 
@@ -49,6 +49,8 @@ interface Props {
   raw: WhatIfRawInputs
   employees: EmployeeColumn[]
   baseSalaries: Record<string, number> | null
+  /** Live ownership awards, bonuses and adjustments — empty without payroll amount access. */
+  payrollExtras: PayrollExtraLine[]
   /** client|service → current price (pairings without a price hide the price lever) */
   currentPrices: Record<string, number>
   canApply: { rating: boolean; salary: boolean; pricing: boolean }
@@ -56,7 +58,7 @@ interface Props {
 
 let scenarioSeq = 1
 
-export default function WhatIfClient({ raw, employees: rawEmployees, baseSalaries, currentPrices, canApply }: Props) {
+export default function WhatIfClient({ raw, employees: rawEmployees, baseSalaries, payrollExtras, currentPrices, canApply }: Props) {
   // Privacy: mask names ONCE here so every downstream panel/table/apply-payload
   // renders the CQID when locked (and the real name only when unlocked) without
   // each sub-component having to remember. `dn` keys on the whole employee.
@@ -76,11 +78,18 @@ export default function WhatIfClient({ raw, employees: rawEmployees, baseSalarie
     return { ...raw, tasks, scores: raw.scores.filter(s => taskIds.has(s.task_id)) }
   }, [raw, dateFilter])
 
-  const monthsInBaseline = useMemo(() => {
-    const months = new Set(filteredRaw.tasks.map(t => (t.task_date || '').slice(0, 7)).filter(Boolean))
-    return Math.max(1, months.size)
-  }, [filteredRaw])
+  const baselineMonths = useMemo(
+    () => new Set(filteredRaw.tasks.map(t => (t.task_date || '').slice(0, 7)).filter(Boolean)),
+    [filteredRaw],
+  )
+  const monthsInBaseline = Math.max(1, baselineMonths.size)
   const divisor = normalizeMonthly ? monthsInBaseline : 1
+
+  // The rest of payroll for the same months: live ownership, bonus, back-pay.
+  const payroll = useMemo<PayrollContext>(() => ({
+    months: monthsInBaseline,
+    extras: payrollExtras.filter(l => baselineMonths.has(l.month)),
+  }), [payrollExtras, baselineMonths, monthsInBaseline])
 
   // ── Scenarios (session-only; the Scenario object itself is persistence-ready) ─
   const [scenarios, setScenarios] = useState<Scenario[]>([emptyScenario('sc-1', 'Scenario A')])
@@ -112,10 +121,10 @@ export default function WhatIfClient({ raw, employees: rawEmployees, baseSalarie
   const comparisons = useMemo(() => {
     const map = new Map<string, ScenarioComparison>()
     for (const s of scenarios) {
-      map.set(s.id, compareScenario(baseline, simulateScenario(filteredRaw, s), employees, baseSalaries, s))
+      map.set(s.id, compareScenario(baseline, simulateScenario(filteredRaw, s), employees, baseSalaries, s, payroll))
     }
     return map
-  }, [baseline, filteredRaw, scenarios, employees, baseSalaries])
+  }, [baseline, filteredRaw, scenarios, employees, baseSalaries, payroll])
   const activeCmp = comparisons.get(active.id)!
 
   // Pairings present in the baseline (drive the commission/price levers).
@@ -224,6 +233,7 @@ export default function WhatIfClient({ raw, employees: rawEmployees, baseSalarie
                   employees={employees}
                   pairings={pairings}
                   baseSalaries={baseSalaries}
+                  payroll={payroll}
                 />
               </LeverSection>
             </div>
@@ -571,13 +581,14 @@ function DraftRolesLever({ active, updateActive }: { active: Scenario; updateAct
 
 // ─── Goal Seek ─────────────────────────────────────────────────────────────────
 
-function GoalSeekPanel({ raw, active, updateActive, employees, pairings, baseSalaries }: {
+function GoalSeekPanel({ raw, active, updateActive, employees, pairings, baseSalaries, payroll }: {
   raw: WhatIfRawInputs
   active: Scenario
   updateActive: (m: (s: Scenario) => Scenario) => void
   employees: EmployeeColumn[]
   pairings: { key: string; label: string; commission: number; price: number | null }[]
   baseSalaries: Record<string, number> | null
+  payroll: PayrollContext
 }) {
   const [goalKind, setGoalKind] = useState<'profit_margin_pct' | 'monthly_profit' | 'payroll_pct_of_revenue' | 'employee_earnings'>('profit_margin_pct')
   const [goalEmp, setGoalEmp] = useState('')
@@ -603,7 +614,7 @@ function GoalSeekPanel({ raw, active, updateActive, employees, pairings, baseSal
       lever = { kind: 'client_service_price', key: p.key, oldPrice: p.price }
     } else lever = { kind: leverKind }
 
-    const res = goalSeek(raw, active, goal, lever, baseSalaries)
+    const res = goalSeek(raw, active, goal, lever, baseSalaries, 0.05, 60, payroll)
     if (res.value === null) {
       setResult(`Unreachable with this lever — closest achievable is ${goalKind.includes('pct') ? pct1(res.achieved) : inr(res.achieved)}.`)
       setSolvedValue(null)
@@ -700,22 +711,27 @@ function TotalsComparison({ scenarios, comparisons, divisor, baseSalaries }: {
   baseSalaries: Record<string, number> | null
 }) {
   const first = comparisons.get(scenarios[0].id)!
-  const metrics: { label: string; get: (c: ScenarioComparison) => MetricDelta; money?: boolean; invert?: boolean }[] = [
+  type Metric = { label: string; get: (c: ScenarioComparison) => MetricDelta; money?: boolean; invert?: boolean; sub?: boolean; strong?: boolean }
+  const all = [...comparisons.values()]
+  const hasOwnership = all.some(c => c.liveOwnership.current !== 0 || c.liveOwnership.simulated !== 0)
+  const hasBonus = all.some(c => c.bonusAdjustments.current !== 0)
+  // Only shown once a role is drafted — an always-visible ₹0 "role cost" row
+  // would read as a claim that delegation is free.
+  const hasDraft = all.some(c => c.ownershipCost.simulated !== 0)
+  const metrics: Metric[] = [
     { label: 'Revenue', get: c => c.revenue },
-    { label: 'Commission cost', get: c => c.commissionCost, invert: true },
-    { label: baseSalaries ? 'Payroll cost (base + commission)' : 'Payroll cost (commission only)', get: c => c.payrollCost, invert: true },
-    { label: 'Profit', get: c => c.profit },
+    { label: 'Commission (task earnings)', get: c => c.commissionCost, invert: true, sub: true },
+    ...(baseSalaries ? [{ label: 'Base salaries', get: (c: ScenarioComparison) => c.baseSalaryCost, invert: true, sub: true }] : []),
+    ...(hasOwnership ? [{ label: 'Ownership (live programs)', get: (c: ScenarioComparison) => c.liveOwnership, invert: true, sub: true }] : []),
+    ...(hasBonus ? [{ label: 'Bonuses & adjustments', get: (c: ScenarioComparison) => c.bonusAdjustments, invert: true, sub: true }] : []),
+    { label: baseSalaries ? 'Payroll cost' : 'Payroll cost (commission only)', get: c => c.payrollCost, invert: true, strong: true },
+    ...(hasDraft ? [{ label: 'Role cost (draft)', get: (c: ScenarioComparison) => c.ownershipCost, invert: true }] : []),
+    { label: 'Profit after commission', get: c => c.profit },
+    ...(hasOwnership || hasDraft ? [{ label: 'Profit after ownership', get: (c: ScenarioComparison) => c.profitAfterOwnership }] : []),
+    ...(baseSalaries ? [{ label: 'Profit after payroll', get: (c: ScenarioComparison) => c.profitAfterPayroll, strong: true }] : []),
     { label: 'Margin %', get: c => c.marginPct, money: false },
     { label: 'ROI (profit ÷ payroll) %', get: c => c.roi, money: false },
   ]
-  // Only shown once a role is drafted — an always-visible ₹0 "role cost" row
-  // would read as a claim that delegation is free.
-  if ([...comparisons.values()].some(c => c.ownershipCost.simulated !== 0)) {
-    metrics.push(
-      { label: 'Role cost (draft)', get: c => c.ownershipCost, invert: true },
-      { label: 'Profit after roles', get: c => c.profitAfterOwnership },
-    )
-  }
   const fmt = (v: number, money: boolean) => (money ? inr(v / divisor) : pct1(v))
   return (
     <div className="bg-secondary/40 border border-border rounded-xl overflow-hidden">
@@ -735,8 +751,8 @@ function TotalsComparison({ scenarios, comparisons, divisor, baseSalaries }: {
         </thead>
         <tbody>
           {metrics.map(m => (
-            <tr key={m.label} className="border-b border-border/50 last:border-0">
-              <td className="px-4 py-2.5 text-foreground">{m.label}</td>
+            <tr key={m.label} className={`border-b border-border/50 last:border-0 ${m.strong ? 'bg-secondary/40 font-semibold' : ''}`}>
+              <td className={`px-4 py-2.5 ${m.sub ? 'pl-8 text-muted-foreground' : 'text-foreground'}`}>{m.label}</td>
               <td className="px-4 py-2.5 text-right text-muted-foreground tabular-nums">{fmt(m.get(first).current, m.money !== false)}</td>
               {scenarios.map(s => {
                 const d = m.get(comparisons.get(s.id)!)
@@ -754,14 +770,24 @@ function TotalsComparison({ scenarios, comparisons, divisor, baseSalaries }: {
         </tbody>
       </table>
       </div>
+      <p className="px-4 py-2 text-[10px] leading-relaxed text-muted-foreground border-t border-border/50">
+        {baseSalaries
+          ? <>Payroll is everything a payslip pays: base salary (once per month), task commission, live ownership programs, bonuses and back-pay — before advances and deductions, which are paid back.
+              {hasOwnership && <> Ownership uses the awards worked out for these months: shares of billing move with revenue and shares of profit with profit; per-entry, per-activity, collections and fixed amounts stay as paid.</>}
+              {' '}Margin and ROI use profit after commission.</>
+          : 'Base salaries, ownership and bonuses are hidden — you need payroll amount access to see them.'}
+      </p>
     </div>
   )
 }
 
 function PerEmployeeTable({ cmp, divisor, scenarioName }: { cmp: ScenarioComparison; divisor: number; scenarioName: string }) {
-  const rows = cmp.perEmployee.filter(e => e.earnings.current !== 0 || e.earnings.simulated !== 0 || e.increment !== 0)
+  const rows = cmp.perEmployee.filter(e =>
+    e.earnings.current !== 0 || e.earnings.simulated !== 0 || e.increment !== 0
+    || e.ownership.current !== 0 || e.ownership.simulated !== 0 || e.bonusAdjustments !== 0)
   if (rows.length === 0) return null
   const hasSalary = rows.some(e => e.projectedSalary != null)
+  const hasOwnership = rows.some(e => e.ownership.current !== 0 || e.ownership.simulated !== 0)
   return (
     <div className="bg-secondary/40 border border-border rounded-xl overflow-hidden">
       <p className="px-4 pt-3 pb-1 text-xs font-semibold text-foreground">Employees — {scenarioName}</p>
@@ -773,6 +799,8 @@ function PerEmployeeTable({ cmp, divisor, scenarioName }: { cmp: ScenarioCompari
               <th className="px-4 py-2 font-medium text-right">Earnings now</th>
               <th className="px-4 py-2 font-medium text-right">Simulated</th>
               <th className="px-4 py-2 font-medium text-right">Δ</th>
+              {hasOwnership && <th className="px-4 py-2 font-medium text-right">Ownership now</th>}
+              {hasOwnership && <th className="px-4 py-2 font-medium text-right">Simulated</th>}
               {hasSalary && <th className="px-4 py-2 font-medium text-right">Salary now*</th>}
               {hasSalary && <th className="px-4 py-2 font-medium text-right">Projected*</th>}
             </tr>
@@ -785,14 +813,16 @@ function PerEmployeeTable({ cmp, divisor, scenarioName }: { cmp: ScenarioCompari
                 <td className="px-4 py-2 text-right text-muted-foreground tabular-nums">{inr(e.earnings.current / divisor)}</td>
                 <td className="px-4 py-2 text-right text-foreground tabular-nums">{inr(e.earnings.simulated / divisor)}</td>
                 <td className="px-4 py-2 text-right text-xs"><DeltaBadge d={e.earnings.delta / divisor} /></td>
-                {hasSalary && <td className="px-4 py-2 text-right text-muted-foreground tabular-nums">{e.currentSalary != null ? inr(e.baseSalary! + e.earnings.current / divisor) : '—'}</td>}
-                {hasSalary && <td className="px-4 py-2 text-right text-foreground tabular-nums font-medium">{e.projectedSalary != null ? inr(e.baseSalary! + e.increment + e.earnings.simulated / divisor) : '—'}</td>}
+                {hasOwnership && <td className="px-4 py-2 text-right text-muted-foreground tabular-nums">{inr(e.ownership.current / divisor)}</td>}
+                {hasOwnership && <td className="px-4 py-2 text-right text-foreground tabular-nums">{inr(e.ownership.simulated / divisor)}</td>}
+                {hasSalary && <td className="px-4 py-2 text-right text-muted-foreground tabular-nums">{e.currentSalary != null ? inr(e.currentSalary / divisor) : '—'}</td>}
+                {hasSalary && <td className="px-4 py-2 text-right text-foreground tabular-nums font-medium">{e.projectedSalary != null ? inr(e.projectedSalary / divisor) : '—'}</td>}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <p className="px-4 py-2 text-[10px] text-muted-foreground">*base + increment + commission for the period{divisor > 1 ? ' (monthly average)' : ''} — before advances/deductions.</p>
+      <p className="px-4 py-2 text-[10px] text-muted-foreground">*base + increment + commission + ownership + bonus/back-pay for the period{divisor > 1 ? ' (monthly average)' : ''} — before advances/deductions.</p>
     </div>
   )
 }

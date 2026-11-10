@@ -12,8 +12,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   emptyScenario, isScenarioEmpty, baselineRows, simulateScenario,
-  compareScenario, goalSeek, resolveIncrement, simulateOwnership,
-  type WhatIfRawInputs, type DraftOwnershipRule,
+  compareScenario, goalSeek, resolveIncrement, simulateOwnership, simulateExtra,
+  type WhatIfRawInputs, type DraftOwnershipRule, type PayrollExtraLine,
 } from './what-if'
 import type { EmployeeColumn } from './contribution-analysis'
 
@@ -270,5 +270,58 @@ describe('lever: draft ownership roles', () => {
     const s = emptyScenario('s1', 'A')
     s.draftOwnershipRules = [role({})]
     expect(isScenarioEmpty(s)).toBe(false)
+  })
+})
+
+describe('the rest of payroll', () => {
+  // Baseline revenue 30,000, profit 20,300 (see compareScenario above).
+  const extras: PayrollExtraLine[] = [
+    { employeeId: 'e1', month: '2026-06', kind: 'ownership', basis: 'billing', programName: 'Operations', amountInr: 900 },
+    { employeeId: 'e2', month: '2026-06', kind: 'ownership', basis: 'referrals', programName: 'Referral commission', amountInr: 300 },
+    { employeeId: 'e2', month: '2026-06', kind: 'ownership', basis: 'entries', programName: 'Accounts Entries', amountInr: 50 },
+    { employeeId: 'e1', month: '2026-06', kind: 'ownership', basis: 'profit', programName: 'Commission', amountInr: 1015 },
+    { employeeId: 'e1', month: '2026-06', kind: 'bonus', amountInr: 2000 },
+    { employeeId: 'e2', month: '2026-06', kind: 'adjustment', amountInr: 150 },
+  ]
+
+  it('moves a share of billing with revenue and a share of profit with profit; leaves the rest', () => {
+    const now = { billingInr: 30000, profitInr: 20300 }
+    const grown = { billingInr: 36000, profitInr: 10150 }
+    expect(simulateExtra(extras[0], now, grown)).toBe(1080)   // 900 × 1.2
+    expect(simulateExtra(extras[1], now, grown)).toBe(360)    // referrals follow billing
+    expect(simulateExtra(extras[2], now, grown)).toBe(50)     // a count of entries does not move
+    expect(simulateExtra(extras[3], now, grown)).toBe(507.5)  // profit halved
+    expect(simulateExtra(extras[4], now, grown)).toBe(2000)   // bonus as paid
+    expect(simulateExtra(extras[3], now, { billingInr: 1, profitInr: -500 })).toBe(0)  // a loss pays no profit share
+  })
+
+  it('counts every part of payroll, and base salary once per month', () => {
+    const raw = fixture()
+    const s = emptyScenario('s1', 'A')
+    s.billingGrowthPct = 20
+    const cmp = compareScenario(baselineRows(raw), simulateScenario(raw, s), EMPLOYEES, { e1: 30000, e2: 25000 }, s, { months: 2, extras })
+    expect(cmp.baseSalaryCost.current).toBe(110000)          // 55,000 × 2 months
+    expect(cmp.liveOwnership.current).toBe(2265)
+    expect(cmp.bonusAdjustments.current).toBe(2150)
+    expect(cmp.payrollCost.current).toBe(9700 + 110000 + 2265 + 2150)
+    expect(cmp.profitAfterPayroll.current).toBe(30000 - (9700 + 110000 + 2265 + 2150))
+    expect(cmp.profitAfterOwnership.current).toBe(20300 - 2265)
+    // +20% billing: commission 11,640, profit 24,360 → billing shares ×1.2, profit share ×1.2
+    expect(cmp.liveOwnership.simulated).toBe(1080 + 360 + 50 + 1218)
+    expect(cmp.bonusAdjustments.simulated).toBe(2150)
+    const alice = cmp.perEmployee.find(e => e.id === 'e1')!
+    expect(alice.ownership.current).toBe(1915)
+    expect(alice.bonusAdjustments).toBe(2000)
+    expect(alice.currentSalary).toBe(30000 * 2 + 7700 + 1915 + 2000)
+  })
+
+  it('includes them in the payroll goal', () => {
+    const raw = fixture()
+    const goal = { kind: 'payroll_pct_of_revenue' as const, target: 50 }
+    const without = goalSeek(raw, emptyScenario('g', 'G'), goal, { kind: 'billing_growth_pct' }, { e1: 10000, e2: 0 })
+    const withExtras = goalSeek(raw, emptyScenario('g', 'G'), goal, { kind: 'billing_growth_pct' }, { e1: 10000, e2: 0 }, 0.05, 60,
+      { extras: [{ employeeId: 'e1', month: '2026-06', kind: 'bonus', amountInr: 5000 }] })
+    // A fixed ₹5,000 more payroll needs more revenue to get down to 50%.
+    expect(withExtras.value!).toBeGreaterThan(without.value!)
   })
 })

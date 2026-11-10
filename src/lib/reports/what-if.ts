@@ -147,6 +147,86 @@ export function simulateOwnership(
   return { lines, totalInr: r2(lines.reduce((s, l) => s + l.costInr, 0)) }
 }
 
+// ─── The rest of payroll: live ownership, bonuses, adjustments ─────────────────
+
+/**
+ * One payroll amount the task engine does not produce, booked in a month.
+ *
+ *   ownership  — a stored award from a LIVE ownership program
+ *   bonus      — the payslip's bonus
+ *   adjustment — back-pay settled on the payslip (payroll.adjustment_earned)
+ *
+ * Advances and other deductions are deliberately absent: they are money the
+ * employee pays back, not a cost to the business.
+ */
+export interface PayrollExtraLine {
+  employeeId: string
+  /** YYYY-MM the amount booked into. */
+  month: string
+  kind: 'ownership' | 'bonus' | 'adjustment'
+  /** ownership only — decides how the award moves with the scenario. */
+  basis?: string
+  /** ownership only — the program, for showing where it came from. */
+  programName?: string
+  amountInr: number
+}
+
+/** Ownership bases measured as a share of task billing — they move with revenue. */
+const BILLING_LIKE_BASES = new Set(['billing', 'referrals', 'clients_handled', 'planned'])
+
+/**
+ * What a payroll extra would be under the scenario.
+ *
+ * A live program's award is re-scaled by what it is measured from: a share of
+ * billing moves with simulated revenue, a share of profit with simulated
+ * profit. Everything the planner cannot simulate — collections (cash, not
+ * billing), counts of entries or activities, fixed bonuses, back-pay — stays
+ * at what was actually paid. Proportional scaling is exact for a company-wide
+ * % of billing and an approximation for a program narrowed to one client.
+ */
+export function simulateExtra(
+  line: PayrollExtraLine,
+  current: { billingInr: number; profitInr: number },
+  simulated: { billingInr: number; profitInr: number },
+): number {
+  if (line.kind !== 'ownership' || !line.basis) return line.amountInr
+  if (BILLING_LIKE_BASES.has(line.basis)) {
+    return current.billingInr > 0 ? r2(line.amountInr * Math.max(0, simulated.billingInr) / current.billingInr) : line.amountInr
+  }
+  if (line.basis === 'profit') {
+    return current.profitInr > 0 ? r2(line.amountInr * Math.max(0, simulated.profitInr) / current.profitInr) : line.amountInr
+  }
+  return line.amountInr
+}
+
+/** Per-employee totals of the extras, now and under the scenario. */
+function extrasByEmployee(
+  extras: PayrollExtraLine[],
+  current: { billingInr: number; profitInr: number },
+  simulated: { billingInr: number; profitInr: number },
+) {
+  const out = new Map<string, { ownershipNow: number; ownershipSim: number; other: number }>()
+  for (const l of extras) {
+    const e = out.get(l.employeeId) ?? { ownershipNow: 0, ownershipSim: 0, other: 0 }
+    if (l.kind === 'ownership') {
+      e.ownershipNow += l.amountInr
+      e.ownershipSim += simulateExtra(l, current, simulated)
+    } else {
+      e.other += l.amountInr
+    }
+    out.set(l.employeeId, e)
+  }
+  return out
+}
+
+/** How the comparison counts payroll beyond task commission. */
+export interface PayrollContext {
+  /** Months in the baseline — base salary is paid once per month. Default 1. */
+  months?: number
+  /** Live ownership awards, bonuses and adjustments booked in those months. */
+  extras?: PayrollExtraLine[]
+}
+
 // ─── Raw inputs (serializable — passed from the server page to the client) ────
 
 export interface WhatIfRawInputs {
@@ -249,9 +329,13 @@ export interface EmployeeImpact {
   earnings: MetricDelta
   baseSalary: number | null            // null when viewer lacks payroll.view_amounts
   increment: number                    // resolved ₹ increment (0 when none)
-  /** base + increment + simulated earnings — before advances/deductions */
+  /** Live ownership programs — what was paid, and what the scenario would pay. */
+  ownership: MetricDelta
+  /** Bonus + back-pay adjustments actually paid — the scenario does not move them. */
+  bonusAdjustments: number
+  /** (base + increment) × months + simulated earnings + ownership + bonus — before advances/deductions */
   projectedSalary: number | null
-  currentSalary: number | null         // base + current earnings
+  currentSalary: number | null         // base × months + current earnings + ownership + bonus
 }
 
 export interface GroupImpact {
@@ -269,16 +353,23 @@ export interface ScenarioComparison {
   commissionCost: MetricDelta
   profit: MetricDelta
   marginPct: MetricDelta
-  /** Σ (base + increment) + commission — before advances/deductions */
+  /** Base salaries (+ increments) for the period: Σ base × months. Zero without salary access. */
+  baseSalaryCost: MetricDelta
+  /** Live ownership programs (stored awards, re-scaled by the scenario). */
+  liveOwnership: MetricDelta
+  /** Bonuses + back-pay adjustments paid in the period — unchanged by the scenario. */
+  bonusAdjustments: MetricDelta
+  /** Everything payroll pays: base + commission + ownership + bonus + adjustments — before advances/deductions */
   payrollCost: MetricDelta
   /** profit ÷ payroll cost (0 when payroll cost is 0) */
   roi: MetricDelta
   /** What the scenario's draft roles would cost. Current is always 0 — a draft
    *  role does not exist yet, so there is nothing to compare it against. */
   ownershipCost: MetricDelta
-  /** Profit once the draft roles are paid. Excludes any LIVE ownership
-   *  programs, which the planner does not model. */
+  /** Profit once live ownership and the draft roles are paid. */
   profitAfterOwnership: MetricDelta
+  /** Revenue − everything payroll pays − draft roles: what is left for expenses. */
+  profitAfterPayroll: MetricDelta
   /** Per-role cost, for showing which hat is expensive. */
   ownershipLines: OwnershipCostLine[]
   perEmployee: EmployeeImpact[]
@@ -330,15 +421,21 @@ export function compareScenario(
   /** employeeId → base_salary; missing/undefined = viewer can't see salaries */
   baseSalaries: Record<string, number> | null,
   scenario: Scenario,
+  payroll: PayrollContext = {},
 ): ScenarioComparison {
   const current = computeSummary(currentRows)
   const simulated = computeSummary(simulatedRows)
+  const months = Math.max(1, payroll.months ?? 1)
+  const curTotals = { billingInr: current.totalBilling, profitInr: current.totalProfit }
+  const simTotals = { billingInr: simulated.totalBilling, profitInr: simulated.totalProfit }
+  const extras = extrasByEmployee(payroll.extras ?? [], curTotals, simTotals)
 
   const perEmployee: EmployeeImpact[] = employees.map(e => {
     const curEarn = sumEarnings(currentRows, e.id)
     const simEarn = sumEarnings(simulatedRows, e.id)
     const base = baseSalaries?.[e.id]
     const increment = base != null ? resolveIncrement(base, scenario.salaryIncrements[e.id]) : 0
+    const x = extras.get(e.id) ?? { ownershipNow: 0, ownershipSim: 0, other: 0 }
     return {
       id: e.id,
       name: e.name,
@@ -346,23 +443,38 @@ export function compareScenario(
       earnings: mkDelta(curEarn, simEarn),
       baseSalary: base ?? null,
       increment,
-      currentSalary: base != null ? r2(base + curEarn) : null,
-      projectedSalary: base != null ? r2(base + increment + simEarn) : null,
+      ownership: mkDelta(x.ownershipNow, x.ownershipSim),
+      bonusAdjustments: r2(x.other),
+      currentSalary: base != null ? r2(base * months + curEarn + x.ownershipNow + x.other) : null,
+      projectedSalary: base != null ? r2((base + increment) * months + simEarn + x.ownershipSim + x.other) : null,
     }
   })
 
-  // Payroll cost = Σ base(+increment) over employees with visible salary + commission cost.
-  // Without salary visibility it degrades to commission-only (labeled in the UI).
-  let curPayroll = current.totalEarnings
-  let simPayroll = simulated.totalEarnings
+  // Base salary is a MONTHLY amount, so a multi-month baseline pays it once
+  // per month — counting it once against several months of commission made
+  // payroll look cheaper the longer the period.
+  let curBase = 0
+  let simBase = 0
   if (baseSalaries) {
     for (const e of perEmployee) {
       if (e.baseSalary != null) {
-        curPayroll += e.baseSalary
-        simPayroll += e.baseSalary + e.increment
+        curBase += e.baseSalary * months
+        simBase += (e.baseSalary + e.increment) * months
       }
     }
   }
+  let curOwnership = 0, simOwnership = 0, bonusAdj = 0
+  for (const x of extras.values()) {
+    curOwnership += x.ownershipNow
+    simOwnership += x.ownershipSim
+    bonusAdj += x.other
+  }
+
+  // Payroll cost = base + commission + live ownership + bonus/adjustments.
+  // Without salary visibility the page passes no salaries and no extras, so it
+  // degrades to commission-only (labelled in the UI).
+  const curPayroll = current.totalEarnings + curBase + curOwnership + bonusAdj
+  const simPayroll = simulated.totalEarnings + simBase + simOwnership + bonusAdj
 
   const marginPct = mkDelta(
     current.totalBilling > 0 ? r2(current.totalProfit / current.totalBilling * 100) : 0,
@@ -387,10 +499,20 @@ export function compareScenario(
     commissionCost: mkDelta(current.totalEarnings, simulated.totalEarnings),
     profit: mkDelta(current.totalProfit, simulated.totalProfit),
     marginPct,
+    baseSalaryCost: mkDelta(curBase, simBase),
+    liveOwnership: mkDelta(curOwnership, simOwnership),
+    bonusAdjustments: mkDelta(bonusAdj, bonusAdj),
     payrollCost: mkDelta(curPayroll, simPayroll),
     roi,
     ownershipCost: mkDelta(0, ownership.totalInr),
-    profitAfterOwnership: mkDelta(current.totalProfit, r2(simulated.totalProfit - ownership.totalInr)),
+    profitAfterOwnership: mkDelta(
+      current.totalProfit - curOwnership,
+      r2(simulated.totalProfit - simOwnership - ownership.totalInr),
+    ),
+    profitAfterPayroll: mkDelta(
+      current.totalBilling - curPayroll,
+      r2(simulated.totalBilling - simPayroll - ownership.totalInr),
+    ),
     ownershipLines: ownership.lines,
     perEmployee,
     perClient: groupImpacts(currentRows, simulatedRows, 'client'),
@@ -424,6 +546,7 @@ function goalValue(
   rows: AnalysisRow[],
   goal: GoalMetric,
   baseSalaries: Record<string, number> | null,
+  payroll: PayrollContext & { baseline?: Summary } = {},
 ): number {
   const s = computeSummary(rows)
   switch (goal.kind) {
@@ -432,9 +555,18 @@ function goalValue(
     case 'monthly_profit':
       return s.totalProfit
     case 'payroll_pct_of_revenue': {
-      let payroll = s.totalEarnings
-      if (baseSalaries) for (const v of Object.values(baseSalaries)) payroll += v
-      return s.totalBilling > 0 ? payroll / s.totalBilling * 100 : 0
+      const months = Math.max(1, payroll.months ?? 1)
+      let cost = s.totalEarnings
+      if (baseSalaries) for (const v of Object.values(baseSalaries)) cost += v * months
+      // Live ownership, bonuses and adjustments, moved by this candidate's
+      // revenue and profit exactly as compareScenario moves them.
+      const now = payroll.baseline
+        ? { billingInr: payroll.baseline.totalBilling, profitInr: payroll.baseline.totalProfit }
+        : { billingInr: s.totalBilling, profitInr: s.totalProfit }
+      for (const l of payroll.extras ?? []) {
+        cost += simulateExtra(l, now, { billingInr: s.totalBilling, profitInr: s.totalProfit })
+      }
+      return s.totalBilling > 0 ? cost / s.totalBilling * 100 : 0
     }
     case 'employee_earnings':
       return sumEarnings(rows, goal.employeeId)
@@ -486,10 +618,12 @@ export function goalSeek(
   baseSalaries: Record<string, number> | null,
   tolerance = 0.05,
   maxIterations = 60,
+  payroll: PayrollContext = {},
 ): GoalSeekResult {
   let [lo, hi] = leverBounds(lever)
+  const ctx = { ...payroll, baseline: computeSummary(baselineRows(raw)) }
   const evalAt = (v: number) =>
-    goalValue(simulateScenario(raw, scenarioWithLever(base, lever, v, raw)), goal, baseSalaries)
+    goalValue(simulateScenario(raw, scenarioWithLever(base, lever, v, raw)), goal, baseSalaries, ctx)
 
   const atLo = evalAt(lo)
   const atHi = evalAt(hi)
