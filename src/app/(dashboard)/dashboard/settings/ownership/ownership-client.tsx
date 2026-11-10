@@ -23,6 +23,7 @@ import { rateLabel, BASIS_CHOICE_LABEL as BASIS_LABEL, PER_UNIT_BASES, PER_PERSO
 import { PER_PERSON_BASES, ruleEmployees } from '@/lib/ownership/types'
 import { activityKindLabel } from '@/lib/ownership/activity-kinds'
 import { todayISO } from '@/lib/utils/local-date'
+import { ClientReferrals, type ClientReferralRow } from './client-referrals'
 
 /** One tickable activity in a program: a built-in kind or a logged action type. */
 interface ActivityOption { key: string; label: string; builtIn: boolean; count: number | null }
@@ -68,6 +69,10 @@ interface Props {
   orgUnits: { id: string; name: string; type: string }[]
   /** clientId → current handler. */
   handlers: Record<string, { employeeId: string; from: string }>
+  /** Clients that came through someone; null before the client-referral migration. */
+  clientReferrals: ClientReferralRow[] | null
+  /** clientId → this month's referred jobs and what they pay. */
+  referralThisMonth: Record<string, { jobs: number; earnedInr: number }>
   /** Built-in activity kinds, then every logged action type (see page.tsx). */
   activityOptions: ActivityOption[]
   currentMonth: number
@@ -404,10 +409,24 @@ export default function OwnershipClient(p: Props) {
                 // placeholder rule ("Admin · 100%") would invite edits that
                 // change nothing, so the card explains the program instead.
                 // Pausing it above is the off switch for every referral.
-                <div className="p-4 text-xs leading-relaxed text-muted-foreground">
-                  Pays whoever is named as <span className="font-medium text-foreground">Referred by</span> on a job,
-                  at the % set on that job, into the payslip of the month the job is dated.
-                  Set it in the job&apos;s edit window under <span className="font-medium text-foreground">Referral commission</span>.
+                <div className="p-4 space-y-4">
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Pays whoever is named as <span className="font-medium text-foreground">Referred by</span> on a job,
+                    at the % set on that job, into the payslip of the month the job is dated.
+                    Set it once for a whole client below, or on a single job in its edit window under{' '}
+                    <span className="font-medium text-foreground">Referral commission</span>.
+                  </p>
+                  <ClientReferrals
+                    clients={p.clients}
+                    employees={p.employees}
+                    referrals={p.clientReferrals}
+                    thisMonth={p.referralThisMonth}
+                    monthLabel={MONTH_NAMES[p.currentMonth - 1]}
+                    defaultFrom={`${p.currentYear}-${pad2(p.currentMonth)}-01`}
+                    onSaved={(t, d) => { success(t, d); refresh() }}
+                    onError={toastError}
+                    onConfirm={setConfirmPrompt}
+                  />
                 </div>
               )}
               {open && prog.basis !== 'referrals' && (

@@ -4,6 +4,7 @@ import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { loadPrograms } from '@/lib/ownership/engine'
 import { ACTIVITY_KINDS, isPayableLogPair, logKind, logKindLabel } from '@/lib/ownership/activity-kinds'
+import { referralCommission } from '@/lib/ownership/referral'
 import OwnershipClient from './ownership-client'
 
 export const dynamic = 'force-dynamic'
@@ -41,6 +42,34 @@ export default async function OwnershipSettingsPage() {
   const handlers = Object.fromEntries(((handlerRows ?? []) as { client_id: string; employee_id: string; effective_from: string }[])
     .map(h => [h.client_id, { employeeId: h.employee_id, from: h.effective_from }]))
 
+  // Clients that came through someone — empty (and the editor hidden) before
+  // 20261110200000_client_referral runs.
+  const { data: refRows, error: refErr } = await admin.from('clients')
+    .select('id, referred_by, referral_percent, referral_from, referral_until')
+    .not('referred_by', 'is', null)
+  const clientReferrals = ((refRows ?? []) as { id: string; referred_by: string; referral_percent: number | string; referral_from: string; referral_until: string | null }[])
+    .map(r => ({ clientId: r.id, employeeId: r.referred_by, percent: Number(r.referral_percent), from: r.referral_from, until: r.referral_until }))
+
+  // This month's referred jobs, per client — what each referral is earning now.
+  const now = new Date()
+  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+  const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+  const monthEnd = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-01`
+  const referralThisMonth: Record<string, { jobs: number; earnedInr: number }> = {}
+  if (!refErr) {
+    const { data: refJobs } = await fetchAll(admin.from('tasks')
+      .select('id, client_id, billing_amount_inr, referral_percent, status')
+      .not('referred_by', 'is', null)
+      .gte('task_date', monthStart).lt('task_date', monthEnd).is('deleted_at', null)
+      .order('id', { ascending: true }))
+    for (const t of (refJobs ?? []) as { client_id: string | null; billing_amount_inr: number | null; referral_percent: number | string | null; status: string | null }[]) {
+      if (!t.client_id || t.status === 'cancelled') continue
+      const m = (referralThisMonth[t.client_id] ??= { jobs: 0, earnedInr: 0 })
+      m.jobs += 1
+      m.earnedInr += referralCommission(t.billing_amount_inr, t.referral_percent == null ? 0 : Number(t.referral_percent))
+    }
+  }
+
   // Activities an "activities" program can count: the built-in kinds, then
   // every action the activity log has recorded with a person in the last year
   // — so work a new feature logs becomes payable here without a code change.
@@ -65,8 +94,6 @@ export default async function OwnershipSettingsPage() {
       .map(([key, c]) => ({ key, label: logKindLabel(c.entityType, c.action), builtIn: false, count: c.n })),
   ]
 
-  const now = new Date()
-
   return (
     <OwnershipClient
       programs={programs}
@@ -79,6 +106,8 @@ export default async function OwnershipSettingsPage() {
       // Absent pre-migration — the unit scope option simply won't be offered.
       orgUnits={(unitRes.data ?? []) as { id: string; name: string; type: string }[]}
       handlers={handlers}
+      clientReferrals={refErr ? null : clientReferrals}
+      referralThisMonth={referralThisMonth}
       activityOptions={activityOptions}
       currentMonth={now.getMonth() + 1}
       currentYear={now.getFullYear()}

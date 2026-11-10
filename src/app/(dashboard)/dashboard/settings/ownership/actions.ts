@@ -24,6 +24,8 @@ import { periodForBookingMonth, activeForPeriod } from '@/lib/ownership/periods'
 import { PER_PERSON_BASES, PER_PERSON_MONEY_BASES, type OwnershipBasis, type OwnershipPeriodType, type OwnershipScopeKind } from '@/lib/ownership/types'
 import { isActivityKind } from '@/lib/ownership/work-measures'
 import { isMissingColumn, withoutColumn, type PgError } from '@/lib/db/missing-column'
+import { fetchAll } from '@/lib/supabase/server'
+import { validateReferral, planClientReferralSync, clientReferralRangeError, type ClientReferral, type ReferralJob } from '@/lib/ownership/referral'
 
 const REVALIDATE = '/dashboard/settings/ownership'
 const MIGRATION = 'supabase/migrations/20260807100000_ownership_platform.sql'
@@ -399,4 +401,124 @@ export async function setClientHandler(clientId: string, employeeId: string | nu
   }
   revalidatePath(REVALIDATE)
   return { ok: true }
+}
+
+// ── Client referral ──────────────────────────────────────────────────────────
+
+const CLIENT_REFERRAL_MIGRATION = 'supabase/migrations/20261110200000_client_referral.sql'
+
+/**
+ * "This client came through <staff> — pay them X% of its jobs from <date>."
+ *
+ * Saves the referral on the client (new jobs copy it via a database trigger)
+ * and brings the client's EXISTING jobs in line — see planClientReferralSync
+ * for which jobs move. Months already paid or locked are left as they were and
+ * counted, so the toast can say so. `employeeId: null` removes it.
+ */
+export async function setClientReferral(
+  clientId: string,
+  employeeId: string | null,
+  percent: number | null,
+  from: string | null,
+  until: string | null,
+): Promise<ActionResult<{ jobsUpdated: number; jobsLocked: number }>> {
+  const guard = await requirePermission(PERMS.PAYROLL_MANAGE_OWNERSHIP)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const checked = validateReferral(employeeId, percent)
+  if (!checked.ok) return { ok: false, error: checked.error.replace('this job', 'this client') }
+  let next: ClientReferral | null = null
+  if (checked.employeeId) {
+    const rangeErr = clientReferralRangeError(from ?? '', until || null)
+    if (rangeErr) return { ok: false, error: rangeErr }
+    next = { employeeId: checked.employeeId, percent: checked.percent!, from: from!, until: until || null }
+  }
+
+  const admin = createAdminClient()
+  const { data: client, error: readErr } = await admin.from('clients')
+    .select('name, referred_by, referral_percent, referral_from, referral_until').eq('id', clientId).maybeSingle()
+  if (readErr) {
+    return { ok: false, error: /referred_by|referral_/.test(readErr.message)
+      ? `Client referrals need a database migration. Run ${CLIENT_REFERRAL_MIGRATION} in the Supabase SQL editor, then try again.`
+      : readErr.message }
+  }
+  if (!client) return { ok: false, error: 'Client not found.' }
+  const c = client as { name: string; referred_by: string | null; referral_percent: number | string | null; referral_from: string | null; referral_until: string | null }
+  const prev: ClientReferral | null = c.referred_by && c.referral_from
+    ? { employeeId: c.referred_by, percent: Number(c.referral_percent), from: c.referral_from, until: c.referral_until }
+    : null
+
+  if (next) {
+    const { data: emp } = await admin.from('employees').select('id').eq('id', next.employeeId).eq('is_active', true).maybeSingle()
+    if (!emp) return { ok: false, error: 'That staff member is not active.' }
+  }
+
+  const { error: saveErr } = await admin.from('clients').update({
+    referred_by: next?.employeeId ?? null,
+    referral_percent: next?.percent ?? null,
+    referral_from: next?.from ?? null,
+    referral_until: next?.until ?? null,
+  }).eq('id', clientId)
+  if (saveErr) return { ok: false, error: saveErr.message }
+
+  // Existing jobs from the earliest date either version covers.
+  const starts = [prev?.from, next?.from].filter((d): d is string => !!d).sort()
+  let jobsUpdated = 0
+  let jobsLocked = 0
+  const touchedMonths = new Set<string>()
+  if (starts.length) {
+    const { data: rows, error: jobsErr } = await fetchAll(admin.from('tasks')
+      .select('id, task_date, referred_by, referral_percent')
+      .eq('client_id', clientId).is('deleted_at', null).gte('task_date', starts[0])
+      .order('task_date', { ascending: true }).order('id', { ascending: true }))
+    if (jobsErr) return { ok: false, error: `Saved on the client, but its existing jobs could not be read: ${jobsErr.message}` }
+
+    const jobs: ReferralJob[] = ((rows ?? []) as { id: string; task_date: string; referred_by: string | null; referral_percent: number | string | null }[])
+      .map(r => ({ id: r.id, date: r.task_date, referredBy: r.referred_by, percent: r.referral_percent == null ? null : Number(r.referral_percent) }))
+    const changes = planClientReferralSync(jobs, prev, next)
+
+    // A paid or locked month keeps what it was paid with.
+    const lockedByMonth = new Map<string, boolean>()
+    for (const key of new Set(changes.map(ch => ch.date.slice(0, 7)))) {
+      const [y, m] = key.split('-').map(Number)
+      lockedByMonth.set(key, await isMonthFinalized(admin, m, y))
+    }
+    const groups = new Map<string, { referredBy: string | null; percent: number | null; ids: string[] }>()
+    for (const ch of changes) {
+      const key = ch.date.slice(0, 7)
+      if (lockedByMonth.get(key)) { jobsLocked++; continue }
+      touchedMonths.add(key)
+      const g = `${ch.referredBy}|${ch.percent}`
+      const group = groups.get(g) ?? { referredBy: ch.referredBy, percent: ch.percent, ids: [] }
+      group.ids.push(ch.id)
+      groups.set(g, group)
+    }
+    for (const group of groups.values()) {
+      for (let i = 0; i < group.ids.length; i += 200) {
+        const ids = group.ids.slice(i, i + 200)
+        const { error } = await admin.from('tasks')
+          .update({ referred_by: group.referredBy, referral_percent: group.percent }).in('id', ids)
+        if (error) return { ok: false, error: `Saved on the client, but some jobs were not updated: ${error.message}` }
+        jobsUpdated += ids.length
+      }
+    }
+  }
+
+  void logActivity({
+    actorId: guard.employeeId,
+    entityType: 'client',
+    entityId: clientId,
+    action: 'updated',
+    detail: { title: c.name, referral: next, jobsUpdated },
+  }).catch(() => {})
+
+  // Bring those months' PENDING payslips in line; paid ones are never touched.
+  for (const key of touchedMonths) {
+    const [y, m] = key.split('-').map(Number)
+    try { await syncPendingPayrollOwnership(admin, m, y) } catch { /* next payroll run catches up */ }
+  }
+
+  revalidatePath(REVALIDATE)
+  revalidatePath('/dashboard/payroll')
+  return { ok: true, data: { jobsUpdated, jobsLocked } }
 }
