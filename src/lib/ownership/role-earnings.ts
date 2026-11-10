@@ -44,7 +44,10 @@ export interface AwardLine {
  * nameless "—" bucket. A hat that happens to share a program's name merges
  * with it, which is the reading a human would expect from two identical names.
  */
-export function roleKeyOf(a: { label: string | null; programName: string }): string {
+export function roleKeyOf(a: { label: string | null; programName: string; basis?: string }): string {
+  // Referral awards stored before the placeholder label was dropped still
+  // carry it ("Whoever is named on the job") — show them by program name.
+  if (a.basis === 'referrals') return a.programName
   const hat = a.label?.trim()
   return hat ? hat : a.programName
 }
@@ -111,7 +114,7 @@ export function groupByRole(awards: AwardLine[]): RoleGroup[] {
 
     groups.push({
       role,
-      labelled: list.some(a => !!a.label?.trim()),
+      labelled: list.some(a => !!a.label?.trim() || a.basis === 'referrals'),
       totalInr: r2(list.reduce((s, a) => s + a.earnedInr, 0)),
       awardCount: list.length,
       people: [...people.entries()]

@@ -3,6 +3,7 @@ import { validateReferral, referralCommission } from './referral'
 import { attributeReferrals, type ReferralTaskRow } from './work-measures'
 import { earningFor, measuredFor, computeAwards } from './compute'
 import { rateLabel, explainAward } from './format'
+import { roleKeyOf } from './role-earnings'
 import type { OwnershipProgram, OwnershipRule, OwnershipPeriod } from './types'
 
 describe('validateReferral', () => {
@@ -113,6 +114,20 @@ describe('the referrals basis in the award engine', () => {
     expect(award.earnedInr).toBe(2250)
     expect(award.employeeId).toBe('asha')
     expect(award.period.bookedMonth).toBe(11)
+  })
+
+  it('goes by the program name, not the placeholder rule label', () => {
+    const program: OwnershipProgram = {
+      id: 'p1', name: 'Referral commission', programType: 'referral', basis: 'referrals',
+      periodType: 'monthly', scopeKind: 'company', scopeId: null, periodStart: null, periodEnd: null,
+      effectiveFrom: '2026-01-01', effectiveTo: null, isActive: true,
+    }
+    const period: OwnershipPeriod = { start: '2026-11-01', end: '2026-11-30', bookedMonth: 11, bookedYear: 2026, label: 'November 2026' }
+    const [award] = computeAwards(program, [{ employeeId: 'asha', rule: { ...rule, label: 'Whoever is named on the job' } }], agg, period)
+    expect(award.breakdown.ruleLabel).toBeNull()
+    // An award stored with the old label still reads as the program.
+    expect(roleKeyOf({ label: 'Whoever is named on the job', programName: 'Referral commission', basis: 'referrals' })).toBe('Referral commission')
+    expect(roleKeyOf({ label: 'Team Lead', programName: 'Operations', basis: 'billing' })).toBe('Team Lead')
   })
 
   it('describes itself honestly on a payslip', () => {

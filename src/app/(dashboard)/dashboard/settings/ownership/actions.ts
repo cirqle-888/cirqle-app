@@ -18,9 +18,8 @@ import { requirePermission, requireReadPermission } from '@/lib/permissions/chec
 import { PERMS } from '@/lib/permissions/keys'
 import { logActivity } from '@/lib/activity/log'
 import { isMonthFinalized } from '@/lib/payroll/compute'
-import { persistAwardsForMonth, syncPendingPayrollOwnership, loadPrograms, loadMembersByDesignation, loadPeriodAggregates, clientsOf } from '@/lib/ownership/engine'
-import { computeAwards, resolveParticipants, totalProfitSharePercent } from '@/lib/ownership/compute'
-import { periodForBookingMonth, activeForPeriod } from '@/lib/ownership/periods'
+import { persistAwardsForMonth, syncPendingPayrollOwnership, loadPrograms, loadMembersByDesignation, computeAwardsForMonth } from '@/lib/ownership/engine'
+import { totalProfitSharePercent } from '@/lib/ownership/compute'
 import { PER_PERSON_BASES, PER_PERSON_MONEY_BASES, type OwnershipBasis, type OwnershipPeriodType, type OwnershipScopeKind } from '@/lib/ownership/types'
 import { isActivityKind } from '@/lib/ownership/work-measures'
 import { isMissingColumn, withoutColumn, type PgError } from '@/lib/db/missing-column'
@@ -314,31 +313,21 @@ export async function previewMonth(month: number, year: number): Promise<ActionR
   const { programs, rules } = await loadPrograms(admin)
   const membersByDesignation = await loadMembersByDesignation(admin)
 
-  const rows: PreviewRow[] = []
-  for (const program of programs) {
-    if (!program.isActive) continue
-    const period = periodForBookingMonth(program.periodType, month, year, { start: program.periodStart, end: program.periodEnd })
-    if (!period) continue
-    if (!activeForPeriod(program.effectiveFrom, program.effectiveTo, period)) continue
-    const live = rules.filter(r => r.programId === program.id && activeForPeriod(r.effectiveFrom, r.effectiveTo, period))
-    const participants = resolveParticipants(live, membersByDesignation)
-    if (participants.length === 0) continue
-    const agg = await loadPeriodAggregates(
-      admin, program, period, participants.map(p => p.employeeId), clientsOf(participants))
-    for (const a of computeAwards(program, participants, agg, period)) {
-      rows.push({
-        programName: program.name,
-        employeeId: a.employeeId,
-        label: a.breakdown.ruleLabel as string | null,
-        basis: program.basis as string,
-        basisAmountInr: a.basisAmountInr,
-        percent: a.percent,
-        fixedAmountInr: a.fixedAmountInr,
-        earnedInr: a.earnedInr,
-        items: (a.breakdown.items as PreviewRow['items']) ?? [],
-      })
-    }
-  }
+  // The SAME computation Run now and payroll use — a preview built from its
+  // own copy of the loop drifted once already (it paid the referral program's
+  // placeholder rule instead of whoever is named on each job).
+  const names = new Map(programs.map(p => [p.id, p.name]))
+  const rows: PreviewRow[] = (await computeAwardsForMonth(admin, month, year)).map(a => ({
+    programName: names.get(a.programId) ?? 'Ownership reward',
+    employeeId: a.employeeId,
+    label: a.breakdown.ruleLabel as string | null,
+    basis: a.basis as string,
+    basisAmountInr: a.basisAmountInr,
+    percent: a.percent,
+    fixedAmountInr: a.fixedAmountInr,
+    earnedInr: a.earnedInr,
+    items: (a.breakdown.items as PreviewRow['items']) ?? [],
+  }))
 
   return {
     ok: true,

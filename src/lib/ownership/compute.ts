@@ -181,7 +181,10 @@ export function computeAwards(
         scopeKind: program.scopeKind,
         scopeId: program.scopeId,
         ruleSource: ruleEmployees(rule).length ? 'employee' : 'designation',
-        ruleLabel: rule.label,
+        // The referral program's one rule is a placeholder the award table
+        // requires ("Whoever is named on the job"); it is not a role anyone
+        // holds, so the award goes by the program's name instead.
+        ruleLabel: program.basis === 'referrals' ? null : rule.label,
         measuredInr: r2(measured),
         clampedAtZero: measured < 0,
         // Per-unit awards are self-describing without a join back to the rule,
