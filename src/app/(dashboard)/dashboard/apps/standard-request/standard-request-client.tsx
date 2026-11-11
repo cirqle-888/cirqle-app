@@ -14,6 +14,7 @@ import {
   saveAgency, deactivateAgency, saveClientDriveFolder, type AgencyInput,
 } from './actions'
 import { FolderOpen } from 'lucide-react'
+import { copyToClipboard } from '@/lib/clipboard'
 
 const inputCls = 'w-full bg-secondary border border-foreground/15 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20'
 const labelCls = 'block text-xs font-medium text-muted-foreground mb-1.5'
@@ -73,7 +74,7 @@ export default function StandardRequestClient({
   const urlFor = (token: string) => `${appUrl}/intake/${token}`
 
   async function copyUrl(link: any) {
-    await navigator.clipboard.writeText(urlFor(link.token))
+    if (!(await copyToClipboard(urlFor(link.token)))) return
     setCopied(link.id); setTimeout(() => setCopied(null), 1500)
   }
 

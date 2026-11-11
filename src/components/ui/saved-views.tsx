@@ -35,6 +35,7 @@ import {
   listSavedViews, activeSavedView, savedViewSlug, buildSavedViewHref,
   hasSavableFilters, normalizeViewName, type SavedView,
 } from '@/lib/saved-views/model'
+import { copyToClipboard } from '@/lib/clipboard'
 
 const ON = 'bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/30'
 const OFF = 'bg-secondary text-muted-foreground border-foreground/15 hover:text-foreground'
@@ -143,13 +144,13 @@ export function SavedViews({ className = '', compact = false }: {
   }
 
   async function copyLink() {
-    try {
-      await navigator.clipboard.writeText(
-        `${window.location.origin}${active ? active.href : buildSavedViewHref(pathname, search)}`,
-      )
+    const ok = await copyToClipboard(
+      `${window.location.origin}${active ? active.href : buildSavedViewHref(pathname, search)}`,
+    )
+    if (ok) {
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1800)
-    } catch {
+    } else {
       setError('Copying is blocked in this browser — use the address bar.')
     }
   }

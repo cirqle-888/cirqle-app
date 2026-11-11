@@ -125,6 +125,7 @@ const PROBES = [
   { m: 'supabase/migrations/20261110100000_task_referral_commission', kind: 'column', table: 'tasks', col: 'referred_by' },
   { m: 'supabase/migrations/20261110200000_client_referral',         kind: 'column', table: 'clients', col: 'referral_from' },
   { m: 'supabase/migrations/20261110110000_ownership_client_service_scope', kind: 'column', table: 'ownership_programs', col: 'scope_service_id' },
+  { m: 'supabase/migrations/20261111100000_contribution_checks',       kind: 'table', table: 'contribution_check_items', col: 'answer' },
 ]
 
 // Not probeable via the REST API — run these in the Supabase SQL editor:

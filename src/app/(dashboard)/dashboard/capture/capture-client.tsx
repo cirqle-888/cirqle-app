@@ -15,6 +15,7 @@ import { Sparkles, Loader2, User, ArrowRight, CheckCircle2, AlertCircle } from '
 import { analyzeCapture, analyzeCaptureAs, commitRequestCapture, commitAdvertisingCapture } from './actions'
 import type { CaptureInput, CaptureResult, CaptureType } from '@/lib/capture/types'
 import { isExternalHref } from '@/lib/offers/studio'
+import { copyToClipboard } from '@/lib/clipboard'
 
 const TYPE_META: Record<CaptureType, { label: string; color: string }> = {
   request:   { label: 'Request',   color: 'text-violet-600 bg-violet-500/10' },
@@ -96,7 +97,7 @@ export default function CaptureClient() {
       if (isExternalHref(draft.target)) {
         // Offer lists go to Offer Studio, a separate app: put the pasted list
         // on the clipboard so it can be pasted straight in there.
-        try { await navigator.clipboard.writeText(text) } catch { /* manual copy still works */ }
+        await copyToClipboard(text) // manual copy still works if this fails
         window.open(draft.target, '_blank', 'noopener')
         setDone('Opened Offer Studio — the list is on your clipboard, paste it there.')
         return

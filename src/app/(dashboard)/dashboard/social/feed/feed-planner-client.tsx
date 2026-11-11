@@ -38,6 +38,7 @@ import {
   Upload, Grid3x3, Loader2, Trash2, Send, Link2, Play, X,
   Calendar, MessageSquare, Heart, ExternalLink, GripVertical, Palette, AlertTriangle,
 } from 'lucide-react'
+import { copyToClipboard } from '@/lib/clipboard'
 
 interface Account {
   id: string; name: string; username: string | null; client_id: string | null
@@ -249,8 +250,8 @@ export default function FeedPlannerClient({
     setBusy(null)
     if (!res.ok || !res.data) { toastError('Could not create link', res.error); return }
     const url = `${window.location.origin}/feed/${res.data.token}`
-    try { await navigator.clipboard.writeText(url) } catch { /* clipboard blocked */ }
-    success('Client link copied', 'Read-only, expires in 30 days.')
+    if (await copyToClipboard(url)) success('Client link copied', 'Read-only, expires in 30 days.')
+    else success('Client link created', url)
     router.refresh()
   }
 

@@ -1,13 +1,14 @@
 'use client'
 import { useState } from 'react'
 import type { ReportFormat } from '@/lib/reporting/types'
+import { copyToClipboard } from '@/lib/clipboard'
 
 export function ManualReportShare({ reportId, caption, formats }: { reportId: string; caption: string; formats: ReportFormat[] }) {
   const [message, setMessage] = useState(caption)
   const [notice, setNotice] = useState('')
   async function copy() {
-    try { await navigator.clipboard.writeText(message); setNotice('Message copied. Attach the downloaded report in WhatsApp.') }
-    catch { setNotice('Copy is unavailable here. Select the message and copy it manually.') }
+    if (await copyToClipboard(message)) setNotice('Message copied. Attach the downloaded report in WhatsApp.')
+    else setNotice('Copy is unavailable here. Select the message and copy it manually.')
   }
   async function share() {
     if (!navigator.share) { await copy(); return }

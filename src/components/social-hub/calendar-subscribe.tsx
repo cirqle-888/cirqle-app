@@ -21,6 +21,7 @@
 import { useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
 import { CalendarPlus, Copy, Check, Loader2, ShieldAlert, X } from 'lucide-react'
+import { copyToClipboard } from '@/lib/clipboard'
 
 export interface CalendarFeedInfo {
   webcalUrl: string
@@ -54,10 +55,10 @@ export function CalendarSubscribe({ load, revoke }: Props) {
   function copy(which: 'webcal' | 'https') {
     const value = which === 'webcal' ? feed?.webcalUrl : feed?.httpsUrl
     if (!value) return
-    navigator.clipboard.writeText(value).then(
-      () => { setCopied(which); setTimeout(() => setCopied(null), 2000) },
-      () => setError('Could not copy — select the link and copy it manually.'),
-    )
+    void copyToClipboard(value).then(ok => {
+      if (ok) { setCopied(which); setTimeout(() => setCopied(null), 2000) }
+      else setError('Could not copy — select the link and copy it manually.')
+    })
   }
 
   function doRevoke() {

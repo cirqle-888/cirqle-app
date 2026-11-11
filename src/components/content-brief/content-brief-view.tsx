@@ -12,6 +12,7 @@ import {
   sanitizeCaptionHtml, captionHtmlToText, canvasToText, canvasImageUrls, platformLabels,
 } from '@/lib/social/plan'
 import { contentTypeLabel, linkDisplay, type ContentBrief } from '@/lib/content-brief'
+import { copyToClipboard } from '@/lib/clipboard'
 
 const SECTION = 'text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 mb-1.5'
 
@@ -29,11 +30,9 @@ export default function ContentBriefView({ brief, platforms, scheduledDate }: {
     .filter((u, i, a) => a.indexOf(u) === i)
 
   async function copyCaption() {
-    try {
-      await navigator.clipboard.writeText(captionText)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1600)
-    } catch { /* clipboard blocked — nothing to do */ }
+    if (!(await copyToClipboard(captionText))) return
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1600)
   }
 
   const nothing = !captionText && !boardText && !images.length && !brief.notes && !brief.links.length

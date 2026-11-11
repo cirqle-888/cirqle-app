@@ -366,6 +366,9 @@ export default async function ContributionsPage() {
         // what you were sent", not everyone in the company.
         viewAll:      viewAll || viewUnit,
         viewActivity: canViewActivity,
+        // Sending a contribution check asks about everyone's credit, so it
+        // takes the full view — not the unit rung. See check/actions.ts.
+        askCheck:     viewAll,
       }}
     />
   )

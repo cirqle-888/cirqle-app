@@ -15,6 +15,7 @@
  *   these helpers are opt-in and only change behavior when isNative().
  */
 import { capPlugin, isNative } from '@/lib/native'
+import { copyToClipboard } from './clipboard'
 
 // ── Share ─────────────────────────────────────────────────────────────────────
 
@@ -73,10 +74,8 @@ export async function writeClipboard(text: string): Promise<boolean> {
       try { await Clipboard.write({ string: text }); return true } catch { /* fall through */ }
     }
   }
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    try { await navigator.clipboard.writeText(text); return true } catch { /* fall through */ }
-  }
-  return false
+  // Desktop bridge → async API → execCommand, same as every other copy button.
+  return copyToClipboard(text)
 }
 
 export async function readClipboard(): Promise<string | null> {

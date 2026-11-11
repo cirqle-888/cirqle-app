@@ -49,6 +49,8 @@ const ActivityPanel = dynamic(() => import('@/components/activity/activity-panel
 const DiscussButton = dynamic(() => import('@/components/chat/discuss-button').then(m => m.DiscussButton), { ssr: false })
 import { PageShell, PageContent, StickyToolbar, PageChrome } from '@/components/layout/page-shell'
 import { toISODate, todayISO } from '@/lib/utils/local-date'
+import { copyToClipboard } from '@/lib/clipboard'
+import { AskCheckBar } from './check/ask-check'
 
 // Heavy task editor — only mount when opened; bundle splits off the
 // contributions route chunk.
@@ -112,6 +114,8 @@ interface Props {
     viewAll?: boolean
     /** true = may see the per-task activity log + post log notes */
     viewActivity?: boolean
+    /** true = may send the filtered list to someone to confirm their credit */
+    askCheck?: boolean
   }
 }
 
@@ -1743,8 +1747,18 @@ export default function ContributionsClient({
 
         <PageContent>
 
-          {/* Named saved views — stores this screen's own URL filters. */}
-          <SavedViews className="mb-3" />
+          {/* Named saved views — stores this screen's own URL filters — and
+              "Ask to check": send the filtered jobs to someone to confirm. */}
+          <div className="mb-3 flex flex-wrap items-center gap-1.5">
+            <SavedViews />
+            <AskCheckBar
+              canAsk={!!permissionFlags.askCheck}
+              employees={employees.map((e: any) => ({ id: e.id, cqid: e.cqid }))}
+              defaultEmployeeId={filterEmployee}
+              taskIds={filteredTasks.map(t => t.id)}
+              myEmployeeId={currentEmployee?.id ?? null}
+            />
+          </div>
 
           {/* ── Tokenized active filters (ERPNext-style chips) ── */}
           <ActiveFilterChips
@@ -1874,7 +1888,7 @@ export default function ContributionsClient({
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span
                                   title={`Task code · click to copy ${taskCode(task)}`}
-                                  onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
+                                  onClick={e => { e.stopPropagation(); void copyToClipboard(taskCode(task)) }}
                                   className="text-[10px] font-mono font-semibold text-muted-foreground/60 bg-foreground/[0.04] border border-foreground/15 px-1.5 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-foreground/25 transition-colors"
                                 >
                                   {taskCode(task)}
@@ -2149,7 +2163,7 @@ export default function ContributionsClient({
                                 <div className="flex items-center gap-1.5 mb-0.5">
                                   <span
                                     title={`Task code · click to copy ${taskCode(task)}`}
-                                    onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
+                                    onClick={e => { e.stopPropagation(); void copyToClipboard(taskCode(task)) }}
                                     className="text-[9px] font-mono font-semibold text-muted-foreground/60 bg-foreground/[0.04] border border-foreground/15 px-1 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-foreground/25 transition-colors"
                                   >
                                     {taskCode(task)}
@@ -2550,7 +2564,7 @@ export default function ContributionsClient({
               {selectedTask?.id && (
                 <span
                   title={`Task code · click to copy ${taskCode(selectedTask)}`}
-                  onClick={() => navigator.clipboard?.writeText(taskCode(selectedTask))}
+                  onClick={() => void copyToClipboard(taskCode(selectedTask))}
                   className="text-[10px] font-mono font-semibold text-muted-foreground/70 bg-foreground/[0.04] border border-foreground/15 px-1.5 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-foreground/25 transition-colors"
                 >
                   {taskCode(selectedTask)}

@@ -78,6 +78,7 @@ import {
   type PendingSource,
 } from './actions'
 import { notifyAnalyticsChanged } from '../analytics-actions'
+import { copyToClipboard } from '@/lib/clipboard'
 import {
   normalizeNoChargeReason, isNoChargeColumnMissing,
   withoutNoChargeReason, isWaivedTask, noChargeReasonLabel,
@@ -3301,7 +3302,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                   <td className="px-5 py-3.5" onClick={e => e.stopPropagation()}>
                     <span
                       title={`Task code · click to copy ${taskCode(task)}`}
-                      onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
+                      onClick={e => { e.stopPropagation(); void copyToClipboard(taskCode(task)) }}
                       className="text-[10px] font-mono font-semibold text-muted-foreground/60 bg-foreground/[0.04] border border-foreground/15 px-1.5 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-foreground/25 transition-colors"
                     >
                       {taskCode(task)}
@@ -3546,7 +3547,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span
                         title={`Task code · ${taskCode(task)}`}
-                        onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
+                        onClick={e => { e.stopPropagation(); void copyToClipboard(taskCode(task)) }}
                         className="text-[10px] font-mono font-semibold text-muted-foreground/70 bg-foreground/[0.04] border border-foreground/15 px-1.5 py-0.5 rounded shrink-0"
                       >
                         {taskCode(task)}
@@ -3966,7 +3967,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                                   <div className="flex items-center gap-1.5 mb-0.5">
                                     <span
                                       title={`Task code · click to copy ${taskCode(task)}`}
-                                      onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(taskCode(task)) }}
+                                      onClick={e => { e.stopPropagation(); void copyToClipboard(taskCode(task)) }}
                                       className="text-[9px] font-mono font-semibold text-muted-foreground/60 bg-foreground/[0.04] border border-foreground/15 px-1 py-0.5 rounded shrink-0 cursor-pointer hover:text-foreground hover:border-foreground/25 transition-colors"
                                     >
                                       {taskCode(task)}

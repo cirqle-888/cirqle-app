@@ -30,6 +30,7 @@ import type { QueueEntry } from '@/lib/social-hub/post-queue-load'
 import { postTiming, formatTime12, timeToMinutes, TIMING_LABEL } from '@/lib/social/posting-time'
 import { savePostContent, markAsPosted, unmarkPosted, myCalendarFeed, revokeMyCalendarFeed } from './actions'
 import { CalendarSubscribe } from '@/components/social-hub/calendar-subscribe'
+import { copyToClipboard } from '@/lib/clipboard'
 
 interface Props {
   initialRows: QueueEntry[]
@@ -319,11 +320,10 @@ function PostEditor({ row, canPublishApi, onClose, onSaved }: {
   const fullText = [caption.trim(), hashtags.trim()].filter(Boolean).join('\n\n')
 
   const copyAll = async () => {
-    try {
-      await navigator.clipboard.writeText(fullText)
+    if (await copyToClipboard(fullText)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1800)
-    } catch { setErr('Could not copy — select the text and copy manually.') }
+    } else setErr('Could not copy — select the text and copy manually.')
   }
 
   const save = (then?: 'posted') => start(async () => {

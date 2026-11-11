@@ -14,6 +14,7 @@ import {
 import { INTAKE_KIND_META } from '@/lib/services/intake'
 import { createTypedClient } from '@/lib/supabase/client'
 import AppSelect from '@/components/ui/app-select'
+import { copyToClipboard } from '@/lib/clipboard'
 
 // Data models
 interface MultiServiceClient {
@@ -50,7 +51,7 @@ function ClientHubHero({ clients }: { clients: MultiServiceClient[] }) {
 
   const handleCopy = async () => {
     if (!selectedClient) return
-    await navigator.clipboard.writeText(hubUrl)
+    if (!(await copyToClipboard(hubUrl))) return
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
