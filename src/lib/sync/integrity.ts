@@ -398,7 +398,8 @@ export async function syncDraftInvoices(taskId: string) {
       .eq('client_id', task.client_id)
       .eq('status', 'draft')
       .like('invoice_number', `INV-${sequenceMonth}-%`)
-      .order('created_at', { ascending: false })
+      // Oldest first: the base number (INV-2612-061), not a stray "-2" duplicate.
+      .order('created_at', { ascending: true })
       .limit(1)
       .maybeSingle()
 
@@ -562,7 +563,8 @@ export async function syncDraftInvoiceExpenses(entryId: string, opts: { cushionE
       .eq('client_id', entry.client_id)
       .eq('status', 'draft')
       .like('invoice_number', `INV-${sequenceMonth}-%`)
-      .order('created_at', { ascending: false })
+      // Oldest first: the base number (INV-2612-061), not a stray "-2" duplicate.
+      .order('created_at', { ascending: true })
       .limit(1)
       .maybeSingle()
 

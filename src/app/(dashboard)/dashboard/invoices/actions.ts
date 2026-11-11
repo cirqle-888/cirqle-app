@@ -16,6 +16,7 @@ import type { RecordInvoicePaymentInput } from '@/lib/finance/record-payment'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { syncDraftInvoices, syncDraftInvoiceExpenses } from '@/lib/sync/integrity'
 import { syncInvoicePackageLines } from '@/lib/packages/sync-invoice'
+import { planDraftMerge } from '@/lib/invoices/merge-drafts'
 import { round2 as r2 } from '@/lib/calculations/currency'
 import type { MissedTask, InvoiceRefreshPreview } from '@/lib/invoices/missed-tasks'
 import { diffInvoiceAgainstTasks, stripDiffPrices, taskLineTotal, type RefreshLine, type RefreshTask } from '@/lib/invoices/refresh-diff'
@@ -68,7 +69,7 @@ export async function recordInvoicePayment(
 
 export async function serverResyncInvoiceTasks(
   invoiceId: string,
-): Promise<ActionResult<{ syncedTasks: number; feeLines: number }>> {
+): Promise<ActionResult<{ syncedTasks: number; feeLines: number; merged: string[] }>> {
   const guard = await requirePermission(PERMS.BILLING_EDIT)
   if (!guard.ok) return { ok: false, error: guard.error }
 
@@ -81,6 +82,11 @@ export async function serverResyncInvoiceTasks(
   if (!inv) return { ok: false, error: 'Invoice not found' }
   if (inv.status !== 'draft') return { ok: false, error: 'Only draft invoices can be resynced' }
   if (!inv.billing_period_start || !inv.billing_period_end) return { ok: false, error: 'Invoice is missing billing period dates' }
+
+  // First fold in any duplicate draft for the same client and month (the "-2"
+  // the trigger used to start while this one was Reviewed). Otherwise the
+  // per-task sync below sees those tasks as invoiced and leaves them there.
+  const merged = await mergeDuplicateDrafts(admin, invoiceId, inv.client_id, inv.billing_period_start)
 
   const { data: items } = await admin.from('invoice_items')
     .select('task_id')
@@ -138,7 +144,79 @@ export async function serverResyncInvoiceTasks(
   } catch { /* best-effort: never fail a resync over package lines */ }
 
   revalidatePath('/dashboard/invoices')
-  return { ok: true, data: { syncedTasks: allIds.length + allExpIds.length, feeLines } }
+  return { ok: true, data: { syncedTasks: allIds.length + allExpIds.length, feeLines, merged } }
+}
+
+/**
+ * Move every line of another DRAFT for this client and billing month onto
+ * `invoiceId`, then delete the emptied duplicate. Returns the invoice numbers
+ * folded in. A duplicate with money against it (a payment or a cashbook
+ * allocation) is left alone — that needs a person, not a resync.
+ */
+async function mergeDuplicateDrafts(
+  admin: ReturnType<typeof createAdminClient>,
+  invoiceId: string,
+  clientId: string | null,
+  periodStart: string,
+): Promise<string[]> {
+  if (!clientId) return []
+  const { data: siblings } = await admin.from('invoices')
+    .select('id, invoice_number, paid_amount')
+    .eq('client_id', clientId)
+    .eq('billing_period_start', periodStart)
+    .eq('status', 'draft')
+    .neq('id', invoiceId)
+  if (!siblings?.length) return []
+
+  const merged: string[] = []
+  for (const sib of siblings) {
+    if (Number(sib.paid_amount || 0) > 0) continue
+    const { count: allocs } = await admin.from('cashbook_invoice_allocations')
+      .select('id', { count: 'exact', head: true }).eq('invoice_id', sib.id)
+    if (allocs) continue
+
+    const [tLines, tExps, sLines, sExps] = await Promise.all([
+      admin.from('invoice_items').select('id, task_id, package_id').eq('invoice_id', invoiceId),
+      admin.from('invoice_expense_items').select('id, cashbook_entry_id').eq('invoice_id', invoiceId),
+      admin.from('invoice_items').select('id, task_id, package_id').eq('invoice_id', sib.id),
+      admin.from('invoice_expense_items').select('id, cashbook_entry_id').eq('invoice_id', sib.id),
+    ])
+    if (tLines.error || tExps.error || sLines.error || sExps.error) continue
+    const plan = planDraftMerge(
+      { lines: tLines.data || [], expenses: tExps.data || [] },
+      { lines: sLines.data || [], expenses: sExps.data || [] },
+    )
+
+    const { data: tail } = await admin.from('invoice_items').select('display_order')
+      .eq('invoice_id', invoiceId).order('display_order', { ascending: false }).limit(1)
+    let order = (tail?.[0]?.display_order ?? -1) + 1
+
+    // Drops first, so a move never collides on (invoice_id, task_id).
+    if (plan.dropLines.length) await admin.from('invoice_items').delete().in('id', plan.dropLines)
+    if (plan.dropExpenses.length) await admin.from('invoice_expense_items').delete().in('id', plan.dropExpenses)
+    for (const id of plan.moveLines) {
+      await admin.from('invoice_items').update({ invoice_id: invoiceId, display_order: order++ }).eq('id', id)
+    }
+    if (plan.moveExpenses.length) {
+      await admin.from('invoice_expense_items').update({ invoice_id: invoiceId }).in('id', plan.moveExpenses)
+    }
+
+    // Only delete it once it is really empty; if anything still points at it
+    // the delete fails and it stays as an empty ₹0 draft.
+    const [{ count: leftLines }, { count: leftExps }] = await Promise.all([
+      admin.from('invoice_items').select('id', { count: 'exact', head: true }).eq('invoice_id', sib.id),
+      admin.from('invoice_expense_items').select('id', { count: 'exact', head: true }).eq('invoice_id', sib.id),
+    ])
+    if (!leftLines && !leftExps) {
+      const { error } = await admin.from('invoices').delete().eq('id', sib.id)
+      if (error) await recalcInvoiceTotals(admin, sib.id)
+    } else {
+      await recalcInvoiceTotals(admin, sib.id)
+    }
+    merged.push(sib.invoice_number)
+  }
+  if (merged.length) await recalcInvoiceTotals(admin, invoiceId)
+  return merged
 }
 
 /**

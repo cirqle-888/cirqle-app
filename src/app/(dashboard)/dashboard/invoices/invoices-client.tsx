@@ -1826,9 +1826,11 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
       const result = await serverResyncInvoiceTasks(inv.id)
       if (!result.ok) throw new Error(result.error)
       const fees = result.data?.feeLines || 0
+      const merged = result.data?.merged ?? []
       success(
         `Processed ${result.data?.syncedTasks || 0} tasks`
-          + (fees > 0 ? ` and ${fees} package line${fees === 1 ? '' : 's'}` : '') + '.',
+          + (fees > 0 ? ` and ${fees} package line${fees === 1 ? '' : 's'}` : '') + '.'
+          + (merged.length ? ` Moved in the lines from ${merged.join(', ')}, a duplicate draft for the same month.` : ''),
         `Invoice resynced`,
       )
       // Refresh list to pull updated items
