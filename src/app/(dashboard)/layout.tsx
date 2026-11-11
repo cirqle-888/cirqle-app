@@ -11,6 +11,7 @@ import { KeyboardGuide } from '@/components/ui/keyboard-guide'
 // TEMPORARY — remove with the bypass. See src/lib/permissions/dev-bypass.ts
 import { PermissionBypassBanner } from '@/components/dev/permission-bypass-banner'
 import { DesktopNotifier } from '@/components/desktop/desktop-notifier'
+import { TempPasswordPrompt } from '@/components/auth/temp-password-prompt'
 import { FloatingCommsWidget } from '@/components/comms/floating-comms-widget'
 import { BirthdayCelebration } from '@/components/ui/birthday-celebration'
 import { FxRatesAutoSync } from './fx-rates-auto-sync'
@@ -232,6 +233,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <CommandPalette />
             <KeyboardGuide />
             <DesktopNotifier />
+            <TempPasswordPrompt />
             <FloatingCommsWidget />
             <FxRatesAutoSync />
             <LastPageRestorer />

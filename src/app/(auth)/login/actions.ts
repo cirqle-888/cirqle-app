@@ -1,6 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
+import { resolveBrandingUrl } from '@/lib/utils/branding'
 
 /**
  * Resolves a login identifier (email OR CQID like "CQID001") to the
@@ -55,17 +56,28 @@ export async function resolveLoginEmail(
  * Returns `null` if no logo has been uploaded — caller should fall back
  * to the default brand placeholder gracefully.
  */
-export async function getCompanyLogo(): Promise<string | null> {
+/**
+ * Every usable workspace logo, best first for the given theme.
+ *
+ * Both Settings slots are returned so the login page can fall back when one
+ * is broken — the light slot once pointed at a website build asset that a
+ * redeploy renamed, and the screen showed the placeholder "C" with a working
+ * logo sitting in the other slot. Values are resolved the same way as the
+ * sidebar (`storage:` paths become public URLs).
+ */
+export async function getCompanyLogo(theme: 'light' | 'dark' = 'light'): Promise<string[]> {
   try {
     const admin = createAdminClient()
     const { data } = await admin
       .from('company_settings')
-      .select('value')
-      .eq('key', 'logo_url')
-      .maybeSingle()
-    const url = (data?.value || '').trim()
-    return url || null
+      .select('key, value')
+      .in('key', ['logo_url', 'logo_url_dark'])
+    const map = Object.fromEntries((data ?? []).map((r: { key: string; value: string | null }) => [r.key, (r.value ?? '').trim()]))
+    const light = resolveBrandingUrl(map.logo_url)
+    const dark = resolveBrandingUrl(map.logo_url_dark)
+    const order = theme === 'dark' ? [dark, light] : [light, dark]
+    return [...new Set(order.filter(Boolean))]
   } catch {
-    return null
+    return []
   }
 }

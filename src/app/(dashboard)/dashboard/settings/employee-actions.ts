@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { headers } from 'next/headers'
 import { requirePermission } from '@/lib/permissions/check'
 import { logActivity } from '@/lib/activity/log'
+import { TEMP_PASSWORD_FLAG } from '@/lib/auth/temp-password'
 
 interface ActionResult<T = void> {
   ok: boolean
@@ -148,8 +149,12 @@ export async function adminResetPassword(employeeId: string): Promise<ActionResu
   if (!emp || !emp.auth_id) return { ok: false, error: 'Employee has no account yet.' }
 
   const tempPassword = 'cirqle-' + crypto.randomUUID().slice(0, 8)
+  // Flag it as temporary so, after signing in, they are offered (not forced)
+  // to set their own. See lib/auth/temp-password.ts.
+  const { data: authUser } = await admin.auth.admin.getUserById(emp.auth_id)
   const { error } = await admin.auth.admin.updateUserById(emp.auth_id, {
     password: tempPassword,
+    app_metadata: { ...(authUser?.user?.app_metadata ?? {}), [TEMP_PASSWORD_FLAG]: true },
   })
   if (error) return { ok: false, error: error.message }
   return { ok: true, data: { tempPassword } }

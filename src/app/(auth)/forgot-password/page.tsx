@@ -10,15 +10,16 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState('')
   const [sent, setSent] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [logoUrl, setLogoUrl] = useState<string | null>(null)
+  const [logos, setLogos] = useState<string[]>([])
+  const logoUrl = logos[0] ?? null
 
   // Same workspace-logo fetch as the login page — this screen hard-coded the
   // default "C" mark regardless of what's uploaded in Settings → Company.
   // Fails silently if no logo is configured; placeholder stays visible.
   useEffect(() => {
     let cancelled = false
-    getCompanyLogo()
-      .then(url => { if (!cancelled) setLogoUrl(url) })
+    getCompanyLogo(document.documentElement.classList.contains('dark') ? 'dark' : 'light')
+      .then(urls => { if (!cancelled) setLogos(urls) })
       .catch(() => {})
     return () => { cancelled = true }
   }, [])
@@ -60,11 +61,11 @@ export default function ForgotPasswordPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           {logoUrl ? (
-            <img
+            <img key={logoUrl}
               src={logoUrl}
               alt="Workspace logo"
               className="mx-auto mb-4 h-14 max-w-[200px] object-contain"
-              onError={() => setLogoUrl(null)}
+              onError={() => setLogos(l => l.slice(1))}
             />
           ) : (
             <div className="inline-flex items-center gap-2 mb-4">

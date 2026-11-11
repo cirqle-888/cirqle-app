@@ -12,7 +12,8 @@ export default function ResetPasswordPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [recoverySession, setRecoverySession] = useState<boolean | null>(null)
-  const [logoUrl, setLogoUrl] = useState<string | null>(null)
+  const [logos, setLogos] = useState<string[]>([])
+  const logoUrl = logos[0] ?? null
   const router = useRouter()
 
   useEffect(() => {
@@ -29,8 +30,8 @@ export default function ResetPasswordPage() {
   // Fails silently if no logo is configured; placeholder stays visible.
   useEffect(() => {
     let cancelled = false
-    getCompanyLogo()
-      .then(url => { if (!cancelled) setLogoUrl(url) })
+    getCompanyLogo(document.documentElement.classList.contains('dark') ? 'dark' : 'light')
+      .then(urls => { if (!cancelled) setLogos(urls) })
       .catch(() => {})
     return () => { cancelled = true }
   }, [])
@@ -62,11 +63,11 @@ export default function ResetPasswordPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           {logoUrl ? (
-            <img
+            <img key={logoUrl}
               src={logoUrl}
               alt="Workspace logo"
               className="mx-auto mb-4 h-14 max-w-[200px] object-contain"
-              onError={() => setLogoUrl(null)}
+              onError={() => setLogos(l => l.slice(1))}
             />
           ) : (
             <div className="inline-flex items-center gap-2 mb-4">

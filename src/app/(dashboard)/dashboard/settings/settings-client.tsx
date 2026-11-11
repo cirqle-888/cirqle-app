@@ -431,7 +431,7 @@ export default function SettingsClient(props: Props) {
   function askAdminResetPassword(emp: any) {
     setConfirmPrompt({
       title: `Reset the password for ${emp.cqid}?`,
-      body: 'Their current password stops working right away. A temporary one is shown to you once — pass it on so they can sign in and set their own.',
+      body: 'Their current password stops working right away. A temporary one is shown to you once — pass it on. After they sign in with it, Cirqle offers to let them set their own (optional).',
       confirmLabel: 'Reset password',
       danger: true,
       onConfirm: () => { void handleAdminResetPassword(emp) },
@@ -4050,7 +4050,7 @@ export default function SettingsClient(props: Props) {
             </div>
 
             <p className="text-xs text-amber-400/80 mb-4">
-              ⚠️ Ask the employee to sign in with this temporary password and immediately change it via &quot;Forgot password&quot; if needed. This password will not be shown again.
+              Send this to {resetPwdModal.cqid}. When they sign in with it, Cirqle offers to let them set their own password — or keep this one. It will not be shown again.
             </p>
 
             <div className="flex gap-2">

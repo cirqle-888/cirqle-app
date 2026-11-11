@@ -28,7 +28,9 @@ function LoginInner() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [remember, setRemember] = useState(true)
-  const [logoUrl, setLogoUrl] = useState<string | null>(null)
+  // Logos to try in order; the first that loads is shown (see getCompanyLogo).
+  const [logos, setLogos] = useState<string[]>([])
+  const logoUrl = logos[0] ?? null
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [hydrated, setHydrated] = useState(false)
@@ -54,11 +56,13 @@ function LoginInner() {
 
   // Fetch the workspace logo (set in Settings → Company) so the login
   // screen reflects the actual brand instead of the default Cirqle "C".
-  // Fails silently if no logo is configured — placeholder stays visible.
+  // A logo that fails to load is skipped for the next one; with none left
+  // the placeholder shows.
   useEffect(() => {
     let cancelled = false
-    getCompanyLogo()
-      .then(url => { if (!cancelled) setLogoUrl(url) })
+    const dark = document.documentElement.classList.contains('dark')
+    getCompanyLogo(dark ? 'dark' : 'light')
+      .then(urls => { if (!cancelled) setLogos(urls) })
       .catch(() => {})
     return () => { cancelled = true }
   }, [])
@@ -113,11 +117,11 @@ function LoginInner() {
             Cirqle brand mark so first-run installs still look polished. */}
         <div className="text-center mb-8">
           {logoUrl ? (
-            <img
+            <img key={logoUrl}
               src={logoUrl}
               alt="Workspace logo"
               className="mx-auto mb-4 h-14 max-w-[200px] object-contain"
-              onError={() => setLogoUrl(null)}
+              onError={() => setLogos(l => l.slice(1))}
             />
           ) : (
             <div className="inline-flex items-center gap-2 mb-4">

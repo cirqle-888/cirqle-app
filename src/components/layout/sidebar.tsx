@@ -217,7 +217,19 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
   const { current: activeWorkspace } = useWorkspace()
   // Local state so a broken/expired logo URL can fall back to the brand mark
   // without leaving a broken-image placeholder visible.
-  const [logoBroken, setLogoBroken] = useState(false)
+  // Logos that failed to load. Each theme's <img> falls back to the other
+  // slot rather than the whole mark dropping to the placeholder: the hidden
+  // light-mode logo failing used to blank a perfectly good dark-mode one.
+  const [brokenLogos, setBrokenLogos] = useState<string[]>([])
+  const markBroken = (src: string | null) => { if (src) setBrokenLogos(b => b.includes(src) ? b : [...b, src]) }
+  // A server-rendered <img> can fail before React attaches onError, so also
+  // check on mount whether it already finished loading with nothing to show.
+  const failedBeforeHydration = (src: string | null) => (el: HTMLImageElement | null) => {
+    if (el && el.complete && el.naturalWidth === 0) markBroken(src)
+  }
+  const usable = (...srcs: (string | null | undefined)[]) => srcs.find(u => !!u && !brokenLogos.includes(u)) ?? null
+  const lightLogo = usable(logoUrl, logoUrlDark)
+  const darkLogo = usable(logoUrlDark, logoUrl)
   const [faviconBroken, setFaviconBroken] = useState(false)
 
   // Requests badge — shared with the App Launcher via RequestsBadgeProvider
@@ -313,7 +325,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
               default and shown in light mode. If only one logo is configured,
               logoUrlLight falls back to logoUrl so both imgs use the same src
               and the correct one is always visible. */}
-          {logoUrl && !logoBroken ? (
+          {lightLogo || darkLogo ? (
             isCollapsed && faviconUrl && !faviconBroken ? (
               /* Collapsed rail: show the favicon / icon mark from Settings — the
                  full wordmark logo doesn't fit. Falls back to the shrunk logo
@@ -328,9 +340,11 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
               <>
                 {/* Light-mode logo (logo_url) — shown in light mode, hidden in dark */}
                 <img
-                  src={logoUrl}
+                  key={`light:${lightLogo ?? ''}`}
+                  src={lightLogo ?? darkLogo ?? undefined}
                   alt="Workspace logo"
-                  onError={() => setLogoBroken(true)}
+                  ref={failedBeforeHydration(lightLogo)}
+                  onError={() => markBroken(lightLogo)}
                   className={`object-contain transition-all duration-300 block dark:hidden ${
                     isCollapsed ? 'w-8 h-8' : 'h-10 max-w-[160px]'
                   }`}
@@ -338,9 +352,11 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
                 {/* Dark-mode logo (logo_url_dark) — shown in dark mode, hidden in light.
                     Falls back to logoUrl when no separate dark logo has been uploaded. */}
                 <img
-                  src={logoUrlDark || logoUrl}
+                  key={`dark:${darkLogo ?? ''}`}
+                  src={darkLogo ?? lightLogo ?? undefined}
                   alt="Workspace logo"
-                  onError={() => setLogoBroken(true)}
+                  ref={failedBeforeHydration(darkLogo)}
+                  onError={() => markBroken(darkLogo)}
                   className={`object-contain transition-all duration-300 hidden dark:block ${
                     isCollapsed ? 'w-8 h-8' : 'h-10 max-w-[160px]'
                   }`}
