@@ -4,10 +4,14 @@ import Link from 'next/link'
 import Header from '@/components/layout/header'
 import {
   Wallet, TrendingUp, AlertTriangle, Users, Activity,
-  CheckCircle2, XCircle, HelpCircle, Clock,
+  CheckCircle2, XCircle, HelpCircle, Clock, ClipboardCheck,
 } from 'lucide-react'
+import type { OwnerCheck } from '@/lib/owner-alerts/rules'
 
 interface Props {
+  ownerCheck: OwnerCheck
+  ownerCheckLines: string[]
+  ownerCheckIncomplete: string[]
   showAmounts: boolean
   cash: {
     bankBalance: number; totalBilled: number; totalPaid: number; badDebtInr: number
@@ -50,7 +54,7 @@ const CLASS_TINT: Record<string, string> = {
   'Watchlist Client': 'text-red-600 dark:text-red-400',
 }
 
-export default function HealthClient({ showAmounts, cash, agingBuckets, clientRisk, cronStatus }: Props) {
+export default function HealthClient({ ownerCheck, ownerCheckLines, ownerCheckIncomplete, showAmounts, cash, agingBuckets, clientRisk, cronStatus }: Props) {
   const amt = (n: number) => showAmounts ? fmt(n) : '••••'
   const agingOrder: (keyof typeof agingBuckets)[] = ['0-30', '31-60', '61-90', '90+']
   const maxBucket = Math.max(1, ...agingOrder.map(k => agingBuckets[k].amount))
@@ -59,6 +63,8 @@ export default function HealthClient({ showAmounts, cash, agingBuckets, clientRi
     <div className="min-h-screen">
       <Header title="Business Health Center" subtitle="Cash, collections, client risk, and whether your automations are actually running" />
       <div className="px-4 sm:px-6 lg:px-8 pb-16 max-w-6xl mx-auto mt-2 space-y-6">
+
+        <OwnerCheckPanel check={ownerCheck} lines={ownerCheckLines} incomplete={ownerCheckIncomplete} amt={amt} />
 
         {/* ── Cash & Collections ──────────────────────────────────── */}
         <section>
@@ -146,5 +152,97 @@ export default function HealthClient({ showAmounts, cash, agingBuckets, clientRi
 
       </div>
     </div>
+  )
+}
+
+// ── Owner check ──────────────────────────────────────────────────────────────
+
+function OwnerCheckPanel({ check, lines, incomplete, amt }: {
+  check: OwnerCheck
+  lines: string[]
+  incomplete: string[]
+  amt: (n: number) => string
+}) {
+  const rows: { label: string; items: { key: string; text: string; href?: string }[] }[] = [
+    {
+      label: 'Invoices not sent',
+      items: check.unsent.items.slice(0, 5).map(u => ({
+        key: u.invoiceId, href: `/dashboard/invoices?id=${u.invoiceId}`,
+        text: `${u.invoiceNumber} · ${u.clientName} · ${amt(u.totalInr)} · dated ${u.daysWaiting} days ago`,
+      })),
+    },
+    {
+      label: 'Largest overdue',
+      items: check.overdue.top.map(t => ({
+        key: t.invoiceId, href: `/dashboard/invoices?id=${t.invoiceId}`,
+        text: `${t.invoiceNumber} · ${t.clientName} · ${amt(t.outstandingInr)} · ${t.daysOverdue} days overdue`,
+      })),
+    },
+    {
+      label: 'Regular clients gone quiet',
+      items: check.quiet.slice(0, 5).map(q => ({
+        key: q.clientId, href: `/dashboard/clients/${q.clientId}`,
+        text: `${q.clientName} · no job for ${q.daysSilent} days · usually ${amt(q.monthlyAvgInr)}/month`,
+      })),
+    },
+    {
+      label: 'Spending less than half their usual',
+      items: check.falling.slice(0, 5).map(f => ({
+        key: f.clientId, href: `/dashboard/clients/${f.clientId}`,
+        text: `${f.clientName} · ${amt(f.recentMonthlyInr)}/month now, was ${amt(f.priorMonthlyInr)}`,
+      })),
+    },
+    {
+      label: 'Requests past their due date',
+      items: check.requestsOverdue.slice(0, 5).map(r => ({
+        key: r.id, href: '/dashboard/requests',
+        text: `REQ-${String(r.ref_no).padStart(4, '0')} ${r.title}${r.client_name ? ` · ${r.client_name}` : ''} · ${r.daysLate} days late`,
+      })),
+    },
+    {
+      label: 'Records to correct',
+      items: check.recordIssues.map(i => ({ key: `${i.invoiceId}-${i.kind}`, href: `/dashboard/invoices?id=${i.invoiceId}`, text: `${i.invoiceNumber}: ${i.detail}` })),
+    },
+    {
+      label: 'Automations failing',
+      items: check.automationFailures.map(f => ({ key: f.name, text: `${f.name}: ${f.lastError || 'failed'} (${f.failedRuns} failed run${f.failedRuns === 1 ? '' : 's'} this week)` })),
+    },
+  ].filter(r => r.items.length > 0)
+
+  return (
+    <section id="owner-check" className="scroll-mt-20">
+      <h2 className="text-sm font-semibold flex items-center gap-2 mb-1"><ClipboardCheck className="w-4 h-4 text-violet-500" /> Owner check</h2>
+      <p className="text-[11px] text-muted-foreground mb-3">
+        Everything that needs a person right now. The same list is sent as a notification every Monday morning.
+        Switch alerts on or off in Settings → Company → Owner alerts.
+      </p>
+      <div className="bg-card border border-border rounded-xl p-4 space-y-4">
+        {incomplete.length > 0 && (
+          <p className="text-[11px] text-amber-600 dark:text-amber-400">Some data could not be read, so this list may be incomplete: {incomplete.join('; ')}</p>
+        )}
+        {lines.length === 0 ? (
+          <p className="text-sm text-muted-foreground flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-500" /> Nothing needs you right now.</p>
+        ) : (
+          <ul className="text-sm space-y-1 list-disc pl-5">
+            {lines.map(l => <li key={l}>{l}</li>)}
+          </ul>
+        )}
+        {(check.cashbook.unreviewed > 0) && (
+          <p className="text-[11px] text-muted-foreground">{check.cashbook.unreviewed} cash book entr{check.cashbook.unreviewed === 1 ? 'y' : 'ies'} from the last 90 days not yet marked reviewed.</p>
+        )}
+        {rows.map(r => (
+          <div key={r.label}>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">{r.label}</p>
+            <ul className="divide-y divide-border border border-border rounded-lg">
+              {r.items.map(i => (
+                <li key={i.key} className="px-3 py-2 text-xs">
+                  {i.href ? <Link href={i.href} className="hover:underline">{i.text}</Link> : i.text}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }

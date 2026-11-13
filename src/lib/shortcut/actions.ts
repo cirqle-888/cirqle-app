@@ -25,7 +25,17 @@ export async function nextTaskNumber(admin: Admin): Promise<number> {
 
 // ── Action handlers ────────────────────────────────────────────────────────
 
-export async function createRequest(admin: Admin, p: { title?: string; client?: string; notes?: string; service?: string; dueDate?: string }) {
+export async function createRequest(admin: Admin, p: {
+  title?: string; client?: string; notes?: string; service?: string; dueDate?: string
+  /**
+   * File it as NEW (unread by staff) instead of as something staff typed in
+   * themselves. Used for items that arrive from outside, such as a WhatsApp
+   * capture, so they show up in the inbox as waiting for a response.
+   */
+  unviewed?: boolean
+  /** Links shown on the request, e.g. the original voice note or photo. */
+  extraLinks?: { label: string; url: string }[]
+}) {
   const title = normalizeTaskTitle(p.title)
   if (!title) return { ok: false, error: 'A title is required.' }
   const client = await findClient(admin, p.client)
@@ -41,13 +51,18 @@ export async function createRequest(admin: Admin, p: { title?: string; client?: 
     due_date: normalizeDate(p.dueDate),
     status: 'submitted',
     client_status: 'submitted',
-    last_staff_viewed_at: now,   // staff-created → don't self-flag as "new"
+    ...(p.unviewed
+      ? { last_external_activity_at: now }   // arrived from outside → flag as "new"
+      : { last_staff_viewed_at: now }),      // staff-created → don't self-flag as "new"
+    ...(p.extraLinks?.length ? { extra_links: p.extraLinks.slice(0, 10) } : {}),
   }).select('id, ref_no, title').single()
   if (error) return { ok: false, error: error.message }
+  const row = data as { id: string; ref_no: number | null; title: string }
   return {
     ok: true, kind: 'request',
-    ref: `REQ-${String((data as any).ref_no ?? 0).padStart(4, '0')}`,
-    title: (data as any).title,
+    id: row.id,
+    ref: `REQ-${String(row.ref_no ?? 0).padStart(4, '0')}`,
+    title: row.title,
     client: client?.name || p.client || null,
     matchedClient: !!client,
   }

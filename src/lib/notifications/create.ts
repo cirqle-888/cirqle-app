@@ -21,6 +21,18 @@ export type NotificationType =
   | 'recurring_tasks_generated'
   | 'payroll_draft_created'
   | 'invoice_overdue'
+  // Owner alerts (lib/owner-alerts)
+  | 'invoice_overdue_stage'
+  | 'invoice_unsent'
+  | 'client_quiet'
+  | 'owner_weekly_check'
+  /** Something shared from WhatsApp was filed in the Requests inbox. */
+  | 'whatsapp_request'
+  | 'whatsapp_capture_failed'
+  /** The gateway reported the spare number logged out / disconnected. */
+  | 'whatsapp_listener_down'
+  /** Listener switched on, but nothing has arrived for a day. */
+  | 'whatsapp_listener_silent'
   | 'offer_sync_failed'
   | 'followup_escalated'
   // Recruitment module

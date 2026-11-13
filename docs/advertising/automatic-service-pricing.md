@@ -1,6 +1,6 @@
 # Automatic advertising service pricing setup
 
-Prepared 28 October 2026. Live records inspected read-only; no production writes performed.
+Prepared 28 October 2026. Activated in production on 29 October 2026; see rollout verification below.
 
 ## Evidence
 
@@ -76,4 +76,27 @@ Vitest advertising and Cashbook suites: 150 tests passed across 16 files.
 Isolated PostgreSQL (PGlite) integration tests cover idempotent wallet credit, edits,
 manual partial/full credits, FX, rejected retagging, deletion/restore and reversals.
 Run `scripts/test-ad-wallet-autocredit.mjs` as described in its header.
-TypeScript project check passed. No production deployment or financial writes performed.
+TypeScript project check passed before rollout. Production activation is recorded below.
+
+
+## Production rollout — 29 October 2026
+
+- Verified production deployment of commit `4305dc22e380e82858a5596f2508ad68699d9920`
+  (GitHub deployment 7390937881, Production, success).
+- Applied and recorded both migrations, then verified the active 30% default service
+  and wallet reconciliation RPC in production.
+- The accountant had already deleted the erroneous ₹80 Cashbook entry and its wallet
+  credit. Both remain inactive. The valid ₹800 funding is credited exactly once;
+  repeated reconciliation did not create another credit.
+- Repaired stale Sea Star links transactionally: the visible project
+  `973a688a-f82d-4076-90ff-f450617d1db2` now owns surviving task #2098 and is the Meta
+  registry owner. Archived duplicate `7c9a4f71-0a1d-40e6-95c2-1463e401cc64` retains
+  the already-deleted task #2094 for history. Existing ₹800 allocation remains on
+  the visible project. No task or financial record was hard-deleted.
+- Refreshed Meta account billing successfully at 2026-10-29 06:20 IST. Actual spend
+  is ₹847.46 excluding GST / ₹1,000 including GST. Task #2098 now carries the
+  Ad Running service and ₹300 billing at 30%. Task #2094 remains deleted and ₹0.
+- Funding is ₹800 versus ₹1,000 consumed: the ₹200 difference needs accountant
+  reconciliation. No missing top-up, service-fee Cashbook entry, or receipt was invented.
+- Existing scheduled advertising sync invokes account funding reconciliation; campaign
+  sync recalculates the linked task fee. Fees do not debit the ad wallet.

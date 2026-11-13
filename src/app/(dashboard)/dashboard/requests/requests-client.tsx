@@ -1148,6 +1148,13 @@ export default function RequestsClient({
             Client &amp; agency submissions — they stay out of Tasks until you start them.
           </p>
         </div>
+        {migrated && (
+          <Link href="/dashboard/requests/pending"
+            title="Who is waiting on us, by client"
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-medium border border-border bg-card hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors shrink-0">
+            <Inbox className="w-3.5 h-3.5" /><span className="hidden sm:inline">Pending by client</span>
+          </Link>
+        )}
         {perms.manage && migrated && (
           <div className="flex items-center gap-2 shrink-0">
             <button

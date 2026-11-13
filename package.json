@@ -10,7 +10,9 @@
     "lint": "eslint --max-warnings 2128",
     "typecheck": "next typegen && tsc --noEmit -p tsconfig.typecheck.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "db:backup": "node scripts/backup-db.mjs --keep 12",
+    "db:backup:verify": "node scripts/backup-verify.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

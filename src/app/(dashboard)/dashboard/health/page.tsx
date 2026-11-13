@@ -5,6 +5,9 @@ import { financialVisibility } from '@/lib/permissions/strip'
 import { billedForCollection, collectedAmount, badDebtLoss } from '@/lib/finance/invoice-revenue'
 import { computeClientScores } from '@/lib/clients/scoring'
 import { daysOverdue } from '@/lib/followups/grouping'
+import { loadOwnerCheckInput } from '@/lib/owner-alerts/load'
+import { buildOwnerCheck, ownerCheckLines } from '@/lib/owner-alerts/rules'
+import { todayISO } from '@/lib/utils/local-date'
 import HealthClient from './health-client'
 
 export const dynamic = 'force-dynamic'
@@ -119,8 +122,16 @@ export default async function BusinessHealthPage() {
     cronStatus = KNOWN_CRONS.map(name => ({ name, ranAt: null, ok: null, summary: null, error: null }))
   }
 
+  // ── Owner check — the same rules the Monday alert uses ─────────────────────
+  const today = todayISO()
+  const owner = await loadOwnerCheckInput(admin, today)
+  const ownerCheck = buildOwnerCheck(owner.input, today)
+
   return (
     <HealthClient
+      ownerCheck={ownerCheck}
+      ownerCheckLines={ownerCheckLines(ownerCheck, showAmounts)}
+      ownerCheckIncomplete={owner.errors}
       showAmounts={showAmounts}
       cash={{ bankBalance, totalBilled, totalPaid, badDebtInr, outstanding, toBeInvoiced, collectionRatePct, totalExpectedCash: bankBalance + outstanding + toBeInvoiced }}
       agingBuckets={buckets}

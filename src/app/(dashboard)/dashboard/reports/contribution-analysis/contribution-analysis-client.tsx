@@ -76,6 +76,8 @@ const PAGE_SIZES = [50, 100, 250, 1000, 0] // 0 = All
 // Keys match the `key` field in buildColumns (e.g. 'task_number', 'client_name').
 const DEFAULT_FROZEN_COLS: string[] = ['task_number', 'title', 'client_name']
 const LS_FROZEN_KEY = 'ca-frozen-cols'
+/** Summary cards shown or hidden — remembered per browser. */
+const LS_SUMMARY_KEY = 'ca-show-summary'
 
 // Default display order for non-employee columns.
 // Change this array to set the factory-default column sequence.
@@ -302,13 +304,15 @@ function buildColumns(employees: EmployeeColumn[], dp: number): Col[] {
 }
 
 // ── Small inline multi-select (chips dropdown) ────────────────────────────────
-function MultiSelect({ label, options, selected, onChange, sortKey }: {
+function MultiSelect({ label, options, selected, onChange, sortKey, hint }: {
   label: string
   options: { id: string; name: string }[]
   selected: string[]
   onChange: (ids: string[]) => void
   /** smart-sort key (e.g. "clients") — orders recently used → frequent → rest */
   sortKey?: string
+  /** Explanation shown on hover, instead of a line of text under the chip. */
+  hint?: string
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -395,9 +399,9 @@ function MultiSelect({ label, options, selected, onChange, sortKey }: {
     else onChange([...new Set([...selected, ...allFilteredIds])])
   }
 
-  const buttonLabel = selected.length
-    ? selected.length === 1 ? (options.find(o => o.id === selected[0])?.name ?? '1 selected') : `${selected.length} selected`
-    : `All ${label.toLowerCase()}`
+  // A chip names its own filter, so no label is needed above it:
+  // "Clients" → "Clients: Sea Star" → "Clients · 3".
+  const picked = selected.length === 1 ? (options.find(o => o.id === selected[0])?.name ?? '1 selected') : null
 
   const panel = open && panelPos && typeof document !== 'undefined' ? createPortal(
     <div
@@ -450,21 +454,22 @@ function MultiSelect({ label, options, selected, onChange, sortKey }: {
   ) : null
 
   return (
-    <div ref={containerRef}>
-      <label className="block text-[11px] font-medium text-muted-foreground mb-1">{label}</label>
+    <div ref={containerRef} className="shrink-0">
       <button
         type="button" onClick={() => setOpen(o => !o)}
-        className="w-full text-left bg-secondary border border-border rounded-lg px-2.5 py-1.5 text-xs hover:border-purple-500/40 focus:outline-none focus:border-purple-500/60 flex items-center justify-between gap-1 transition-colors"
+        title={hint}
+        aria-label={`${label} filter${selected.length ? `, ${selected.length} selected` : ''}`}
+        className={`h-[30px] max-w-[13rem] rounded-lg border px-2.5 text-xs flex items-center gap-1.5 transition-colors focus:outline-none focus-visible:border-purple-500/60 ${
+          selected.length
+            ? 'border-purple-500/40 bg-purple-500/10 text-purple-700 dark:text-purple-200'
+            : 'border-border bg-secondary text-muted-foreground hover:text-foreground hover:border-purple-500/40'
+        }`}
       >
-        <span className="truncate flex items-center gap-1.5">
-          {selected.length > 0 && (
-            <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-purple-500/20 text-purple-400 text-[10px] font-semibold shrink-0">
-              {selected.length}
-            </span>
-          )}
-          {buttonLabel}
+        <span className="truncate">
+          {label}
+          {picked ? <>: <span className="font-medium">{picked}</span></> : selected.length > 1 ? <> · <span className="font-medium">{selected.length}</span></> : null}
         </span>
-        <ChevronDown className={`w-3 h-3 shrink-0 transition-transform text-muted-foreground ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`w-3 h-3 shrink-0 transition-transform opacity-60 ${open ? 'rotate-180' : ''}`} />
       </button>
       {panel}
     </div>
@@ -541,7 +546,20 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
   const [groups, setGroups] = useState<ColGroup[]>(hasUrlCols ? initial.groups : ((dbLayout?.groups as ColGroup[] | undefined) ?? initial.groups))
   const groupSet = useMemo(() => new Set(groups), [groups])
   const [groupKey, setGroupKey] = useState<GroupKey>(initial.groupKey)
+  // Starts shown (so server and first client render agree), then takes the
+  // remembered choice; every toggle is remembered for next time.
   const [showSummary, setShowSummary] = useState(true)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- browser storage only exists after mount; reading it in the initializer would make server and client render differently.
+    try { if (localStorage.getItem(LS_SUMMARY_KEY) === '0') setShowSummary(false) } catch {}
+  }, [])
+  const toggleSummary = useCallback(() => {
+    setShowSummary(s => {
+      const next = !s
+      try { localStorage.setItem(LS_SUMMARY_KEY, next ? '1' : '0') } catch {}
+      return next
+    })
+  }, [])
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
 
   // ── Freeze columns ──────────────────────────────────────────────────────────
@@ -1068,7 +1086,25 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
       <Header title="Contribution Analysis" subtitle="Per-task profitability, earnings & employee contribution breakdown" />
 
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
-        {/* Summary cards */}
+        {/* Summary cards — one click on the bar hides or shows them; when
+            hidden the bar keeps the two figures people look for first. */}
+        <button
+          type="button"
+          onClick={toggleSummary}
+          aria-expanded={showSummary}
+          className="w-full flex items-center gap-2 text-left text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform ${showSummary ? '' : '-rotate-90'}`} />
+          <span className="font-medium text-foreground">Summary</span>
+          {!showSummary && (
+            <span className="min-w-0 truncate tabular-nums">
+              · Billing {inr(summary.totalBilling, 0)} · Net profit{' '}
+              <span className={summary.totalNetProfit < 0 ? 'text-red-400' : 'text-emerald-400'}>{inr(summary.totalNetProfit, 0)}</span>
+              {' '}· {fmt(summary.totalTasks, 0)} tasks
+            </span>
+          )}
+          <span className="ml-auto shrink-0">{showSummary ? 'Hide' : 'Show'}</span>
+        </button>
         {showSummary && (
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-3">
             {[
@@ -1192,7 +1228,7 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
             {/* View controls */}
             <div className={TB_SEGMENT}>
               <button
-                onClick={() => setShowSummary(s => !s)}
+                onClick={toggleSummary}
                 title={showSummary ? 'Hide summary cards' : 'Show summary cards'}
                 aria-label={showSummary ? 'Hide summary cards' : 'Show summary cards'}
                 className={TB_ICON}
@@ -1452,37 +1488,41 @@ export default function ContributionAnalysisClient({ rows, employees, clients, s
 
         {/* Filter panel */}
         {showFilters && (
-          <div className="bg-card border border-border rounded-xl p-4 space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">Date</label>
-                <DateFilter value={filters.date}
-                  onChange={d => {
-                    // Clearing the date here is a deliberate "show me everything".
-                    if (d === null) setDateExplicitAll(true)
-                    setFilters(f => ({ ...f, date: d }))
-                  }}
-                  className="w-full [&>button]:w-full [&>button]:border-border" compact />
-                {!filters.date && dataWindowLabel && !dateExplicitAll && (
-                  <p className="mt-1 text-[10px] text-muted-foreground/70">
-                    Showing {dataWindowLabel} — pick a date (or clear it) for other periods.
-                  </p>
-                )}
-              </div>
-              <MultiSelect label="Clients" options={scopedClients} selected={filters.clientIds} onChange={ids => setFilters(f => ({ ...f, clientIds: ids }))} sortKey="clients" />
-              <MultiSelect label="Services" options={scopedServices} selected={filters.serviceIds} onChange={ids => setFilters(f => ({ ...f, serviceIds: ids }))} sortKey="services" />
-              <MultiSelect label="Department" options={categories} selected={filters.categoryIds} onChange={ids => setFilters(f => ({ ...f, categoryIds: ids }))} />
-              <div>
-                <MultiSelect label="Team / Region" options={unitOptions} selected={filters.unitIds} onChange={ids => setFilters(f => ({ ...f, unitIds: ids }))} />
-                <p className="mt-1 text-[10px] text-muted-foreground/70">
-                  {orgUnits.length === 0
-                    ? 'No teams or regions yet — create them in Settings → Organization.'
-                    : 'A unit’s mapped clients and services, plus work its members contributed to.'}
-                </p>
-              </div>
-              <MultiSelect label="Has contributor" options={scopedContribEmployees} selected={filters.employeeIds || []} onChange={ids => setFilters(f => ({ ...f, employeeIds: ids }))} />
-              <MultiSelect label="Status" options={STATUSES.map(s => ({ id: s, name: s }))} selected={filters.statuses} onChange={ids => setFilters(f => ({ ...f, statuses: ids }))} />
-            </div>
+          // One row of small chips, each as wide as its own text. Helper
+          // notes live in hover titles rather than lines under each box.
+          <div className="bg-card border border-border rounded-xl px-2.5 py-2 flex flex-wrap items-center gap-1.5">
+            <DateFilter value={filters.date}
+              onChange={d => {
+                // Clearing the date here is a deliberate "show me everything".
+                if (d === null) setDateExplicitAll(true)
+                setFilters(f => ({ ...f, date: d }))
+              }}
+              className="shrink-0 [&>button]:border-border" compact />
+            <MultiSelect label="Clients" options={scopedClients} selected={filters.clientIds} onChange={ids => setFilters(f => ({ ...f, clientIds: ids }))} sortKey="clients" />
+            <MultiSelect label="Services" options={scopedServices} selected={filters.serviceIds} onChange={ids => setFilters(f => ({ ...f, serviceIds: ids }))} sortKey="services" />
+            <MultiSelect label="Department" options={categories} selected={filters.categoryIds} onChange={ids => setFilters(f => ({ ...f, categoryIds: ids }))} />
+            {/* No teams or regions set up → nothing to filter by, so no chip. */}
+            {orgUnits.length > 0 && (
+              <MultiSelect label="Team / Region" options={unitOptions} selected={filters.unitIds} onChange={ids => setFilters(f => ({ ...f, unitIds: ids }))}
+                hint="A unit’s mapped clients and services, plus work its members contributed to." />
+            )}
+            <MultiSelect label="Contributor" options={scopedContribEmployees} selected={filters.employeeIds || []} onChange={ids => setFilters(f => ({ ...f, employeeIds: ids }))}
+              hint="Only tasks this person contributed to." />
+            <MultiSelect label="Status" options={STATUSES.map(s => ({ id: s, name: s }))} selected={filters.statuses} onChange={ids => setFilters(f => ({ ...f, statuses: ids }))} />
+            {activeFilterCount > (filters.date ? 1 : 0) && (
+              <button
+                type="button"
+                onClick={() => setFilters(f => ({ ...EMPTY_FILTERS, date: f.date }))}
+                className="h-[30px] px-2 text-xs text-muted-foreground hover:text-red-500"
+              >
+                Clear
+              </button>
+            )}
+            {!filters.date && dataWindowLabel && !dateExplicitAll && (
+              <span className="ml-auto text-[10px] text-muted-foreground/70" title="Pick a date (or clear it) for other periods.">
+                Showing {dataWindowLabel}
+              </span>
+            )}
           </div>
         )}
 
