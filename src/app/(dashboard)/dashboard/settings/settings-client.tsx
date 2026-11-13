@@ -45,7 +45,8 @@ import { buildInvoiceShareText } from '@/lib/invoices/share'
 import { buildReminderText } from '@/lib/followups/grouping'
 import { todayISO } from '@/lib/utils/local-date'
 import { OWNER_ALERT_SWITCHES, ownerAlertOn } from '@/lib/owner-alerts/switches'
-import { LISTENER_KEYS, LISTENER_SERVER_KEYS, aiFilterOn, listenerEnabled, listenerHealth, parseGroupList, parseSeen } from '@/lib/whatsapp-listener/rules'
+import { LISTENER_KEYS, LISTENER_SERVER_KEYS, aiFilterOn, listenerEnabled, listenerHealth } from '@/lib/whatsapp-listener/rules'
+import WhatsAppListenerMap from '@/components/settings/whatsapp-listener-map'
 
 const AllocationRebuildPanel = dynamic(
   () => import('@/components/cashbook/allocation-rebuild-panel'),
@@ -102,7 +103,7 @@ function ArchFilterTabs({ value, onChange }: { value: 'active' | 'archived' | 'a
 const SETTINGS_TABS = [
   'Company', 'Employees', 'Services', 'Departments',
   'Groups & Params', 'Tools', 'Bank Accounts', 'Cash Categories', 'Exchange Rates',
-  'Privacy & Security', 'Message Templates', 'Matching'
+  'Privacy & Security', 'Message Templates', 'WhatsApp Listener', 'Matching'
 ] as const
 type SettingsTab = typeof SETTINGS_TABS[number]
 
@@ -128,7 +129,7 @@ const SETTINGS_GROUPS: { label: string; emoji: string; tabs: SettingsTab[] }[] =
   { label: 'People',          emoji: '👥', tabs: ['Employees'] },
   { label: 'Service Catalog', emoji: '📦', tabs: ['Services', 'Departments'] },
   { label: 'Finance',         emoji: '💸', tabs: ['Bank Accounts', 'Cash Categories'] },
-  { label: 'Communication',   emoji: '💬', tabs: ['Message Templates'] },
+  { label: 'Communication',   emoji: '💬', tabs: ['Message Templates', 'WhatsApp Listener'] },
   { label: 'Advanced',        emoji: '⚙️', tabs: ['Groups & Params', 'Tools', 'Exchange Rates', 'Matching'] },
 ]
 
@@ -1733,118 +1734,6 @@ export default function SettingsClient(props: Props) {
                 })}
               </div>
 
-              {/* WhatsApp listener — lib/whatsapp-listener, docs/WHATSAPP_LISTENER.md */}
-              <div className="space-y-4 border-t border-border pt-5">
-                <div>
-                  <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">WhatsApp listener</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Files requests from client WhatsApp chats through a spare, listen-only number. Only the chats listed below are read.
-                  </p>
-                </div>
-                <div className="bg-amber-500/8 border border-amber-500/20 rounded-lg px-3 py-2 text-[11px] text-amber-400/80">
-                  ⚠️ This uses an unofficial WhatsApp connection. It breaks WhatsApp&apos;s terms and the listener number can be banned. Never connect your main number, and tell clients the number reads the group.
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-foreground mb-1.5">Listener</label>
-                  <div className="flex gap-1.5">
-                    {([
-                      { val: 'on', lbl: 'On' },
-                      { val: 'off', lbl: 'Off' },
-                    ] as const).map(({ val, lbl }) => (
-                      <button
-                        key={val}
-                        type="button"
-                        onClick={() => setCompanySettings(p => ({ ...p, [LISTENER_KEYS.enabled]: val }))}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                          (listenerEnabled(companySettings) ? 'on' : 'off') === val
-                            ? 'bg-primary/20 border-primary/50 text-primary'
-                            : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
-                        }`}
-                      >{lbl}</button>
-                    ))}
-                  </div>
-                </div>
-                {(() => {
-                  const health = listenerHealth(companySettings, openedAtMs)
-                  const session = (companySettings[LISTENER_KEYS.session] || '').split(' @ ')[0]
-                  const text =
-                    health.state === 'off' ? null
-                    : health.state === 'no-chats' ? 'On, but no chats are listed yet, so nothing is read.'
-                    : health.state === 'never' ? 'On, but the gateway has never called. Check OpenWA and its webhook.'
-                    : health.state === 'silent' ? `Nothing received for ${health.hours} hours. If the groups were active, the gateway is down.`
-                    : `Working: last heard from the gateway ${health.hours === 0 ? 'within the last hour' : `${health.hours} hour${health.hours === 1 ? '' : 's'} ago`}.`
-                  if (!text) return null
-                  const bad = health.state === 'never' || health.state === 'silent'
-                  return (
-                    <p className={`text-[11px] rounded-lg px-3 py-2 border ${bad ? 'text-red-600 dark:text-red-400 border-red-500/25 bg-red-500/5' : 'text-muted-foreground border-border bg-secondary/50'}`}>
-                      {text}{session ? ` Gateway status: ${session}.` : ''} A warning is also sent to admins after 24 hours of silence.
-                    </p>
-                  )
-                })()}
-                <div>
-                  <label className="block text-xs font-medium text-foreground mb-0.5">Filter chatter with AI</label>
-                  <p className="text-[11px] text-muted-foreground/60 mb-1.5">
-                    On: AI drops text that is not a request. Off: every message is captured except &quot;ok&quot;, &quot;thanks&quot; and emoji, and you pick the real requests in the inbox. If AI is unavailable it behaves as Off.
-                  </p>
-                  <div className="flex gap-1.5">
-                    {([
-                      { val: 'on', lbl: 'On' },
-                      { val: 'off', lbl: 'Off — capture everything' },
-                    ] as const).map(({ val, lbl }) => (
-                      <button
-                        key={val}
-                        type="button"
-                        onClick={() => setCompanySettings(p => ({ ...p, [LISTENER_KEYS.aiFilter]: val }))}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                          (aiFilterOn(companySettings) ? 'on' : 'off') === val
-                            ? 'bg-primary/20 border-primary/50 text-primary'
-                            : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
-                        }`}
-                      >{lbl}</button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label htmlFor="wa-listener-groups" className="block text-xs font-medium text-foreground mb-0.5">Chats to read</label>
-                  <p className="text-[11px] text-muted-foreground/60 mb-1.5">
-                    One per line: <code>chat id = client name</code>. A chat that is not listed is never read.
-                    {' '}{parseGroupList(companySettings[LISTENER_KEYS.groups]).size} listed.
-                  </p>
-                  <textarea
-                    id="wa-listener-groups"
-                    rows={5}
-                    spellCheck={false}
-                    value={companySettings[LISTENER_KEYS.groups] || ''}
-                    onChange={e => setCompanySettings(p => ({ ...p, [LISTENER_KEYS.groups]: e.target.value }))}
-                    placeholder={'120363021234567890@g.us = Sea Star Supermarket'}
-                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-xs font-mono"
-                  />
-                </div>
-                {(() => {
-                  const listed = parseGroupList(companySettings[LISTENER_KEYS.groups])
-                  const seen = Object.entries(parseSeen(companySettings[LISTENER_KEYS.seen]))
-                    .filter(([id]) => !listed.has(id))
-                    .sort((a, b) => (a[1].at < b[1].at ? 1 : -1))
-                  if (!seen.length) return null
-                  return (
-                    <div>
-                      <p className="text-xs font-medium text-foreground mb-0.5">Seen but not listed</p>
-                      <p className="text-[11px] text-muted-foreground/60 mb-1.5">
-                        Chats the listener number is in. Nothing from them is stored except this line. Copy an id into the list above to start reading it.
-                      </p>
-                      <ul className="divide-y divide-border border border-border rounded-lg">
-                        {seen.map(([id, info]) => (
-                          <li key={id} className="px-3 py-2 text-[11px] flex flex-wrap items-center justify-between gap-2">
-                            <code className="select-all">{id}</code>
-                            <span className="text-muted-foreground">last message from {info.by || 'unknown'} · {new Date(info.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )
-                })()}
-              </div>
-
               <button onClick={saveCompanySettings} disabled={saving} className="gradient-bg text-white text-sm font-medium px-5 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">
                 {saving ? 'Saving…' : 'Save Settings'}
               </button>
@@ -3168,6 +3057,93 @@ export default function SettingsClient(props: Props) {
                   ))}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* WhatsApp Listener */}
+          {tab === 'WhatsApp Listener' && (
+            <div className="space-y-5 max-w-3xl">
+              {/* WhatsApp listener — lib/whatsapp-listener, docs/WHATSAPP_LISTENER.md */}
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">WhatsApp listener</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Files requests from client WhatsApp chats through a spare, listen-only number. Only the chats listed below are read.
+                  </p>
+                </div>
+                <div className="bg-amber-500/8 border border-amber-500/20 rounded-lg px-3 py-2 text-[11px] text-amber-400/80">
+                  ⚠️ This uses an unofficial WhatsApp connection. It breaks WhatsApp&apos;s terms and the listener number can be banned. Never connect your main number, and tell clients the number reads the group.
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1.5">Listener</label>
+                  <div className="flex gap-1.5">
+                    {([
+                      { val: 'on', lbl: 'On' },
+                      { val: 'off', lbl: 'Off' },
+                    ] as const).map(({ val, lbl }) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setCompanySettings(p => ({ ...p, [LISTENER_KEYS.enabled]: val }))}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                          (listenerEnabled(companySettings) ? 'on' : 'off') === val
+                            ? 'bg-primary/20 border-primary/50 text-primary'
+                            : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
+                        }`}
+                      >{lbl}</button>
+                    ))}
+                  </div>
+                </div>
+                {(() => {
+                  const health = listenerHealth(companySettings, openedAtMs)
+                  const session = (companySettings[LISTENER_KEYS.session] || '').split(' @ ')[0]
+                  const text =
+                    health.state === 'off' ? null
+                    : health.state === 'no-chats' ? 'On, but no chats are listed yet, so nothing is read.'
+                    : health.state === 'never' ? 'On, but the gateway has never called. Check OpenWA and its webhook.'
+                    : health.state === 'silent' ? `Nothing received for ${health.hours} hours. If the groups were active, the gateway is down.`
+                    : `Working: last heard from the gateway ${health.hours === 0 ? 'within the last hour' : `${health.hours} hour${health.hours === 1 ? '' : 's'} ago`}.`
+                  if (!text) return null
+                  const bad = health.state === 'never' || health.state === 'silent'
+                  return (
+                    <p className={`text-[11px] rounded-lg px-3 py-2 border ${bad ? 'text-red-600 dark:text-red-400 border-red-500/25 bg-red-500/5' : 'text-muted-foreground border-border bg-secondary/50'}`}>
+                      {text}{session ? ` Gateway status: ${session}.` : ''} A warning is also sent to admins after 24 hours of silence.
+                    </p>
+                  )
+                })()}
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-0.5">Filter chatter with AI</label>
+                  <p className="text-[11px] text-muted-foreground/60 mb-1.5">
+                    On: AI drops text that is not a request. Off: every message is captured except &quot;ok&quot;, &quot;thanks&quot; and emoji, and you pick the real requests in the inbox. If AI is unavailable it behaves as Off.
+                  </p>
+                  <div className="flex gap-1.5">
+                    {([
+                      { val: 'on', lbl: 'On' },
+                      { val: 'off', lbl: 'Off — capture everything' },
+                    ] as const).map(({ val, lbl }) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setCompanySettings(p => ({ ...p, [LISTENER_KEYS.aiFilter]: val }))}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                          (aiFilterOn(companySettings) ? 'on' : 'off') === val
+                            ? 'bg-primary/20 border-primary/50 text-primary'
+                            : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
+                        }`}
+                      >{lbl}</button>
+                    ))}
+                  </div>
+                </div>
+                <WhatsAppListenerMap
+                  settings={companySettings}
+                  onChange={(key, value) => setCompanySettings(p => ({ ...p, [key]: value }))}
+                  clients={props.clients}
+                  people={(employees as { name?: string; is_active?: boolean }[]).filter(e => e.is_active !== false).map(e => e.name || '').filter(Boolean)}
+                />
+              </div>
+              <button onClick={saveCompanySettings} disabled={saving} className="gradient-bg text-white text-sm font-medium px-5 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">
+                {saving ? 'Saving…' : 'Save Settings'}
+              </button>
             </div>
           )}
 

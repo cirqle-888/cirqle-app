@@ -2,7 +2,7 @@ import { createHmac } from 'crypto'
 import { describe, expect, it, vi } from 'vitest'
 import {
   addSeen, appendedDescription, decide, isAcknowledgement, isCapturableType, listenerEnabled, parseEnvelope,
-  parseGroupList, parseSeen, verifySignature, MAX_SEEN, type ListenerMessage,
+  parseGroupList, parseGroupNames, parseNumberList, parseNumberRows, parseSeen, phoneMatchKey, serializeGroupList, serializeNumberList, verifySignature, MAX_SEEN, type ListenerMessage,
   aiFilterOn, isBadSessionStatus, listenerHealth, parseSessionStatus, shouldWriteHeard, LISTENER_SERVER_KEYS, SILENT_AFTER_HOURS,
 } from './rules'
 import { handleListenerMessage, type ListenerDeps } from './handle'
@@ -75,6 +75,56 @@ describe('settings', () => {
     const map = parseGroupList(`# client groups\n${GROUP} = Sea Star Supermarket\n\n919876543210@c.us=Goodwill\n120363099@g.us\nnot a chat = Nobody\nhttps://chat.whatsapp.com/abc = X`)
     expect([...map.entries()]).toEqual([[GROUP, 'Sea Star Supermarket'], ['919876543210@c.us', 'Goodwill'], ['120363099@g.us', '']])
     expect(parseGroupList(null).size).toBe(0)
+  })
+
+  it('matches phone numbers on their last 9 digits, whatever the format', () => {
+    expect(phoneMatchKey('+91 98765 43210')).toBe('876543210')
+    expect(phoneMatchKey('919876543210@c.us')).toBe(phoneMatchKey('98765-43210'))
+    // A UAE number saved locally matches the international form WhatsApp sends.
+    expect(phoneMatchKey('050 123 4567')).toBe(phoneMatchKey('971501234567'))
+    expect(phoneMatchKey('12345')).toBe('')
+    expect(phoneMatchKey(null)).toBe('')
+  })
+
+  it('parses the Cirqle numbers list, labels optional, and counts lines it cannot use', () => {
+    const { numbers, invalid } = parseNumberList(
+      '# shared lines\n+91 98765 43210 = Cirqle Design line (shared)\n\n+971 50 123 4567=Safoora (personal)\n9000011111\nAjid = no number here\n123 = too short',
+    )
+    expect([...numbers.entries()]).toEqual([
+      ['876543210', 'Cirqle Design line (shared)'],
+      ['501234567', 'Safoora (personal)'],
+      ['000011111', ''],
+    ])
+    expect(invalid).toBe(2)
+    expect(parseNumberList(undefined)).toEqual({ numbers: new Map(), invalid: 0 })
+  })
+
+  it('writes the Settings tables back as the text the listener reads', () => {
+    const groups = serializeGroupList([
+      { id: GROUP, client: 'Sea Star Supermarket' },
+      { id: '120363099@g.us', client: '' },
+      { id: 'not a chat', client: 'Nobody' },
+      { id: ` ${GROUP.replace('7890', '0000')} `, client: 'Two\nlines' },
+    ])
+    expect(groups).toBe(`${GROUP} = Sea Star Supermarket\n120363099@g.us\n${GROUP.replace('7890', '0000')} = Two lines`)
+    expect([...parseGroupList(groups).values()]).toEqual(['Sea Star Supermarket', '', 'Two lines'])
+
+    const rows = [
+      { number: '+91 98765 43210', who: 'Design line (shared)' },
+      { number: '9000011111', who: '' },
+      { number: '', who: '' },
+      { number: '98=76', who: 'x' },
+    ]
+    const text = serializeNumberList(rows)
+    expect(text).toBe('+91 98765 43210 = Design line (shared)\n9000011111\n9876 = x')
+    expect(parseNumberRows(text)).toEqual([rows[0], rows[1], { number: '9876', who: 'x' }])
+    expect(parseNumberRows('# note\n\n')).toEqual([])
+  })
+
+  it('reads group display names, ignoring anything malformed', () => {
+    expect(parseGroupNames(JSON.stringify({ [GROUP]: 'Sea Star@Cirqle', bad: 5 }))).toEqual({ [GROUP]: 'Sea Star@Cirqle' })
+    expect(parseGroupNames('not json')).toEqual({})
+    expect(parseGroupNames('[1]')).toEqual({})
   })
 
   it('keeps a short list of unlisted chats, newest first, with no content', () => {

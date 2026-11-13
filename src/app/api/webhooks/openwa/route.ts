@@ -3,7 +3,7 @@ import { after, NextRequest, NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createAdminClient } from '@/lib/supabase/server'
 import { createRequest } from '@/lib/shortcut/actions'
-import { aiParse, normalizePhone } from '@/lib/ai/request-capture'
+import { aiParse } from '@/lib/ai/request-capture'
 import { callGroqJSON } from '@/lib/ai/groq'
 import { transcribeAudio } from '@/lib/ai/transcribe'
 import { readImageText } from '@/lib/ai/vision'
@@ -11,8 +11,8 @@ import { notifyAdmins } from '@/lib/notifications/create'
 import { safeStorageName, type PartKind, type SharedFile } from '@/lib/shortcut/whatsapp-capture'
 import { handleListenerMessage, type ListenerDeps, type RecentRequest } from '@/lib/whatsapp-listener/handle'
 import {
-  addSeen, aiFilterOn, isBadSessionStatus, listenerEnabled, parseEnvelope, parseGroupList, parseSeen,
-  parseSessionStatus, shouldWriteHeard, verifySignature,
+  addSeen, aiFilterOn, isBadSessionStatus, listenerEnabled, parseEnvelope, parseGroupList, parseNumberList, parseSeen,
+  parseSessionStatus, phoneMatchKey, shouldWriteHeard, verifySignature,
   BURST_MINUTES, LISTENER_KEYS, type ListenerMessage,
 } from '@/lib/whatsapp-listener/rules'
 
@@ -49,13 +49,19 @@ async function loadSettings(admin: SupabaseClient): Promise<Record<string, strin
 
 function buildDeps(admin: SupabaseClient, settings: Record<string, string>): ListenerDeps {
   const month = new Date().toISOString().slice(0, 7)
+  const staffNumbers = parseNumberList(settings[LISTENER_KEYS.staffNumbers]).numbers
   return {
     enabled: listenerEnabled(settings),
     groups: parseGroupList(settings[LISTENER_KEYS.groups]),
 
-    isStaffPhone: async last10 => {
+    // Cirqle is talking when the sender is on the listener's own number list
+    // (shared lines, personal numbers, freelancers) or is an active employee's saved phone.
+    isStaffPhone: async phone => {
+      const key = phoneMatchKey(phone)
+      if (!key) return false
+      if (staffNumbers.has(key)) return true
       const { data } = await admin.from('employees').select('phone').eq('is_active', true)
-      return (data || []).some((e: { phone: string | null }) => normalizePhone(e.phone) === last10)
+      return (data || []).some((e: { phone: string | null }) => phoneMatchKey(e.phone) === key)
     },
 
     isDuplicate: async messageId => {

@@ -26,7 +26,8 @@ export interface ListenerDeps extends Pick<CaptureDeps, 'transcribe' | 'readImag
   enabled: boolean
   /** Allow-listed chats: chat id → client name ('' when the line names no client). */
   groups: ReadonlyMap<string, string>
-  isStaffPhone: (last10: string) => Promise<boolean>
+  /** Is this sender Cirqle (a listed Cirqle number or an active employee's phone)? */
+  isStaffPhone: (phone: string) => Promise<boolean>
   isDuplicate: (messageId: string) => Promise<boolean>
   /** The same sender's request from this chat, filed in the last few minutes and still untouched. */
   recentRequest: (chatId: string, senderId: string) => Promise<RecentRequest | null>

@@ -61,7 +61,7 @@ A message in a listed chat arrives at Cirqle App within seconds and is handled l
 | Message | What happens |
 |---|---|
 | Sent by the listener number itself | Ignored |
-| Sent by a Cirqle employee (phone matches an active employee) | Ignored |
+| Sent from a Cirqle number: listed under **Cirqle numbers** in Settings (shared lines, personal numbers used for work, freelancers), or an active employee's saved phone. Numbers match on their last 9 digits | Ignored |
 | Sticker, video, document, poll, call, deleted message | Ignored |
 | "ok", "thanks", an emoji, a greeting | Ignored |
 | Text that follows the same person's request from the last 10 minutes | Added to that request |
@@ -115,7 +115,7 @@ private: do not expose port 2785 to the internet. OpenWA only needs to make outg
 
 ### 4. Switch it on
 
-In Cirqle App → Settings → Company → **WhatsApp listener**:
+In Cirqle App → Settings → **WhatsApp Listener** (under Communication):
 
 1. Get each group's id. Either:
    - ask OpenWA for the groups the spare number is in (`GET /api/sessions/{sessionId}/groups`, with its
@@ -156,7 +156,7 @@ The client name is not affected: it comes from the list in Settings, not from AI
   2. The daily alert job (09:00) warns when the listener is On, chats are listed, and nothing at all has
      arrived for 24 hours. A quiet day in every group looks the same, so the warning says "check".
      Because that job runs once a day, a gateway that died in the morning is reported the next morning.
-  3. Settings → Company → WhatsApp listener shows when the gateway was last heard and its last status.
+  3. Settings → WhatsApp Listener shows when the gateway was last heard and its last status.
 - A linked device that stays offline for a long time may be logged out by WhatsApp; scan the QR code again.
 - Use the share shortcut until it is back.
 

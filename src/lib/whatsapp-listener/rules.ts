@@ -123,6 +123,10 @@ export const LISTENER_KEYS = {
   lastHeard: 'whatsapp_listener_last_heard',
   /** Last session status the gateway reported, as `<status> @ <ISO time>`. */
   session: 'whatsapp_listener_session',
+  /** Numbers Cirqle people post from (shared lines, personal numbers, freelancers): never filed. */
+  staffNumbers: 'whatsapp_listener_staff_numbers',
+  /** JSON of chat id → WhatsApp group name, shown in the Settings table. Display only. */
+  groupNames: 'whatsapp_listener_group_names',
 } as const
 
 /** Rows the listener writes itself. The Settings page must never save its stale copy over them. */
@@ -203,9 +207,101 @@ export function parseGroupList(text: string | null | undefined): Map<string, str
     const at = line.indexOf('=')
     const id = (at === -1 ? line : line.slice(0, at)).trim()
     const client = at === -1 ? '' : line.slice(at + 1).trim()
-    if (/^[\w.+-]+@(g\.us|c\.us|s\.whatsapp\.net|lid)$/.test(id)) map.set(id, client)
+    if (isChatId(id)) map.set(id, client)
   }
   return map
+}
+
+/** A WhatsApp chat id: a group (`…@g.us`) or a direct chat. */
+export function isChatId(id: string): boolean {
+  return /^[\w.+-]+@(g\.us|c\.us|s\.whatsapp\.net|lid)$/.test(id)
+}
+
+const oneLine = (s: string) => s.replace(/[\r\n]+/g, ' ').trim()
+
+/** The allow-list text for table rows; the inverse of `parseGroupList`. Rows without a valid chat id are dropped. */
+export function serializeGroupList(rows: readonly { id: string; client: string }[]): string {
+  return rows
+    .map(r => ({ id: r.id.trim(), client: oneLine(r.client) }))
+    .filter(r => isChatId(r.id))
+    .map(r => (r.client ? `${r.id} = ${r.client}` : r.id))
+    .join('\n')
+}
+
+/**
+ * Display names for listed chats (chat id → the group's WhatsApp name), so the
+ * Settings table can show "Sea Star@Cirqle" instead of a long id. Display
+ * only: the listener never reads this.
+ */
+export function parseGroupNames(json: string | null | undefined): Record<string, string> {
+  try {
+    const v = JSON.parse(json || '{}')
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return {}
+    return Object.fromEntries(Object.entries(v).filter(([, name]) => typeof name === 'string')) as Record<string, string>
+  } catch {
+    return {}
+  }
+}
+
+export interface NumberRow { number: string; who: string }
+
+/** The Cirqle numbers list as table rows, numbers kept as typed. Comments and blank lines are skipped. */
+export function parseNumberRows(text: string | null | undefined): NumberRow[] {
+  const rows: NumberRow[] = []
+  for (const raw of (text || '').split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    const at = line.indexOf('=')
+    rows.push({ number: (at === -1 ? line : line.slice(0, at)).trim(), who: at === -1 ? '' : line.slice(at + 1).trim() })
+  }
+  return rows
+}
+
+/** The Cirqle numbers text for table rows; the inverse of `parseNumberRows`. Fully empty rows are dropped. */
+export function serializeNumberList(rows: readonly NumberRow[]): string {
+  return rows
+    // "=" separates number from name, so it cannot appear in the number itself.
+    .map(r => ({ number: oneLine(r.number).replace(/=/g, ''), who: oneLine(r.who) }))
+    .filter(r => r.number || r.who)
+    .map(r => (r.who ? `${r.number} = ${r.who}` : r.number))
+    .join('\n')
+}
+
+/**
+ * Two phone numbers are the same person when their last 9 digits match. Nine,
+ * not ten, so a UAE number saved locally (050 123 4567) still matches the
+ * form WhatsApp sends (971501234567); Indian numbers match either way.
+ */
+export const PHONE_MATCH_DIGITS = 9
+
+/** The comparable part of a phone number, or '' when it is too short to be one. */
+export function phoneMatchKey(raw: string | null | undefined): string {
+  const d = (raw || '').replace(/\D/g, '')
+  return d.length >= PHONE_MATCH_DIGITS ? d.slice(-PHONE_MATCH_DIGITS) : ''
+}
+
+/**
+ * Cirqle's own numbers, one per line:  `<number> = <who>`
+ *   +91 98765 43210 = Cirqle Design line (shared)
+ *   +91 97000 11111 = Safoora (personal)
+ * Any format works (spaces, +, dashes). A message from one of these numbers is
+ * Cirqle talking, never a client request, whoever is holding the phone; this
+ * is what lets one shared line serve several people, and lets staff use their
+ * personal numbers. Blank lines and lines starting with # are ignored; lines
+ * without a usable number are counted in `invalid` so Settings can say so.
+ */
+export function parseNumberList(text: string | null | undefined): { numbers: Map<string, string>; invalid: number } {
+  const numbers = new Map<string, string>()
+  let invalid = 0
+  for (const raw of (text || '').split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    const at = line.indexOf('=')
+    const key = phoneMatchKey(at === -1 ? line : line.slice(0, at))
+    if (!key) { invalid++; continue }
+    numbers.set(key, at === -1 ? '' : line.slice(at + 1).trim())
+  }
+  return { numbers, invalid }
 }
 
 export interface SeenChat { at: string; by: string }
