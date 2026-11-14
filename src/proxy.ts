@@ -17,6 +17,10 @@ export const config = {
    * had no name, no icons and no standalone display to read.
    *
    * The manifest holds the app's name and icon paths and nothing private.
+   *
+   * `push-sw.js` is skipped for the same kind of reason: a browser refuses a service
+   * worker script that answers with a redirect, so a signed-out phone could never
+   * update it. It holds no data, only how to show a notification.
    */
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webmanifest|ico)$).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|push-sw\\.js$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webmanifest|ico)$).*)'],
 }
