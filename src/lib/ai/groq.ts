@@ -46,7 +46,10 @@ async function groqContent(
   // qwen3.6-27b burned 1200/1200 tokens and produced nothing.
   // Override per-deployment with GROQ_MODEL; Groq retires model ids regularly,
   // so check console.groq.com/docs/models if a 404 appears.
-  const model = opts?.model || process.env.GROQ_MODEL || 'llama-3.3-70b-versatile'
+  // 14 Nov 2026: Groq retired llama-3.3-70b-versatile and every AI feature answered 404.
+  // gpt-oss-120b was checked against this app's own prompts (JSON back in ~2s, correct answers);
+  // the reasoning-model handling below gives it the headroom the note above warns about.
+  const model = opts?.model || process.env.GROQ_MODEL || 'openai/gpt-oss-120b'
 
   // Reasoning models emit <think> chain-of-thought and accept reasoning_format
   // to suppress it. Plain instruct models REJECT that parameter outright
