@@ -12,7 +12,7 @@ import { isFinishedTaskStatus } from '@/lib/social/plan'
 import { CHAT_LOG_TABLE, indiaDay } from './chat-log'
 import { chatAlertTargets } from './insights'
 import { chatTitle, departmentMembers, type ListenerContext } from './insights-run'
-import { addDays, dateLabel } from './offer-plan'
+import { addDays, dateLabel, offerTagDates } from './offer-plan'
 import {
   APPROVED_MARK, STAGE_LABEL, TITLE_PROMPT, campaignTitle, cleanOfferTitle, flyerProgress, isBehind, notesWithApproval, offerList, offerSource,
   priceWarnings, pricedProducts, type CampaignRow,
@@ -95,6 +95,8 @@ export async function loadFlyerDesk(admin: SupabaseClient, chatIds: ReadonlySet<
     // This flyer's part of the conversation ends where the client's next list begins.
     const next = sameChat.filter(x => x.row.created_at > row.created_at).map(x => x.row.created_at).sort()[0] ?? null
     const list = offerList(row.notes)
+    // The plan is dated the work day; the offer's own dates are in the notes (older items: the plan date).
+    const offer = offerTagDates(row.notes) ?? { start: row.scheduled_date, end: row.scheduled_end_date ?? null }
     const earlier = sameChat.filter(x => x.row.created_at < row.created_at).map(x => offerList(x.row.notes))
     return {
       itemId: row.id,
@@ -105,8 +107,8 @@ export async function loadFlyerDesk(admin: SupabaseClient, chatIds: ReadonlySet<
       taskId: row.task_id ?? null,
       requestId: row.request_id ?? null,
       client: clientOf.get(row.calendar_id) || '',
-      offerStart: row.scheduled_date,
-      offerEnd: row.scheduled_end_date ?? null,
+      offerStart: offer.start,
+      offerEnd: offer.end,
       receivedAt: row.created_at,
       products: pricedProducts(list).length,
       list,

@@ -354,3 +354,10 @@ offer date. Checked against all stored history: 14 matches, every one a real Sea
 
 Voice notes heard as Tamil or Hindi (Whisper mishears Malayalam) are transcribed a second time as
 Malayalam.
+
+### The plan is dated the work day (14 Nov 2026)
+
+An offer for tomorrow is today's job. So the calendar item (and the task made from it) is dated the
+day before the offer starts, never earlier than the day the list arrived. The offer's own dates stay
+in the notes ("Offer date: …" and an `[offer:start..end]` tag) and are what the Flyers tab and the
+evening nudge go by.

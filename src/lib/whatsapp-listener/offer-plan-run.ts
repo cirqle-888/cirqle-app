@@ -16,7 +16,7 @@ import { isVoiceOrPhoto, type ListenerMessage } from './rules'
 import {
   DATE_ASSUMED_LINE, DATE_FOLLOW_UP_MINUTES, NO_PRICES_LINE, OFFER_ITEM_TITLE, SAME_FLYER_MINUTES, STALE_HOURS,
   additionMarker, chatMarker, dateLabel, dateOnlyMessage, isSmallAddition, messageMarker, notesWithAddition, notesWithDate, notesWithVoice,
-  offerDates, offerNotes, priceListSize, productListSize, voiceMarker,
+  offerDates, offerNotes, priceListSize, productListSize, voiceMarker, workDate,
   type OfferDates,
 } from './offer-plan'
 
@@ -101,13 +101,15 @@ async function addList(
   if (seen.data?.length) return true
 
   const dates = offerDates(m.body, today)
-  const calendar = await calendarFor(admin, client, dates.start)
+  // The plan (and so the task) is dated the work day: tomorrow's offer is today's job.
+  const day = workDate(today, dates.start)
+  const calendar = await calendarFor(admin, client, day)
   if (!calendar) return false
 
   const row = {
     calendar_id: calendar,
-    scheduled_date: dates.start,
-    scheduled_end_date: dates.end,
+    scheduled_date: day,
+    scheduled_end_date: null,
     title: OFFER_ITEM_TITLE,
     content_type: 'flyer',
     platforms: [],
@@ -122,7 +124,7 @@ async function addList(
 
   await tell(input, {
     title: `Offer list — ${input.clientName}`,
-    message: `${products} products${fromPhoto ? ' read from a photo' : ''}${noPrices ? ' (no prices in the list)' : ''} for ${dateLabel(dates)}${dates.given ? '' : ' (date not given, set to the next day)'}. Added to the social calendar as "${OFFER_ITEM_TITLE}".`,
+    message: `${products} products${fromPhoto ? ' read from a photo' : ''}${noPrices ? ' (no prices in the list)' : ''} for the offer on ${dateLabel(dates)}${dates.given ? '' : ' (date not given, taken as the next day)'}. Added to the social calendar on ${dateLabel({ start: day, end: null })} as "${OFFER_ITEM_TITLE}".`,
     sourceKey: `whatsapp_offer:${m.id}`,
   })
   return true
@@ -131,28 +133,29 @@ async function addList(
 /** The client sent the date on its own: move the list it belongs to. */
 async function applyDate(admin: SupabaseClient, m: ListenerMessage, input: OfferPlanInput, dates: OfferDates): Promise<boolean> {
   const since = new Date(Date.now() - DATE_FOLLOW_UP_MINUTES * 60_000).toISOString()
-  const { data } = await admin.from(ITEMS).select('id, calendar_id, notes, scheduled_date')
+  const { data } = await admin.from(ITEMS).select('id, calendar_id, notes, scheduled_date, created_at')
     .like('notes', `%${likeSafe(chatMarker(m.chatId))}%`).like('notes', `%${DATE_ASSUMED_LINE}%`)
     .eq('status', 'planned').gte('created_at', since).order('created_at', { ascending: false }).limit(1)
-  const item = data?.[0] as { id: string; calendar_id: string; notes: string; scheduled_date: string } | undefined
+  const item = data?.[0] as { id: string; calendar_id: string; notes: string; scheduled_date: string; created_at: string } | undefined
   if (!item) return false
 
+  const day = workDate(indiaDay(item.created_at), dates.start)
   let calendar = item.calendar_id
-  if (dates.start.slice(0, 7) !== item.scheduled_date.slice(0, 7)) {
+  if (day.slice(0, 7) !== item.scheduled_date.slice(0, 7)) {
     const { data: cal } = await admin.from(CALENDARS).select('client_id').eq('id', item.calendar_id).maybeSingle()
-    const moved = cal?.client_id ? await calendarFor(admin, cal.client_id as string, dates.start) : null
+    const moved = cal?.client_id ? await calendarFor(admin, cal.client_id as string, day) : null
     if (!moved) return false
     calendar = moved
   }
   const { error } = await writeTolerant({
-    calendar_id: calendar, scheduled_date: dates.start, scheduled_end_date: dates.end,
+    calendar_id: calendar, scheduled_date: day, scheduled_end_date: null,
     notes: notesWithDate(item.notes, dates), updated_at: new Date().toISOString(),
   }, r => admin.from(ITEMS).update(r).eq('id', item.id))
   if (error) return false
 
   await tell(input, {
     title: `Offer date — ${input.clientName}`,
-    message: `The client gave the date: ${dateLabel(dates)}. The flyer on the social calendar has been moved.`,
+    message: `The client gave the date: ${dateLabel(dates)}. The flyer on the social calendar is now dated ${dateLabel({ start: day, end: null })}, the work day.`,
     sourceKey: `whatsapp_offer_date:${m.id}`,
   })
   return true

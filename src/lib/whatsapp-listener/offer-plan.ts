@@ -178,6 +178,23 @@ export function offerDates(text: string, today: string): OfferDates & { given: b
   return { start: addDays(today, 1), end: null, given: false }
 }
 
+/**
+ * The day the flyer is worked on, which is the date on the plan and on its task:
+ * the day before the offer starts (tomorrow's offer is today's work), and never
+ * before the day the list arrived.
+ */
+export function workDate(received: string, offerStart: string): string {
+  const before = addDays(offerStart, -1)
+  return before > received ? before : received
+}
+
+/** The offer's own dates, kept in the notes because the plan's date is the work day. */
+export const offerTag = (d: OfferDates) => `[offer:${d.start}..${d.end ?? ''}]`
+export function offerTagDates(notes: string | null | undefined): OfferDates | null {
+  const m = String(notes || '').match(/\[offer:(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})?\]/)
+  return m ? { start: m[1], end: m[2] ?? null } : null
+}
+
 /** A short message that only gives a date ("29/30", "നാളെ", "Date 14/15"). */
 export function dateOnlyMessage(text: string, today: string): OfferDates | null {
   const t = String(text || '').trim()
@@ -220,11 +237,12 @@ export function offerNotes(input: {
     '',
     input.list.trim().slice(0, 6000),
     '',
-    sourceTag(input.messageId, input.chatId),
+    `${offerTag(input.dates)} ${sourceTag(input.messageId, input.chatId)}`,
   ].join('\n')
 }
 
 /** The notes once the client has sent the date the list did not carry. */
 export function notesWithDate(notes: string, dates: OfferDates): string {
   return notes.replace(DATE_ASSUMED_LINE, `Offer date: ${dateLabel(dates)} (given by the client in a later message).`)
+    .replace(/\[offer:[^\]]*\]/, offerTag(dates))
 }

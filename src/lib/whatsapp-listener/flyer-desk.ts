@@ -112,7 +112,7 @@ export function offerList(notes: string | null | undefined): string {
   const out: string[] = []
   for (const raw of String(notes || '').split('\n')) {
     const l = raw.trim()
-    if (!l || /^\[(whatsapp|added|voice|approved):/.test(l)) continue
+    if (!l || /^\[(whatsapp|added|voice|approved|offer):/.test(l)) continue
     // The voice note and the approval line come after the list and are not part of it.
     if (/^(Voice note from the client|Approved by the client)/.test(l)) break
     if (/^(Read by AI from a photo|Offer list from WhatsApp|Offer date:|Prices are not in the list|Added by the client afterwards)/.test(l)) continue

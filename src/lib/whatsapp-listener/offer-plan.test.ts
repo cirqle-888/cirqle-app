@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DATE_ASSUMED_LINE, additionMarker, chatMarker, dateOnlyMessage, isPriceLine, isSmallAddition, messageMarker, notesWithAddition, notesWithDate,
-  offerDates, offerNotes, parseDateHint, priceListSize, productListSize, notesWithVoice, NO_PRICES_LINE,
+  offerDates, offerNotes, parseDateHint, priceListSize, productListSize, notesWithVoice, NO_PRICES_LINE, workDate, offerTagDates,
 } from './offer-plan'
 
 const VEG = 'Onionbig-49\nChittulli-39\nTomato-26\nOrange-2k-100\nPinapple-49\nApple-140'
@@ -168,5 +168,23 @@ describe('a day written above a list', () => {
   it('is the offer date', () => {
     expect(offerDates('Sunday\n\nLaddu\nCup Cake\nJilebi', '2026-11-13')).toEqual({ start: '2026-11-15', end: null, given: true })
     expect(offerDates('Laddu\nCup Cake\nJilebi', '2026-11-13').given).toBe(false)
+  })
+})
+
+describe('the date on the plan and the task', () => {
+  it('is today when the offer is tomorrow or today', () => {
+    expect(workDate('2026-11-14', '2026-11-15')).toBe('2026-11-14')
+    expect(workDate('2026-11-14', '2026-11-14')).toBe('2026-11-14')
+  })
+  it('is the day before a later offer', () => {
+    expect(workDate('2026-11-10', '2026-11-14')).toBe('2026-11-13')
+    expect(workDate('2026-11-30', '2026-12-02')).toBe('2026-12-01')
+  })
+  it('keeps the real offer dates in the notes, and follows a date sent later', () => {
+    const base = { list: VEG, client: 'Bismi', sender: '', products: 6, messageId: 'M1', chatId: 'c@g.us' }
+    const notes = offerNotes({ ...base, dates: offerDates(VEG, TODAY) })
+    expect(offerTagDates(notes)).toEqual({ start: '2026-11-11', end: null })
+    expect(offerTagDates(notesWithDate(notes, { start: '2026-11-14', end: '2026-11-15' }))).toEqual({ start: '2026-11-14', end: '2026-11-15' })
+    expect(offerTagDates('old notes')).toBeNull()
   })
 })
