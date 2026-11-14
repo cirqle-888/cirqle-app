@@ -207,7 +207,12 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
   useEffect(() => {
     if (!profileOpen) return
     const onDown = (e: MouseEvent) => {
-      if (!profileRef.current?.contains(e.target as Node)) setProfileOpen(false)
+      // By attribute, not by ref: the top-bar buttons are rendered twice (a
+      // phone copy and a desktop copy) and one ref can only point at the
+      // last of them. On a phone that made every tap INSIDE the menu count
+      // as outside — the menu closed on mousedown and the tapped item was
+      // gone before its click arrived.
+      if (!(e.target as Element | null)?.closest?.('[data-profile-menu]')) setProfileOpen(false)
     }
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setProfileOpen(false) }
     document.addEventListener('mousedown', onDown)
@@ -280,7 +285,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
       <NotificationBell />
 
       {/* Profile Dropdown */}
-      <div className="relative ml-1" ref={profileRef}>
+      <div className="relative ml-1" ref={profileRef} data-profile-menu>
         <button 
           onClick={() => setProfileOpen(!profileOpen)}
           className="flex items-center gap-2 rounded-full hover:bg-secondary/80 p-1 pr-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary group"
