@@ -189,7 +189,9 @@ interface Invoice {
 
 interface Props {
   initialInvoices: Invoice[]
-  clients: { id: string; name: string; code: string; phone?: string; email?: string; address?: string; default_currency?: string }[]
+  clients: { id: string; name: string; code: string; phone?: string; email?: string; address?: string; default_currency?: string; business_partner_id?: string | null }[]
+  /** Business partners, for the list's partner filter. */
+  partners?: { id: string; name: string; code: string | null }[]
   /** Draft (trial) clients — never offered for invoicing until approved. */
   draftClientIds?: string[]
   bankAccounts: { id: string; name: string; is_default?: boolean }[]
@@ -339,7 +341,7 @@ function findLinkedCashbookEntry(inv: Invoice, p: Payment) {
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function InvoicesClient({ initialInvoices, clients, draftClientIds = [], bankAccounts, cashbookCategories, services, companySettings, exchangeRates, visibility, agreementBreakdowns }: Props) {
+export default function InvoicesClient({ initialInvoices, clients, partners = [], draftClientIds = [], bankAccounts, cashbookCategories, services, companySettings, exchangeRates, visibility, agreementBreakdowns }: Props) {
   // Coming back from a record lands where the list was left, not at the top.
   // See lib/lists/scroll-restore for the rules.
   useScrollRestore('invoices')
@@ -411,6 +413,15 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     return (searchParams.get('tab') || 'active') === 'active' ? DEFAULT_STATUS_FILTER : ''
   })
   const [filterClient, setFilterClient] = useState<string>(searchParams.get('client') || '')
+  // Business partner → every client they brought in. A partner pays for
+  // several clients at once, so this is how their open invoices are found.
+  const [filterPartner, setFilterPartner] = useState<string>(searchParams.get('partner') || '')
+  // The cash book is where a receipt is recorded; without edit rights there
+  // the Receive payment button would open a form the user cannot save.
+  const canReceive = can('cashbook.edit') && !permUser.isViewAs
+  const partnerClientIds = useMemo(() => new Set(
+    filterPartner ? clients.filter(c => c.business_partner_id === filterPartner).map(c => c.id) : [],
+  ), [clients, filterPartner])
   const [groupByClient, setGroupByClient] = useState(false)
   const [sortBy, setSortBy] = useState(searchParams.get('sort') || 'workflow')
   const [searchFacets, setSearchFacets] = useState<SearchFacet[]>(() => {
@@ -519,6 +530,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
 
     if (filterStatus) params.set('status', filterStatus); else params.set('status', STATUS_ANY)
     if (filterClient) params.set('client', filterClient); else params.delete('client')
+    if (filterPartner) params.set('partner', filterPartner); else params.delete('partner')
     if (sortBy !== 'workflow') params.set('sort', sortBy); else params.delete('sort')
     if (searchFacets.length) params.set('sf', JSON.stringify(searchFacets)); else params.delete('sf')
     if (tab && tab !== 'active') params.set('tab', tab); else params.delete('tab')
@@ -534,7 +546,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
       // "Native History API").
       window.history.replaceState(null, '', `${pathname}?${newQueryString}`)
     }
-  }, [filterStatus, filterClient, searchFacets, tab, selectedId, sortBy, pathname, searchParams])
+  }, [filterStatus, filterClient, filterPartner, searchFacets, tab, selectedId, sortBy, pathname, searchParams])
   const [editClientId, setEditClientId] = useState<string | null>(null)
 
   // Panel modes
@@ -914,6 +926,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
         return false
       }
       if (filterClient && inv.client_id !== filterClient) return false
+      if (filterPartner && !partnerClientIds.has(inv.client_id)) return false
       if (activeFacets.length && !recordMatchesFacets(activeFacets, inv, INVOICE_FIELDS, invoiceGeneric)) return false
       return true
     })
@@ -927,7 +940,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
       if (ai !== bi) return ai - bi
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     })
-  }, [invoices, tab, filterStatus, filterClient, activeFacets, sortBy, showAmounts])
+  }, [invoices, tab, filterStatus, filterClient, filterPartner, partnerClientIds, activeFacets, sortBy, showAmounts])
 
   // Client groups for the list panel — only computed when groupByClient is on.
   // Sorted by group balance-due desc (clients who owe the most surface first);
@@ -1034,24 +1047,29 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   // invoices left out — they were never (or no longer are) billable.
   const [showSummary, setShowSummary] = useState(false)
   /**
-   * Has the invoice list been scrolled far enough to fold the overview away?
+   * The overview lives INSIDE the list's scroller (full-width view), so it
+   * scrolls away like any other content and the filter bar below it pins.
    *
-   * The overview band sits ABOVE the scrolling list rather than inside it, so
-   * its three cards held their full height forever and ate the top third of
-   * the screen on a laptop. Folding it on scroll gives that back the moment
-   * somebody starts working down the list, and unfolds it when they come back
-   * to the top — nothing is permanently hidden and nothing is pinned over the
-   * list.
-   *
-   * Hysteresis (48px down, 8px back up) on purpose: with one threshold the
-   * band's own collapse shortens the page, which scrolls the list, which
-   * re-expands it — a flicker loop at exactly the scroll position people stop
-   * at.
+   * It used to sit above the scroller and fold on scroll. Folding changed the
+   * scroller's height mid-gesture, so the rows jumped under the finger — the
+   * worst of it on a phone, where the band was half the screen. Nothing here
+   * changes size in response to scrolling any more.
    */
-  const [overviewCollapsed, setOverviewCollapsed] = useState(false)
-  const handleListScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const y = e.currentTarget.scrollTop
-    setOverviewCollapsed(prev => (prev ? y > 8 : y > 48))
+  // Phones: the status / client selects sit behind a Filters button so the
+  // pinned bar is two rows, not five.
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
+  // Height of the pinned filter bar, so group-by-client headers stick just
+  // below it instead of sliding underneath.
+  const [listToolbarH, setListToolbarH] = useState(0)
+  const toolbarObserver = useRef<ResizeObserver | null>(null)
+  const listToolbarRef = useCallback((el: HTMLDivElement | null) => {
+    toolbarObserver.current?.disconnect()
+    toolbarObserver.current = null
+    if (!el) return
+    const ro = new ResizeObserver(() => setListToolbarH(el.offsetHeight))
+    ro.observe(el)
+    toolbarObserver.current = ro
+    setListToolbarH(el.offsetHeight)
   }, [])
   const summary = useMemo(() => {
     const live = invoices.filter(i => !['cancelled', 'bad_debt'].includes(i.status))
@@ -2924,6 +2942,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   function resetListFilters() {
     setFilterStatus('')
     setFilterClient('')
+    setFilterPartner('')
     setSearchFacets([])
     setSearchDraft('')
   }
@@ -2950,11 +2969,13 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   // ─────────────────────────────────────────────────────────────────────────
   function renderList() {
     return (
-      <div className="flex flex-col h-full min-h-0 overflow-hidden bg-card">
-        {/* Pinned: this header stays put while the invoices scroll beneath it,
-            so search, filters and bulk actions are never scrolled away. Kept
-            compact — icon-only buttons, one filter row. */}
-        <div className="shrink-0 max-h-[55%] overflow-y-auto border-b border-border/60 bg-card px-3 pb-2.5 pt-0 shadow-sm sm:px-4">
+      // One scroller for the whole column: the overview scrolls away as part of
+      // the content, the filter bar pins at the top. Nothing resizes on scroll.
+      <div className="h-full min-h-0 flex-1 overflow-y-auto overscroll-contain bg-card">
+        {!showRightPanel && renderOverview()}
+        {/* Pinned: this bar stays put while the invoices scroll beneath it,
+            so search, filters and bulk actions are never scrolled away. */}
+        <div ref={listToolbarRef} className="sticky top-0 z-[2] max-h-[60dvh] overflow-y-auto border-b border-border/60 bg-card px-3 pb-2.5 pt-0 shadow-sm sm:px-4">
           <div className="mb-2 flex items-center gap-4 border-b border-border/50" aria-label="Invoice views">
             {(['active', 'closed', 'all'] as const).map(t => (
               <button key={t} onClick={() => { setTab(t); setFilterStatus('') }} aria-pressed={tab === t}
@@ -2964,6 +2985,8 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
             ))}
           </div>
           <div className="space-y-2">
+            <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
             <TokenizedSearch
               facets={searchFacets}
               onFacetsChange={setSearchFacets}
@@ -2978,14 +3001,40 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                 ...(showAmounts ? [{ key: 'amount', label: 'Amount ₹', type: 'number' as const }] : []),
               ]}
             />
-            <div className="flex flex-wrap items-center gap-2">
+            </div>
+            {/* Phones: filters behind one button, badge = how many are set. */}
+            <button type="button" onClick={() => setMobileFiltersOpen(o => !o)} aria-expanded={mobileFiltersOpen} aria-label="Filters"
+              className={cn("relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:hidden",
+                mobileFiltersOpen ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground")}>
+              <Filter className="h-4 w-4" />
+              {(filterStatus ? 1 : 0) + (filterClient ? 1 : 0) + (filterPartner ? 1 : 0) > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
+                  {(filterStatus ? 1 : 0) + (filterClient ? 1 : 0) + (filterPartner ? 1 : 0)}
+                </span>
+              )}
+            </button>
+            </div>
+            <div className={cn("flex-wrap items-center gap-2 sm:flex", mobileFiltersOpen ? "flex" : "hidden")}>
               <AppSelect aria-label="Filter by invoice status" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} wrapperClassName="min-w-[5.5rem] flex-1" className="text-xs">
                 <option value="">All statuses</option>
                 {(tab === 'closed' ? ['paid', 'cancelled', 'bad_debt'] : tab === 'all' ? ['to_send', 'draft', 'reviewed', 'sent', 'partial', 'overdue', 'paid', 'cancelled', 'bad_debt'] : ['to_send', 'draft', 'reviewed', 'sent', 'partial', 'overdue']).map(status => <option key={status} value={status}>{getStatusLabel(status)}</option>)}
               </AppSelect>
+              {partners.length > 0 && (
+                <AppSelect aria-label="Filter by business partner" value={filterPartner}
+                  onChange={e => {
+                    const id = e.target.value
+                    setFilterPartner(id)
+                    // A client outside the new partner would empty the list.
+                    if (id && filterClient && clients.find(c => c.id === filterClient)?.business_partner_id !== id) setFilterClient('')
+                  }}
+                  wrapperClassName="min-w-[5.5rem] flex-1" className="text-xs">
+                  <option value="">All partners</option>
+                  {partners.map(bp => <option key={bp.id} value={bp.id}>{bp.name}</option>)}
+                </AppSelect>
+              )}
               <AppSelect aria-label="Filter by client" value={filterClient} onChange={e => setFilterClient(e.target.value)} wrapperClassName="min-w-[5.5rem] flex-1" className="text-xs">
-                <option value="">All clients</option>
-                {clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
+                <option value="">{filterPartner ? 'All their clients' : 'All clients'}</option>
+                {(filterPartner ? clients.filter(c => partnerClientIds.has(c.id)) : clients).map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
               </AppSelect>
               <button type="button" onClick={() => setGroupByClient(g => !g)} aria-pressed={groupByClient} aria-label="Group invoices by client" title="Group invoices by client"
                 className={cn("inline-flex h-9 w-9 items-center justify-center rounded-lg border text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", groupByClient ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground")}>
@@ -3000,10 +3049,42 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
           <ActiveFilterChips
             chips={[
               ...(filterStatus ? [{ key: 'status', label: 'Status', value: getStatusLabel(filterStatus), onRemove: () => setFilterStatus('') }] : []),
+              ...(filterPartner ? [{ key: 'partner', label: 'Partner', value: partners.find(bp => bp.id === filterPartner)?.name || 'Selected', onRemove: () => setFilterPartner('') }] : []),
               ...(filterClient ? [{ key: 'client', label: 'Client', value: invoices.find(i => i.client_id === filterClient)?.client?.name || 'Selected', onRemove: () => setFilterClient('') }] : []),
             ]}
-            onClearAll={() => { setFilterStatus(''); setFilterClient('') }}
+            onClearAll={() => { setFilterStatus(''); setFilterClient(''); setFilterPartner('') }}
           />
+
+          {/* A partner or client is picked: what they owe, and one tap to
+              record what they paid — the cash book opens already narrowed to
+              them, and "Pay oldest first" there spreads the money by age. */}
+          {(filterPartner || filterClient) && canReceive && (() => {
+            const open = invoices.filter(i =>
+              ['sent', 'partial', 'overdue'].includes(i.status) && balanceDueInr(i) > 0.01 &&
+              (!filterClient || i.client_id === filterClient) &&
+              (!filterPartner || partnerClientIds.has(i.client_id)))
+            const who = filterClient
+              ? clients.find(c => c.id === filterClient)?.name
+              : partners.find(bp => bp.id === filterPartner)?.name
+            const qs = new URLSearchParams({ receive: '1' })
+            if (filterPartner) qs.set('partner', filterPartner)
+            if (filterClient) qs.set('rclient', filterClient)
+            return (
+              <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2">
+                <p className="min-w-0 text-xs text-muted-foreground">
+                  <span className="block truncate font-medium text-foreground">{who || 'Selected'}</span>
+                  {open.length} unpaid invoice{open.length !== 1 ? 's' : ''}
+                  {showTotals && open.length > 0 && <> · <span className="font-medium tabular-nums text-foreground">{fmt(open.reduce((s, i) => s + balanceDueInr(i), 0))}</span> due</>}
+                </p>
+                {open.length > 0 && (
+                  <Link href={`/dashboard/cashbook?${qs.toString()}`}
+                    className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <IndianRupee className="h-3.5 w-3.5" />Receive payment
+                  </Link>
+                )}
+              </div>
+            )
+          })()}
 
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
             <label className="inline-flex min-h-8 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
@@ -3012,7 +3093,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
                 checked={filtered.length > 0 && filtered.every(i => selectedForBulk.has(i.id))} onChange={toggleSelectAllBulk} />
               {filtered.length} invoice{filtered.length !== 1 ? 's' : ''}
             </label>
-            <AppSelect aria-label="Sort invoices" value={sortBy} onChange={e => setSortBy(e.target.value)} className="h-8 text-xs" wrapperClassName="w-36">
+            <AppSelect aria-label="Sort invoices" value={sortBy} onChange={e => setSortBy(e.target.value)} className="h-8 text-xs" wrapperClassName="w-44 sm:w-36">
               <option value="workflow">Workflow order</option>
               <option value="newest">Newest first</option>
               <option value="due">Due date first</option>
@@ -3105,19 +3186,19 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
         </div>
 
         {/* List */}
-        <div onScroll={handleListScroll} className="flex-1 min-h-0 overflow-y-auto divide-y divide-border/50">
+        <div className="divide-y divide-border/50 pb-24 sm:pb-6">
           {filtered.length === 0 && (
             <div className="flex flex-col items-center px-6 py-14 text-center">
               <div className="mb-4 rounded-2xl bg-secondary p-4"><FileText className="h-7 w-7 text-muted-foreground" /></div>
-              <h2 className="text-sm font-semibold">{activeFacets.length || filterStatus || filterClient ? 'No matching invoices' : tab === 'active' ? 'You’re all caught up' : 'No invoices yet'}</h2>
-              <p className="mt-2 max-w-xs text-xs leading-relaxed text-muted-foreground">{activeFacets.length || filterStatus || filterClient ? 'Try a different client, status, or search term.' : tab === 'active' ? 'Your active invoices will appear here when there’s work to bill.' : 'Create an invoice or generate one from completed tasks.'}</p>
-              {(activeFacets.length > 0 || filterStatus || filterClient) ? <button onClick={resetListFilters} className="mt-4 rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-secondary">Clear filters</button> : can('billing.edit') && !permUser.isViewAs && <button onClick={() => { setPanelMode('new'); setSelectedId(null) }} className="mt-4 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90">Create invoice</button>}
+              <h2 className="text-sm font-semibold">{activeFacets.length || filterStatus || filterClient || filterPartner ? 'No matching invoices' : tab === 'active' ? 'You’re all caught up' : 'No invoices yet'}</h2>
+              <p className="mt-2 max-w-xs text-xs leading-relaxed text-muted-foreground">{activeFacets.length || filterStatus || filterClient || filterPartner ? 'Try a different client, status, or search term.' : tab === 'active' ? 'Your active invoices will appear here when there’s work to bill.' : 'Create an invoice or generate one from completed tasks.'}</p>
+              {(activeFacets.length > 0 || filterStatus || filterClient || filterPartner) ? <button onClick={resetListFilters} className="mt-4 rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-secondary">Clear filters</button> : can('billing.edit') && !permUser.isViewAs && <button onClick={() => { setPanelMode('new'); setSelectedId(null) }} className="mt-4 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90">Create invoice</button>}
             </div>
           )}
           {groupByClient
             ? clientGroups.map(g => (
                 <div key={g.clientId}>
-                  <div className="sticky top-0 z-[1] px-3 py-1.5 bg-secondary/70 backdrop-blur-sm border-y border-border/30 flex items-center justify-between gap-2">
+                  <div style={{ top: listToolbarH }} className="sticky z-[1] px-3 py-1.5 bg-secondary/70 backdrop-blur-sm border-y border-border/30 flex items-center justify-between gap-2">
                     <span className="text-xs font-semibold text-foreground truncate">{g.clientName}</span>
                     <span className="flex items-center gap-2 shrink-0 text-[10px] text-muted-foreground">
                       <span>{g.invoices.length} inv</span>
@@ -3145,7 +3226,7 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
           <input type="checkbox" aria-label={`Select invoice ${inv.invoice_number}`} className="h-4 w-4 shrink-0 accent-violet-600"
             checked={selectedForBulk.has(inv.id)} onChange={e => toggleBulkSelection(e as unknown as React.MouseEvent, inv.id)} />
           <button type="button" onClick={() => selectInvoice(inv.id)} aria-pressed={isSelected}
-            className={cn("grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 rounded-lg py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", !showRightPanel && "lg:grid-cols-[minmax(0,1.7fr)_110px_minmax(110px,1fr)_130px]")}>
+            className={cn("grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1.5 rounded-lg py-2.5 text-left sm:gap-y-2 sm:py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", !showRightPanel && "lg:grid-cols-[minmax(0,1.7fr)_110px_minmax(110px,1fr)_130px]")}>
             <span className="min-w-0">
               <span className="block truncate text-sm font-semibold">{inv.client?.name || 'No client'}</span>
               <span className="mt-1 block truncate text-xs text-muted-foreground">{inv.invoice_number}{inv.billing_period_start ? ` · ${formatBillingPeriod(inv.billing_period_start)}` : ''}</span>
@@ -3158,11 +3239,15 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
               {showAmounts && <><span className="block text-sm font-semibold tabular-nums">{fmt(balance > 0 ? balance : inv.total_amount, inv.currency)}</span><span className="mt-1 block text-[10px] text-muted-foreground">{balance > 0 && !['draft', 'reviewed', 'cancelled', 'bad_debt'].includes(inv.status) ? 'Balance due' : 'Invoice total'}</span></>}
             </span>
           </button>
+          {/* Phones: tapping the row opens it, so the menu only costs width
+              the client name needs. */}
+          <div className="hidden sm:block">
           <OverflowMenu label={`Actions for ${inv.invoice_number}`} items={[
             { label: 'Open invoice', icon: FileText, onClick: () => selectInvoice(inv.id) },
             { label: 'Copy invoice number', icon: Copy, onClick: () => copyInvNum(inv.invoice_number) },
             ...(role === 'super_admin' ? [{ label: 'Edit client', icon: Building2, onClick: () => setEditClientId(inv.client_id) }] : []),
           ]} />
+          </div>
         </div>
       )
     }
@@ -6294,6 +6379,105 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
     )
   }
 
+  /**
+   * The overview band. Full-width list view: rendered as the first thing in
+   * the list's scroller (see renderList), so it scrolls away naturally.
+   * Split view: one compact line above both panes, xl and up only.
+   *
+   * Phones get one swipeable row of figures instead of three tall cards —
+   * the list is the point of this screen, and the cards used to fill it.
+   */
+  function renderOverview() {
+    const toolBtn = "inline-flex min-h-9 items-center gap-2 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-3"
+    const chip = "flex min-w-[7.5rem] shrink-0 flex-col items-start rounded-lg border px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    return (
+      <section className={cn("border-b border-border/60 bg-card px-4 sm:px-6",
+        showRightPanel ? (focused ? "hidden" : "hidden shrink-0 py-2 xl:block") : "py-3 sm:py-4")} aria-label="Invoice overview">
+        <div className="flex items-center justify-between gap-3">
+          <h1 className={cn("font-semibold tracking-tight", showRightPanel ? "text-sm" : "text-base sm:text-lg")}>Invoice overview</h1>
+          <div className="flex shrink-0 items-center gap-2">
+            {showTotals && (
+              <button onClick={() => setShowSummary(true)} aria-label="Summary" className={toolBtn}>
+                <BarChart3 className="h-4 w-4" /><span className="hidden sm:inline">Summary</span>
+              </button>
+            )}
+            <Link href="/dashboard/invoices/follow-ups" aria-label="Follow-ups" className={toolBtn}>
+              <CalendarClock className="h-4 w-4" /><span className="hidden sm:inline">Follow-ups</span>
+            </Link>
+            <OverflowMenu label="Invoice tools" items={[
+              ...(can('billing.edit') && !permUser.isViewAs ? [
+                // Invoices are generated automatically, so a blank one is a
+                // rare need — it lives here rather than as the page's button.
+                { label: 'New blank invoice', icon: Plus, onClick: () => { setPanelMode('new'); setSelectedId(null) } },
+                { label: 'Generate from tasks', icon: Calendar, onClick: () => { setPanelMode('generate'); setSelectedId(null); setGenTasks([]) } },
+                { label: 'Generate in bulk', icon: History, onClick: () => { setPanelMode('batch_generate'); setSelectedId(null); setBatchGroups([]); setBatchDone(0) } },
+              ] : []),
+              { label: 'Client statements', icon: Receipt, onClick: () => router.push('/dashboard/statements') },
+              ...(showTotals ? [{ label: 'Financial analytics', icon: TrendingUp, onClick: () => { setPanelMode('discounts'); setSelectedId(null); loadDiscountAnalytics() } }] : []),
+              { label: 'Export all invoices (CSV)', icon: Download, onClick: exportInvoicesCSV, separatorBefore: true },
+            ]} />
+          </div>
+        </div>
+        {!showRightPanel && (
+          <>
+            <p className="mt-1 hidden text-xs text-muted-foreground sm:block">Review drafts, track payments, and keep client billing moving.</p>
+
+            {/* Phone: one row of figures. Overdue and Ready filter the list. */}
+            <div className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 pb-0.5 hide-scrollbar sm:hidden">
+              {showTotals && (
+                <div className={cn(chip, "border-border/60 bg-background")}>
+                  <span className="text-[11px] text-muted-foreground">Outstanding</span>
+                  <span className="text-sm font-semibold tabular-nums">{fmt(stats.outstanding)}</span>
+                </div>
+              )}
+              {showTotals && (
+                <button onClick={() => showInvoiceQueue('overdue')} className={cn(chip, "border-red-400/30 bg-red-500/[0.04]")}>
+                  <span className="text-[11px] text-muted-foreground">Overdue · {stats.overdueCount}</span>
+                  <span className="text-sm font-semibold tabular-nums text-red-600 dark:text-red-400">{fmt(stats.overdueAmt)}</span>
+                </button>
+              )}
+              <button onClick={() => showInvoiceQueue('to_send')} className={cn(chip, "border-primary/20 bg-primary/[0.04]")}>
+                <span className="text-[11px] text-muted-foreground">Ready to send</span>
+                <span className="text-sm font-semibold tabular-nums">{stats.toSendCount}{showTotals ? <span className="ml-1 text-xs font-normal text-muted-foreground">· {fmt(stats.toSendTotal)}</span> : null}</span>
+              </button>
+            </div>
+
+            {/* sm and up: the three cards. */}
+            <div className={cn("mt-4 hidden gap-3 sm:grid", showTotals ? "grid-cols-3" : "grid-cols-1")}>
+              {showTotals && (
+                <div className="rounded-xl border border-border/60 bg-background p-3.5">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">Outstanding balance<Wallet className="h-4 w-4" /></div>
+                  <div className="mt-2 text-xl font-semibold tracking-tight tabular-nums">{fmt(stats.outstanding)}</div>
+                  <p className="mt-1 text-[11px] text-muted-foreground">Unpaid balance on sent invoices · INR</p>
+                </div>
+              )}
+              {showTotals && (
+                <button onClick={() => showInvoiceQueue('overdue')} className="rounded-xl border border-border/60 bg-background p-3.5 text-left transition-colors hover:border-red-400/60 hover:bg-red-500/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">Overdue<Clock className="h-4 w-4 text-red-600 dark:text-red-400" /></div>
+                  <div className="mt-2 text-xl font-semibold tracking-tight tabular-nums text-red-600 dark:text-red-400">{fmt(stats.overdueAmt)}</div>
+                  <p className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">{stats.overdueCount} invoice{stats.overdueCount !== 1 ? 's' : ''} to follow up<ChevronRight className="h-3.5 w-3.5" /></p>
+                </button>
+              )}
+              <button onClick={() => showInvoiceQueue('to_send')} className="rounded-xl border border-primary/20 bg-primary/[0.04] p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-primary/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">Ready to send<Send className="h-4 w-4 text-primary" /></div>
+                <div className="mt-2 flex items-baseline gap-2"><span className="text-xl font-semibold tracking-tight tabular-nums">{stats.toSendCount}</span><span className="text-xs text-muted-foreground">invoice{stats.toSendCount !== 1 ? 's' : ''}{showTotals ? ` · ${fmt(stats.toSendTotal)}` : ''}</span></div>
+                <p className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">Review and send due drafts<ChevronRight className="h-3.5 w-3.5" /></p>
+              </button>
+            </div>
+            {showTotals && stats.monthDues.length > 0 && (
+              <details className="mt-3 hidden text-xs text-muted-foreground sm:block">
+                <summary className="w-fit cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Outstanding by month</summary>
+                <div className="mt-2 flex max-h-24 flex-wrap gap-2 overflow-y-auto">
+                  {stats.monthDues.map(m => <span key={m.key} className="rounded-md border border-border/60 px-2.5 py-1.5">{m.label}<span className="ml-2 font-medium text-foreground tabular-nums">{fmt(m.amount)}</span></span>)}
+                </div>
+              </details>
+            )}
+          </>
+        )}
+      </section>
+    )
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // MAIN RENDER
   // ─────────────────────────────────────────────────────────────────────────
@@ -6301,10 +6485,6 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
   // Focus only applies while an invoice is open — with nothing selected the
   // list is the page, so it must not disappear.
   const focused = focusMode && panelMode === 'detail' && !!selectedInv
-  // The overview folds only in the full-width list view: with the split open
-  // it is already down to one compact line, and folding that would leave an
-  // empty strip.
-  const folded = overviewCollapsed && !showRightPanel
 
   return (
     <div className="flex flex-col h-dvh bg-background text-foreground">
@@ -6348,104 +6528,8 @@ export default function InvoicesClient({ initialInvoices, clients, draftClientId
         </div>
       )}
 
-      <section className={cn("shrink-0 border-b border-border/60 bg-card px-4 transition-[padding] duration-200 ease-out sm:px-6",
-        showRightPanel ? (focused ? "hidden" : "hidden xl:block py-2") : folded ? "py-2" : "py-4")} aria-label="Invoice overview">
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-          <div className={cn("flex min-w-0 items-center gap-3", folded && "flex-1")}>
-            <h1 className={cn("font-semibold tracking-tight transition-[font-size] duration-200", showRightPanel || folded ? "text-sm" : "text-lg")}>Invoice overview</h1>
-            {/* Folded: the three cards' numbers, on one line and still
-                clickable, so scrolling the list never costs the figures.
-                Dropped below sm — a phone has no room for them beside the
-                buttons, and they collided with Summary at 375px. */}
-            {folded && (
-              <div className="hidden min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums sm:flex">
-                {showTotals && (
-                  <span className="text-muted-foreground">Outstanding<span className="ml-1.5 font-semibold text-foreground">{fmt(stats.outstanding)}</span></span>
-                )}
-                {/* These two FILTER the list; Outstanding above is a figure
-                    and nothing more. They are drawn as buttons — border, hover,
-                    pointer — because side by side with a plain number they
-                    read as a label, and a stray click silently narrows the
-                    list to three invoices. */}
-                {showTotals && (
-                  <button onClick={() => showInvoiceQueue('overdue')}
-                    title="Show only overdue invoices"
-                    className="cursor-pointer rounded-md border border-border/60 px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    Overdue<span className="ml-1.5 font-semibold text-red-600 dark:text-red-400">{fmt(stats.overdueAmt)}</span>
-                  </button>
-                )}
-                <button onClick={() => showInvoiceQueue('to_send')}
-                  title="Show only the drafts that are ready to send"
-                  className="cursor-pointer rounded-md border border-border/60 px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  Ready<span className="ml-1.5 font-semibold text-foreground">{stats.toSendCount}</span>
-                </button>
-              </div>
-            )}
-          </div>
-          {!showRightPanel && !folded && (
-            <p className="order-last w-full text-xs text-muted-foreground">Review drafts, track payments, and keep client billing moving.</p>
-          )}
-          <div className="flex shrink-0 items-center gap-2">
-            {showTotals && (
-              <button onClick={() => setShowSummary(true)}
-                className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-xs font-medium hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                <BarChart3 className="h-4 w-4" />Summary
-              </button>
-            )}
-            <Link href="/dashboard/invoices/follow-ups" className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-border px-3 text-xs font-medium hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <CalendarClock className="h-4 w-4" />Follow-ups
-            </Link>
-            <OverflowMenu label="Invoice tools" items={[
-              ...(can('billing.edit') && !permUser.isViewAs ? [
-                // Invoices are generated automatically, so a blank one is a
-                // rare need — it lives here rather than as the page's button.
-                { label: 'New blank invoice', icon: Plus, onClick: () => { setPanelMode('new'); setSelectedId(null) } },
-                { label: 'Generate from tasks', icon: Calendar, onClick: () => { setPanelMode('generate'); setSelectedId(null); setGenTasks([]) } },
-                { label: 'Generate in bulk', icon: History, onClick: () => { setPanelMode('batch_generate'); setSelectedId(null); setBatchGroups([]); setBatchDone(0) } },
-              ] : []),
-              { label: 'Client statements', icon: Receipt, onClick: () => router.push('/dashboard/statements') },
-              ...(showTotals ? [{ label: 'Financial analytics', icon: TrendingUp, onClick: () => { setPanelMode('discounts'); setSelectedId(null); loadDiscountAnalytics() } }] : []),
-              { label: 'Export all invoices (CSV)', icon: Download, onClick: exportInvoicesCSV, separatorBefore: true },
-            ]} />
-          </div>
-        </div>
-        {/* The cards fold away on scroll. grid-rows 1fr→0fr animates to the
-            content's own height, which a max-height guess cannot do without
-            either clipping a card or easing through empty space. */}
-        <div className={cn("grid transition-[grid-template-rows] duration-200 ease-out", folded ? "grid-rows-[0fr]" : "grid-rows-[1fr]", showRightPanel && "hidden")}>
-        <div className="min-h-0 overflow-hidden">
-        <div className={cn("mt-4 grid gap-3 overflow-x-auto pb-1", showTotals ? "grid-cols-[repeat(3,minmax(150px,1fr))]" : "grid-cols-1", showRightPanel && "hidden")}>
-          {showTotals && (
-            <div className="rounded-xl border border-border/60 bg-background p-3.5">
-              <div className="flex items-center justify-between text-xs text-muted-foreground">Outstanding balance<Wallet className="h-4 w-4" /></div>
-              <div className="mt-2 text-xl font-semibold tracking-tight tabular-nums">{fmt(stats.outstanding)}</div>
-              <p className="mt-1 text-[11px] text-muted-foreground">Unpaid balance on sent invoices · INR</p>
-            </div>
-          )}
-          {showTotals && (
-            <button onClick={() => showInvoiceQueue('overdue')} className="rounded-xl border border-border/60 bg-background p-3.5 text-left transition-colors hover:border-red-400/60 hover:bg-red-500/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <div className="flex items-center justify-between text-xs text-muted-foreground">Overdue<Clock className="h-4 w-4 text-red-600 dark:text-red-400" /></div>
-              <div className="mt-2 text-xl font-semibold tracking-tight tabular-nums text-red-600 dark:text-red-400">{fmt(stats.overdueAmt)}</div>
-              <p className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">{stats.overdueCount} invoice{stats.overdueCount !== 1 ? 's' : ''} to follow up<ChevronRight className="h-3.5 w-3.5" /></p>
-            </button>
-          )}
-          <button onClick={() => showInvoiceQueue('to_send')} className="rounded-xl border border-primary/20 bg-primary/[0.04] p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-primary/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">Ready to send<Send className="h-4 w-4 text-primary" /></div>
-            <div className="mt-2 flex items-baseline gap-2"><span className="text-xl font-semibold tracking-tight tabular-nums">{stats.toSendCount}</span><span className="text-xs text-muted-foreground">invoice{stats.toSendCount !== 1 ? 's' : ''}{showTotals ? ` · ${fmt(stats.toSendTotal)}` : ''}</span></div>
-            <p className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">Review and send due drafts<ChevronRight className="h-3.5 w-3.5" /></p>
-          </button>
-        </div>
-        {showTotals && !showRightPanel && stats.monthDues.length > 0 && (
-          <details className="mt-3 hidden text-xs text-muted-foreground sm:block">
-            <summary className="w-fit cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Outstanding by month</summary>
-            <div className="mt-2 flex max-h-24 flex-wrap gap-2 overflow-y-auto">
-              {stats.monthDues.map(m => <span key={m.key} className="rounded-md border border-border/60 px-2.5 py-1.5">{m.label}<span className="ml-2 font-medium text-foreground tabular-nums">{fmt(m.amount)}</span></span>)}
-            </div>
-          </details>
-        )}
-        </div>
-        </div>
-      </section>
+      {/* Split view only; the full-width list renders it inside its scroller. */}
+      {showRightPanel && renderOverview()}
 
       {/* ── Main content ── */}
       <div className="flex min-h-0 flex-1 overflow-hidden">

@@ -3,6 +3,7 @@ import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { financialVisibility, stripCashbookList } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
 import CashBookClient from './cashbook-client'
+import { listPartnerOptions } from '@/lib/partners/list'
 
 export const dynamic = 'force-dynamic'
 
@@ -80,6 +81,7 @@ export default async function CashBookPage() {
   const vis = financialVisibility(me)
   const supabase = createAdminClient()
 
+  const partnersP = listPartnerOptions(supabase)
   const [entriesRes, categoriesRes, bankAccountsRes, exchangeRatesRes, dueInvoicesRes, employeesRes, clientsRes, creditsRes, pendingPayrollsRes, companySettingsRes, tagsRes, adAccountsRes] = await Promise.all([
     fetchCashbookEntries(supabase),
     supabase.from('cashbook_categories').select('*').order('type').order('name'),
@@ -101,7 +103,7 @@ export default async function CashBookPage() {
           .order('due_date', { ascending: true })
       : Promise.resolve({ data: [] as unknown[] }),
     supabase.from('employees').select('id, cqid, name, role').eq('is_active', true).order('cqid'),
-    supabase.from('clients').select('id, name, code').eq('is_active', true).order('name'),
+    supabase.from('clients').select('id, name, code, business_partner_id').eq('is_active', true).order('name'),
     vis.payrollAmounts
       ? supabase.from('credit_ledger').select('*, employee:employees(cqid)').eq('credit_type', 'given').order('credit_date', { ascending: false })
       : Promise.resolve({ data: [] as unknown[] }),
@@ -169,6 +171,7 @@ export default async function CashBookPage() {
       dueInvoices={(dueInvoicesRes.data || []) as any[]}
       employees={(employeesRes.data || []) as any[]}
       clients={(clientsRes.data || []) as any[]}
+      partners={await partnersP}
       outstandingCredits={(creditsRes.data || []) as any[]}
       pendingPayrolls={(pendingPayrollsRes.data || []) as any[]}
       companySettings={companySettings}

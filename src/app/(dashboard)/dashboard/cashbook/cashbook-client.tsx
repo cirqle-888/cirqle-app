@@ -2,8 +2,9 @@
 
 import { resolveBrandingUrl } from '@/lib/utils/branding'
 
-import { useState, useMemo, useEffect, useCallback, Fragment } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef, Fragment } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
+import type { PartnerOption } from '@/lib/partners/list'
 import dynamic from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
@@ -221,6 +222,8 @@ interface Props {
   dueInvoices: DueInvoice[]
   employees: any[]
   clients: any[]
+  /** Business partners, for the invoice picker's partner filter. */
+  partners?: PartnerOption[]
   outstandingCredits: any[]
   /**
    * All pending payslips (status='pending'), pre-sorted newest-first by the
@@ -256,7 +259,7 @@ interface Props {
 
 const CURRENCIES: Currency[] = ['INR', 'AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 
-export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, outstandingCredits, pendingPayrolls, companySettings, showAmounts, showTotals, markupAvailable, canEditEntries, allTags, reversalsAvailable = false, adAccounts = [] }: Props) {
+export default function CashBookClient({ initialEntries, categories, bankAccounts, exchangeRates, dueInvoices, employees, clients, partners = [], outstandingCredits, pendingPayrolls, companySettings, showAmounts, showTotals, markupAvailable, canEditEntries, allTags, reversalsAvailable = false, adAccounts = [] }: Props) {
   // Coming back from a record lands where the list was left, not at the top.
   // See lib/lists/scroll-restore for the rules.
   useScrollRestore('cashbook')
@@ -386,6 +389,10 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     // invoices. Not persisted — once an invoice is picked, the client is
     // implicit via the invoice. Auto-fills when an invoice is selected.
     client_filter_id: '',
+    // UI-only, like client_filter_id: narrows the picker to every client a
+    // business partner brought in, so one partner payment can settle
+    // invoices across all of them.
+    partner_filter_id: '',
     fully_paid: false,
     // Finance scope for entries with NO client: 'company' = Cirqle's own books
     // (feeds the Company P&L), '' = leave untriaged (client money, tag later).
@@ -506,6 +513,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       reference:       '',
       allocations:     [],
       client_filter_id:  entry.client_id ?? '',
+      partner_filter_id: '',
       fully_paid:      false,
       scope:           entry.scope === 'company' ? 'company' : '',
       tags:            (entry.tags ?? []).map(t => t.tag.name),
@@ -548,6 +556,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       // panel instead.
       allocations:       [],
       client_filter_id:  entry.client_id  ?? '',
+      partner_filter_id: '',
       fully_paid:      false,
       scope:           entry.scope === 'company' ? 'company' : '',
       tags:            (entry.tags ?? []).map(t => t.tag.name),
@@ -663,7 +672,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         ))
         setShowForm(false)
         setFormEditingId(null)
-        setForm({ ad_account_id: '', type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [], markupType: 'none', markupValue: '' })
+        setForm({ ad_account_id: '', type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', partner_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [], markupType: 'none', markupValue: '' })
         setDescTouched(false)
       }
       setSaving(false)
@@ -706,7 +715,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     // outflow categories) or the invoice-mode client filter — same rule the
     // edit path uses. A tagged client makes the money client-scoped; otherwise
     // the user's Books choice applies ('' = leave for triage).
-    const insertClientId = smartExtra.client_id || form.client_filter_id || null
+    const lineClientIds = new Set(splitLines.map(l => dueInvoices.find(i => i.id === l.invoice_id)?.client?.id).filter(Boolean))
+    const singleLineClient = lineClientIds.size === 1 ? [...lineClientIds][0] as string : ''
+    const insertClientId = smartExtra.client_id || form.client_filter_id || singleLineClient || null
     const result = await insertCashbookEntries(
       baseDates,
       {
@@ -764,7 +775,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       setEntries(prev => [...[...allInserted].reverse(), ...prev])
       setShowForm(false)
       setRecurringMonths(0)
-      setForm({ ad_account_id: '', type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [], markupType: 'none', markupValue: '' })
+      setForm({ ad_account_id: '', type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', partner_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [], markupType: 'none', markupValue: '' })
       setDescTouched(false)
       // The entry saved but the DB rejected the split (over-allocation, or an
       // invoice that was settled from another tab meanwhile). Say so — the
@@ -966,14 +977,47 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     </>
   )
 
+  // ── "Receive payment" deep link ────────────────────────────────────────────
+  // /dashboard/cashbook?receive=1&partner=<id>&client=<id> — from the invoices
+  // page. Opens a new Invoice income entry already narrowed to that partner or
+  // client, so the user only types the amount and taps "Pay oldest first".
+  // The params are consumed once and stripped, so a refresh doesn't reopen it.
+  const receiveHandled = useRef(false)
+  useEffect(() => {
+    if (receiveHandled.current || searchParams.get('receive') !== '1') return
+    receiveHandled.current = true
+    if (canEditEntries && !permissionUser.isViewAs && invoiceCategoryId) {
+      const partnerId = searchParams.get('partner') || ''
+      const clientId  = searchParams.get('rclient') || ''
+      setForm(p => ({
+        ...p, type: 'inflow', category_id: invoiceCategoryId, allocations: [],
+        partner_filter_id: partners.some(bp => bp.id === partnerId) ? partnerId : '',
+        client_filter_id:  clients.some((c: { id: string }) => c.id === clientId) ? clientId : '',
+      }))
+      setShowForm(true)
+    }
+    const params = new URLSearchParams(searchParams.toString())
+    params.delete('receive'); params.delete('partner'); params.delete('rclient')
+    const qs = params.toString()
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+  }, [searchParams, canEditEntries, permissionUser.isViewAs, invoiceCategoryId, partners, clients, pathname, router])
+
   const today = todayISO()
+  /** Clients brought in by the partner picked in the entry form. */
+  const partnerClientIds = useMemo(() => new Set(
+    form.partner_filter_id
+      ? clients.filter((c: { id: string; business_partner_id?: string | null }) => c.business_partner_id === form.partner_filter_id).map((c: { id: string }) => c.id)
+      : [],
+  ), [clients, form.partner_filter_id])
   // Pending invoices for the Invoice picker — narrowed to a single client when
   // the user picks one in the Client filter. Sorted overdue-first then by due
   // date so the most-pressing receivables surface at the top.
   const sortedDueInvoices = useMemo(() => {
     const list = form.client_filter_id
       ? dueInvoices.filter(inv => inv.client?.id === form.client_filter_id)
-      : dueInvoices
+      : form.partner_filter_id
+        ? dueInvoices.filter(inv => !!inv.client?.id && partnerClientIds.has(inv.client.id))
+        : dueInvoices
     return [...list].sort((a, b) => {
       const aOverdue = a.due_date && a.due_date < today
       const bOverdue = b.due_date && b.due_date < today
@@ -981,7 +1025,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       if (!aOverdue && bOverdue) return 1
       return (a.due_date || '').localeCompare(b.due_date || '')
     })
-  }, [dueInvoices, form.client_filter_id, today])
+  }, [dueInvoices, form.client_filter_id, form.partner_filter_id, partnerClientIds, today])
 
   const isInvoiceCategory = form.category_id === invoiceCategoryId && form.type === 'inflow'
 
@@ -1005,10 +1049,14 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   // One receipt settles one client's invoices. The first line locks the client
   // even if the filter chip above is later cleared — a payment from client A
   // must never land on client B's ledger.
+  // With a business partner picked, the lock is the partner instead: the
+  // candidates are already narrowed to that partner's clients, and the
+  // payment is meant to cover several of them.
   const allocClientId = useMemo(() => {
+    if (form.partner_filter_id) return form.client_filter_id
     const first = form.allocations[0]
     return (first ? dueInvoices.find(i => i.id === first.invoice_id)?.client?.id : '') || form.client_filter_id
-  }, [form.allocations, form.client_filter_id, dueInvoices])
+  }, [form.allocations, form.client_filter_id, form.partner_filter_id, dueInvoices])
 
   /** Invoices this receipt can still be split across: same client, not already a line. */
   const allocCandidates = useMemo(() => {
@@ -1053,7 +1101,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       ...p,
       ...(seed ?? {}),
       allocations:      lines,
-      client_filter_id: inv.client?.id || p.client_filter_id,
+      client_filter_id: p.partner_filter_id ? p.client_filter_id : (inv.client?.id || p.client_filter_id),
       fully_paid:       false,
       reference:        lines.length === 1 ? (inv.invoice_number || '') : '',
     }))
@@ -1099,7 +1147,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     setForm(p => ({
       ...p,
       allocations:      lines,
-      client_filter_id: firstInv?.client?.id || p.client_filter_id,
+      client_filter_id: p.partner_filter_id ? p.client_filter_id : (firstInv?.client?.id || p.client_filter_id),
       // A single invoice number is a useful entry reference; across a split it
       // just duplicates what the allocations already say.
       reference:        lines.length === 1 ? (firstInv?.invoice_number || '') : '',
@@ -2366,7 +2414,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   <button
                     key={t}
                     type="button"
-                    onClick={() => { setForm(p => ({ ...p, type: t, category_id: t === 'inflow' ? invoiceCategoryId : '', allocations: [], client_filter_id: '', fully_paid: false, scope: '', splitEmployeeIds: [], markupType: 'none', markupValue: '' })); resetSmart() }}
+                    onClick={() => { setForm(p => ({ ...p, type: t, category_id: t === 'inflow' ? invoiceCategoryId : '', allocations: [], client_filter_id: '', partner_filter_id: '', fully_paid: false, scope: '', splitEmployeeIds: [], markupType: 'none', markupValue: '' })); resetSmart() }}
                     className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors ${form.type === t
                       ? t === 'inflow' ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'
                       : 'bg-secondary text-muted-foreground border border-transparent hover:text-foreground'
@@ -2529,7 +2577,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                         className="shrink-0 flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg bg-violet-500/15 text-violet-600 dark:text-violet-300 border border-violet-500/25 hover:bg-violet-500/25 transition-colors"
                       >
                         <Sparkles className="w-3 h-3" />
-                        Split oldest first
+                        Pay oldest first
                       </button>
                     )}
                   </div>
@@ -2544,11 +2592,27 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                       {/* Client filter — narrows the picker to one client's pending
                           invoices. Optional up front; the first invoice added fills
                           it in and locks every later line to the same client. */}
+                      {/* Business partner — one payment from a partner settles
+                          invoices across every client they brought in. Picking
+                          one narrows both pickers below to those clients. */}
+                      {partners.length > 0 && (
+                        <Combobox
+                          options={partners.map(bp => ({ id: bp.id, label: bp.name, sub: bp.code ?? undefined }))}
+                          value={form.partner_filter_id}
+                          onChange={id => setForm(p => {
+                            const keepClient = !!id && !!p.client_filter_id &&
+                              clients.some((c: { id: string; business_partner_id?: string | null }) => c.id === p.client_filter_id && c.business_partner_id === id)
+                            return { ...p, partner_filter_id: id, client_filter_id: keepClient ? p.client_filter_id : '' }
+                          })}
+                          placeholder="Filter by business partner (optional)…"
+                          disabled={form.allocations.length > 0}
+                        />
+                      )}
                       <Combobox
-                        options={clients.map(c => ({ id: c.id, label: c.name, sub: c.code }))}
+                        options={(form.partner_filter_id ? clients.filter(c => partnerClientIds.has(c.id)) : clients).map(c => ({ id: c.id, label: c.name, sub: c.code }))}
                         value={form.client_filter_id}
                         onChange={id => setForm(p => ({ ...p, client_filter_id: id }))}
-                        placeholder="Filter by client (optional)…"
+                        placeholder={form.partner_filter_id ? 'All of this partner’s clients…' : 'Filter by client (optional)…'}
                         disabled={form.allocations.length > 0}
                       />
                       <Combobox
@@ -2573,7 +2637,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                         onChange={id => { if (id) addAllocation(id) }}
                         placeholder={
                           allocCandidates.length === 0
-                            ? (form.allocations.length > 0 ? 'No other open invoices for this client' : 'No pending invoices for this client')
+                            ? (form.allocations.length > 0
+                                ? `No other open invoices for this ${form.partner_filter_id && !form.client_filter_id ? 'partner' : 'client'}`
+                                : `No pending invoices for this ${form.partner_filter_id && !form.client_filter_id ? 'partner' : 'client'}`)
                             : form.allocations.length > 0 ? 'Add another invoice…' : 'Select invoice…'
                         }
                       />

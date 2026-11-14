@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { ChevronRight, Home, ChevronDown, UserCircle, Sparkles, MessageCircle } from 'lucide-react'
-import { forwardRef, useState, useRef, useEffect } from 'react'
+import { forwardRef, useState, useRef, useEffect, useCallback } from 'react'
 import { usePermissions } from '@/contexts/permission-context'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
@@ -146,6 +146,48 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
   const isEmployee = !user.isAdmin
   
   const [profileOpen, setProfileOpen] = useState(false)
+
+  // ── Page actions: beside the title when they fit, their own row when not ──
+  // They used to be squeezed into whatever was left between the title and the
+  // global buttons, scrolling sideways with the scrollbar hidden — so on a
+  // laptop or tablet "Add Entry" was a sliver and the rest were simply gone.
+  // Now the bar is measured: if the actions' natural width does not fit, they
+  // drop to a second row and wrap, so every button is always on screen.
+  const barRef = useRef<HTMLDivElement | null>(null)
+  const actionsRef = useRef<HTMLDivElement | null>(null)
+  const globalsRef = useRef<HTMLDivElement | null>(null)
+  const [stackActions, setStackActions] = useState(false)
+  const setBarRef = useCallback((el: HTMLDivElement | null) => {
+    barRef.current = el
+    if (typeof ref === 'function') ref(el)
+    else if (ref) ref.current = el
+  }, [ref])
+  const hasActions = !!actions
+  useEffect(() => {
+    const bar = barRef.current
+    if (!bar || !hasActions) return
+    const measure = () => {
+      const a = actionsRef.current
+      if (!a) return
+      // Natural width of the buttons (they never shrink), independent of
+      // which layout is showing — so the answer cannot flip-flop.
+      let need = 0
+      const kids = Array.from(a.children) as HTMLElement[]
+      kids.forEach(k => { need += k.offsetWidth })
+      need += Math.max(0, kids.length - 1) * 8
+      const cs = getComputedStyle(bar)
+      const inner = bar.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+      const globals = globalsRef.current?.offsetWidth ?? 0
+      const TITLE_MIN = 176, GAPS = 32
+      setStackActions(need + globals + TITLE_MIN + GAPS > inner)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(bar)
+    if (actionsRef.current) ro.observe(actionsRef.current)
+    if (globalsRef.current) ro.observe(globalsRef.current)
+    return () => ro.disconnect()
+  }, [hasActions])
   const [showPwdModal, setShowPwdModal] = useState(false)
 
   // Close on any click outside, and on Escape.
@@ -280,8 +322,8 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
 
   return (
     <div
-      ref={ref}
-      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 pr-3 md:px-5 border-b border-border/80 bg-background/95 supports-[backdrop-filter]:bg-background/60 backdrop-blur-md sticky top-0 z-30 transition-all ${isEmployee ? 'pl-3 py-2 sm:pl-16 sm:py-3.5' : 'pl-3 sm:pl-16 py-2.5 sm:py-3.5'}`}
+      ref={setBarRef}
+      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-x-3 gap-y-2 sm:gap-x-4 ${stackActions ? 'sm:flex-wrap' : ''} pr-3 md:px-5 border-b border-border/80 bg-background/95 supports-[backdrop-filter]:bg-background/60 backdrop-blur-md sticky top-0 z-30 transition-all ${isEmployee ? 'pl-3 py-2 sm:pl-16 sm:py-3.5' : 'pl-3 sm:pl-16 py-2.5 sm:py-3.5'}`}
     >
       <div className="flex items-center justify-between w-full sm:w-auto sm:flex-1 min-w-0 sm:min-w-[10rem] gap-2">
         {/* Left: Branding & Title */}
@@ -310,15 +352,15 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
 
       {/* Local Actions (Bottom Row on Mobile, Middle on Desktop) */}
       {actions && (
-        // sm:shrink + min-w-0: beside the title and global actions this row
-        // scrolls inside its own slot rather than widening the page.
-        <div className="flex items-center gap-2 overflow-x-auto hide-scrollbar w-full sm:w-auto shrink-0 sm:shrink min-w-0 [&>*]:shrink-0 pb-1 sm:pb-0">
+        // Phones, and any width where they don't fit beside the title: a row
+        // of their own that wraps, so no button is ever off-screen.
+        <div ref={actionsRef} className={`flex flex-wrap items-center gap-2 w-full min-w-0 [&>*]:shrink-0 ${stackActions ? 'sm:order-last sm:basis-full sm:justify-end' : 'sm:w-auto sm:flex-nowrap sm:shrink-0'}`}>
           {actions}
         </div>
       )}
 
       {/* Desktop Global Actions (Hidden on Mobile) */}
-      <div className="hidden sm:flex items-center gap-1.5 sm:gap-2 shrink-0 border-l border-border/60 pl-2 sm:pl-4">
+      <div ref={globalsRef} className="hidden sm:flex items-center gap-1.5 sm:gap-2 shrink-0 border-l border-border/60 pl-2 sm:pl-4">
         {globalActions}
       </div>
 

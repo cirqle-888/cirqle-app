@@ -7,6 +7,7 @@ import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banne
 import { getCompanySettings } from '@/lib/settings/company-settings'
 import { loadAgreementBreakdowns } from '@/lib/packages/invoice-breakdown'
 import InvoicesClient from './invoices-client'
+import { listPartnerOptions } from '@/lib/partners/list'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,6 +23,7 @@ export default async function InvoicesPage() {
   // Pending-to-price banner — only for users who can see invoice amounts/pricing.
   const canSeePricing = (me?.isAdmin ?? false) || vis.billingAmounts || vis.billingLinePricing
 
+  const partnersP = listPartnerOptions(supabase)
   const [invoicesRes, clientsRes, bankRes, servicesRes, settingsRes, ratesRes, categoriesRes, serviceColumnDefaults, pendingPricing] = await Promise.all([
     // The list query. `items` and `cashbook_invoice_allocations` are
     // deliberately NOT joined here: measured across 270 invoices they were
@@ -47,7 +49,7 @@ export default async function InvoicesPage() {
     // batch generator until approved (falls back pre-migration).
     withDraftFlag(x => supabase
       .from('clients')
-      .select(`id, name, code, phone, email, address, default_currency${x}`)
+      .select(`id, name, code, phone, email, address, default_currency, business_partner_id${x}`)
       .eq('is_active', true)
       .order('name')),
     supabase
@@ -127,6 +129,7 @@ export default async function InvoicesPage() {
       initialInvoices={initialInvoices}
       clients={((clientsRes.data || []) as any[]).filter(c => !c.is_draft)}
       draftClientIds={((clientsRes.data || []) as any[]).filter(c => c.is_draft).map(c => c.id as string)}
+      partners={await partnersP}
       bankAccounts={bankRes.data || []}
       cashbookCategories={categoriesRes.data || []}
       services={servicesRes.data || []}
