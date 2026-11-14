@@ -6,8 +6,8 @@ import { useState } from 'react'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
-import { Plus, Handshake, ChevronRight, Edit2 } from 'lucide-react'
-import { createPartner, updatePartner, type PartnerInput } from './actions'
+import { Plus, Handshake, ChevronRight, Edit2, Trash2 } from 'lucide-react'
+import { createPartner, updatePartner, setPartnerStatus, deletePartner, type PartnerInput } from './actions'
 import type { BusinessPartner, PartnerSummary } from '@/lib/partners/queries'
 import { formatDate } from '@/lib/utils/format-date'
 
@@ -80,6 +80,7 @@ export default function PartnersClient({ initialPartners, allClients, summaries,
       notes: p.notes,
     })
     setError(null)
+    setConfirmDelete(false)
     setModalOpen(true)
   }
 
@@ -106,6 +107,30 @@ export default function PartnersClient({ initialPartners, allClients, summaries,
       setPartners(prev => [...prev, { id: result.data!.id, status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), ...toPartnerPatch(form) } as BusinessPartner])
     }
     setSaving(false)
+    setModalOpen(false)
+  }
+
+  // ── Inactive / delete, from the edit popup ───────────────────────────────
+  async function toggleStatus() {
+    if (!editing) return
+    const status = editing.status === 'active' ? 'inactive' : 'active'
+    setSaving(true); setError(null)
+    const result = await setPartnerStatus(editing.id, status)
+    setSaving(false)
+    if (!result.ok) { setError(result.error || 'Something went wrong.'); return }
+    setPartners(prev => prev.map(p => p.id === editing.id ? { ...p, status } : p))
+    setModalOpen(false)
+  }
+
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  async function handleDelete() {
+    if (!editing) return
+    setSaving(true); setError(null)
+    const result = await deletePartner(editing.id)
+    setSaving(false)
+    setConfirmDelete(false)
+    if (!result.ok) { setError(result.error || 'Something went wrong.'); return }
+    setPartners(prev => prev.filter(p => p.id !== editing.id))
     setModalOpen(false)
   }
 
@@ -219,6 +244,31 @@ export default function PartnersClient({ initialPartners, allClients, summaries,
               </div>
               {error && <div className="text-sm text-destructive bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2">{error}</div>}
             </div>
+            {/* Added by mistake, or no longer working with them. Inactive
+                keeps the history and hides the partner from pickers; Delete
+                is only offered while nothing is linked to them. */}
+            {editing && canEdit && (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+                <button onClick={toggleStatus} disabled={saving}
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary disabled:opacity-50">
+                  {editing.status === 'active' ? 'Make inactive' : 'Make active again'}
+                </button>
+                {(clientCountByPartner.get(editing.id) || 0) === 0 && (
+                  confirmDelete ? (
+                    <span className="flex items-center gap-2 text-xs">
+                      <span className="text-muted-foreground">Delete for good?</span>
+                      <button onClick={handleDelete} disabled={saving} className="rounded-lg bg-red-600 px-3 py-1.5 font-semibold text-white hover:bg-red-500 disabled:opacity-50">Yes, delete</button>
+                      <button onClick={() => setConfirmDelete(false)} className="rounded-lg border border-border px-3 py-1.5 font-medium hover:bg-secondary">No</button>
+                    </span>
+                  ) : (
+                    <button onClick={() => setConfirmDelete(true)} disabled={saving}
+                      className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-500/10 disabled:opacity-50 dark:text-red-400">
+                      <Trash2 className="h-3.5 w-3.5" />Delete partner
+                    </button>
+                  )
+                )}
+              </div>
+            )}
             <div className="flex gap-2 mt-5">
               <button onClick={() => setModalOpen(false)} className="flex-1 py-2 rounded-lg border border-border text-sm font-medium text-foreground hover:bg-secondary">
                 Cancel

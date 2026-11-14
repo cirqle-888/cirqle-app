@@ -116,6 +116,39 @@ export async function setPartnerStatus(id: string, status: 'active' | 'inactive'
 }
 
 /**
+ * Delete a partner added by mistake.
+ *
+ * Only an EMPTY partner can go: no clients linked and no commission payments
+ * recorded. Anything with history is made inactive instead (setPartnerStatus)
+ * — the database would cascade-delete its commission payments, and those are
+ * money records. Invoices, payments and the cash book are never touched.
+ */
+export async function deletePartner(id: string): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.PARTNERS_EDIT)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const [clientsRes, paymentsRes] = await Promise.all([
+    admin.from('clients').select('id', { count: 'exact', head: true }).eq('business_partner_id', id),
+    admin.from('partner_commission_payments').select('id', { count: 'exact', head: true }).eq('partner_id', id),
+  ])
+  if (clientsRes.error) return { ok: false, error: clientsRes.error.message }
+  if ((clientsRes.count ?? 0) > 0) {
+    return { ok: false, error: 'This partner still has clients linked. Unlink them first, or make the partner inactive instead.' }
+  }
+  // A missing payments table (pre-migration) means there is nothing to protect.
+  if (!paymentsRes.error && (paymentsRes.count ?? 0) > 0) {
+    return { ok: false, error: 'This partner has commission payments on record. Make them inactive instead of deleting.' }
+  }
+
+  const { error } = await admin.from('business_partners').delete().eq('id', id)
+  if (error) return { ok: false, error: error.message }
+
+  revalidatePath('/dashboard/partners')
+  return { ok: true }
+}
+
+/**
  * Link (or unlink, when partnerId is null) a client to a partner.
  * The only write in this module that touches the `clients` table, and only
  * the `business_partner_id` column — invoices/payments are never modified.
