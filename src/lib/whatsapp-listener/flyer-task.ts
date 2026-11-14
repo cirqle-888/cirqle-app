@@ -81,6 +81,10 @@ export async function ensureFlyerTask(admin: SupabaseClient, input: FlyerTaskInp
     }
     if (!taskId) return null
     await autoLinkTaskPackage(admin, taskId)
+    // Priced the way the Add Task form prices it: the client's price for the service
+    // (Pricing Matrix), else the service default, for one flyer. Pages are not known
+    // yet, so the quantity stays 1 until someone sets it.
+    await priceFlyerTask(taskId, input.clientId, serviceId)
     if (input.assigneeId) {
       await admin.from('task_assignments').insert({ task_id: taskId, employee_id: input.assigneeId }).then(() => {}, () => {})
     }
@@ -96,6 +100,16 @@ export async function ensureFlyerTask(admin: SupabaseClient, input: FlyerTaskInp
     return null
   }
   return taskId
+}
+
+async function priceFlyerTask(taskId: string, clientId: string, serviceId: string | null): Promise<void> {
+  try {
+    // Loaded on demand: the Tasks actions pull in most of the app, which a webhook should not pay for on every message.
+    const { serverFillTaskBilling } = await import('@/app/(dashboard)/dashboard/tasks/actions')
+    await serverFillTaskBilling(taskId, clientId, serviceId, 1)
+  } catch (err) {
+    console.warn('[whatsapp-listener] flyer task left unpriced:', err)
+  }
 }
 
 /** Keeps an open task's date on the flyer's work day when the client gives the offer date later. */
