@@ -3,15 +3,18 @@
 import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
 import AppSelect from '@/components/ui/app-select'
+import { usePrivacy } from '@/contexts/privacy-context'
 import {
   LISTENER_KEYS, isChatId, parseGroupList, parseGroupNames, parseNumberRows, parseSeen, phoneMatchKey,
   serializeGroupList, serializeNumberList, type NumberRow,
 } from '@/lib/whatsapp-listener/rules'
+import { ACCESS_KEY, NO_ACCESS, parseAccess, serializeAccess, type ChatAccess } from '@/lib/whatsapp-listener/insights'
 
 /**
  * The WhatsApp listener's two mappings as tables:
  *   groups  → which Cirqle client each WhatsApp chat belongs to
  *   numbers → which phone numbers are Cirqle's own (never filed as requests)
+ * and, per chat, who is responsible for it and who may read it in Cirqle.
  *
  * A friendlier editor over the same company_settings text the listener reads
  * (see lib/whatsapp-listener/rules.ts), so nothing changes on the listener side.
@@ -23,6 +26,8 @@ interface Props {
   clients: { name: string; is_active?: boolean | null }[]
   /** Names offered as suggestions in the "Who" column. */
   people: string[]
+  /** Active employees, for "Responsible" and "Who can see". */
+  staff: { id: string; cqid?: string | null; name?: string | null }[]
 }
 
 interface GroupRow { id: string; client: string }
@@ -31,13 +36,14 @@ const cell = 'px-2 py-1.5 align-middle'
 const input = 'w-full bg-secondary border border-border rounded-md px-2 py-1.5 text-xs'
 const th = 'px-2 py-1.5 text-left text-[11px] font-medium text-muted-foreground'
 
-export default function WhatsAppListenerMap({ settings, onChange, clients, people }: Props) {
+export default function WhatsAppListenerMap({ settings, onChange, clients, people, staff }: Props) {
   // Rows live here while editing, so a half-typed row is not lost on the way
   // through the text format; every change is written back as text for Save.
   const [groups, setGroups] = useState<GroupRow[]>(() =>
     [...parseGroupList(settings[LISTENER_KEYS.groups])].map(([id, client]) => ({ id, client })))
   const [names, setNames] = useState<Record<string, string>>(() => parseGroupNames(settings[LISTENER_KEYS.groupNames]))
   const [numbers, setNumbers] = useState<NumberRow[]>(() => parseNumberRows(settings[LISTENER_KEYS.staffNumbers]))
+  const [access, setAccess] = useState<Record<string, ChatAccess>>(() => parseAccess(settings[ACCESS_KEY]))
   const [newChatId, setNewChatId] = useState('')
 
   const clientNames = clients.filter(c => c.is_active !== false).map(c => c.name).sort((a, b) => a.localeCompare(b))
@@ -50,7 +56,18 @@ export default function WhatsAppListenerMap({ settings, onChange, clients, peopl
     const kept = Object.fromEntries(next.map(g => [g.id, (nextNames[g.id] || '').trim()]).filter(([, n]) => n))
     setNames(nextNames)
     onChange(LISTENER_KEYS.groupNames, JSON.stringify(kept))
+    // A chat taken off the list loses its sharing too.
+    onChange(ACCESS_KEY, serializeAccess(access, next.map(g => g.id)))
   }
+  function saveAccess(chatId: string, change: Partial<ChatAccess>) {
+    const next = { ...access, [chatId]: { ...(access[chatId] ?? NO_ACCESS), ...change } }
+    setAccess(next)
+    onChange(ACCESS_KEY, serializeAccess(next, groups.map(g => g.id)))
+  }
+  // Staff show by CQID until names are unlocked, like everywhere else in the app.
+  const { dn } = usePrivacy()
+  const staffSorted = staff.map(e => ({ id: e.id, label: dn(e) })).sort((a, b) => a.label.localeCompare(b.label))
+  const staffName = new Map(staffSorted.map(e => [e.id, e.label]))
   function saveNumbers(next: NumberRow[]) {
     setNumbers(next)
     onChange(LISTENER_KEYS.staffNumbers, serializeNumberList(next))
@@ -78,23 +95,32 @@ export default function WhatsAppListenerMap({ settings, onChange, clients, peopl
       <div>
         <p className="text-xs font-medium text-foreground mb-0.5">Chats to read</p>
         <p className="text-[11px] text-muted-foreground/60 mb-1.5">
-          Each WhatsApp chat and the client it belongs to. A chat that is not in this table is never read. {groups.length} listed.
+          Each WhatsApp chat, the client it belongs to, who looks after it and who may read it in Cirqle.
+          A chat that is not in this table is never read. {groups.length} listed.
+        </p>
+        <p className="text-[11px] text-muted-foreground/60 mb-1.5">
+          Admins can read every chat. The responsible person can read their chat and is told when something in it is waiting on Cirqle.
         </p>
         <div className="border border-border rounded-lg overflow-x-auto">
-          <table className="w-full text-xs min-w-[520px]">
+          <table className="w-full text-xs min-w-[860px]">
             <thead className="bg-secondary/50 border-b border-border">
               <tr>
                 <th className={th}>WhatsApp chat</th>
                 <th className={th}>Cirqle client</th>
+                <th className={th}>Responsible</th>
+                <th className={th}>Who can see</th>
                 <th className={`${th} w-8`}><span className="sr-only">Remove</span></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {groups.length === 0 && (
-                <tr><td colSpan={3} className="px-3 py-3 text-[11px] text-muted-foreground">No chats yet. Add one below.</td></tr>
+                <tr><td colSpan={5} className="px-3 py-3 text-[11px] text-muted-foreground">No chats yet. Add one below.</td></tr>
               )}
               {groups.map((g, i) => {
                 const unknownClient = !!g.client && !known.has(g.client.toLowerCase())
+                const a = access[g.id] ?? NO_ACCESS
+                const label = names[g.id] || g.id
+                const shared = a.viewers.map(id => staffName.get(id)).filter(Boolean) as string[]
                 return (
                   <tr key={g.id}>
                     <td className={cell}>
@@ -120,6 +146,47 @@ export default function WhatsAppListenerMap({ settings, onChange, clients, peopl
                       </AppSelect>
                       {unknownClient && (
                         <p className="mt-0.5 text-[10px] text-amber-500">No client with this name. Pick one, or add the client first.</p>
+                      )}
+                    </td>
+                    <td className={cell}>
+                      <AppSelect
+                        aria-label={`Responsible for ${label}`}
+                        value={a.owner && staffName.has(a.owner) ? a.owner : ''}
+                        onChange={e => saveAccess(g.id, { owner: e.target.value || null })}
+                        className="!text-xs !h-8"
+                      >
+                        <option value="">Nobody (admins are told)</option>
+                        {staffSorted.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
+                      </AppSelect>
+                    </td>
+                    <td className={cell}>
+                      <AppSelect
+                        aria-label={`Who can see ${label}`}
+                        value={a.everyone ? 'everyone' : 'chosen'}
+                        onChange={e => saveAccess(g.id, { everyone: e.target.value === 'everyone' })}
+                        className="!text-xs !h-8"
+                      >
+                        <option value="chosen">Admins and chosen people</option>
+                        <option value="everyone">Everyone with Requests</option>
+                      </AppSelect>
+                      {!a.everyone && (
+                        <details className="mt-1">
+                          <summary className="cursor-pointer text-[11px] text-primary">
+                            {shared.length ? `Also shared with ${shared.join(', ')}` : 'Share with more people'}
+                          </summary>
+                          <div className="mt-1 max-h-40 overflow-y-auto border border-border rounded-md p-1.5 space-y-1">
+                            {staffSorted.map(e => (
+                              <label key={e.id} className="flex items-center gap-1.5 text-[11px]">
+                                <input
+                                  type="checkbox"
+                                  checked={a.viewers.includes(e.id)}
+                                  onChange={ev => saveAccess(g.id, { viewers: ev.target.checked ? [...a.viewers, e.id] : a.viewers.filter(v => v !== e.id) })}
+                                />
+                                {e.label}
+                              </label>
+                            ))}
+                          </div>
+                        </details>
                       )}
                     </td>
                     <td className={cell}>

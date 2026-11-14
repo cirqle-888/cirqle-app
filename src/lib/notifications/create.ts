@@ -33,6 +33,8 @@ export type NotificationType =
   | 'whatsapp_listener_down'
   /** Listener switched on, but nothing has arrived for a day. */
   | 'whatsapp_listener_silent'
+  /** Something in a client WhatsApp chat is waiting on Cirqle (lib/whatsapp-listener/insights). */
+  | 'whatsapp_pending'
   | 'offer_sync_failed'
   | 'followup_escalated'
   // Recruitment module

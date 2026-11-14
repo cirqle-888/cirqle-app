@@ -8,8 +8,11 @@ import { callGroqJSON } from '@/lib/ai/groq'
 import { transcribeAudio } from '@/lib/ai/transcribe'
 import { readImageText } from '@/lib/ai/vision'
 import { notifyAdmins } from '@/lib/notifications/create'
-import { safeStorageName, type PartKind, type SharedFile } from '@/lib/shortcut/whatsapp-capture'
+import { safeStorageName, transcriptionFileName, type PartKind, type SharedFile } from '@/lib/shortcut/whatsapp-capture'
 import { handleListenerMessage, type ListenerDeps, type RecentRequest } from '@/lib/whatsapp-listener/handle'
+import { planOfferFromMessage } from '@/lib/whatsapp-listener/offer-plan-run'
+import { ACCESS_KEY, parseAccess } from '@/lib/whatsapp-listener/insights'
+import { CHAT_LOG_TABLE, chatLogRow, chatMedia, isChatEvent, isMissingTable } from '@/lib/whatsapp-listener/chat-log'
 import {
   addSeen, aiFilterOn, isBadSessionStatus, listenerEnabled, parseEnvelope, parseGroupList, parseNumberList, parseSeen,
   parseSessionStatus, phoneMatchKey, shouldWriteHeard, verifySignature,
@@ -47,22 +50,94 @@ async function loadSettings(admin: SupabaseClient): Promise<Record<string, strin
   return Object.fromEntries((data || []).map((r: { key: string; value: string | null }) => [r.key, r.value ?? '']))
 }
 
-function buildDeps(admin: SupabaseClient, settings: Record<string, string>): ListenerDeps {
+/**
+ * Is this sender Cirqle? On the listener's own number list (shared lines,
+ * personal numbers, freelancers) or an active employee's saved phone.
+ */
+async function isCirqleNumber(admin: SupabaseClient, settings: Record<string, string>, phone: string): Promise<boolean> {
+  const key = phoneMatchKey(phone)
+  if (!key) return false
+  if (parseNumberList(settings[LISTENER_KEYS.staffNumbers]).numbers.has(key)) return true
+  const { data } = await admin.from('employees').select('phone').eq('is_active', true)
+  return (data || []).some((e: { phone: string | null }) => phoneMatchKey(e.phone) === key)
+}
+
+/**
+ * Keeps the message for the read-only chat view (lib/whatsapp-listener/chat-log).
+ * Only for chats on the allow-list, and only while the listener is on.
+ *
+ * Returns the storage path of the voice note or photo it kept, so the request
+ * filing below links to the same file instead of storing a second copy.
+ * Before the chat-log migration is applied this quietly does nothing.
+ */
+async function recordChatMessage(
+  admin: SupabaseClient, settings: Record<string, string>, m: ListenerMessage, mediaText: MediaText,
+): Promise<string | null> {
+  if (!listenerEnabled(settings) || !parseGroupList(settings[LISTENER_KEYS.groups]).has(m.chatId)) return null
+  const now = Date.now()
+  const media = chatMedia(m)
+  if (!chatLogRow(m, { fromCirqle: false, mediaPath: null, mediaMime: null, mediaNote: media.note, nowMs: now })) return null
+
+  // A gateway retry: already kept, so do not store the file again.
+  const existing = await admin.from(CHAT_LOG_TABLE).select('media_path').eq('message_id', m.id).maybeSingle()
+  if (existing.error) {
+    if (!isMissingTable(existing.error)) console.warn('[whatsapp-listener] chat log unavailable:', existing.error.message)
+    return null
+  }
+  if (existing.data) return (existing.data.media_path as string | null) ?? null
+
+  let mediaPath: string | null = null
+  let mediaNote = media.note
+  if (media.file) {
+    const path = `whatsapp-chat/${new Date(now).toISOString().slice(0, 7)}/${randomUUID()}-${safeStorageName(m.media?.filename || '', media.file.kind)}`
+    const { error } = await admin.storage.from(BUCKET).upload(path, media.file.bytes, { contentType: media.file.mime, upsert: false })
+    if (error) mediaNote = 'Could not be stored. Open WhatsApp to see it.'
+    else mediaPath = path
+  }
+
+  const fromCirqle = m.fromMe || m.event === 'message.sent'
+    || (m.senderPhone ? await isCirqleNumber(admin, settings, m.senderPhone).catch(() => false) : false)
+  const row = chatLogRow(m, { fromCirqle, mediaPath, mediaMime: media.file?.mime ?? null, mediaNote, nowMs: now })
+  if (!row) return mediaPath
+  const { error } = await admin.from(CHAT_LOG_TABLE).insert(row)
+  // 23505: the same message arrived twice at once and the other delivery won.
+  if (error && error.code !== '23505') console.warn('[whatsapp-listener] could not keep the message for the chat view:', error.message)
+  // What the voice note says / what is written in the photo, so the chat can be
+  // read, summarised and asked about like text. A separate write: before the
+  // reports migration the column does not exist, and the message must still be kept.
+  if (!error && media.file) {
+    const text = await mediaText().catch(() => null)
+    if (text) await admin.from(CHAT_LOG_TABLE).update({ media_text: text.slice(0, 8000) }).eq('message_id', m.id).then(() => {}, () => {})
+  }
+  return mediaPath
+}
+
+/** A message's voice note or photo as text, worked out at most once however many callers ask. */
+type MediaText = () => Promise<string | null>
+function mediaTextOnce(m: ListenerMessage): MediaText {
+  let pending: Promise<string | null> | null = null
+  return () => {
+    if (!pending) {
+      const { file } = chatMedia(m)
+      pending = !file ? Promise.resolve(null)
+        : file.kind === 'audio' ? transcribeAudio(file.bytes, transcriptionFileName(m.media?.filename || 'voice-note.ogg'))
+          : readImageText(file.bytes, file.mime)
+    }
+    return pending
+  }
+}
+
+function buildDeps(
+  admin: SupabaseClient, settings: Record<string, string>, keptMediaPath: string | null = null, mediaText: MediaText | null = null,
+): ListenerDeps {
   const month = new Date().toISOString().slice(0, 7)
-  const staffNumbers = parseNumberList(settings[LISTENER_KEYS.staffNumbers]).numbers
   return {
     enabled: listenerEnabled(settings),
     groups: parseGroupList(settings[LISTENER_KEYS.groups]),
 
     // Cirqle is talking when the sender is on the listener's own number list
     // (shared lines, personal numbers, freelancers) or is an active employee's saved phone.
-    isStaffPhone: async phone => {
-      const key = phoneMatchKey(phone)
-      if (!key) return false
-      if (staffNumbers.has(key)) return true
-      const { data } = await admin.from('employees').select('phone').eq('is_active', true)
-      return (data || []).some((e: { phone: string | null }) => phoneMatchKey(e.phone) === key)
-    },
+    isStaffPhone: phone => isCirqleNumber(admin, settings, phone),
 
     isDuplicate: async messageId => {
       const { data } = await admin.from('request_activity').select('id')
@@ -104,9 +179,16 @@ function buildDeps(admin: SupabaseClient, settings: Record<string, string>): Lis
       return typeof out?.request === 'boolean' ? out.request : null
     },
 
-    transcribe: (audio, fileName) => transcribeAudio(audio, fileName),
-    readImage: (file: SharedFile) => readImageText(file.bytes, file.type),
+    // A message carries one file, and the chat log has usually turned it into
+    // text already: reuse that instead of paying the AI twice.
+    transcribe: (audio, fileName) => (mediaText ? mediaText() : transcribeAudio(audio, fileName)),
+    readImage: (file: SharedFile) => (mediaText ? mediaText() : readImageText(file.bytes, file.type)),
     store: async (file: SharedFile, kind: PartKind) => {
+      // The chat log already kept this file: link to that copy.
+      if (keptMediaPath) {
+        const kept = await admin.storage.from(BUCKET).createSignedUrl(keptMediaPath, LINK_SECONDS)
+        if (kept.data?.signedUrl) return kept.data.signedUrl
+      }
       const path = `whatsapp-capture/${month}/${randomUUID()}-${safeStorageName(file.name, kind)}`
       const { error } = await admin.storage.from(BUCKET).upload(path, file.bytes, {
         contentType: file.type || (kind === 'audio' ? 'audio/ogg' : 'image/jpeg'), upsert: false,
@@ -139,6 +221,8 @@ function buildDeps(admin: SupabaseClient, settings: Record<string, string>): Lis
         visibility: 'internal',
         detail: { message: summary, messageId: m.id, chatId: m.chatId, senderId: m.senderId, type: m.type },
       })
+      // Lets the chat view show which request a message became. Harmless before the chat-log migration.
+      await admin.from(CHAT_LOG_TABLE).update({ request_id: requestId }).eq('message_id', m.id).then(() => {}, () => {})
     },
 
     recordSeen: async (chatId, by) => {
@@ -201,7 +285,7 @@ export async function POST(req: NextRequest) {
   try { payload = JSON.parse(raw) } catch { return json({ ok: false, error: 'Invalid JSON.' }, 400) }
 
   const message = parseEnvelope(payload)
-  if (!message || message.event !== 'message.received') {
+  if (!message || !isChatEvent(message.event)) {
     // Not a message (a test ping, a session event). It still proves the gateway is alive,
     // and a session event may say the number has stopped listening.
     const status = parseSessionStatus(payload)
@@ -223,7 +307,29 @@ export async function POST(req: NextRequest) {
     try {
       const settings = await loadSettings(admin)
       await recordHeard(admin, settings).catch(() => {})
-      const outcome = await handleListenerMessage(message, buildDeps(admin, settings))
+      // Keeping the conversation must never stop a request from being filed.
+      const mediaText = mediaTextOnce(message)
+      const keptMediaPath = await recordChatMessage(admin, settings, message, mediaText).catch(err => {
+        console.warn('[whatsapp-listener] chat log failed:', err)
+        return null
+      })
+      // A message the listener number sent is part of the conversation, never a request.
+      if (message.event !== 'message.received') return
+      const deps = buildDeps(admin, settings, keptMediaPath, mediaText)
+      // A supermarket's offer price list goes onto its social calendar instead of the Requests inbox.
+      // If that cannot be done for any reason, the message is filed as a request as before.
+      const planned = await planOfferFromMessage(admin, message, {
+        enabled: deps.enabled,
+        clientName: deps.groups.get(message.chatId) || '',
+        isStaffPhone: deps.isStaffPhone,
+        ownerId: parseAccess(settings[ACCESS_KEY])[message.chatId]?.owner ?? null,
+        mediaText,
+      }).catch(err => {
+        console.warn('[whatsapp-listener] offer list check failed:', err)
+        return false
+      })
+      if (planned) return
+      const outcome = await handleListenerMessage(message, deps)
       if (outcome.result === 'failed') throw new Error(outcome.error)
     } catch (err) {
       // The message is not lost from WhatsApp, but it did not reach the inbox: say so, without its content.

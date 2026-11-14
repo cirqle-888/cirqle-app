@@ -35,7 +35,7 @@ import {
   Search, Plus, UserRound, List, LayoutGrid, Link as LinkIcon, Trash2,
   ExternalLink, GripVertical, Share2, RefreshCw, Sparkles,
   BadgePercent, Megaphone, ChevronDown, ListChecks, Building2, Tag,
-  FolderOpen, MoreHorizontal, Send, Pencil,
+  FolderOpen, MoreHorizontal, Send, Pencil, MessageCircle,
 } from 'lucide-react'
 import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
 import {
@@ -1153,6 +1153,13 @@ export default function RequestsClient({
             title="Who is waiting on us, by client"
             className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-medium border border-border bg-card hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors shrink-0">
             <Inbox className="w-3.5 h-3.5" /><span className="hidden sm:inline">Pending by client</span>
+          </Link>
+        )}
+        {migrated && (
+          <Link href="/dashboard/requests/whatsapp"
+            title="Read the client WhatsApp chats (read-only)"
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-medium border border-border bg-card hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors shrink-0">
+            <MessageCircle className="w-3.5 h-3.5" /><span className="hidden sm:inline">WhatsApp chats</span>
           </Link>
         )}
         {perms.manage && migrated && (

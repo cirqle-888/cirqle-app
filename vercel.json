@@ -26,6 +26,10 @@
       "schedule": "30 3 * * *"
     },
     {
+      "path": "/api/cron/whatsapp-reports",
+      "schedule": "0 14 * * *"
+    },
+    {
       "path": "/api/cron/advertising-sync",
       "schedule": "0 3 * * *"
     },

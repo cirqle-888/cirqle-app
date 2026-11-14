@@ -3139,6 +3139,9 @@ export default function SettingsClient(props: Props) {
                   onChange={(key, value) => setCompanySettings(p => ({ ...p, [key]: value }))}
                   clients={props.clients}
                   people={(employees as { name?: string; is_active?: boolean }[]).filter(e => e.is_active !== false).map(e => e.name || '').filter(Boolean)}
+                  staff={(employees as { id?: string; cqid?: string | null; name?: string | null; is_active?: boolean; is_archived?: boolean }[])
+                    .filter(e => e.is_active !== false && e.is_archived !== true && e.id)
+                    .map(e => ({ id: e.id as string, cqid: e.cqid, name: e.name }))}
                 />
               </div>
               <button onClick={saveCompanySettings} disabled={saving} className="gradient-bg text-white text-sm font-medium px-5 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50">

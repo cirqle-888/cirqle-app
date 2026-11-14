@@ -69,6 +69,65 @@ describe('WhatsApp listener webhook', () => {
     expect(mocks.createAdminClient).not.toHaveBeenCalled() // only inside the deferred work
   })
 
+  // ── Chat log (read-only chat view) ────────────────────────────────────────
+  const CHAT = '1203630212@g.us'
+  type Result = { data: unknown; error: { code?: string; message?: string } | null }
+  /** A stand-in database: answers by table, and records every insert. */
+  function fakeAdmin(chatLogLookup: Result) {
+    const inserts: { table: string; row: Record<string, unknown> }[] = []
+    const from = (table: string) => {
+      let op = 'select'
+      const result = (): Result => {
+        if (table === 'company_settings' && op === 'select') {
+          return { data: [{ key: 'whatsapp_listener_enabled', value: 'on' }, { key: 'whatsapp_listener_groups', value: `${CHAT} = Sea Star` }], error: null }
+        }
+        if (table === 'whatsapp_chat_messages' && op === 'select') return chatLogLookup
+        return { data: null, error: null }
+      }
+      const b: Record<string, unknown> = {}
+      for (const m of ['select', 'eq', 'like', 'in', 'order', 'limit', 'gte']) b[m] = () => b
+      b.insert = (row: Record<string, unknown>) => { op = 'insert'; inserts.push({ table, row }); return b }
+      b.upsert = () => { op = 'upsert'; return b }
+      b.update = () => { op = 'update'; return b }
+      b.maybeSingle = () => Promise.resolve(result())
+      b.then = (ok: (r: Result) => unknown, fail?: (e: unknown) => unknown) => Promise.resolve(result()).then(ok, fail)
+      return b
+    }
+    return { admin: { from, storage: { from: () => ({ upload: vi.fn(), createSignedUrl: vi.fn() }) } }, inserts }
+  }
+  async function deliver(payload: unknown, db: ReturnType<typeof fakeAdmin>) {
+    mocks.createAdminClient.mockReturnValue(db.admin)
+    const body = JSON.stringify(payload)
+    expect((await call(body, sign(body))).status).toBe(200)
+    await mocks.after.mock.calls[0][0]()
+  }
+  const sent = { ...message, event: 'message.sent', data: { ...message.data, id: 'S1', fromMe: true, body: 'Sure, by Friday', timestamp: 1794300000 } }
+
+  it('keeps a message Cirqle sent for the chat view, and never files it as a request', async () => {
+    const db = fakeAdmin({ data: null, error: null })
+    await deliver(sent, db)
+    expect(db.inserts).toHaveLength(1)
+    expect(db.inserts[0].table).toBe('whatsapp_chat_messages')
+    expect(db.inserts[0].row).toMatchObject({ message_id: 'S1', chat_id: CHAT, from_cirqle: true, body: 'Sure, by Friday', sent_at: new Date(1794300000 * 1000).toISOString() })
+  })
+
+  it('does not keep a message twice, or one from a chat that is not listed', async () => {
+    const again = fakeAdmin({ data: { media_path: null }, error: null })
+    await deliver(sent, again)
+    expect(again.inserts).toHaveLength(0)
+
+    mocks.after.mockClear()
+    const other = fakeAdmin({ data: null, error: null })
+    await deliver({ ...sent, data: { ...sent.data, chatId: '999@g.us', from: '999@g.us' } }, other)
+    expect(other.inserts).toHaveLength(0)
+  })
+
+  it('carries on quietly before the chat-log table exists', async () => {
+    const db = fakeAdmin({ data: null, error: { code: 'PGRST205', message: "Could not find the table 'public.whatsapp_chat_messages'" } })
+    await deliver(sent, db)
+    expect(db.inserts).toHaveLength(0)
+  })
+
   it('rejects signed junk', async () => {
     const body = 'not json'
     expect((await call(body, sign(body))).status).toBe(400)

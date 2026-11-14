@@ -205,3 +205,77 @@ Settings are `company_settings` rows. Set by you: `whatsapp_listener_enabled`, `
 
 The message format was taken from OpenWA's `docs/06-api-specification.md` §6.6 and `docs/04-security-design.md`
 as published on 10 Nov 2026. If OpenWA changes it, messages will be ignored as unreadable, not misfiled.
+
+## Read-only chat view (built 14 Nov 2026, not deployed yet)
+
+**Requests → WhatsApp chats** (`/dashboard/requests/whatsapp`) shows each chat on the allow-list as a
+thread: who wrote what and when, voice notes with a player, photos, and which request a message became.
+It is read-only. Nothing can be sent from it; replies happen in WhatsApp. Same access as the Requests inbox.
+
+- Needs the migration `supabase/migrations/20261114100000_whatsapp_chat_messages.sql`
+  (rollback in `supabase/rollbacks/`). Until it is applied the page says so and the listener files
+  requests exactly as before.
+- Only messages from allow-listed chats are kept, and only from the moment the migration is applied
+  and the listener is running. Old history is not imported.
+- Messages from Cirqle numbers are kept too (shown on the right), but never filed as requests.
+- To also show what is sent from the listener number itself, add the `message.sent` event to the
+  OpenWA webhook. Not yet done, and not yet checked that OpenWA reports messages sent from the phone.
+- Voice notes and photos are stored once, under `whatsapp-chat/` in the private `chat-attachments`
+  bucket; a filed request links to the same file. Nothing deletes old messages or files yet.
+- Voice notes are transcribed only when they are filed as a request; the chat view plays the audio.
+
+## Smart layer: text from media, pending list, daily report, Ask, sharing
+
+Built on the chat log. Needs `supabase/migrations/20261114110000_whatsapp_chat_reports.sql`
+(rollback in `supabase/rollbacks/`). Rules: `src/lib/whatsapp-listener/insights.ts`;
+database and AI: `insights-run.ts`. Nothing here sends anything to WhatsApp.
+
+| Part | What it does | Where |
+|---|---|---|
+| Media to text | Each voice note is transcribed and each photo read once, when it arrives; the words are stored in `whatsapp_chat_messages.media_text` and shown under the bubble | webhook |
+| Daily report | Every evening (19:30 IST) the AI reads each chat's new messages and writes a short plain-English summary per chat per day | Requests → WhatsApp chats → Daily report |
+| Pending list | The same run keeps a list of open items per chat: waiting on Cirqle or on the client, and since when. "Done" ticks one off | … → Pending |
+| Alerts | A new item waiting on Cirqle raises one Cirqle notification (bell + push): to the person named in the chat if that is one clear employee, else the chat's responsible person, else the admins | automatic |
+| Ask | A question box answered by AI from the open items, recent summaries, latest messages and open requests | … → Pending |
+| Sharing | Per chat: who is responsible and who may read it. Default is admins only | Settings → WhatsApp Listener |
+
+Access is checked on the server for every page and action (`loadChatViewer`):
+a person only sees, asks about, or ticks off chats shared with them. Admins see all.
+
+Limits to know:
+- The AI can miss or misread things, most of all in Malayalam voice notes. The pages say so; the chat is the source of truth.
+- Photo reading needs `GROQ_VISION_MODEL`; without it photos are kept but not turned into text.
+- Message text, voice notes and photos from allow-listed chats go to Groq for transcription and summarising.
+- Free-tier AI limits: the evening run takes chats one at a time and stops after 4 minutes; chats it did not reach are read on the next run or with "Update now" (admins).
+- Questions and answers are not stored. There is still no automatic deletion of old messages or reports.
+
+## Offer price lists go to the social calendar
+
+Rules: `src/lib/whatsapp-listener/offer-plan.ts`; the database part: `offer-plan-run.ts`.
+
+| When | What happens |
+|---|---|
+| A client pastes a price list (4 or more lines that end in a price) in a listed chat that names a client | A flyer called **Untitled** is added to that client's social calendar on the offer date, with the list in its notes. The month's plan is made if there is none. Admins and the chat's responsible person are told. The message is **not** also filed as a request: the flyer is pushed to Requests from the planner as usual. |
+| The list carries a date (`DATE 14/15`, a bare `12/13` first line) | That date is used. Numbers are days of the month; two or more make a period. |
+| No date | The offer is for the next day, and the notes say the date was not given. |
+| The client sends the date on its own within 3 hours (`29/30`, `നാളെ`, `Sat and sun`) | The most recent undated list from that chat is moved to it. |
+| The client sends one to three more priced products within 3 hours (`APPLE 149/-`) | They are added to the notes of the most recent list from that chat, so one flyer stays one item. |
+| The client sends the list as a photo | The photo's text (read by AI, needs `GROQ_VISION_MODEL`) is treated the same way, and the notes say to check every price against the photo. Only when the sender's number is known and is not Cirqle: Cirqle's own finished flyers are photos full of prices too. |
+| The message is more than 24 hours old (delivered late after the listener was off) | It is not planned from; it goes to Requests as before. |
+| Anything goes wrong (client name not matched, calendar tables missing) | The message is filed as a request, as before. |
+
+Not handled yet: a price list spoken in a voice note, a list kept in a Google Sheet, and one
+message that gives different dates for several lists ("Bakery tomorrow, non-food Saturday").
+
+## End-of-day nudges (evening run)
+
+| Nudge | Rule |
+|---|---|
+| Waiting for a reply | A chat where the client spoke last, 2 to 72 hours ago, and it was not just "ok" or a thumbs-up. The chat's responsible person is told (else the admins), once per unanswered message. |
+| The week (Mondays) | One note to the admins: messages in the last 7 days, the busiest chats, and how much is waiting on Cirqle and on clients. |
+
+Both depend on telling Cirqle's people from the client in a group, which needs every staff phone in the
+Cirqle numbers table or on the employee record.
+
+Found on 14 Nov 2026: when the listener was started after being off, OpenWA delivered the messages from the
+previous two days (about 190). So a short gap is caught up; how far back it reaches is not known.

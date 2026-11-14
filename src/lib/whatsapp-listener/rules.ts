@@ -55,6 +55,8 @@ export interface ListenerMessage {
   senderPhone: string
   senderName: string
   media: ListenerMedia | null
+  /** When WhatsApp says it was sent (ms since epoch), or null when the delivery did not say. */
+  sentAtMs: number | null
 }
 
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : typeof v === 'number' ? String(v) : '')
@@ -108,7 +110,20 @@ export function parseEnvelope(payload: unknown): ListenerMessage | null {
     senderPhone,
     senderName: str(contact.pushName) || str(contact.pushname) || str(contact.name) || str(contact.shortName) || str(data.notifyName),
     media,
+    sentAtMs: sentAt(data.timestamp) ?? sentAt(env.timestamp),
   }
+}
+
+/** A gateway timestamp (seconds, milliseconds or an ISO string) as ms since epoch. */
+function sentAt(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v < 1e11 ? Math.round(v * 1000) : Math.round(v)
+  if (typeof v === 'string' && v.trim()) {
+    const n = Number(v)
+    if (Number.isFinite(n) && n > 0) return n < 1e11 ? Math.round(n * 1000) : Math.round(n)
+    const t = Date.parse(v)
+    return Number.isFinite(t) ? t : null
+  }
+  return null
 }
 
 // ── Allow-list ──────────────────────────────────────────────────────────────
