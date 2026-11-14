@@ -13,6 +13,7 @@ import { PermissionBypassBanner } from '@/components/dev/permission-bypass-banne
 import { DesktopNotifier } from '@/components/desktop/desktop-notifier'
 import { TempPasswordPrompt } from '@/components/auth/temp-password-prompt'
 import { FloatingCommsWidget } from '@/components/comms/floating-comms-widget'
+import { HelpGuide } from '@/components/help/help-guide'
 import { BirthdayCelebration } from '@/components/ui/birthday-celebration'
 import { FxRatesAutoSync } from './fx-rates-auto-sync'
 import { LastPageRestorer } from '@/components/layout/last-page-restorer'
@@ -235,6 +236,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <DesktopNotifier />
             <TempPasswordPrompt />
             <FloatingCommsWidget />
+            {/* "How do I…?" — step-by-step guides that point at the real buttons. */}
+            <HelpGuide />
             <FxRatesAutoSync />
             <LastPageRestorer />
             {showBirthday && me && (

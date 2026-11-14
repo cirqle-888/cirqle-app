@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { ChevronRight, Home, ChevronDown, UserCircle, Sparkles, MessageCircle } from 'lucide-react'
+import { ChevronRight, Home, ChevronDown, UserCircle, Sparkles, MessageCircle, LifeBuoy } from 'lucide-react'
 import { forwardRef, useState, useRef, useEffect, useCallback } from 'react'
 import { usePermissions } from '@/contexts/permission-context'
 import { usePrivacy } from '@/contexts/privacy-context'
@@ -266,6 +266,17 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
       >
         <MessageCircle className="h-4 w-4" />
       </button>
+      {/* "How do I…?" guides. Icon from sm up; phones reach it from the
+          account menu below, where the top bar has no room left. */}
+      <button
+        type="button"
+        onClick={() => window.dispatchEvent(new CustomEvent('cirqle:openHelp'))}
+        title="Help — how do I…?"
+        aria-label="Help"
+        className="hidden sm:inline-flex items-center justify-center rounded-lg p-2 text-muted-foreground transition-colors hover:bg-secondary/80 hover:text-foreground"
+      >
+        <LifeBuoy className="h-4 w-4" />
+      </button>
       <NotificationBell />
 
       {/* Profile Dropdown */}
@@ -312,6 +323,13 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
                   <div className="my-2 border-t border-border/50" />
                 </>
               )}
+              <button
+                type="button"
+                onClick={() => { setProfileOpen(false); window.dispatchEvent(new CustomEvent('cirqle:openHelp')) }}
+                className="mb-1 flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm text-foreground hover:bg-secondary"
+              >
+                <LifeBuoy className="h-4 w-4 text-primary" />Help — how do I…?
+              </button>
               <ProfileActions onChangePassword={() => { setShowPwdModal(true); setProfileOpen(false) }} compact />
             </div>
           </>
