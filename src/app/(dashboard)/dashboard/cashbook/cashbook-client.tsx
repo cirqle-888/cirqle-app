@@ -3255,6 +3255,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               const directInv = unwrap(receiptEntry.direct_invoice)
               receiptInvoices = [{
                 number: directInv?.invoice_number || '—',
+                client: (unwrap(directInv?.client)?.name as string | undefined) || undefined,
                 outstanding: directInv ? Number(directInv.total_amount) - Number(directInv.paid_amount || 0) : 0,
                 allocated: receiptEntry.amount ?? 0,
               }]
