@@ -15,7 +15,23 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/admin'
-import { sendWebPush } from '@/lib/push/send'
+import { sendWebPush, type PushPayload } from '@/lib/push/send'
+
+/** Longest a notification waits for the push services before moving on. */
+const PUSH_WAIT_MS = 8000
+
+/**
+ * Sends the phone alerts and waits for them (bounded). On Vercel a function is frozen
+ * as soon as its response is sent, so a push that is fired and not awaited is usually
+ * never delivered. Never throws.
+ */
+async function pushAll(sends: readonly { employeeId: string; payload: PushPayload }[]): Promise<void> {
+  if (!sends.length) return
+  await Promise.race([
+    Promise.all(sends.map(s => Promise.resolve(sendWebPush(s.employeeId, s.payload)).catch(() => {}))),
+    new Promise(resolve => setTimeout(resolve, PUSH_WAIT_MS)),
+  ])
+}
 
 export type NotificationType =
   | 'recurring_tasks_generated'
@@ -83,12 +99,12 @@ export async function createNotification(input: NotificationContent & { employee
     // Web push to the employee's devices (best-effort; no-op without VAPID/subs).
     // Skipped on duplicate (23505) so a cron re-run doesn't re-push.
     if (!error) {
-      void sendWebPush(input.employeeId, {
+      await pushAll([{ employeeId: input.employeeId, payload: {
         title: input.title,
         body: input.message ?? undefined,
         url: input.link ?? '/dashboard',
         tag: input.sourceKey ?? undefined,
-      })
+      } }])
     }
   } catch (err) {
     console.warn('createNotification threw:', err)
@@ -139,14 +155,8 @@ export async function notifyAdmins(input: NotificationContent): Promise<void> {
     }
     // Only newly inserted notifications may push. Retries must not re-alert
     // admins about records already delivered or failed writes.
-    for (const employeeId of insertedIds) {
-      void sendWebPush(employeeId, {
-        title: input.title,
-        body: input.message ?? undefined,
-        url: input.link ?? '/dashboard',
-        tag: input.sourceKey ?? undefined,
-      })
-    }
+    const payload = { title: input.title, body: input.message ?? undefined, url: input.link ?? '/dashboard', tag: input.sourceKey ?? undefined }
+    await pushAll(insertedIds.map(employeeId => ({ employeeId, payload })))
   } catch (err) {
     console.warn('notifyAdmins threw:', err)
   }
@@ -199,14 +209,10 @@ export async function notifyAdminsBatch(inputs: NotificationContent[]): Promise<
       }
     }
     
-    for (const row of insertedRows) {
-      void sendWebPush(row.employee_id, {
-        title: row.title,
-        body: row.message ?? undefined,
-        url: row.link ?? '/dashboard',
-        tag: row.source_key ?? undefined,
-      })
-    }
+    await pushAll(insertedRows.map(row => ({
+      employeeId: row.employee_id,
+      payload: { title: row.title, body: row.message ?? undefined, url: row.link ?? '/dashboard', tag: row.source_key ?? undefined },
+    })))
   } catch (err) {
     console.warn('notifyAdminsBatch threw:', err)
   }

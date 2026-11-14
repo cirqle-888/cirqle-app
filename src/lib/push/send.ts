@@ -55,13 +55,17 @@ export async function sendWebPush(employeeId: string, payload: PushPayload): Pro
         await webpush.sendNotification(
           { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
           body,
+          // High urgency: the phone is woken for it instead of batching it for later
+          // (Android Doze, iOS low-power). Kept for a day if the phone is off.
+          { urgency: 'high', TTL: 24 * 60 * 60 },
         )
-        void admin.from('push_subscriptions').update({ last_used_at: new Date().toISOString() }).eq('id', s.id)
+        // Awaited: a Supabase query that is not awaited is never sent at all.
+        await admin.from('push_subscriptions').update({ last_used_at: new Date().toISOString() }).eq('id', s.id)
       } catch (err: unknown) {
         // 404/410 = subscription expired/unsubscribed → prune it.
         const status = (err as { statusCode?: number })?.statusCode
         if (status === 404 || status === 410) {
-          void admin.from('push_subscriptions').delete().eq('id', s.id)
+          await admin.from('push_subscriptions').delete().eq('id', s.id)
         }
       }
     }))

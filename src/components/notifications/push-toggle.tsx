@@ -39,7 +39,8 @@ export function PushToggle({ className = '' }: { className?: string }) {
       setSupported(ok)
       if (!ok) return
       navigator.serviceWorker.getRegistration('/push-sw.js')
-        .then(reg => reg?.pushManager.getSubscription())
+        // Pick up a newer service worker on devices that enabled push long ago.
+        .then(reg => { void reg?.update().catch(() => {}); return reg?.pushManager.getSubscription() })
         .then(sub => setSubscribed(!!sub))
         .catch(() => {})
     }, 0)

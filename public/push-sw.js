@@ -8,17 +8,18 @@ self.addEventListener('push', (event) => {
   const options = {
     body: data.body || '',
     tag: data.tag || undefined,
+    // A second alert with the same tag still buzzes instead of silently replacing the first.
+    renotify: !!data.tag,
     data: { url: data.url || '/dashboard' },
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
+    vibrate: [200, 100, 200],
+    timestamp: Date.now(),
   }
-  event.waitUntil((async () => {
-    // If the app is focused right now, the page itself already alerted
-    // (chime + toast) — a system banner on top would be a double alert.
-    const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-    if (clientList.some((c) => c.focused)) return
-    await self.registration.showNotification(title, options)
-  })())
+  // Always shown, even with the app open. iPhone and iPad require every push to show a
+  // notification: after a few that show nothing, iOS cancels the device's subscription
+  // without telling anyone, and alerts stop arriving.
+  event.waitUntil(self.registration.showNotification(title, options))
 })
 
 self.addEventListener('notificationclick', (event) => {
