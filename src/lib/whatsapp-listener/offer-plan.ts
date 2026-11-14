@@ -41,6 +41,36 @@ export function priceListSize(text: string): number {
   return priced >= MIN_PRICE_LINES && priced >= all.length * 0.6 ? priced : 0
 }
 
+/** Fewest lines that make a message a product list with no prices. */
+export const MIN_NAME_LINES = 8
+/** Product lists sent one after another this close together are one flyer. */
+export const SAME_FLYER_MINUTES = 20
+/** Written in the notes of a list that came without prices. */
+export const NO_PRICES_LINE = 'Prices are not in the list: listen to the voice note in the chat or ask the client.'
+
+// "Butter Cake", "Sp Mixture", "Rusk Nrml": a few words, no digits, no sentence punctuation.
+const NAME_LINE = /^[A-Za-z\u0D00-\u0D7F][A-Za-z\u0D00-\u0D7F\s.&'()\/-]{1,38}$/
+
+/**
+ * How many products a message names when it gives no prices at all: the client
+ * lists what goes on the flyer and says the price in a voice note, or it is one
+ * price for everything. 0 when it is not such a list. Deliberately strict (many
+ * short lines, nothing else), because ordinary chat must never become a flyer.
+ */
+export function productListSize(text: string): number {
+  const all = lines(text)
+  if (all.length < MIN_NAME_LINES) return 0
+  const names = all.filter(l => NAME_LINE.test(l) && l.split(/\s+/).length <= 4).length
+  return names === all.length ? names : 0
+}
+
+/** What the client said in a voice note right after a list, added to that list's notes. */
+export const voiceMarker = (messageId: string) => `[voice:${messageId}]`
+export function notesWithVoice(notes: string, said: string | null, messageId: string): string {
+  const text = (said || '').trim()
+  return `${notes}\n\nVoice note from the client after the list${text ? ' (as heard by AI, may be wrong)' : ''}:\n${text ? text.slice(0, 1500) : 'Could not be turned into text. Listen to it in the chat.'}\n${voiceMarker(messageId)}`
+}
+
 /**
  * One to three priced lines with nothing else ("Ador price 289", "BANANA MYSORE 39"):
  * some clients send a flyer's products a few at a time, or add one after the list.
@@ -142,7 +172,8 @@ export function offerDates(text: string, today: string): OfferDates & { given: b
   }
   // A bare "14/15" as the first line, above the products.
   const first = lines(text)[0] || ''
-  const top = !isPriceLine(first) && /^[\d\s\/,&.\-]+$/.test(first) ? parseDateHint(first, today) : null
+  // ...or a day on its own ("Sunday", "നാളെ"), as Sea Star heads its lists.
+  const top = isPriceLine(first) ? null : /^[\d\s\/,&.\-]+$/.test(first) ? parseDateHint(first, today) : dateOnlyMessage(first, today)
   if (top) return { ...top, given: true }
   return { start: addDays(today, 1), end: null, given: false }
 }
@@ -178,11 +209,14 @@ export function offerNotes(input: {
   dates: OfferDates & { given: boolean }; messageId: string; chatId: string
   /** The list was read off a photo by AI rather than typed. */
   fromPhoto?: boolean
+  /** The list names products but gives no prices. */
+  noPrices?: boolean
 }): string {
   return [
     ...(input.fromPhoto ? ['Read by AI from a photo: check every price against the photo in the WhatsApp chat.'] : []),
     `Offer list from WhatsApp (${input.client}${input.sender ? `, sent by ${input.sender}` : ''}): ${input.products} products.`,
     input.dates.given ? `Offer date: ${dateLabel(input.dates)} (given by the client).` : DATE_ASSUMED_LINE,
+    ...(input.noPrices ? [NO_PRICES_LINE] : []),
     '',
     input.list.trim().slice(0, 6000),
     '',

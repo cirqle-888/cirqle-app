@@ -117,6 +117,16 @@ async function recordChatMessage(
   return mediaPath
 }
 
+/**
+ * Cirqle's clients speak Malayalam, which Whisper sometimes hears as Tamil or Hindi and
+ * writes as nonsense. When the text comes back in another Indian script, ask again as Malayalam.
+ */
+async function transcribeVoice(audio: ArrayBuffer, fileName: string): Promise<string | null> {
+  const first = await transcribeAudio(audio, fileName)
+  if (!first || !/[\u0900-\u0CFF]/.test(first)) return first
+  return (await transcribeAudio(audio, fileName, 'ml')) ?? first
+}
+
 /** A message's voice note or photo as text, worked out at most once however many callers ask. */
 type MediaText = () => Promise<string | null>
 function mediaTextOnce(m: ListenerMessage): MediaText {
@@ -125,7 +135,7 @@ function mediaTextOnce(m: ListenerMessage): MediaText {
     if (!pending) {
       const { file } = chatMedia(m)
       pending = !file ? Promise.resolve(null)
-        : file.kind === 'audio' ? transcribeAudio(file.bytes, transcriptionFileName(m.media?.filename || 'voice-note.ogg'))
+        : file.kind === 'audio' ? transcribeVoice(file.bytes, transcriptionFileName(m.media?.filename || 'voice-note.ogg'))
           : readImageText(file.bytes, file.mime)
     }
     return pending
@@ -186,7 +196,7 @@ function buildDeps(
 
     // A message carries one file, and the chat log has usually turned it into
     // text already: reuse that instead of paying the AI twice.
-    transcribe: (audio, fileName) => (mediaText ? mediaText() : transcribeAudio(audio, fileName)),
+    transcribe: (audio, fileName) => (mediaText ? mediaText() : transcribeVoice(audio as ArrayBuffer, fileName)),
     readImage: (file: SharedFile) => (mediaText ? mediaText() : readImageText(file.bytes, file.type)),
     store: async (file: SharedFile, kind: PartKind) => {
       // The chat log already kept this file: link to that copy.

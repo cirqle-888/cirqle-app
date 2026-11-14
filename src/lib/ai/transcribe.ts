@@ -14,6 +14,8 @@ const MODEL = process.env.GROQ_WHISPER_MODEL || 'whisper-large-v3-turbo'
 export async function transcribeAudio(
   audio: Blob | ArrayBuffer,
   fileName = 'voice.webm',
+  /** ISO language code ("ml") to stop Whisper guessing a neighbouring language. */
+  language?: string,
 ): Promise<string | null> {
   const key = process.env.GROQ_API_KEY
   if (!key) return null
@@ -24,6 +26,7 @@ export async function transcribeAudio(
     form.append('file', blob, fileName)
     form.append('model', MODEL)
     form.append('response_format', 'json')
+    if (language) form.append('language', language)
 
     const res = await fetch(GROQ_AUDIO_URL, {
       method: 'POST',

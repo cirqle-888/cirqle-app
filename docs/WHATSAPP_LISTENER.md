@@ -343,3 +343,14 @@ catch-up) does three things, once per flyer:
    person or department is told what was done.
 
 A wrong "ok" (the client answering something else) closes the task too: reopen it by hand.
+
+### Lists with no prices (added 14 Nov 2026)
+
+Sea Star often sends only product names (eight or more short lines, nothing else) and says the
+price in a voice note. Such a list also becomes an "Untitled" flyer, with a line in its notes that
+the prices are missing. Parts sent within 20 minutes join the same flyer, and a voice note from the
+client in that time is added to its notes as text. A day written above the list ("Sunday") is the
+offer date. Checked against all stored history: 14 matches, every one a real Sea Star product list.
+
+Voice notes heard as Tamil or Hindi (Whisper mishears Malayalam) are transcribed a second time as
+Malayalam.

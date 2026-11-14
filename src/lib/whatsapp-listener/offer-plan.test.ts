@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DATE_ASSUMED_LINE, additionMarker, chatMarker, dateOnlyMessage, isPriceLine, isSmallAddition, messageMarker, notesWithAddition, notesWithDate,
-  offerDates, offerNotes, parseDateHint, priceListSize,
+  offerDates, offerNotes, parseDateHint, priceListSize, productListSize, notesWithVoice, NO_PRICES_LINE,
 } from './offer-plan'
 
 const VEG = 'Onionbig-49\nChittulli-39\nTomato-26\nOrange-2k-100\nPinapple-49\nApple-140'
@@ -141,5 +141,32 @@ describe('products sent a few at a time', () => {
 describe('the date line as Goodwill types it', () => {
   it('reads "Date2 to 10" without the space', () => {
     expect(dateOnlyMessage('Date2 to 10', '2026-09-01')).toEqual({ start: '2026-09-02', end: '2026-09-10' })
+  })
+})
+
+describe('a product list with no prices', () => {
+  const SWEETS = 'Laddu \nCup Cake \nJilebi \nJaggiri \nPlum Cake \nHalwa Sp \nMarble Cake \nTps Cake \nMaisoor Pack \nButter Cake'
+  it('is counted when it is many short product names and nothing else', () => {
+    expect(productListSize(SWEETS)).toBe(10)
+    expect(priceListSize(SWEETS)).toBe(0)
+  })
+  it('is not taken from chat, short lists or lists with prices', () => {
+    expect(productListSize('Laddu\nCup Cake\nJilebi')).toBe(0)
+    expect(productListSize(`${SWEETS}\nPlease make this poster today itself and send before evening`)).toBe(0)
+    expect(productListSize(`${SWEETS}\nCall 9876543210`)).toBe(0)
+    expect(productListSize(VEG)).toBe(0)
+  })
+  it('says so in the notes and keeps the voice note with it', () => {
+    const notes = offerNotes({ list: SWEETS, client: 'Sea Star', sender: '', products: 10, dates: offerDates(SWEETS, TODAY), messageId: 'M1', chatId: 'c@g.us', noPrices: true })
+    expect(notes).toContain(NO_PRICES_LINE)
+    expect(notesWithVoice(notes, 'ellam 99 rupa', 'V1')).toContain('ellam 99 rupa')
+    expect(notesWithVoice(notes, null, 'V1')).toContain('Listen to it in the chat')
+  })
+})
+
+describe('a day written above a list', () => {
+  it('is the offer date', () => {
+    expect(offerDates('Sunday\n\nLaddu\nCup Cake\nJilebi', '2026-11-13')).toEqual({ start: '2026-11-15', end: null, given: true })
+    expect(offerDates('Laddu\nCup Cake\nJilebi', '2026-11-13').given).toBe(false)
   })
 })

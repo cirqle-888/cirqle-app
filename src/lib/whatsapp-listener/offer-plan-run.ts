@@ -14,9 +14,9 @@ import { suggestServiceId } from '@/lib/social/plan'
 import { indiaDay } from './chat-log'
 import { isVoiceOrPhoto, type ListenerMessage } from './rules'
 import {
-  DATE_ASSUMED_LINE, DATE_FOLLOW_UP_MINUTES, OFFER_ITEM_TITLE, STALE_HOURS,
-  additionMarker, chatMarker, dateLabel, dateOnlyMessage, isSmallAddition, messageMarker, notesWithAddition, notesWithDate,
-  offerDates, offerNotes, priceListSize,
+  DATE_ASSUMED_LINE, DATE_FOLLOW_UP_MINUTES, NO_PRICES_LINE, OFFER_ITEM_TITLE, SAME_FLYER_MINUTES, STALE_HOURS,
+  additionMarker, chatMarker, dateLabel, dateOnlyMessage, isSmallAddition, messageMarker, notesWithAddition, notesWithDate, notesWithVoice,
+  offerDates, offerNotes, priceListSize, productListSize, voiceMarker,
   type OfferDates,
 } from './offer-plan'
 
@@ -91,7 +91,7 @@ async function tell(input: OfferPlanInput, content: { title: string; message: st
 }
 
 async function addList(
-  admin: SupabaseClient, m: ListenerMessage, input: OfferPlanInput, products: number, today: string, fromPhoto = false,
+  admin: SupabaseClient, m: ListenerMessage, input: OfferPlanInput, products: number, today: string, fromPhoto = false, noPrices = false,
 ): Promise<boolean> {
   const client = await clientId(admin, input.clientName)
   if (!client) return false
@@ -113,7 +113,7 @@ async function addList(
     platforms: [],
     status: 'planned',
     notes: offerNotes({
-      list: m.body, client: input.clientName, sender: m.senderName, products, dates, messageId: m.id, chatId: m.chatId, fromPhoto,
+      list: m.body, client: input.clientName, sender: m.senderName, products, dates, messageId: m.id, chatId: m.chatId, fromPhoto, noPrices,
     }),
     service_id: await flyerService(admin),
   }
@@ -122,7 +122,7 @@ async function addList(
 
   await tell(input, {
     title: `Offer list — ${input.clientName}`,
-    message: `${products} products${fromPhoto ? ' read from a photo' : ''} for ${dateLabel(dates)}${dates.given ? '' : ' (date not given, set to the next day)'}. Added to the social calendar as "${OFFER_ITEM_TITLE}".`,
+    message: `${products} products${fromPhoto ? ' read from a photo' : ''}${noPrices ? ' (no prices in the list)' : ''} for ${dateLabel(dates)}${dates.given ? '' : ' (date not given, set to the next day)'}. Added to the social calendar as "${OFFER_ITEM_TITLE}".`,
     sourceKey: `whatsapp_offer:${m.id}`,
   })
   return true
@@ -159,16 +159,34 @@ async function applyDate(admin: SupabaseClient, m: ListenerMessage, input: Offer
 }
 
 /** A product or two sent after the list: added to that list's notes, so one flyer stays one item. */
-async function addToRecentList(admin: SupabaseClient, m: ListenerMessage): Promise<boolean> {
-  const since = new Date(Date.now() - DATE_FOLLOW_UP_MINUTES * 60_000).toISOString()
-  const { data } = await admin.from(ITEMS).select('id, notes')
-    .like('notes', `%${likeSafe(chatMarker(m.chatId))}%`)
+async function addToRecentList(
+  admin: SupabaseClient, m: ListenerMessage, minutes = DATE_FOLLOW_UP_MINUTES, onlyWithoutPrices = false,
+): Promise<boolean> {
+  const since = new Date(Date.now() - minutes * 60_000).toISOString()
+  let query = admin.from(ITEMS).select('id, notes').like('notes', `%${likeSafe(chatMarker(m.chatId))}%`)
+  if (onlyWithoutPrices) query = query.like('notes', `%${NO_PRICES_LINE}%`)
+  const { data } = await query
     .eq('status', 'planned').gte('created_at', since).order('created_at', { ascending: false }).limit(1)
   const item = data?.[0] as { id: string; notes: string } | undefined
   if (!item) return false
   if (item.notes.includes(additionMarker(m.id))) return true
   const { error } = await admin.from(ITEMS)
     .update({ notes: notesWithAddition(item.notes, m.body, m.id), updated_at: new Date().toISOString() }).eq('id', item.id)
+  return !error
+}
+
+/** A voice note right after a list with no prices: it usually says the price, so it stays with that flyer. */
+async function addVoiceToRecentList(admin: SupabaseClient, m: ListenerMessage, input: OfferPlanInput): Promise<boolean> {
+  const since = new Date(Date.now() - SAME_FLYER_MINUTES * 60_000).toISOString()
+  const { data } = await admin.from(ITEMS).select('id, notes')
+    .like('notes', `%${likeSafe(chatMarker(m.chatId))}%`).like('notes', `%${NO_PRICES_LINE}%`)
+    .eq('status', 'planned').gte('created_at', since).order('created_at', { ascending: false }).limit(1)
+  const item = data?.[0] as { id: string; notes: string } | undefined
+  if (!item) return false
+  if (item.notes.includes(voiceMarker(m.id))) return true
+  const said = input.mediaText ? await input.mediaText().catch(() => null) : null
+  const { error } = await admin.from(ITEMS)
+    .update({ notes: notesWithVoice(item.notes, said, m.id), updated_at: new Date().toISOString() }).eq('id', item.id)
   return !error
 }
 
@@ -189,16 +207,23 @@ export async function planOfferFromMessage(admin: SupabaseClient, m: ListenerMes
     const found = priceListSize(text)
     return found ? addList(admin, { ...m, body: text }, input, found, today, true) : false
   }
-  if (isVoiceOrPhoto(m.type) || !m.body.trim()) return false
+  if (isVoiceOrPhoto(m.type)) {
+    if (m.senderPhone && await input.isStaffPhone(m.senderPhone).catch(() => false)) return false
+    return addVoiceToRecentList(admin, m, input)
+  }
+  if (!m.body.trim()) return false
 
   const products = priceListSize(m.body)
-  const dates = products ? null : dateOnlyMessage(m.body, today)
-  const addition = !products && !dates && isSmallAddition(m.body)
-  if (!products && !dates && !addition) return false
+  const names = products ? 0 : productListSize(m.body)
+  const dates = products || names ? null : dateOnlyMessage(m.body, today)
+  const addition = !products && !names && !dates && isSmallAddition(m.body)
+  if (!products && !names && !dates && !addition) return false
   // Cirqle's own staff paste lists and dates into the group too: those are not the client's.
   if (m.senderPhone && await input.isStaffPhone(m.senderPhone).catch(() => false)) return false
 
   if (products) return addList(admin, m, input, products, today)
+  // A long list often arrives as two or three messages: the later parts join the first.
+  if (names) return await addToRecentList(admin, m, SAME_FLYER_MINUTES, true) || addList(admin, m, input, names, today, false, true)
   if (dates) return applyDate(admin, m, input, dates)
   return addToRecentList(admin, m)
 }
