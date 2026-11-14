@@ -196,7 +196,8 @@ export function cleanOfferTitle(raw: unknown): string | null {
   const t = String(typeof raw === 'string' ? raw : '').replace(/\s+/g, ' ').replace(/^["'“”\s]+|["'“”\s.]+$/g, '').trim()
   if (t.length < 3 || t.length > 60 || !/[A-Za-z\u0D00-\u0D7F]{3}/.test(t)) return null
   if (isPriceLine(t) || /^untitled$/i.test(t)) return null
-  return t
+  // Flyer headlines are printed in capitals: "TASTY TREASURES" reads better as "Tasty Treasures".
+  return /[a-z]/.test(t) ? t : t.toLowerCase().replace(/(^|[\s\-&])([a-z])/g, (_, gap: string, c: string) => gap + c.toUpperCase())
 }
 
 export interface CampaignRow {
@@ -213,6 +214,9 @@ export function campaignTitle(campaigns: readonly CampaignRow[], offerStart: str
 }
 
 export const TITLE_PROMPT =
-  'You are given the text read off a supermarket offer flyer. Find the offer title: the headline that names the offer, ' +
-  'such as "Weekend Offer", "Onam Mega Sale" or "Friday Fresh Deals". It is not the shop name, an address, a date, a product or a price. ' +
+  'You are given the text read off a supermarket offer flyer. Find the offer title: the big headline that names THIS offer, ' +
+  'such as "Tasty Treasures", "Weekend Offer", "Onam Mega Sale" or "Friday Fresh Deals". ' +
+  'It is not the shop name, an address, a date or validity line, a product or a price. ' +
+  'It is also not a badge for a long-running occasion that sits beside the headline on every flyer of the season ' +
+  '("4th Anniversary Fest", "5 Years of Trust", "Ramadan Kareem"): when the flyer has both such a badge and its own headline, answer the headline. ' +
   'Respond with ONLY a JSON object: {"title": "<the headline as printed>"} or {"title": ""} when no headline is clear.'

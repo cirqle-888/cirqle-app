@@ -119,6 +119,8 @@ describe('when the client approves', () => {
   })
   it('accepts a real title and refuses a price, a blank or the placeholder', () => {
     expect(cleanOfferTitle(' "Weekend Offer". ')).toBe('Weekend Offer')
+    expect(cleanOfferTitle('TASTY TREASURES')).toBe('Tasty Treasures')
+    expect(cleanOfferTitle('4th Anniversary Fest')).toBe('4th Anniversary Fest')
     for (const t of ['', 'Untitled', 'Tomato-26', '14/15', 'ok', undefined, 'x'.repeat(80)]) expect(cleanOfferTitle(t), String(t)).toBeNull()
   })
   it('takes the Offer Studio offer whose dates cover the flyer', () => {
