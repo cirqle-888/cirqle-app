@@ -3279,16 +3279,27 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             // the receipt is the PARTNER's — their name, and "overall
             // outstanding" means everything their clients still owe, not one
             // client's share of it.
-            const receiptClients = allocs.map(a => unwrap(unwrap(a.invoice)?.client)).filter(Boolean) as { id: string; business_partner_id?: string | null }[]
+            const receiptClients = [
+              ...allocs.map(a => unwrap(unwrap(a.invoice)?.client)),
+              ...(allocs.length === 0 ? [unwrap(unwrap(receiptEntry.direct_invoice)?.client)] : []),
+            ].filter(Boolean) as { id: string; business_partner_id?: string | null }[]
             const receiptClientIds = new Set(receiptClients.map(c => c.id))
             const receiptPartnerIds = new Set(receiptClients.map(c => c.business_partner_id || ''))
-            if (receiptClientIds.size > 1 && receiptPartnerIds.size === 1 && !receiptPartnerIds.has('')) {
+            // Whoever the receipt is for, if their client(s) came through one
+            // business partner the popup can show that partner's whole balance.
+            let partnerName: string | undefined
+            let partnerTotalOutstanding: number | undefined
+            if (receiptPartnerIds.size === 1 && !receiptPartnerIds.has('')) {
               const partnerId = [...receiptPartnerIds][0]
               const partner = partners.find(bp => bp.id === partnerId)
-              if (partner) firstClientName = partner.name
-              customerTotalOutstanding = dueInvoices
+              const total = dueInvoices
                 .filter(i => i.client?.business_partner_id === partnerId && i.currency === receiptEntry.currency && !['draft', 'reviewed'].includes(i.status))
                 .reduce((sum, inv) => sum + Math.max(0, Number(inv.total_amount) - Number(inv.paid_amount || 0)), 0)
+              if (partner) { partnerName = partner.name; partnerTotalOutstanding = total }
+              if (receiptClientIds.size > 1) {
+                if (partner) firstClientName = partner.name
+                customerTotalOutstanding = total
+              }
             }
 
             // inflow entries). The UUID-derived fallback covers only outflow
@@ -3306,6 +3317,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               reference: receiptEntry.reference,
               invoices: receiptInvoices,
               customerTotalOutstanding,
+              partnerName,
+              partnerTotalOutstanding,
               // Per client, for the "this client only" receipt of a shared payment.
               clientOutstanding: Object.fromEntries(
                 [...new Set(receiptInvoices.map(r => r.client).filter(Boolean) as string[])].map(name => [

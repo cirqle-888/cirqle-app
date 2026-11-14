@@ -45,6 +45,15 @@ export interface ReceiptInput {
    * of a payment that covered several.
    */
   clientOutstanding?: Record<string, number>
+  /**
+   * The business partner who brought this receipt's client(s), and everything
+   * ALL their clients still owe. A partner pays for several clients, so the
+   * figure they care about is this one — not one client's or one invoice's.
+   */
+  partnerName?: string
+  partnerTotalOutstanding?: number
+  /** Footnote under the balance when it is an overall figure. Set by the popup. */
+  overallNote?: string
   /** Itemise every invoice, grouped by client, with what is left on each. Set by the popup. */
   detailed?: boolean
   /**
@@ -413,7 +422,7 @@ function drawReceipt(
   
   if (opts.showOverallBalance) {
     ctx.textAlign = 'center'; ctx.fillStyle = '#94a3b8'; ctx.font = `400 10px ${FONT}`
-    ctx.fillText('Outstanding balance includes all unpaid invoices for this customer as of the receipt date.', 216, divY2 - 16)
+    ctx.fillText(input.overallNote || 'Outstanding balance includes all unpaid invoices for this customer as of the receipt date.', 216, divY2 - 16)
     ctx.textAlign = 'center'; ctx.fillStyle = '#c4b5fd'; ctx.font = `500 12.5px ${FONT}`
     ctx.fillText(truncate(note || 'Thank you for your payment!', 360), 216, divY2 - 34)
   } else {
@@ -433,8 +442,17 @@ export default function ReceiptModal({ input: baseInput, onClose }: Props) {
   )
   const [forClient, setForClient] = useState('')
   const [detailed, setDetailed] = useState(false)
+  // Balance shown = everything the partner's clients owe, instead of this
+  // invoice's or this client's balance.
+  const [partnerBalance, setPartnerBalance] = useState(false)
   const input: ReceiptInput = useMemo(() => {
-    if (!forClient) return { ...baseInput, detailed }
+    const partnerWide = partnerBalance && baseInput.partnerTotalOutstanding !== undefined
+      ? {
+          customerTotalOutstanding: baseInput.partnerTotalOutstanding,
+          overallNote: `Balance is everything still unpaid across ${baseInput.partnerName || 'this partner'}’s clients as of the receipt date.`,
+        }
+      : {}
+    if (!forClient) return { ...baseInput, detailed, ...partnerWide }
     const mine = baseInput.invoices.filter(i => i.client === forClient)
     return {
       ...baseInput,
@@ -446,8 +464,9 @@ export default function ReceiptModal({ input: baseInput, onClose }: Props) {
       // payment are never mistaken for the same document.
       receiptNo: `${baseInput.receiptNo}-${receiptClients.indexOf(forClient) + 1}`,
       customerTotalOutstanding: baseInput.clientOutstanding?.[forClient],
+      ...partnerWide,
     }
-  }, [baseInput, forClient, detailed, receiptClients])
+  }, [baseInput, forClient, detailed, partnerBalance, receiptClients])
   const cardRef = useRef<HTMLDivElement>(null)
   // Container that constrains the preview to the modal width. We measure it
   // with a ResizeObserver and derive a CSS scale so the 432-wide card always
@@ -456,7 +475,8 @@ export default function ReceiptModal({ input: baseInput, onClose }: Props) {
   const [previewScale, setPreviewScale] = useState(1)
   const [clientName, setClientName] = useState(baseInput.defaultClientName || '')
   const [note, setNote] = useState('')
-  const [showOverallBalance, setShowOverallBalance] = useState(false)
+  const [overallTicked, setShowOverallBalance] = useState(false)
+  const showOverallBalance = overallTicked || (partnerBalance && baseInput.partnerTotalOutstanding !== undefined)
   const [busy, setBusy] = useState<'png' | 'share' | 'pdf' | null>(null)
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
@@ -652,12 +672,27 @@ export default function ReceiptModal({ input: baseInput, onClose }: Props) {
               <label className="flex items-center gap-2 mt-1 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={showOverallBalance}
+                  checked={overallTicked}
+                  disabled={partnerBalance}
                   onChange={e => setShowOverallBalance(e.target.checked)}
                   className="rounded border-border text-primary focus:ring-primary/50 bg-secondary w-4 h-4"
                 />
                 <span className="text-[12px] font-medium text-foreground">
                   Show overall outstanding balance
+                </span>
+              </label>
+            )}
+
+            {baseInput.partnerTotalOutstanding !== undefined && (
+              <label className="flex items-center gap-2 mt-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={partnerBalance}
+                  onChange={e => setPartnerBalance(e.target.checked)}
+                  className="rounded border-border text-primary focus:ring-primary/50 bg-secondary w-4 h-4"
+                />
+                <span className="text-[12px] font-medium text-foreground">
+                  Show {baseInput.partnerName || 'the partner'}’s total balance — all their clients
                 </span>
               </label>
             )}
@@ -814,7 +849,7 @@ export default function ReceiptModal({ input: baseInput, onClose }: Props) {
                 <div style={{ marginTop: 'auto', paddingTop: 16 }}>
                   {showOverallBalance && (
                     <div style={{ fontSize: 10, color: '#94a3b8', textAlign: 'center', marginBottom: 6 }}>
-                      Outstanding balance includes all unpaid invoices for this customer as of the receipt date.
+                      {input.overallNote || 'Outstanding balance includes all unpaid invoices for this customer as of the receipt date.'}
                     </div>
                   )}
                   <div style={{ fontSize: 12.5, color: '#c4b5fd', textAlign: 'center', fontWeight: 500 }}>
