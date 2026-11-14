@@ -5,6 +5,7 @@ import {
   parseGroupList, parseGroupNames, parseNumberList, parseNumberRows, parseSeen, phoneMatchKey, serializeGroupList, serializeNumberList, verifySignature, MAX_SEEN, type ListenerMessage,
   aiFilterOn, isBadSessionStatus, listenerHealth, parseSessionStatus, shouldWriteHeard, LISTENER_SERVER_KEYS, SILENT_AFTER_HOURS,
 } from './rules'
+import { isStaleStatus } from './rules'
 import { handleListenerMessage, type ListenerDeps } from './handle'
 
 const GROUP = '120363021234567890@g.us'
@@ -334,5 +335,17 @@ describe('listener health', () => {
     expect(aiFilterOn({ whatsapp_listener_ai_filter: 'on' })).toBe(true)
     expect(aiFilterOn({ whatsapp_listener_ai_filter: 'Off' })).toBe(false)
     expect([...LISTENER_SERVER_KEYS].sort()).toEqual(['whatsapp_listener_last_heard', 'whatsapp_listener_seen', 'whatsapp_listener_session'])
+  })
+})
+
+describe('a status event that arrives late', () => {
+  const now = Date.parse('2026-11-14T11:08:00Z')
+  it('is old news when its own time is minutes behind', () => {
+    expect(isStaleStatus({ event: 'session.status', timestamp: '2026-11-14T06:29:31Z', data: { status: 'disconnected' } }, now)).toBe(true)
+    expect(isStaleStatus({ event: 'session.status', timestamp: Date.parse('2026-11-14T06:29:31Z'), data: {} }, now)).toBe(true)
+  })
+  it('is current when fresh or when it carries no time', () => {
+    expect(isStaleStatus({ event: 'session.status', timestamp: '2026-11-14T11:07:02Z', data: { status: 'ready' } }, now)).toBe(false)
+    expect(isStaleStatus({ event: 'session.status', data: { status: 'ready' } }, now)).toBe(false)
   })
 })

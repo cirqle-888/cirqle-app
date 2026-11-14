@@ -199,6 +199,20 @@ export function parseSessionStatus(payload: unknown): string | null {
   return status ? status.toLowerCase().slice(0, 60) : null
 }
 
+/** A status event delivered this late describes the past, not now. */
+export const STALE_STATUS_MINUTES = 5
+
+/**
+ * Is this status event old news? The gateway retries a delivery it could not make,
+ * so the "disconnected" from a shutdown can arrive after the "ready" of the next start.
+ * An event with no readable time is taken as current.
+ */
+export function isStaleStatus(payload: unknown, nowMs: number): boolean {
+  const env = obj(payload)
+  const at = sentAt(obj(env.data).timestamp) ?? sentAt(env.timestamp)
+  return at !== null && nowMs - at > STALE_STATUS_MINUTES * 60_000
+}
+
 /**
  * A session status that means the spare number is no longer listening:
  * logged out, disconnected, banned or restricted. Matched loosely because the

@@ -19,7 +19,7 @@ import { isApproval } from '@/lib/whatsapp-listener/flyer-desk'
 import { finishApprovedFlyers } from '@/lib/whatsapp-listener/flyer-desk-run'
 import { CHAT_LOG_TABLE, chatLogRow, chatMedia, isChatEvent, isMissingTable } from '@/lib/whatsapp-listener/chat-log'
 import {
-  addSeen, aiFilterOn, isBadSessionStatus, listenerEnabled, parseEnvelope, parseGroupList, parseNumberList, parseSeen,
+  addSeen, aiFilterOn, isBadSessionStatus, isStaleStatus, listenerEnabled, parseEnvelope, parseGroupList, parseNumberList, parseSeen,
   parseSessionStatus, phoneMatchKey, shouldWriteHeard, verifySignature,
   BURST_MINUTES, LISTENER_KEYS, type ListenerMessage,
 } from '@/lib/whatsapp-listener/rules'
@@ -333,7 +333,8 @@ export async function POST(req: NextRequest) {
   if (!message || !isChatEvent(message.event)) {
     // Not a message (a test ping, a session event). It still proves the gateway is alive,
     // and a session event may say the number has stopped listening.
-    const status = parseSessionStatus(payload)
+    // A late retry of an old status must not overwrite the current one or raise a false alarm.
+    const status = isStaleStatus(payload, Date.now()) ? null : parseSessionStatus(payload)
     after(async () => {
       try {
         const admin = createAdminClient()
