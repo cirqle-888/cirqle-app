@@ -209,7 +209,7 @@ export default async function WhatsAppChatsPage({ searchParams }: { searchParams
                             )}
                             {m.media_text && (
                               <p className="text-sm whitespace-pre-wrap break-words mb-1">
-                                <span className="block text-[10px] text-muted-foreground">{isImage ? 'Text in the photo (read by AI)' : 'What it says (by AI, check against the recording)'}</span>
+                                <span className="block text-[10px] text-muted-foreground">{isImage ? 'Text in the photo (read by AI)' : 'What it means in English (by AI, check against the recording)'}</span>
                                 {m.media_text}
                               </p>
                             )}

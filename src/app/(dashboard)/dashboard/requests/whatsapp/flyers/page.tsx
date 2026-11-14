@@ -56,7 +56,7 @@ export default async function WhatsAppFlyersPage() {
             {f.offerEnd ? ` to ${dateLabel({ start: f.offerEnd, end: null })}` : ''}
           </span>
           {f.dateAssumed && ' (date not given, set to the next day)'}
-          {' · '}{f.products} products{f.fromPhoto && ', read from a photo'}
+          {' · '}{f.products} products{f.fromPhoto && ', read from a photo'}{f.unpriced > 0 && `, ${f.unpriced} without a price`}
           {' · '}received {time(f.receivedAt)}
           {f.progress.designs > 0 && <>{' · '}{f.progress.designs} design{f.progress.designs === 1 ? '' : 's'} sent</>}
           {f.progress.corrections > 0 && <>{' · '}{f.progress.corrections} round{f.progress.corrections === 1 ? '' : 's'} of changes</>}
@@ -68,6 +68,14 @@ export default async function WhatsAppFlyersPage() {
               <li key={w} className="flex items-start gap-1.5"><TriangleAlert className="w-3.5 h-3.5 mt-0.5 shrink-0" aria-hidden /> <span>Check: {w}</span></li>
             ))}
           </ul>
+        )}
+        {f.followUps.length > 0 && (
+          <div className="text-xs text-muted-foreground">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground/70">The client also said (voice and photos read by AI, may be wrong)</p>
+            <ul className="mt-0.5 space-y-0.5">
+              {f.followUps.slice(-5).map(n => <li key={n}>{n}</li>)}
+            </ul>
+          </div>
         )}
         <div className="flex flex-wrap items-center gap-2 pt-0.5">
           <CopyListButton list={f.list} label={title} />

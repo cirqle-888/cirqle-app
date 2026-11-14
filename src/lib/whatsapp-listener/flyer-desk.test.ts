@@ -134,3 +134,22 @@ describe('when the client approves', () => {
     expect(notes).toContain(APPROVED_MARK)
   })
 })
+
+describe('designs posted around the approval', () => {
+  it('stay approved when a page lands seconds after the ok', () => {
+    const chat: DeskMessage[] = [
+      { chat_id: 'c', from_cirqle: true, type: 'image', body: '', sent_at: '2026-11-14T17:17:19Z' },
+      { chat_id: 'c', from_cirqle: false, type: 'text', body: 'K', sent_at: '2026-11-14T17:17:29Z' },
+      { chat_id: 'c', from_cirqle: true, type: 'image', body: '', sent_at: '2026-11-14T17:17:39Z' },
+    ]
+    expect(flyerProgress(chat, '2026-11-14T12:00:00Z', null)).toMatchObject({ stage: 'approved', designs: 2 })
+  })
+  it('reopen when a new version comes later', () => {
+    const chat: DeskMessage[] = [
+      { chat_id: 'c', from_cirqle: true, type: 'image', body: '', sent_at: '2026-11-14T17:17:19Z' },
+      { chat_id: 'c', from_cirqle: false, type: 'text', body: 'ok', sent_at: '2026-11-14T17:17:29Z' },
+      { chat_id: 'c', from_cirqle: true, type: 'image', body: '', sent_at: '2026-11-14T17:40:00Z' },
+    ]
+    expect(flyerProgress(chat, '2026-11-14T12:00:00Z', null).stage).toBe('sent')
+  })
+})

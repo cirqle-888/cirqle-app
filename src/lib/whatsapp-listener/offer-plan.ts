@@ -246,3 +246,108 @@ export function notesWithDate(notes: string, dates: OfferDates): string {
   return notes.replace(DATE_ASSUMED_LINE, `Offer date: ${dateLabel(dates)} (given by the client in a later message).`)
     .replace(/\[offer:[^\]]*\]/, offerTag(dates))
 }
+
+// ─── One flyer, many messages ─────────────────────────────────────────────────
+//
+// A flyer rarely arrives as one tidy message. The client sends the product names,
+// then the prices, then one page again with a correction, then a voice note and a
+// photo of a product. All of it belongs to the one flyer for that offer, so it all
+// goes into the one calendar item: lists are merged line by line, and everything
+// else is kept under the list as what the client said about it.
+
+/** A flyer still takes more lists and remarks this long after its first list arrived. */
+export const OPEN_FLYER_HOURS = 36
+/** Longest the notes may grow before further remarks are left to the chat view. */
+export const MAX_NOTES_CHARS = 12_000
+export const SOME_PRICES_LINE = 'Some products have no price yet: check the list.'
+export const FOLLOW_UP_HEADING = 'From the client about this flyer (voice and photos as read by AI, may be wrong):'
+/** Finds a remark already kept with a flyer. */
+export const followUpMarker = (messageId: string) => `[note:${messageId}]`
+
+const TRAILING_PRICE = /[\s\-:=.₹]\s*(?:rs\.?\s*)?\d{1,5}(?:\.\d{1,2})?\s*(?:\/-|rs\.?|₹)?\s*$/i
+/** What a list line is about, whatever its price: "Laddu", "Laddu 69" and "LADDU - 69/-" are one product. */
+export function productKey(line: string): string {
+  const l = line.trim()
+  const name = isPriceLine(l) ? l.replace(TRAILING_PRICE, '') : l
+  return name.toLowerCase().replace(/[^a-z0-9\u0D00-\u0D7F]+/g, '')
+}
+
+export interface OfferNotesParts {
+  /** The lines above the list: where it came from, the offer date, warnings. */
+  header: string[]
+  list: string[]
+  /** `[offer:…] [whatsapp:…]` and every `[added:…]`: how the item is found again. */
+  tags: string[]
+  /** Older style: a voice note kept as its own block. */
+  voice: string[]
+  followUps: string[]
+  approval: string | null
+}
+
+/** Takes an item's notes apart. Understands every shape these notes have had. */
+export function parseOfferNotes(notes: string | null | undefined): OfferNotesParts {
+  const out: OfferNotesParts = { header: [], list: [], tags: [], voice: [], followUps: [], approval: null }
+  const all = String(notes || '').split('\n')
+  let i = 0
+  for (; i < all.length && all[i].trim(); i++) out.header.push(all[i].trim())
+  let inVoice = false
+  for (; i < all.length; i++) {
+    const l = all[i].trim()
+    if (!l) continue
+    if (inVoice) { out.voice.push(l); if (l.startsWith('[voice:')) inVoice = false; continue }
+    if (l.startsWith('Voice note from the client')) { inVoice = true; out.voice.push(l); continue }
+    if (l.startsWith('Approved by the client')) { out.approval = l; continue }
+    if (l === FOLLOW_UP_HEADING || l.startsWith('Added by the client afterwards')) continue
+    if (l.includes('[note:')) { out.followUps.push(l); continue }
+    if (/^(\[(offer|whatsapp|added|approved):[^\]]*\]\s*)+$/.test(l)) { out.tags.push(...(l.match(/\[[^\]]*\]/g) || [])); continue }
+    out.list.push(l)
+  }
+  return out
+}
+
+export function buildOfferNotes(p: OfferNotesParts): string {
+  return [
+    ...p.header, '', ...p.list, '', p.tags.join(' '),
+    ...(p.voice.length ? ['', ...p.voice] : []),
+    ...(p.followUps.length ? ['', FOLLOW_UP_HEADING, ...p.followUps] : []),
+    ...(p.approval ? ['', p.approval] : []),
+  ].join('\n')
+}
+
+/**
+ * Adds another list to a flyer's notes. A product already on the list is replaced by
+ * the new line (that is how prices arrive for a names-only list, and how a corrected
+ * page replaces the first one); a new product is added at the end.
+ */
+export function notesWithList(notes: string, text: string, messageId: string): { notes: string; added: number; replaced: number; products: number } {
+  const p = parseOfferNotes(notes)
+  const at = new Map<string, number>()
+  p.list.forEach((l, i) => { const k = productKey(l); if (k && !at.has(k)) at.set(k, i) })
+  let added = 0, replaced = 0
+  for (const l of lines(text)) {
+    if (DATE_LINE.test(l)) continue
+    const k = productKey(l)
+    const i = k ? at.get(k) : undefined
+    if (i === undefined) { p.list.push(l); if (k) at.set(k, p.list.length - 1); added++ }
+    else if (p.list[i] !== l && (isPriceLine(l) || !isPriceLine(p.list[i]))) { p.list[i] = l; replaced++ }
+  }
+  const priced = p.list.filter(isPriceLine).length
+  p.header = p.header
+    .filter(h => h !== NO_PRICES_LINE && h !== SOME_PRICES_LINE)
+    .map(h => h.replace(/: \d+ products\.$/, `: ${p.list.length} products.`))
+  if (priced === 0) p.header.push(NO_PRICES_LINE)
+  else if (priced < p.list.length * 0.8) p.header.push(SOME_PRICES_LINE)
+  p.tags.push(additionMarker(messageId))
+  return { notes: buildOfferNotes(p), added, replaced, products: p.list.length }
+}
+
+/** Keeps something the client said about the flyer (a remark, a voice note, a photo) under its list. */
+export function notesWithFollowUp(notes: string, o: { kind: 'text' | 'voice' | 'photo'; text: string | null; time: string; messageId: string }): string {
+  const p = parseOfferNotes(notes)
+  const said = (o.text || '').replace(/\s*\n\s*/g, ' / ').trim().slice(0, 400)
+  const what = o.kind === 'text' ? said
+    : o.kind === 'voice' ? (said ? `voice note, in English: ${said}` : 'voice note: listen to it in the chat')
+      : (said ? `photo, it reads: ${said}` : 'photo: see it in the chat')
+  p.followUps.push(`- ${o.time} ${what} ${followUpMarker(o.messageId)}`)
+  return buildOfferNotes(p)
+}

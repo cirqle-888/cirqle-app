@@ -86,6 +86,10 @@ export async function handleListenerMessage(m: ListenerMessage, deps: ListenerDe
     return { result: 'ignored', reason: 'not-listed' }
   }
 
+  // A listed group with no client is one of Cirqle's own (Accounts, Creative, Flyer): it is on the
+  // list so staff can read it in the chat view, and nothing said in it is a client's request.
+  if (m.isGroup && !deps.groups.get(m.chatId)) return { result: 'ignored', reason: 'internal-group' }
+
   const [fromStaff, duplicate] = await Promise.all([
     m.senderPhone ? deps.isStaffPhone(m.senderPhone).catch(() => false) : Promise.resolve(false),
     deps.isDuplicate(m.id).catch(() => false),

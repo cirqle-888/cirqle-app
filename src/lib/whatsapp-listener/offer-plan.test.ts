@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DATE_ASSUMED_LINE, additionMarker, chatMarker, dateOnlyMessage, isPriceLine, isSmallAddition, messageMarker, notesWithAddition, notesWithDate,
-  offerDates, offerNotes, parseDateHint, priceListSize, productListSize, notesWithVoice, NO_PRICES_LINE, workDate, offerTagDates,
+  offerDates, offerNotes, parseDateHint, priceListSize, productListSize, notesWithVoice, NO_PRICES_LINE, workDate, offerTagDates, notesWithList, notesWithFollowUp, parseOfferNotes, buildOfferNotes, productKey, followUpMarker, FOLLOW_UP_HEADING,
 } from './offer-plan'
 
 const VEG = 'Onionbig-49\nChittulli-39\nTomato-26\nOrange-2k-100\nPinapple-49\nApple-140'
@@ -186,5 +186,64 @@ describe('the date on the plan and the task', () => {
     expect(offerTagDates(notes)).toEqual({ start: '2026-11-11', end: null })
     expect(offerTagDates(notesWithDate(notes, { start: '2026-11-14', end: '2026-11-15' }))).toEqual({ start: '2026-11-14', end: '2026-11-15' })
     expect(offerTagDates('old notes')).toBeNull()
+  })
+})
+
+describe('one flyer from many messages', () => {
+  const NAMES = 'Laddu \nCup Cake \nJilebi \nJaggiri \nPlum Cake \nHalwa Sp \nMarble Cake \nTps Cake'
+  const PRICED = 'Laddu 69\nCup Cake 69\nJilebi 69\nJaggiri 69\nPlum Cake 69\nHalwa Sp 64\nMarble Cake 69\nTps Cake 72'
+  const start = () => offerNotes({ list: NAMES, client: 'Sea Star', sender: 'S', products: 8, dates: offerDates(NAMES, TODAY), messageId: 'M1', chatId: 'c@g.us', noPrices: true })
+
+  it('knows a product whatever its price', () => {
+    expect(productKey('Laddu 69')).toBe(productKey('Laddu'))
+    expect(productKey('LADDU - 69/-')).toBe('laddu')
+    expect(productKey('Cup Cake')).not.toBe(productKey('Sp Cup Cake'))
+  })
+  it('fills in prices for a names-only list instead of making a second flyer', () => {
+    const r = notesWithList(start(), PRICED, 'M2')
+    expect(r).toMatchObject({ added: 0, replaced: 8, products: 8 })
+    expect(parseOfferNotes(r.notes).list).toEqual(PRICED.split('\n'))
+    expect(r.notes).not.toContain(NO_PRICES_LINE)
+    expect(r.notes).toContain('[added:M2]')
+    expect(r.notes).toContain(messageMarker('M1'))
+    expect(r.notes).toContain(chatMarker('c@g.us'))
+  })
+  it('adds a second page and replaces a corrected line', () => {
+    const page2 = notesWithList(notesWithList(start(), PRICED, 'M2').notes, 'Madakk 74\nSp Mixture 82\nChips 144\nPolo Ring 67', 'M3')
+    expect(page2).toMatchObject({ added: 4, replaced: 0, products: 12 })
+    const again = notesWithList(page2.notes, PRICED.replace('Laddu 69', 'Laddu 65'), 'M4')
+    expect(again).toMatchObject({ added: 0, replaced: 1, products: 12 })
+    expect(parseOfferNotes(again.notes).list[0]).toBe('Laddu 65')
+    expect(again.notes).toContain(': 12 products.')
+  })
+  it('never lets a bare name wipe out a price', () => {
+    const r = notesWithList(notesWithList(start(), PRICED, 'M2').notes, NAMES, 'M3')
+    expect(r.replaced).toBe(0)
+    expect(parseOfferNotes(r.notes).list[0]).toBe('Laddu 69')
+  })
+  it('keeps what the client said about the flyer under the list', () => {
+    let notes = notesWithFollowUp(start(), { kind: 'voice', text: 'Change the rate of the pickle to 95.', time: '10:30 pm', messageId: 'V1' })
+    notes = notesWithFollowUp(notes, { kind: 'photo', text: 'RING NURUK\nMRP: 170.00', time: '8:06 pm', messageId: 'P1' })
+    notes = notesWithFollowUp(notes, { kind: 'voice', text: null, time: '9 pm', messageId: 'V2' })
+    const p = parseOfferNotes(notes)
+    expect(p.list).toHaveLength(8)
+    expect(p.followUps).toHaveLength(3)
+    expect(notes).toContain(FOLLOW_UP_HEADING)
+    expect(notes).toContain('voice note, in English: Change the rate of the pickle to 95.')
+    expect(notes).toContain('photo, it reads: RING NURUK / MRP: 170.00')
+    expect(notes).toContain('listen to it in the chat')
+    expect(notes).toContain(followUpMarker('V1'))
+    // A later list still merges cleanly around the remarks.
+    expect(parseOfferNotes(notesWithList(notes, PRICED, 'M2').notes).followUps).toHaveLength(3)
+  })
+  it('reads the older note shapes and writes them back without loss', () => {
+    const old = notesWithVoice(notesWithAddition(offerNotes({ list: VEG, client: 'Bismi', sender: '', products: 6, dates: offerDates(VEG, TODAY), messageId: 'M1', chatId: 'c@g.us' }), 'APPLE 149/-', 'M2'), 'ellam 99', 'V1')
+    const p = parseOfferNotes(`${old}\n\nApproved by the client in WhatsApp on 2026-11-14. [approved:2026-11-14]`)
+    expect(p.list).toEqual([...VEG.split('\n'), 'APPLE 149/-'])
+    expect(p.voice.join(' ')).toContain('ellam 99')
+    expect(p.approval).toContain('[approved:2026-11-14]')
+    const again = parseOfferNotes(buildOfferNotes(p))
+    expect(again).toEqual(p)
+    expect(offerTagDates(buildOfferNotes(p))).toEqual({ start: '2026-11-11', end: null })
   })
 })

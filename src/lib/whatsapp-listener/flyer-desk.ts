@@ -16,7 +16,7 @@
  */
 
 import { isAcknowledgement } from './rules'
-import { isPriceLine } from './offer-plan'
+import { isPriceLine, parseOfferNotes } from './offer-plan'
 
 export type FlyerStage = 'new' | 'sent' | 'changes' | 'approved'
 
@@ -42,6 +42,9 @@ export interface FlyerProgress {
   designText: string | null
 }
 
+/** Designs this close after an approval belong to the approved set. */
+export const SAME_BURST_MINUTES = 3
+
 const isDesign = (m: DeskMessage) => m.from_cirqle && (m.type === 'image' || m.type === 'document')
 
 // "Ok" after a design is the approval. Greetings are acknowledgements too, but approve nothing.
@@ -66,8 +69,10 @@ export function flyerProgress(messages: readonly DeskMessage[], fromIso: string,
       p.designs++
       p.firstDesignAt ??= m.sent_at
       if (m.media_text?.trim()) p.designText = m.media_text.trim()
-      p.stage = 'sent'
-      p.approvedAt = null
+      // Pages posted in one go straddle the client's "ok": a design within a few minutes
+      // of the approval is part of what was approved, not a new version.
+      const sameBurst = p.approvedAt !== null && Date.parse(m.sent_at) - Date.parse(p.approvedAt) <= SAME_BURST_MINUTES * 60_000
+      if (!sameBurst) { p.stage = 'sent'; p.approvedAt = null }
       continue
     }
     // Before a design the client is still sending material; Cirqle's own talk changes nothing.
@@ -107,18 +112,15 @@ export function offerSource(notes: string | null | undefined): OfferSource | nul
   return m ? { messageId: m[1], chatId: m[2] } : null
 }
 
-/** The price list alone, as the client sent it (plus anything added afterwards), ready to paste into Offer Studio. */
+/** The price list alone, as the client sent it (every part merged), ready to paste into Offer Studio. */
 export function offerList(notes: string | null | undefined): string {
-  const out: string[] = []
-  for (const raw of String(notes || '').split('\n')) {
-    const l = raw.trim()
-    if (!l || /^\[(whatsapp|added|voice|approved|offer):/.test(l)) continue
-    // The voice note and the approval line come after the list and are not part of it.
-    if (/^(Voice note from the client|Approved by the client)/.test(l)) break
-    if (/^(Read by AI from a photo|Offer list from WhatsApp|Offer date:|Prices are not in the list|Added by the client afterwards)/.test(l)) continue
-    out.push(l)
-  }
-  return out.join('\n')
+  return parseOfferNotes(notes).list.join('\n')
+}
+
+/** What the client said about the flyer after the list: remarks, voice notes, photos. */
+export function offerFollowUps(notes: string | null | undefined): string[] {
+  const p = parseOfferNotes(notes)
+  return [...p.voice.filter(l => !l.startsWith('[')), ...p.followUps.map(l => l.replace(/\s*\[note:[^\]]*\]$/, '').replace(/^- /, ''))]
 }
 
 // ── Price checks ────────────────────────────────────────────────────────────

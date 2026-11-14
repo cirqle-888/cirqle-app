@@ -5,7 +5,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { createRequest } from '@/lib/shortcut/actions'
 import { aiParse } from '@/lib/ai/request-capture'
 import { callGroqJSON } from '@/lib/ai/groq'
-import { transcribeAudio } from '@/lib/ai/transcribe'
+import { transcribeAudio, translateAudio } from '@/lib/ai/transcribe'
 import { readImageText } from '@/lib/ai/vision'
 import { notifyAdmins } from '@/lib/notifications/create'
 import { safeStorageName, transcriptionFileName, type PartKind, type SharedFile } from '@/lib/shortcut/whatsapp-capture'
@@ -118,13 +118,12 @@ async function recordChatMessage(
 }
 
 /**
- * Cirqle's clients speak Malayalam, which Whisper sometimes hears as Tamil or Hindi and
- * writes as nonsense. When the text comes back in another Indian script, ask again as Malayalam.
+ * A voice note as English text. Cirqle's clients speak Malayalam, which Whisper writes
+ * as nonsense but translates usably, so the meaning in English is what is kept.
+ * Falls back to plain transcription when translation is unavailable.
  */
 async function transcribeVoice(audio: ArrayBuffer, fileName: string): Promise<string | null> {
-  const first = await transcribeAudio(audio, fileName)
-  if (!first || !/[\u0900-\u0CFF]/.test(first)) return first
-  return (await transcribeAudio(audio, fileName, 'ml')) ?? first
+  return (await translateAudio(audio, fileName)) ?? transcribeAudio(audio, fileName)
 }
 
 /** A message's voice note or photo as text, worked out at most once however many callers ask. */
@@ -273,6 +272,8 @@ async function raiseSignals(m: ListenerMessage, deps: ListenerDeps, mediaText: M
   if (m.sentAtMs && Date.now() - m.sentAtMs > STALE_HOURS * 3_600_000) return
   const listed = deps.groups.has(m.chatId)
   if (!listed && (m.isGroup || m.type !== 'text' || !looksLikeEnquiry(m.body))) return
+  // An internal Cirqle group (listed, no client): staff talking about payments is not a client paying.
+  if (listed && m.isGroup && !deps.groups.get(m.chatId)) return
   if (m.senderPhone && await deps.isStaffPhone(m.senderPhone).catch(() => false)) return
   const who = m.senderName || (m.senderPhone ? `…${m.senderPhone.slice(-4)}` : 'Someone')
 

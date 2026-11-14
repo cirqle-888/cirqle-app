@@ -14,7 +14,7 @@ import { chatAlertTargets } from './insights'
 import { chatTitle, departmentMembers, type ListenerContext } from './insights-run'
 import { addDays, dateLabel, offerTagDates } from './offer-plan'
 import {
-  APPROVED_MARK, STAGE_LABEL, TITLE_PROMPT, campaignTitle, cleanOfferTitle, flyerProgress, isBehind, notesWithApproval, offerList, offerSource,
+  APPROVED_MARK, STAGE_LABEL, TITLE_PROMPT, campaignTitle, cleanOfferTitle, flyerProgress, isBehind, notesWithApproval, offerFollowUps, offerList, offerSource,
   priceWarnings, pricedProducts, type CampaignRow,
   type DeskMessage, type FlyerProgress,
 } from './flyer-desk'
@@ -36,6 +36,10 @@ export interface DeskFlyer {
   offerEnd: string | null
   receivedAt: string
   products: number
+  /** Products on the list that still have no price. */
+  unpriced: number
+  /** What the client said about the flyer after the list. */
+  followUps: string[]
   list: string
   fromPhoto: boolean
   dateAssumed: boolean
@@ -110,7 +114,9 @@ export async function loadFlyerDesk(admin: SupabaseClient, chatIds: ReadonlySet<
       offerStart: offer.start,
       offerEnd: offer.end,
       receivedAt: row.created_at,
-      products: pricedProducts(list).length,
+      products: list.split('\n').filter(Boolean).length,
+      unpriced: list.split('\n').filter(Boolean).length - pricedProducts(list).length,
+      followUps: offerFollowUps(row.notes),
       list,
       fromPhoto: (row.notes || '').startsWith('Read by AI from a photo'),
       dateAssumed: (row.notes || '').includes('not given, so it is set to the next day'),

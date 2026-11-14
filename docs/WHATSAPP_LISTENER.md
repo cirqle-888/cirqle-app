@@ -361,3 +361,29 @@ An offer for tomorrow is today's job. So the calendar item (and the task made fr
 day before the offer starts, never earlier than the day the list arrived. The offer's own dates stay
 in the notes ("Offer date: …" and an `[offer:start..end]` tag) and are what the Flyers tab and the
 evening nudge go by.
+
+### One flyer from many messages (15 Nov 2026)
+
+What the first real evening showed (Sea Star, 14 Nov): the client sent the product names, then the
+prices as two messages, then one of them again, a voice note, two product photos and a "K". That was
+ONE four-page flyer, and it became four plan items and five separate requests. Now:
+
+| The client sends | What happens |
+|---|---|
+| A list for an offer that already has a flyer (same chat, same offer day, within 36 hours) | Merged into that flyer: a product already listed is replaced by the new line (prices for a names-only list, a corrected page), a new product is added |
+| A voice note, a photo or a remark while a flyer is open | Kept under the flyer's list ("From the client about this flyer"), not filed as a request |
+| "Ok" / "K" after a design | Approval, as before. Pages Cirqle posts within 3 minutes of it stay approved |
+
+A different offer day, or a chat with no open flyer, behaves as before.
+
+**Internal groups.** A listed GROUP with no client (Accounts Cirqle, Creative Cirqle, Flyer Cirqle)
+is on the list only so staff can read it: nothing in it is filed as a request or raised as a payment.
+
+**Voice notes are kept as their meaning in English.** Whisper writes Malayalam as nonsense (Tamil,
+Gurmukhi, invented English), but its translate mode keeps the meaning. Checked on five real notes:
+"Okay, you're right" was really "Change the rate of the pickle to 95". It still mishears words, so
+the recording is the truth.
+
+**The AI model.** Groq retired `llama-3.3-70b-versatile` and every AI call failed for a time
+(reports, the request filter, titles). The default is now `openai/gpt-oss-120b`; set `GROQ_MODEL` on
+Vercel to change it without a deploy. The evening run's log (`cron_runs`) shows a 404 when a model is retired.
