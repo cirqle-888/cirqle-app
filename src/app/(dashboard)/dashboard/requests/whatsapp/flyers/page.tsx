@@ -47,7 +47,10 @@ export default async function WhatsAppFlyersPage() {
     return (
       <li key={f.itemId} className="px-4 py-3 space-y-1.5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <p className="text-sm font-medium flex-1 min-w-[180px]">{title}</p>
+          <p className="text-sm font-medium flex-1 min-w-[180px]">
+            {title}
+            <span className="ml-2 font-normal text-muted-foreground">{f.title && !/^untitled$/i.test(f.title.trim()) ? f.title : 'Untitled'}</span>
+          </p>
           <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${TONE[f.progress.stage]}`}>{STAGE_LABEL[f.progress.stage]}</span>
         </div>
         <p className="text-xs text-muted-foreground">

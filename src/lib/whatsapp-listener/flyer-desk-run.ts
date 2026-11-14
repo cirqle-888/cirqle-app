@@ -71,8 +71,9 @@ export async function loadFlyerDesk(admin: SupabaseClient, chatIds: ReadonlySet<
 
   const rows = ((res.data || []) as ItemRow[])
     .map(r => ({ row: r, source: offerSource(r.notes) }))
-    .filter((x): x is { row: ItemRow; source: NonNullable<ReturnType<typeof offerSource>> } => !!x.source && chatIds.has(x.source.chatId))
-  const shown = rows.filter(x => x.row.scheduled_date >= since && x.row.status !== 'cancelled')
+    // A cancelled item is no flyer: it must not cut short the one it was a duplicate of.
+    .filter((x): x is { row: ItemRow; source: NonNullable<ReturnType<typeof offerSource>> } => !!x.source && chatIds.has(x.source.chatId) && x.row.status !== 'cancelled')
+  const shown = rows.filter(x => x.row.scheduled_date >= since)
   if (!shown.length) return { flyers: [], missing: false }
 
   const calendarIds = [...new Set(shown.map(x => x.row.calendar_id))]
