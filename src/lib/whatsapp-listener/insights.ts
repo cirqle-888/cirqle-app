@@ -26,9 +26,11 @@ export interface ChatAccess {
   viewers: string[]
   /** Open to everyone who can open the Requests inbox. */
   everyone: boolean
+  /** Department ids: everyone in them sees the chat, and is told when nobody is responsible. */
+  departments: string[]
 }
 
-export const NO_ACCESS: ChatAccess = { owner: null, viewers: [], everyone: false }
+export const NO_ACCESS: ChatAccess = { owner: null, viewers: [], everyone: false, departments: [] }
 
 export function parseAccess(json: string | null | undefined): Record<string, ChatAccess> {
   let v: unknown
@@ -37,11 +39,12 @@ export function parseAccess(json: string | null | undefined): Record<string, Cha
   const out: Record<string, ChatAccess> = {}
   for (const [chatId, raw] of Object.entries(v as Record<string, unknown>)) {
     if (!raw || typeof raw !== 'object') continue
-    const r = raw as { owner?: unknown; viewers?: unknown; everyone?: unknown }
+    const r = raw as { owner?: unknown; viewers?: unknown; everyone?: unknown; departments?: unknown }
     out[chatId] = {
       owner: typeof r.owner === 'string' && r.owner ? r.owner : null,
       viewers: Array.isArray(r.viewers) ? [...new Set(r.viewers.filter((x): x is string => typeof x === 'string' && !!x))] : [],
       everyone: r.everyone === true,
+      departments: Array.isArray(r.departments) ? [...new Set(r.departments.filter((x): x is string => typeof x === 'string' && !!x))] : [],
     }
   }
   return out
@@ -52,17 +55,23 @@ export function serializeAccess(access: Readonly<Record<string, ChatAccess>>, li
   const out: Record<string, ChatAccess> = {}
   for (const id of listedChatIds) {
     const a = access[id]
-    if (a && (a.owner || a.viewers.length || a.everyone)) out[id] = { owner: a.owner, viewers: a.viewers, everyone: a.everyone }
+    if (a && (a.owner || a.viewers.length || a.everyone || a.departments.length)) {
+      out[id] = { owner: a.owner, viewers: a.viewers, everyone: a.everyone, departments: a.departments }
+    }
   }
   return JSON.stringify(out)
 }
 
-export interface Viewer { isAdmin: boolean; employeeId: string; canViewRequests: boolean }
+export interface Viewer {
+  isAdmin: boolean; employeeId: string; canViewRequests: boolean
+  /** The departments this person belongs to. */
+  departmentIds?: readonly string[]
+}
 
 /**
  * May this person read this chat? Admins always. Otherwise only the person
- * responsible, the people it is shared with, or — when the chat is opened to
- * everyone — anyone with the Requests inbox. A chat with no setting is
+ * responsible, the people and departments it is shared with, or — when the chat
+ * is opened to everyone — anyone with the Requests inbox. A chat with no setting is
  * admins-only: client conversations are private until someone shares them.
  */
 export function canSeeChat(viewer: Viewer | null, access: ChatAccess | undefined): boolean {
@@ -70,6 +79,7 @@ export function canSeeChat(viewer: Viewer | null, access: ChatAccess | undefined
   if (viewer.isAdmin) return true
   const a = access ?? NO_ACCESS
   if (a.owner === viewer.employeeId || a.viewers.includes(viewer.employeeId)) return true
+  if (a.departments.some(d => viewer.departmentIds?.includes(d))) return true
   return a.everyone && viewer.canViewRequests
 }
 
@@ -238,6 +248,8 @@ export function alertTargets(
   item: Pick<PendingItem, 'who'>,
   access: ChatAccess | undefined,
   employees: readonly { id: string; name: string }[],
+  /** Department id → its active members. */
+  members: ReadonlyMap<string, readonly string[]> = new Map(),
 ): string[] {
   if (item.who) {
     const wanted = words(item.who)
@@ -247,7 +259,16 @@ export function alertTargets(
     })
     if (matches.length === 1) return [matches[0].id]
   }
-  return access?.owner ? [access.owner] : []
+  return chatAlertTargets(access, members)
+}
+
+/**
+ * Who is told about a chat when nobody is named: the person responsible, else
+ * everyone in the chat's departments. Empty means the admins.
+ */
+export function chatAlertTargets(access: ChatAccess | undefined, members: ReadonlyMap<string, readonly string[]> = new Map()): string[] {
+  if (access?.owner) return [access.owner]
+  return [...new Set((access?.departments ?? []).flatMap(d => members.get(d) ?? []))]
 }
 
 // ── The pending list ────────────────────────────────────────────────────────

@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import {
   alertTargets, canSeeChat, chatsInQuestion, daysBetween, latestReports, messageText, normalizeReport, parseAccess,
-  parseItems, pendingLines, serializeAccess, transcript, visibleChatIds, waitingChats, weeklyDigest,
+  chatAlertTargets, parseItems, pendingLines, serializeAccess, transcript, visibleChatIds, waitingChats, weeklyDigest,
   type ChatAccess, type LastMessage, type PendingItem,
 } from './insights'
 
 const admin = { isAdmin: true, employeeId: 'a', canViewRequests: true }
 const staff = (id: string, requests = true) => ({ isAdmin: false, employeeId: id, canViewRequests: requests })
-const access = (a: Partial<ChatAccess>): ChatAccess => ({ owner: null, viewers: [], everyone: false, ...a })
+const access = (a: Partial<ChatAccess>): ChatAccess => ({ owner: null, viewers: [], everyone: false, departments: [], ...a })
 
 describe('who may see a chat', () => {
   it('is admins only until someone shares it', () => {
@@ -38,10 +38,10 @@ describe('who may see a chat', () => {
   it('reads and writes the settings text, ignoring junk', () => {
     expect(parseAccess('not json')).toEqual({})
     expect(parseAccess('{"g1":{"owner":"e1","viewers":["e2","e2",5],"everyone":"yes"},"g2":7}'))
-      .toEqual({ g1: { owner: 'e1', viewers: ['e2'], everyone: false } })
+      .toEqual({ g1: { owner: 'e1', viewers: ['e2'], everyone: false, departments: [] } })
     // Defaults and chats no longer listed are not stored.
     const text = serializeAccess({ g1: access({ owner: 'e1' }), g2: access({}), gone: access({ everyone: true }) }, ['g1', 'g2'])
-    expect(JSON.parse(text)).toEqual({ g1: { owner: 'e1', viewers: [], everyone: false } })
+    expect(JSON.parse(text)).toEqual({ g1: { owner: 'e1', viewers: [], everyone: false, departments: [] } })
   })
 })
 
@@ -194,5 +194,28 @@ describe('the Monday note', () => {
   })
   it('stays quiet when nothing happened', () => {
     expect(weeklyDigest([], new Map(), '2026-11-16', title)).toBeNull()
+  })
+})
+
+describe('sharing a chat with a department', () => {
+  const flyer = { isAdmin: false, employeeId: 'e1', canViewRequests: false, departmentIds: ['flyer'] }
+  const social = { isAdmin: false, employeeId: 'e2', canViewRequests: false, departmentIds: ['social'] }
+  it('lets everyone in the department read it, and nobody else', () => {
+    const a = access({ departments: ['flyer'] })
+    expect(canSeeChat(flyer, a)).toBe(true)
+    expect(canSeeChat(social, a)).toBe(false)
+    expect(canSeeChat({ isAdmin: false, employeeId: 'e3', canViewRequests: true }, a)).toBe(false)
+  })
+  it('survives a save and a reload', () => {
+    const back = parseAccess(serializeAccess({ c1: access({ departments: ['flyer', 'flyer'] }) }, ['c1']))
+    expect(back.c1.departments).toEqual(['flyer'])
+    expect(parseAccess('{"c1":{"owner":"x"}}').c1.departments).toEqual([])
+  })
+  it('tells the whole department when nobody is responsible', () => {
+    const members = new Map([['flyer', ['e1', 'e4']], ['social', ['e2', 'e4']]])
+    expect(chatAlertTargets(access({ departments: ['flyer', 'social'] }), members)).toEqual(['e1', 'e4', 'e2'])
+    expect(chatAlertTargets(access({ owner: 'boss', departments: ['flyer'] }), members)).toEqual(['boss'])
+    expect(chatAlertTargets(access({}), members)).toEqual([])
+    expect(alertTargets({ who: '' }, access({ departments: ['flyer'] }), [], members)).toEqual(['e1', 'e4'])
   })
 })

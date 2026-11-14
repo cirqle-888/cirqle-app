@@ -19,7 +19,7 @@ import { createNotification, notifyAdmins } from '@/lib/notifications/create'
 import { loadCurrentUser, type CurrentUser } from '@/lib/permissions/check'
 import { CHAT_LOG_TABLE, chatDisplayName, indiaDay, isMissingTable } from './chat-log'
 import {
-  ACCESS_KEY, ASK_PROMPT, REPORT_PROMPT, REPORT_TABLE, alertTargets, chatsInQuestion, daysBetween, normalizeReport, parseAccess,
+  ACCESS_KEY, ASK_PROMPT, REPORT_PROMPT, REPORT_TABLE, alertTargets, chatAlertTargets, chatsInQuestion, daysBetween, normalizeReport, parseAccess,
   parseItems, reportInput, transcript, visibleChatIds, type ChatAccess, type InsightMessage, type PendingItem, type Viewer,
   WAITING_MAX_HOURS,
   latestReports,
@@ -67,8 +67,15 @@ export interface ChatViewer {
 /** Who is looking and what they may see. The one gate every WhatsApp page and action goes through. */
 export async function loadChatViewer(admin: SupabaseClient): Promise<ChatViewer> {
   const [me, ctx] = await Promise.all([loadCurrentUser().catch(() => null), loadListenerContext(admin)])
+  // Admins see every chat, so their departments are never needed.
+  const mine = me && !me.isAdmin
+    ? await admin.from('employee_service_categories').select('category_id').eq('employee_id', me.employeeId)
+    : { data: [] }
   const viewer: Viewer | null = me
-    ? { isAdmin: me.isAdmin, employeeId: me.employeeId, canViewRequests: me.isAdmin || me.permissions.has('requests.view') }
+    ? {
+        isAdmin: me.isAdmin, employeeId: me.employeeId, canViewRequests: me.isAdmin || me.permissions.has('requests.view'),
+        departmentIds: ((mine.data || []) as { category_id: string }[]).map(r => r.category_id),
+      }
     : null
   return { me, viewer, ctx, visible: visibleChatIds(viewer, ctx.groups.keys(), ctx.access) }
 }
@@ -80,13 +87,27 @@ export type ReportOutcome =
 
 interface StoredReport { report_day: string; summary: string; items: unknown; message_count: number; covered_until: string | null }
 
+/** Department id → the active employees in it. */
+export async function departmentMembers(admin: SupabaseClient): Promise<Map<string, string[]>> {
+  const [links, staff] = await Promise.all([
+    admin.from('employee_service_categories').select('employee_id, category_id'),
+    admin.from('employees').select('id').eq('is_active', true).eq('is_archived', false),
+  ])
+  const active = new Set(((staff.data || []) as { id: string }[]).map(e => e.id))
+  const out = new Map<string, string[]>()
+  for (const l of (links.data || []) as { employee_id: string; category_id: string }[]) {
+    if (active.has(l.employee_id)) (out.get(l.category_id) ?? out.set(l.category_id, []).get(l.category_id)!).push(l.employee_id)
+  }
+  return out
+}
+
 async function activeEmployees(admin: SupabaseClient): Promise<{ id: string; name: string }[]> {
   const { data } = await admin.from('employees').select('id, name').eq('is_active', true).eq('is_archived', false)
   return ((data || []) as { id: string; name: string | null }[]).filter(e => e.name).map(e => ({ id: e.id, name: e.name as string }))
 }
 
 async function alertNewItems(
-  o: { chatId: string; title: string; items: PendingItem[]; newIds: string[]; access: ChatAccess | undefined; employees: { id: string; name: string }[] },
+  o: { chatId: string; title: string; items: PendingItem[]; newIds: string[]; access: ChatAccess | undefined; employees: { id: string; name: string }[]; members: Map<string, string[]> },
 ): Promise<number> {
   let sent = 0
   for (const item of o.items) {
@@ -99,7 +120,7 @@ async function alertNewItems(
       // Once per item, however many times the report is rebuilt.
       sourceKey: `whatsapp_pending:${item.id}`,
     }
-    const targets = alertTargets(item, o.access, o.employees)
+    const targets = alertTargets(item, o.access, o.employees, o.members)
     if (targets.length) for (const employeeId of targets) await createNotification({ ...content, employeeId })
     else await notifyAdmins(content)
     sent++
@@ -112,6 +133,7 @@ export async function updateChatReport(
   ctx: ListenerContext,
   chatId: string,
   employees?: { id: string; name: string }[],
+  members?: Map<string, string[]>,
 ): Promise<ReportOutcome> {
   if (!ctx.groups.has(chatId)) return { result: 'skipped', reason: 'not-listed' }
 
@@ -162,6 +184,7 @@ export async function updateChatReport(
   const alerts = await alertNewItems({
     chatId, title, items: report.items, newIds: report.newIds, access: ctx.access[chatId],
     employees: employees ?? await activeEmployees(admin),
+    members: members ?? await departmentMembers(admin),
   }).catch(() => 0)
   return { result: 'updated', items: report.items.length, alerts }
 }
@@ -177,11 +200,12 @@ export async function updateAllReports(admin: SupabaseClient, o: { budgetMs: num
   const started = Date.now()
   const ctx = await loadListenerContext(admin)
   const employees = await activeEmployees(admin)
+  const members = await departmentMembers(admin)
   const out: RunSummary = { chats: 0, updated: 0, skipped: 0, failed: 0, alerts: 0, outOfTime: false, errors: [] }
   for (const chatId of o.chatIds ?? ctx.groups.keys()) {
     if (Date.now() - started > o.budgetMs) { out.outOfTime = true; break }
     out.chats++
-    const r = await updateChatReport(admin, ctx, chatId, employees)
+    const r = await updateChatReport(admin, ctx, chatId, employees, members)
     if (r.result === 'updated') { out.updated++; out.alerts += r.alerts }
     else if (r.result === 'skipped') { out.skipped++; if (r.reason === 'no-table') break }
     else { out.failed++; if (out.errors.length < 3) out.errors.push(r.error.slice(0, 160)) }
@@ -200,6 +224,7 @@ export async function alertUnanswered(admin: SupabaseClient, ctx: ListenerContex
     .select('chat_id, message_id, from_cirqle, type, body, sent_at')
     .in('chat_id', ids).gte('sent_at', since).order('sent_at', { ascending: false }).limit(3000)
   if (error || !data) return 0
+  const members = await departmentMembers(admin)
   let sent = 0
   for (const w of waitingChats(data as LastMessage[], Date.now())) {
     const content = {
@@ -210,8 +235,8 @@ export async function alertUnanswered(admin: SupabaseClient, ctx: ListenerContex
       // Once per unanswered message, however many evenings it stays unanswered.
       sourceKey: `whatsapp_waiting:${w.messageId}`,
     }
-    const owner = ctx.access[w.chatId]?.owner
-    if (owner) await createNotification({ ...content, employeeId: owner })
+    const targets = chatAlertTargets(ctx.access[w.chatId], members)
+    if (targets.length) for (const employeeId of targets) await createNotification({ ...content, employeeId })
     else await notifyAdmins(content)
     sent++
   }

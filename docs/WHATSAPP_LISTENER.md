@@ -279,3 +279,67 @@ Cirqle numbers table or on the employee record.
 
 Found on 14 Nov 2026: when the listener was started after being off, OpenWA delivered the messages from the
 previous two days (about 190). So a short gap is caught up; how far back it reaches is not known.
+
+## Sharing a chat with a department
+
+In **Chats to read**, "Who can see" can tick whole departments (Settings → Departments) as well as people.
+Everyone in a ticked department can read the chat. When the chat has no responsible person, its alerts
+(new pending item, waiting for a reply, new offer list) go to everyone in those departments; with no
+department either, they go to the admins. "Add to all chats" shares every listed chat with one department.
+
+## Flyer desk, price checks, payment and enquiry alerts (built 14 Nov 2026)
+
+**Flyer desk** (Requests → WhatsApp chats → Flyers). One row for every offer price list a client
+sent, with how far its flyer has got. Nothing is stored for this: the stage is read off the chat
+each time (`flyer-desk.ts`).
+
+| Stage | How it is known |
+|---|---|
+| Not designed yet | The list is in; no photo or file from a Cirqle number since |
+| Design sent | A Cirqle number posted a photo or file after the list |
+| Client asked for changes | The client wrote anything other than "ok" after a design (one round however many messages) |
+| Approved | The client answered "ok", "super", a thumbs-up and the like |
+
+A flyer's part of the chat ends where the same client's next list begins. Each row has
+**Copy list** (the bare price list, ready to paste into Offer Studio) and a link to Offer Studio.
+
+**Price checks** on each list, against the same client's earlier lists: a product listed twice at
+two prices, a product with no price, and a price 50% or more away from last time.
+
+**Evening nudge** (the 19:30 run): an offer that starts today or tomorrow and is still "Not designed
+yet" or "Client asked for changes" raises one notification for the chat's person or department.
+
+**Payment message**: a client in a listed chat says they paid ("paid", "GPay cheythu", "amount
+ayachu"), or sends a payment screenshot. Admins get a notification with the amount when one is
+written. Nothing is recorded as paid.
+
+**New enquiry**: someone in a direct chat that is not on the list writes about a service and asks
+something (rate, need, how much). Admins get one notification a month per person, with the name and
+the last four digits only. The message itself is looked at in memory and never stored.
+
+**This all depends on telling Cirqle from the client.** In groups WhatsApp hides the sender's
+number, so the gateway must be told to attach it: `RESOLVE_LID_TO_PHONE=true` in
+`openwa-local/openwa.env` (added 14 Nov; needs one restart of the listener). Before that, every group
+message arrived with no phone and Cirqle's own designs looked like the client's. The lookup is local
+to the gateway; it does not contact WhatsApp. Messages kept before 13 Nov carry no sender at all, so
+the desk can only be judged on messages from now on.
+
+Not built: reading a client's Google Sheet (needs the full link and its sharing), and anything that
+sends a WhatsApp message (that would go through Meta's official API on a separate number, never
+through this listener).
+
+### When the client approves a flyer
+
+The client's "ok" after a design (at once from the webhook, and again in the evening run as a
+catch-up) does three things, once per flyer:
+
+1. **Name**: "Untitled" becomes the offer title, on the calendar item, its request and its task.
+   The title comes from the Offer Studio offer for that client whose dates cover the flyer; if there
+   is none, AI reads the headline off the newest design photo. If neither gives a title it stays
+   "Untitled" and the notification says so. A title someone typed by hand is never replaced.
+2. **Done**: the flyer's task is set to Done (which also completes its request). A task that is
+   already invoiced or paid keeps its status. A flyer with no task yet is only renamed.
+3. **Note**: the calendar notes get "Approved by the client in WhatsApp on <date>", and the chat's
+   person or department is told what was done.
+
+A wrong "ok" (the client answering something else) closes the task too: reopen it by hand.

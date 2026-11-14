@@ -31,8 +31,8 @@ export interface OfferPlanInput {
   /** The client this chat belongs to, as named on the allow-list ('' = none). */
   clientName: string
   isStaffPhone: (phone: string) => Promise<boolean>
-  /** The person responsible for this chat, told as well as the admins. */
-  ownerId?: string | null
+  /** The person responsible for this chat, or its department's people: told as well as the admins. */
+  tellIds?: readonly string[]
   /** What a photo says, as already worked out for the chat view (null when photo reading is off). */
   mediaText?: (() => Promise<string | null>) | null
 }
@@ -87,7 +87,7 @@ async function writeTolerant(
 async function tell(input: OfferPlanInput, content: { title: string; message: string; sourceKey: string }): Promise<void> {
   const note = { type: 'whatsapp_request' as const, link: LINK, ...content }
   await notifyAdmins(note).catch(() => {})
-  if (input.ownerId) await createNotification({ ...note, employeeId: input.ownerId }).catch(() => {})
+  for (const employeeId of input.tellIds ?? []) await createNotification({ ...note, employeeId }).catch(() => {})
 }
 
 async function addList(

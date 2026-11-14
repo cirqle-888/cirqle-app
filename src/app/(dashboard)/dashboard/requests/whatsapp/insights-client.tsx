@@ -3,12 +3,13 @@
 import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Check, RefreshCw, Sparkles } from 'lucide-react'
+import { Check, Copy, RefreshCw, Sparkles } from 'lucide-react'
 import { askWhatsAppChats, markPendingDone, refreshWhatsAppReports } from './actions'
 
 const TABS = [
   { key: 'chats', label: 'Chats', href: '/dashboard/requests/whatsapp' },
   { key: 'pending', label: 'Pending', href: '/dashboard/requests/whatsapp/pending' },
+  { key: 'flyers', label: 'Flyers', href: '/dashboard/requests/whatsapp/flyers' },
   { key: 'report', label: 'Daily report', href: '/dashboard/requests/whatsapp/report' },
 ] as const
 
@@ -63,6 +64,22 @@ export function DoneButton({ chatId, itemId, label }: { chatId: string; itemId: 
         <Check className="w-3 h-3" /> {busy ? 'Saving…' : 'Done'}
       </button>
     </span>
+  )
+}
+
+/** Copies a price list, ready to paste into Offer Studio. */
+export function CopyListButton({ list, label }: { list: string; label: string }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  return (
+    <button type="button" aria-label={`Copy the price list: ${label}`}
+      onClick={async () => {
+        try { await navigator.clipboard.writeText(list); setState('copied') } catch { setState('failed') }
+        setTimeout(() => setState('idle'), 2500)
+      }}
+      className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11px] border border-border bg-secondary hover:text-foreground text-muted-foreground">
+      {state === 'copied' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      <span role="status">{state === 'copied' ? 'Copied' : state === 'failed' ? 'Could not copy' : 'Copy list'}</span>
+    </button>
   )
 }
 

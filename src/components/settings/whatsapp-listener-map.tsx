@@ -28,6 +28,8 @@ interface Props {
   people: string[]
   /** Active employees, for "Responsible" and "Who can see". */
   staff: { id: string; cqid?: string | null; name?: string | null }[]
+  /** Active departments, to share a chat with a whole team at once. */
+  departments?: { id: string; name: string }[]
 }
 
 interface GroupRow { id: string; client: string }
@@ -36,7 +38,7 @@ const cell = 'px-2 py-1.5 align-middle'
 const input = 'w-full bg-secondary border border-border rounded-md px-2 py-1.5 text-xs'
 const th = 'px-2 py-1.5 text-left text-[11px] font-medium text-muted-foreground'
 
-export default function WhatsAppListenerMap({ settings, onChange, clients, people, staff }: Props) {
+export default function WhatsAppListenerMap({ settings, onChange, clients, people, staff, departments = [] }: Props) {
   // Rows live here while editing, so a half-typed row is not lost on the way
   // through the text format; every change is written back as text for Save.
   const [groups, setGroups] = useState<GroupRow[]>(() =>
@@ -45,6 +47,7 @@ export default function WhatsAppListenerMap({ settings, onChange, clients, peopl
   const [numbers, setNumbers] = useState<NumberRow[]>(() => parseNumberRows(settings[LISTENER_KEYS.staffNumbers]))
   const [access, setAccess] = useState<Record<string, ChatAccess>>(() => parseAccess(settings[ACCESS_KEY]))
   const [newChatId, setNewChatId] = useState('')
+  const [bulkDept, setBulkDept] = useState('')
 
   const clientNames = clients.filter(c => c.is_active !== false).map(c => c.name).sort((a, b) => a.localeCompare(b))
   const known = new Set(clients.map(c => c.name.toLowerCase()))
@@ -61,6 +64,17 @@ export default function WhatsAppListenerMap({ settings, onChange, clients, peopl
   }
   function saveAccess(chatId: string, change: Partial<ChatAccess>) {
     const next = { ...access, [chatId]: { ...(access[chatId] ?? NO_ACCESS), ...change } }
+    setAccess(next)
+    onChange(ACCESS_KEY, serializeAccess(next, groups.map(g => g.id)))
+  }
+  /** Shares every listed chat with one department in a single step. */
+  function shareAllWith(departmentId: string) {
+    if (!departmentId) return
+    const next = { ...access }
+    for (const g of groups) {
+      const a: ChatAccess = { ...NO_ACCESS, ...next[g.id] }
+      if (!a.departments.includes(departmentId)) next[g.id] = { ...a, departments: [...a.departments, departmentId] }
+    }
     setAccess(next)
     onChange(ACCESS_KEY, serializeAccess(next, groups.map(g => g.id)))
   }
@@ -101,6 +115,20 @@ export default function WhatsAppListenerMap({ settings, onChange, clients, peopl
         <p className="text-[11px] text-muted-foreground/60 mb-1.5">
           Admins can read every chat. The responsible person can read their chat and is told when something in it is waiting on Cirqle.
         </p>
+        {departments.length > 0 && groups.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <span className="text-[11px] text-muted-foreground">Share every chat below with a department:</span>
+            <AppSelect aria-label="Department to share every chat with" value={bulkDept} onChange={e => setBulkDept(e.target.value)} className="!text-xs !h-8 !w-auto">
+              <option value="">Pick a department</option>
+              {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </AppSelect>
+            <button type="button" disabled={!bulkDept} onClick={() => { shareAllWith(bulkDept); setBulkDept('') }}
+              className="h-8 px-3 rounded-md text-xs border border-border bg-card hover:bg-secondary disabled:opacity-50">
+              Add to all chats
+            </button>
+            <span className="text-[11px] text-muted-foreground/60">Nothing is saved until you press Save Settings.</span>
+          </div>
+        )}
         <div className="border border-border rounded-lg overflow-x-auto">
           <table className="w-full text-xs min-w-[860px]">
             <thead className="bg-secondary/50 border-b border-border">
@@ -118,9 +146,13 @@ export default function WhatsAppListenerMap({ settings, onChange, clients, peopl
               )}
               {groups.map((g, i) => {
                 const unknownClient = !!g.client && !known.has(g.client.toLowerCase())
-                const a = access[g.id] ?? NO_ACCESS
+                // Spread over the defaults so a row saved before a field existed still has every field.
+                const a: ChatAccess = { ...NO_ACCESS, ...access[g.id] }
                 const label = names[g.id] || g.id
-                const shared = a.viewers.map(id => staffName.get(id)).filter(Boolean) as string[]
+                const shared = [
+                  ...departments.filter(d => a.departments.includes(d.id)).map(d => d.name),
+                  ...(a.viewers.map(id => staffName.get(id)).filter(Boolean) as string[]),
+                ]
                 return (
                   <tr key={g.id}>
                     <td className={cell}>
@@ -155,7 +187,7 @@ export default function WhatsAppListenerMap({ settings, onChange, clients, peopl
                         onChange={e => saveAccess(g.id, { owner: e.target.value || null })}
                         className="!text-xs !h-8"
                       >
-                        <option value="">Nobody (admins are told)</option>
+                        <option value="">{a.departments.length ? 'Whole department' : 'Nobody (admins are told)'}</option>
                         {staffSorted.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
                       </AppSelect>
                     </td>
@@ -166,15 +198,27 @@ export default function WhatsAppListenerMap({ settings, onChange, clients, peopl
                         onChange={e => saveAccess(g.id, { everyone: e.target.value === 'everyone' })}
                         className="!text-xs !h-8"
                       >
-                        <option value="chosen">Admins and chosen people</option>
+                        <option value="chosen">Admins, chosen departments and people</option>
                         <option value="everyone">Everyone with Requests</option>
                       </AppSelect>
                       {!a.everyone && (
                         <details className="mt-1">
                           <summary className="cursor-pointer text-[11px] text-primary">
-                            {shared.length ? `Also shared with ${shared.join(', ')}` : 'Share with more people'}
+                            {shared.length ? `Shared with ${shared.join(', ')}` : 'Share with a department or people'}
                           </summary>
-                          <div className="mt-1 max-h-40 overflow-y-auto border border-border rounded-md p-1.5 space-y-1">
+                          <div className="mt-1 max-h-48 overflow-y-auto border border-border rounded-md p-1.5 space-y-1">
+                            {departments.length > 0 && <p className="text-[10px] font-medium text-muted-foreground">Departments</p>}
+                            {departments.map(d => (
+                              <label key={d.id} className="flex items-center gap-1.5 text-[11px]">
+                                <input
+                                  type="checkbox"
+                                  checked={a.departments.includes(d.id)}
+                                  onChange={ev => saveAccess(g.id, { departments: ev.target.checked ? [...a.departments, d.id] : a.departments.filter(v => v !== d.id) })}
+                                />
+                                {d.name}
+                              </label>
+                            ))}
+                            {departments.length > 0 && <p className="pt-1 text-[10px] font-medium text-muted-foreground">People</p>}
                             {staffSorted.map(e => (
                               <label key={e.id} className="flex items-center gap-1.5 text-[11px]">
                                 <input

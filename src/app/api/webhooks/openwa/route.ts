@@ -11,7 +11,12 @@ import { notifyAdmins } from '@/lib/notifications/create'
 import { safeStorageName, transcriptionFileName, type PartKind, type SharedFile } from '@/lib/shortcut/whatsapp-capture'
 import { handleListenerMessage, type ListenerDeps, type RecentRequest } from '@/lib/whatsapp-listener/handle'
 import { planOfferFromMessage } from '@/lib/whatsapp-listener/offer-plan-run'
-import { ACCESS_KEY, parseAccess } from '@/lib/whatsapp-listener/insights'
+import { STALE_HOURS } from '@/lib/whatsapp-listener/offer-plan'
+import { isPaymentMessage, looksLikeEnquiry, paymentAmount } from '@/lib/whatsapp-listener/signals'
+import { ACCESS_KEY, chatAlertTargets, parseAccess } from '@/lib/whatsapp-listener/insights'
+import { departmentMembers, loadListenerContext } from '@/lib/whatsapp-listener/insights-run'
+import { isApproval } from '@/lib/whatsapp-listener/flyer-desk'
+import { finishApprovedFlyers } from '@/lib/whatsapp-listener/flyer-desk-run'
 import { CHAT_LOG_TABLE, chatLogRow, chatMedia, isChatEvent, isMissingTable } from '@/lib/whatsapp-listener/chat-log'
 import {
   addSeen, aiFilterOn, isBadSessionStatus, listenerEnabled, parseEnvelope, parseGroupList, parseNumberList, parseSeen,
@@ -246,6 +251,46 @@ function buildDeps(
   }
 }
 
+/**
+ * Two things the owner is told about at once (rules: lib/whatsapp-listener/signals.ts):
+ * a client saying a payment was made, and someone who is not a listed client asking
+ * about a service. Only a Cirqle notification is raised: nothing is recorded as paid,
+ * and an unlisted chat's words are looked at here and never stored.
+ */
+async function raiseSignals(m: ListenerMessage, deps: ListenerDeps, mediaText: MediaText): Promise<void> {
+  if (!deps.enabled || m.fromMe) return
+  // Caught up after the listener was off: old news.
+  if (m.sentAtMs && Date.now() - m.sentAtMs > STALE_HOURS * 3_600_000) return
+  const listed = deps.groups.has(m.chatId)
+  if (!listed && (m.isGroup || m.type !== 'text' || !looksLikeEnquiry(m.body))) return
+  if (m.senderPhone && await deps.isStaffPhone(m.senderPhone).catch(() => false)) return
+  const who = m.senderName || (m.senderPhone ? `…${m.senderPhone.slice(-4)}` : 'Someone')
+
+  if (!listed) {
+    await notifyAdmins({
+      type: 'whatsapp_request',
+      title: 'New enquiry on WhatsApp',
+      message: `${who}${m.senderName && m.senderPhone ? ` (…${m.senderPhone.slice(-4)})` : ''} is asking about a service on the Cirqle number. Reply in WhatsApp.`,
+      link: '/dashboard',
+      // Once a month per person, however many messages they send.
+      sourceKey: `whatsapp_lead:${m.chatId}:${new Date().toISOString().slice(0, 7)}`,
+    })
+    return
+  }
+
+  // A payment screenshot says it in the picture, which the chat log has already read.
+  const text = m.type === 'image' ? [m.body, await mediaText().catch(() => null)].filter(Boolean).join('\n') : m.type === 'text' ? m.body : ''
+  if (!isPaymentMessage(text)) return
+  const amount = paymentAmount(text)
+  await notifyAdmins({
+    type: 'whatsapp_pending',
+    title: `Payment message — ${deps.groups.get(m.chatId) || 'client chat'}`,
+    message: `${who} says a payment was made${amount ? ` (${amount})` : ''}. Check the bank, then record it against the invoice.`,
+    link: `/dashboard/requests/whatsapp?chat=${encodeURIComponent(m.chatId)}`,
+    sourceKey: `whatsapp_payment:${m.id}`,
+  })
+}
+
 /** Notes that the gateway is alive. Any signed delivery counts, whatever it carries. */
 async function recordHeard(admin: SupabaseClient, settings: Record<string, string>): Promise<void> {
   if (!shouldWriteHeard(settings, Date.now())) return
@@ -316,13 +361,22 @@ export async function POST(req: NextRequest) {
       // A message the listener number sent is part of the conversation, never a request.
       if (message.event !== 'message.received') return
       const deps = buildDeps(admin, settings, keptMediaPath, mediaText)
+      await raiseSignals(message, deps, mediaText).catch(err => console.warn('[whatsapp-listener] payment/enquiry check failed:', err))
+      // The client's "ok" after a design: the flyer takes its offer title and its task is closed.
+      if (deps.enabled && deps.groups.has(message.chatId) && message.type === 'text' && isApproval(message.body)
+        && !(message.senderPhone && await deps.isStaffPhone(message.senderPhone).catch(() => false))) {
+        await finishApprovedFlyers(admin, await loadListenerContext(admin), new Set([message.chatId]))
+          .catch(err => console.warn('[whatsapp-listener] approved flyer not closed:', err))
+      }
       // A supermarket's offer price list goes onto its social calendar instead of the Requests inbox.
       // If that cannot be done for any reason, the message is filed as a request as before.
+      const chatAccess = parseAccess(settings[ACCESS_KEY])[message.chatId]
       const planned = await planOfferFromMessage(admin, message, {
         enabled: deps.enabled,
         clientName: deps.groups.get(message.chatId) || '',
         isStaffPhone: deps.isStaffPhone,
-        ownerId: parseAccess(settings[ACCESS_KEY])[message.chatId]?.owner ?? null,
+        // Looked up only for a chat shared with a department: most messages need no extra query.
+        tellIds: chatAlertTargets(chatAccess, chatAccess?.departments.length && !chatAccess.owner ? await departmentMembers(admin).catch(() => new Map()) : new Map()),
         mediaText,
       }).catch(err => {
         console.warn('[whatsapp-listener] offer list check failed:', err)
