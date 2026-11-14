@@ -38,7 +38,7 @@ export default async function InvoicesPage() {
       .from('invoices')
       .select(`
         *,
-        client:clients(id, name, code, phone, email, address),
+        client:clients(id, name, code, phone, email, address, business_partner_id),
         item_count:invoice_items(count),
         payments(id, amount, currency, exchange_rate, amount_inr, payment_date, payment_method, reference, notes),
         expense_items:invoice_expense_items(id, cashbook_entry_id, description, amount, amount_inr, currency, original_amount, original_amount_inr, markup_type, markup_value, markup_amount, notes)

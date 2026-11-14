@@ -147,7 +147,7 @@ interface Invoice {
   expenses_mode?: string   // 'mode_a' | 'mode_b' | 'mode_c' — client display style
   /** Service column override. null/undefined = follow the client's default. */
   show_service_column?: boolean | null
-  client?: { id: string; name: string; code: string; phone?: string; email?: string; address?: string
+  client?: { id: string; name: string; code: string; business_partner_id?: string | null; phone?: string; email?: string; address?: string
     /** The client's standing rule for the printed Service column. */
     invoice_show_services?: boolean | null }
   items?: InvoiceItem[]
@@ -422,6 +422,12 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
   const partnerClientIds = useMemo(() => new Set(
     filterPartner ? clients.filter(c => c.business_partner_id === filterPartner).map(c => c.id) : [],
   ), [clients, filterPartner])
+  // The invoice's own client decides, not only the active-client list above:
+  // a partner's client that has since been made inactive still owes its
+  // invoices, and leaving them out understated what the partner has to pay.
+  const inPartner = useCallback((inv: Invoice) =>
+    inv.client?.business_partner_id === filterPartner || partnerClientIds.has(inv.client_id),
+  [filterPartner, partnerClientIds])
   const [groupByClient, setGroupByClient] = useState(false)
   const [sortBy, setSortBy] = useState(searchParams.get('sort') || 'workflow')
   const [searchFacets, setSearchFacets] = useState<SearchFacet[]>(() => {
@@ -926,7 +932,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
         return false
       }
       if (filterClient && inv.client_id !== filterClient) return false
-      if (filterPartner && !partnerClientIds.has(inv.client_id)) return false
+      if (filterPartner && !inPartner(inv)) return false
       if (activeFacets.length && !recordMatchesFacets(activeFacets, inv, INVOICE_FIELDS, invoiceGeneric)) return false
       return true
     })
@@ -940,7 +946,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
       if (ai !== bi) return ai - bi
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     })
-  }, [invoices, tab, filterStatus, filterClient, filterPartner, partnerClientIds, activeFacets, sortBy, showAmounts])
+  }, [invoices, tab, filterStatus, filterClient, filterPartner, inPartner, activeFacets, sortBy, showAmounts])
 
   // Client groups for the list panel — only computed when groupByClient is on.
   // Sorted by group balance-due desc (clients who owe the most surface first);
@@ -3062,7 +3068,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
             const open = invoices.filter(i =>
               ['sent', 'partial', 'overdue'].includes(i.status) && balanceDueInr(i) > 0.01 &&
               (!filterClient || i.client_id === filterClient) &&
-              (!filterPartner || partnerClientIds.has(i.client_id)))
+              (!filterPartner || inPartner(i)))
             const who = filterClient
               ? clients.find(c => c.id === filterClient)?.name
               : partners.find(bp => bp.id === filterPartner)?.name

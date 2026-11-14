@@ -169,7 +169,7 @@ interface DueInvoice {
   exchange_rate?: number   // frozen book rate at issue — used for realised FX
   currency: string
   client_id?: string    // for per-client FIFO filtering
-  client?: { id: string; name: string; code: string }
+  client?: { id: string; name: string; code: string; business_partner_id?: string | null }
   // Present (non-empty) when the invoice already has direct "Record Payment"
   // rows — used to exclude it from cashbook allocation (mutual exclusion).
   payments?: { id: string }[]
@@ -1016,7 +1016,9 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     const list = form.client_filter_id
       ? dueInvoices.filter(inv => inv.client?.id === form.client_filter_id)
       : form.partner_filter_id
-        ? dueInvoices.filter(inv => !!inv.client?.id && partnerClientIds.has(inv.client.id))
+        // By the invoice's own client too — an inactive client is not in
+        // `clients`, but its unpaid invoices are still the partner's to pay.
+        ? dueInvoices.filter(inv => inv.client?.business_partner_id === form.partner_filter_id || (!!inv.client?.id && partnerClientIds.has(inv.client.id)))
         : dueInvoices
     return [...list].sort((a, b) => {
       const aOverdue = a.due_date && a.due_date < today
@@ -3237,6 +3239,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               const inv = unwrap(a.invoice)
               return {
                 number: inv?.invoice_number || '—',
+                // Whose invoice — lets the popup make one receipt per client.
+                client: (unwrap(inv?.client)?.name as string | undefined) || undefined,
                 outstanding: inv ? Number(inv.total_amount) - Number(inv.paid_amount || 0) : 0,
                 // Each invoice's share — itemised on the receipt for split payments.
                 allocated: round2(Number(a.allocated_amount || 0) * inrToEntryCcy),
@@ -3269,6 +3273,23 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               customerTotalOutstanding = clientInvoices.reduce((sum, inv) => sum + Math.max(0, Number(inv.total_amount) - Number(inv.paid_amount || 0)), 0)
             }
 
+            // A partner's payment: the receipt's invoices belong to more than
+            // one client, all brought in by the same business partner. Then
+            // the receipt is the PARTNER's — their name, and "overall
+            // outstanding" means everything their clients still owe, not one
+            // client's share of it.
+            const receiptClients = allocs.map(a => unwrap(unwrap(a.invoice)?.client)).filter(Boolean) as { id: string; business_partner_id?: string | null }[]
+            const receiptClientIds = new Set(receiptClients.map(c => c.id))
+            const receiptPartnerIds = new Set(receiptClients.map(c => c.business_partner_id || ''))
+            if (receiptClientIds.size > 1 && receiptPartnerIds.size === 1 && !receiptPartnerIds.has('')) {
+              const partnerId = [...receiptPartnerIds][0]
+              const partner = partners.find(bp => bp.id === partnerId)
+              if (partner) firstClientName = partner.name
+              customerTotalOutstanding = dueInvoices
+                .filter(i => i.client?.business_partner_id === partnerId && i.currency === receiptEntry.currency && !['draft', 'reviewed'].includes(i.status))
+                .reduce((sum, inv) => sum + Math.max(0, Number(inv.total_amount) - Number(inv.paid_amount || 0)), 0)
+            }
+
             // inflow entries). The UUID-derived fallback covers only outflow
             // entries opened via the receipt icon, or any entry created before
             // migration 011 was applied to this environment.
@@ -3284,6 +3305,15 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               reference: receiptEntry.reference,
               invoices: receiptInvoices,
               customerTotalOutstanding,
+              // Per client, for the "this client only" receipt of a shared payment.
+              clientOutstanding: Object.fromEntries(
+                [...new Set(receiptInvoices.map(r => r.client).filter(Boolean) as string[])].map(name => [
+                  name,
+                  dueInvoices
+                    .filter(i => i.client?.name === name && i.currency === receiptEntry.currency && !['draft', 'reviewed'].includes(i.status))
+                    .reduce((sum, inv) => sum + Math.max(0, Number(inv.total_amount) - Number(inv.paid_amount || 0)), 0),
+                ]),
+              ),
               // Branding from Settings → Company. Missing keys leave the
               // receipt rendering its built-in Cirqle defaults.
               // Receipt has a dark background — use dark logo when available,

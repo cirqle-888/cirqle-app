@@ -16,10 +16,10 @@ const CORE_JOINS = `
     invoice_id,
     allocated_amount,
     deleted_at,
-    invoice:invoices(invoice_number, status, due_date, total_amount, paid_amount, total_amount_inr, exchange_rate, currency, client:clients(id, name))
+    invoice:invoices(invoice_number, status, due_date, total_amount, paid_amount, total_amount_inr, exchange_rate, currency, client:clients(id, name, business_partner_id))
   ),
   direct_invoice:invoices!invoice_id(
-    invoice_number, status, due_date, total_amount, paid_amount, total_amount_inr, exchange_rate, currency, client:clients(id, name)
+    invoice_number, status, due_date, total_amount, paid_amount, total_amount_inr, exchange_rate, currency, client:clients(id, name, business_partner_id)
   ),
   payroll_allocations:cashbook_payroll_allocations!cashbook_entry_id(
     id,
@@ -98,7 +98,7 @@ export default async function CashBookPage() {
     vis.billingAmounts
       ? supabase
           .from('invoices')
-          .select('id, invoice_number, status, issue_date, due_date, total_amount, paid_amount, total_amount_inr, paid_amount_inr, exchange_rate, currency, client_id, client:clients(id, name, code), payments(id)')
+          .select('id, invoice_number, status, issue_date, due_date, total_amount, paid_amount, total_amount_inr, paid_amount_inr, exchange_rate, currency, client_id, client:clients(id, name, code, business_partner_id), payments(id)')
           .in('status', ['draft', 'reviewed', 'sent', 'partial', 'overdue'])
           .order('due_date', { ascending: true })
       : Promise.resolve({ data: [] as unknown[] }),

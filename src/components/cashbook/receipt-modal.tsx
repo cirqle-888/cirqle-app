@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState, useEffect, useMemo } from 'react'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { formatDate } from '@/lib/utils/format-date'
 import { X, Download, Share2, FileText, Loader2, Check, ChevronDown } from 'lucide-react'
@@ -38,7 +38,15 @@ export interface ReceiptInput {
    * the receipt, in the receipt's own `currency` — supply it and a split
    * payment itemises each invoice instead of listing bare numbers.
    */
-  invoices: { number: string; outstanding?: number; allocated?: number }[]
+  invoices: { number: string; outstanding?: number; allocated?: number; client?: string }[]
+  /**
+   * What each client on this receipt still owes in total (client name → amount,
+   * receipt currency). Used when the popup makes a receipt for ONE client out
+   * of a payment that covered several.
+   */
+  clientOutstanding?: Record<string, number>
+  /** Itemise every invoice, grouped by client, with what is left on each. Set by the popup. */
+  detailed?: boolean
   /**
    * Workspace branding from Settings → Company. All optional — the renderer
    * falls back to the hardcoded Cirqle defaults if any field is missing.
@@ -89,11 +97,44 @@ const MAX_SPLIT_ROWS = 4
  * itemised (each invoice with its own share) so the customer can see how their
  * money was applied; a single invoice stays a plain one-line reference.
  */
+type SplitRow = { number: string; amount: string; head?: boolean }
+
+/** Detailed receipts list every invoice; past this the rest collapse to "+N more". */
+const MAX_DETAILED_ROWS = 16
+
 function invoiceSection(
   input: ReceiptInput,
   showOverallBalance: boolean,
-): { label: string; splitRows: { number: string; amount: string }[] } {
+): { label: string; splitRows: SplitRow[] } {
   const priced = input.invoices.filter(i => (i.allocated ?? 0) > 0.005)
+
+  // ── Detailed: every invoice, under its client, with what is still owed ──
+  if (input.detailed && priced.length > 0) {
+    const clients = [...new Set(priced.map(i => i.client || ''))]
+    const grouped = clients.length > 1
+    const splitRows: SplitRow[] = []
+    for (const c of clients) {
+      const mine = priced.filter(i => (i.client || '') === c)
+      if (grouped) {
+        splitRows.push({
+          number: c || 'Other',
+          amount: fmtAmount(mine.reduce((sum, i) => sum + (i.allocated as number), 0), input.currency),
+          head: true,
+        })
+      }
+      for (const i of mine) {
+        const left = Math.max(0, i.outstanding ?? 0)
+        splitRows.push({
+          number: `${i.number} · ${left > 0.01 ? `bal ${fmtAmount(left, input.currency)}` : 'paid in full'}`,
+          amount: fmtAmount(i.allocated as number, input.currency),
+        })
+      }
+    }
+    const shown = splitRows.slice(0, MAX_DETAILED_ROWS)
+    if (splitRows.length > shown.length) shown.push({ number: `+${splitRows.length - shown.length} more`, amount: '' })
+    return { label: `${priced.length} invoice${priced.length === 1 ? '' : 's'}`, splitRows: shown }
+  }
+
   const itemise = !showOverallBalance && priced.length > 1
 
   if (!itemise) {
@@ -106,7 +147,7 @@ function invoiceSection(
   }
 
   const shown = priced.slice(0, MAX_SPLIT_ROWS)
-  const splitRows = shown.map(i => ({
+  const splitRows: SplitRow[] = shown.map(i => ({
     number: i.number,
     amount: fmtAmount(i.allocated as number, input.currency),
   }))
@@ -114,6 +155,15 @@ function invoiceSection(
   if (hidden > 0) splitRows.push({ number: `+${hidden} more`, amount: '' })
 
   return { label: `${priced.length} invoices`, splitRows }
+}
+
+/**
+ * The card is 4:5 until a detailed list needs more room — then it grows by
+ * one line per extra row instead of running into the footer.
+ */
+function cardHeight(input: ReceiptInput, showOverallBalance: boolean): number {
+  const { splitRows } = invoiceSection(input, showOverallBalance)
+  return CARD_H + Math.max(0, splitRows.length - MAX_SPLIT_ROWS) * 18
 }
 
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
@@ -146,7 +196,7 @@ export async function renderReceiptCanvas(
 ): Promise<HTMLCanvasElement> {
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(CARD_W * CAPTURE_SCALE)
-  canvas.height = Math.round(CARD_H * CAPTURE_SCALE)
+  canvas.height = Math.round(cardHeight(input, opts.showOverallBalance) * CAPTURE_SCALE)
   const ctx = canvas.getContext('2d')
   if (!ctx) return canvas
   // Wait for webfonts so text metrics & rendering are stable.
@@ -166,7 +216,7 @@ function drawReceipt(
   logoImg: HTMLImageElement | null,
 ) {
   const W = CARD_W
-  const H = CARD_H
+  const H = cardHeight(input, opts.showOverallBalance)
   const clientName = opts.clientName
   const note = opts.note
   
@@ -283,10 +333,10 @@ function drawReceipt(
   // ── details panel ─────────────────────────────────────────────
   // `sub` rows are the per-invoice split lines — smaller and dimmer, so the
   // breakdown reads as detail under "Invoice Ref" rather than as new fields.
-  const rows: { label: string; value: string; mono: boolean; sub?: boolean }[] = [
+  const rows: { label: string; value: string; mono: boolean; sub?: boolean; head?: boolean }[] = [
     { label: 'Received from', value: clientName || '—', mono: false },
     { label: 'Invoice Ref', value: invoiceLabel, mono: true },
-    ...splitRows.map(r => ({ label: r.number, value: r.amount, mono: true, sub: true })),
+    ...splitRows.map(r => ({ label: r.number, value: r.amount, mono: true, sub: true, head: r.head })),
     { label: 'Date', value: dateLabel, mono: false },
   ]
   if (input.method) rows.push({ label: 'Method', value: input.method, mono: false })
@@ -315,7 +365,13 @@ function drawReceipt(
   const valMaxW = (panelW - padX * 2) * 0.62
   let ry = panelTop + padY
   rows.forEach((r, i) => {
-    if (r.sub) {
+    if (r.sub && r.head) {
+      // Client heading inside a detailed list, with that client's subtotal.
+      ctx.textAlign = 'left'; ctx.fillStyle = '#e5e7eb'; ctx.font = `600 10.5px ${FONT}`
+      ctx.fillText(truncate(r.label, panelW - padX * 2 - 90), panelX + padX + 4, ry)
+      ctx.textAlign = 'right'; ctx.font = `700 10.5px ${MONO}`
+      ctx.fillText(r.value, panelX + panelW - padX, ry)
+    } else if (r.sub) {
       // Indented, dimmer: "  INV-2607-059            ₹1,000.00"
       ctx.textAlign = 'left'; ctx.fillStyle = '#8b93a7'; ctx.font = `500 10.5px ${MONO}`
       ctx.fillText(truncate(r.label, panelW - padX * 2 - 90), panelX + padX + 10, ry)
@@ -366,14 +422,39 @@ function drawReceipt(
   }
 }
 
-export default function ReceiptModal({ input, onClose }: Props) {
+export default function ReceiptModal({ input: baseInput, onClose }: Props) {
+  // ── One payment, several clients ─────────────────────────────────────────
+  // A partner's payment covers invoices of more than one client. The popup
+  // can then make ONE receipt for everything, or a separate receipt for each
+  // client showing only their invoices and their share of the money.
+  const receiptClients = useMemo(
+    () => [...new Set(baseInput.invoices.map(i => i.client || '').filter(Boolean))],
+    [baseInput.invoices],
+  )
+  const [forClient, setForClient] = useState('')
+  const [detailed, setDetailed] = useState(false)
+  const input: ReceiptInput = useMemo(() => {
+    if (!forClient) return { ...baseInput, detailed }
+    const mine = baseInput.invoices.filter(i => i.client === forClient)
+    return {
+      ...baseInput,
+      detailed,
+      invoices: mine,
+      amount: Math.round(mine.reduce((sum, i) => sum + (i.allocated ?? 0), 0) * 100) / 100,
+      defaultClientName: forClient,
+      // Each client's copy gets its own number, so two receipts from one
+      // payment are never mistaken for the same document.
+      receiptNo: `${baseInput.receiptNo}-${receiptClients.indexOf(forClient) + 1}`,
+      customerTotalOutstanding: baseInput.clientOutstanding?.[forClient],
+    }
+  }, [baseInput, forClient, detailed, receiptClients])
   const cardRef = useRef<HTMLDivElement>(null)
   // Container that constrains the preview to the modal width. We measure it
   // with a ResizeObserver and derive a CSS scale so the 432-wide card always
   // fits without horizontal scrolling, regardless of device width.
   const previewContainerRef = useRef<HTMLDivElement>(null)
   const [previewScale, setPreviewScale] = useState(1)
-  const [clientName, setClientName] = useState(input.defaultClientName || '')
+  const [clientName, setClientName] = useState(baseInput.defaultClientName || '')
   const [note, setNote] = useState('')
   const [showOverallBalance, setShowOverallBalance] = useState(false)
   const [busy, setBusy] = useState<'png' | 'share' | 'pdf' | null>(null)
@@ -403,6 +484,7 @@ export default function ReceiptModal({ input, onClose }: Props) {
     ? input.customerTotalOutstanding
     : input.invoices.reduce((s, i) => s + Math.max(0, i.outstanding ?? 0), 0)
   const { label: invoiceLabel, splitRows } = invoiceSection(input, showOverallBalance)
+  const cardH = cardHeight(input, showOverallBalance)
   const dateLabel = input.dateISO
     ? formatDate(input.dateISO)
     : ''
@@ -536,6 +618,36 @@ export default function ReceiptModal({ input, onClose }: Props) {
               />
             </label>
             
+            {receiptClients.length > 1 && (
+              <label className="block">
+                <span className="text-[11px] font-medium text-muted-foreground">Receipt for</span>
+                <select
+                  value={forClient}
+                  onChange={e => {
+                    const c = e.target.value
+                    setForClient(c)
+                    setClientName(c || baseInput.defaultClientName || '')
+                  }}
+                  className="mt-1 w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                >
+                  <option value="">All {receiptClients.length} clients — one receipt</option>
+                  {receiptClients.map(c => <option key={c} value={c}>{c} only</option>)}
+                </select>
+              </label>
+            )}
+
+            <label className="flex items-center gap-2 mt-1 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={detailed}
+                onChange={e => setDetailed(e.target.checked)}
+                className="rounded border-border text-primary focus:ring-primary/50 bg-secondary w-4 h-4"
+              />
+              <span className="text-[12px] font-medium text-foreground">
+                Detailed — list every invoice and what is left on it
+              </span>
+            </label>
+
             {input.customerTotalOutstanding !== undefined && (
               <label className="flex items-center gap-2 mt-1 cursor-pointer">
                 <input
@@ -566,7 +678,7 @@ export default function ReceiptModal({ input, onClose }: Props) {
               width: '100%',
               // Reserve exactly the scaled height so the parent layout
               // doesn't collapse or create extra whitespace.
-              height: Math.round(CARD_H * previewScale),
+              height: Math.round(cardH * previewScale),
               position: 'relative',
               overflow: 'hidden',
             }}
@@ -587,7 +699,7 @@ export default function ReceiptModal({ input, onClose }: Props) {
                 ref={cardRef}
                 style={{
                   width: CARD_W,
-                  height: CARD_H,
+                  height: cardH,
                   position: 'relative',
                   overflow: 'hidden',
                   background:
@@ -678,9 +790,11 @@ export default function ReceiptModal({ input, onClose }: Props) {
                   {splitRows.length > 0 && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: -4 }}>
                       {splitRows.map(r => (
-                        <div key={r.number} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, paddingLeft: 10 }}>
-                          <span style={{ fontSize: 10.5, fontWeight: 500, color: '#8b93a7', fontFamily: 'ui-monospace, monospace' }}>{r.number}</span>
-                          <span style={{ fontSize: 10.5, fontWeight: 600, color: '#cbd5e1', fontFamily: 'ui-monospace, monospace' }}>{r.amount}</span>
+                        <div key={r.number} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, paddingLeft: r.head ? 4 : 10 }}>
+                          <span style={r.head
+                            ? { fontSize: 10.5, fontWeight: 600, color: '#e5e7eb' }
+                            : { fontSize: 10.5, fontWeight: 500, color: '#8b93a7', fontFamily: 'ui-monospace, monospace' }}>{r.number}</span>
+                          <span style={{ fontSize: 10.5, fontWeight: r.head ? 700 : 600, color: r.head ? '#e5e7eb' : '#cbd5e1', fontFamily: 'ui-monospace, monospace', whiteSpace: 'nowrap' }}>{r.amount}</span>
                         </div>
                       ))}
                     </div>
