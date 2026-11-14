@@ -387,3 +387,18 @@ the recording is the truth.
 **The AI model.** Groq retired `llama-3.3-70b-versatile` and every AI call failed for a time
 (reports, the request filter, titles). The default is now `openai/gpt-oss-120b`; set `GROQ_MODEL` on
 Vercel to change it without a deploy. The evening run's log (`cron_runs`) shows a 404 when a model is retired.
+
+### Every offer list gets its task (15 Nov 2026)
+
+When a list makes a new flyer item, the item gets a task at once (`flyer-task.ts`) and reads
+"tasked" on the planner. The task is made the way Offer Studio makes one: the Offer Flyer service,
+quantity 1, no price typed in, the client's package linked when there is one, dated the work day, and
+assigned to the chat's Responsible person when one is set. Later lists and remarks for the same
+offer change the flyer's notes, not the task.
+
+On the client's "ok" the task takes the offer title and is marked Done (see "When the client
+approves a flyer"). If the designer also saves the offer in Offer Studio, that save adopts this task
+(same client, same first offer day) instead of making a second one.
+
+An item someone already sent to Requests by hand is left alone, and if the task cannot be made the
+flyer simply stays a plan item.

@@ -5,6 +5,7 @@ import { todayISO } from '@/lib/utils/local-date'
 import { autoLinkTaskPackage } from '@/lib/packages/auto-link'
 import { resolveFlyerService } from '../_lib/flyer-department'
 import { bumpContribution, diffProducts, parametersForService, resolveFlyerParameters } from '../_lib/contributions'
+import { FLYER_TASK_MARK } from '@/lib/whatsapp-listener/flyer-task'
 
 /**
  * POST /api/figma/campaign — save an offer parsed in the Cirqle Studio plugin
@@ -447,6 +448,29 @@ export async function POST(req: NextRequest) {
       const existingTask = ((existingTasks as { id: string; task_number: number | null }[] | null) || [])[0] || null
       taskId = existingTask?.id || null
       taskNumber = existingTask?.task_number ?? null
+
+      // The same flyer may already have a task: the client's price list on WhatsApp made
+      // one when it arrived (lib/whatsapp-listener/flyer-task). Adopt it instead of
+      // filing the job twice: it takes this offer's marker, so later saves find it above.
+      if (!taskId) {
+        const offerStart = dateType === 'single' ? (body?.offerDate || today) : (body?.offerDateFrom || today)
+        const { data: fromWhatsApp } = await admin
+          .from('tasks')
+          .select('id, task_number, description')
+          .eq('client_id', client.id)
+          .is('deleted_at', null)
+          .in('status', ['pending', 'in_progress', 'delivered'])
+          .ilike('description', `%${FLYER_TASK_MARK}%`)
+          .ilike('description', `%[offer:${offerStart}..%`)
+          .order('task_number', { ascending: false, nullsFirst: false })
+          .limit(1)
+        const adopt = ((fromWhatsApp as { id: string; task_number: number | null; description: string | null }[] | null) || [])[0]
+        if (adopt) {
+          await admin.from('tasks').update({ description: `${adopt.description || ''} ${marker}`.trim() }).eq('id', adopt.id)
+          taskId = adopt.id
+          taskNumber = adopt.task_number ?? null
+        }
+      }
 
       if (taskId) {
         // Same offer re-saved — keep the task, refresh the title, and follow

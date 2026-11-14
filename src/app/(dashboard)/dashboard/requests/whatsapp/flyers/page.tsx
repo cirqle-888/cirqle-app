@@ -64,6 +64,7 @@ export default async function WhatsAppFlyersPage() {
           {f.progress.designs > 0 && <>{' · '}{f.progress.designs} design{f.progress.designs === 1 ? '' : 's'} sent</>}
           {f.progress.corrections > 0 && <>{' · '}{f.progress.corrections} round{f.progress.corrections === 1 ? '' : 's'} of changes</>}
           {f.calendarStatus === 'requested' && ' · sent to Requests'}
+          {f.taskId ? ' · has a task' : f.calendarStatus === 'planned' && ' · no task yet'}
         </p>
         {f.warnings.length > 0 && (
           <ul className="text-xs text-amber-700 dark:text-amber-300 space-y-0.5">

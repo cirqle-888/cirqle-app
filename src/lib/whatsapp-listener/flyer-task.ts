@@ -1,0 +1,104 @@
+/**
+ * WhatsApp listener — the task for an offer flyer.
+ *
+ * An offer price list is a job for the flyer desk the moment it arrives, so its
+ * calendar item gets a task straight away (the planner's "skip the inbox" exit:
+ * the item is linked through `task_id` and reads "tasked"). The client's "ok"
+ * later renames that task to the offer title and marks it done (flyer-desk-run).
+ *
+ * The task is made the same way Offer Studio makes one (api/figma/campaign):
+ * the Offer Flyer service, quantity 1, no price typed in, and the client's
+ * package linked when there is one — so it bills exactly like a flyer saved from
+ * Figma. Offer Studio looks for this task before making its own (see the marker
+ * below), so a flyer worked in both places is still one task.
+ */
+
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { resolveFlyerService } from '@/app/api/figma/_lib/flyer-department'
+import { autoLinkTaskPackage } from '@/lib/packages/auto-link'
+import { OFFER_ITEM_TITLE, dateLabel, offerTag, type OfferDates } from './offer-plan'
+
+const ITEMS = 'social_calendar_items'
+
+/** In the task's description: finds the task of a calendar item, and tells Offer Studio the task exists. */
+export const FLYER_TASK_MARK = '[whatsapp-flyer:'
+export const flyerTaskMarker = (itemId: string) => `${FLYER_TASK_MARK}${itemId}]`
+
+export function flyerTaskDescription(o: { itemId: string; products: number; offer: OfferDates }): string {
+  return `Offer flyer from a WhatsApp price list — ${o.products} products, offer ${dateLabel(o.offer)}. ` +
+    `The list is on the Social Calendar item and under Requests → WhatsApp chats → Flyers. ${flyerTaskMarker(o.itemId)} ${offerTag(o.offer)}`
+}
+
+export interface FlyerTaskInput {
+  itemId: string
+  clientId: string
+  title: string
+  /** The day the flyer is worked on: the task's date. */
+  workDate: string
+  products: number
+  offer: OfferDates
+  /** The person responsible for the chat, put on the task when there is one. */
+  assigneeId?: string | null
+}
+
+/**
+ * Makes the flyer's task and links the calendar item to it. Safe to call again:
+ * an item that already has a task, or was sent to Requests by hand, is left alone.
+ * Returns the task id, or null when no task was made.
+ */
+export async function ensureFlyerTask(admin: SupabaseClient, input: FlyerTaskInput): Promise<string | null> {
+  const { data: item, error: itemError } = await admin.from(ITEMS).select('id, status, task_id, request_id').eq('id', input.itemId).maybeSingle()
+  // No task_id column: the direct-task migration is not applied, so the item stays a plan item.
+  if (itemError || !item) return null
+  const row = item as { status: string; task_id: string | null; request_id: string | null }
+  if (row.task_id) return row.task_id
+  if (row.request_id || row.status !== 'planned') return null
+
+  // A task made a moment ago by another delivery of the same message.
+  const { data: made } = await admin.from('tasks').select('id')
+    .ilike('description', `%${flyerTaskMarker(input.itemId)}%`).is('deleted_at', null).limit(1)
+  let taskId = (made?.[0] as { id: string } | undefined)?.id ?? null
+
+  if (!taskId) {
+    const { serviceId } = await resolveFlyerService(admin, null)
+    // task_number is max + 1 under a unique index: retry when another task took the number.
+    for (let attempt = 0; attempt < 5 && !taskId; attempt++) {
+      const { data: maxRow } = await admin.from('tasks').select('task_number')
+        .order('task_number', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
+      const candidate = (((maxRow as { task_number?: number } | null)?.task_number) ?? 0) + 1 + attempt
+      const { data: taskRow, error } = await admin.from('tasks').insert({
+        task_number: candidate,
+        title: input.title.trim() || OFFER_ITEM_TITLE,
+        description: flyerTaskDescription({ itemId: input.itemId, products: input.products, offer: input.offer }),
+        client_id: input.clientId,
+        service_id: serviceId,
+        status: 'pending',
+        task_date: input.workDate,
+        quantity: 1,
+      }).select('id').single()
+      if (!error) { taskId = (taskRow as { id: string }).id; break }
+      if ((error as { code?: string }).code !== '23505') { console.warn('[whatsapp-listener] flyer task not created:', error.message); return null }
+    }
+    if (!taskId) return null
+    await autoLinkTaskPackage(admin, taskId)
+    if (input.assigneeId) {
+      await admin.from('task_assignments').insert({ task_id: taskId, employee_id: input.assigneeId }).then(() => {}, () => {})
+    }
+  }
+
+  // Claimed only while the item is still unrouted, exactly as the planner does it.
+  const { data: claimed } = await admin.from(ITEMS)
+    .update({ task_id: taskId, status: 'tasked', updated_at: new Date().toISOString() })
+    .eq('id', input.itemId).is('task_id', null).eq('status', 'planned').select('id')
+  if (!claimed?.length) {
+    // Someone routed the item meanwhile: this task would be a duplicate of theirs.
+    await admin.from('tasks').update({ deleted_at: new Date().toISOString() }).eq('id', taskId)
+    return null
+  }
+  return taskId
+}
+
+/** Keeps an open task's date on the flyer's work day when the client gives the offer date later. */
+export async function moveFlyerTask(admin: SupabaseClient, taskId: string, workDate: string): Promise<void> {
+  await admin.from('tasks').update({ task_date: workDate }).eq('id', taskId).in('status', ['pending', 'in_progress']).is('deleted_at', null)
+}

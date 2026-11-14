@@ -13,6 +13,7 @@ import { createNotification, notifyAdmins } from '@/lib/notifications/create'
 import { suggestServiceId } from '@/lib/social/plan'
 import { indiaDay } from './chat-log'
 import { isAcknowledgement, isVoiceOrPhoto, type ListenerMessage } from './rules'
+import { ensureFlyerTask, moveFlyerTask } from './flyer-task'
 import {
   DATE_ASSUMED_LINE, DATE_FOLLOW_UP_MINUTES, MAX_NOTES_CHARS, OFFER_ITEM_TITLE, OPEN_FLYER_HOURS, STALE_HOURS,
   additionMarker, chatMarker, dateLabel, dateOnlyMessage, followUpMarker, isSmallAddition, messageMarker, notesWithDate, notesWithFollowUp,
@@ -33,6 +34,8 @@ export interface OfferPlanInput {
   isStaffPhone: (phone: string) => Promise<boolean>
   /** The person responsible for this chat, or its department's people: told as well as the admins. */
   tellIds?: readonly string[]
+  /** The person responsible for this chat: put on the flyer's task. */
+  ownerId?: string | null
   /** What a photo says, as already worked out for the chat view (null when photo reading is off). */
   mediaText?: (() => Promise<string | null>) | null
 }
@@ -161,9 +164,17 @@ async function addList(
   const { error } = await writeTolerant(row, r => admin.from(ITEMS).insert(r))
   if (error) { console.warn('[whatsapp-listener] offer list not added to the calendar:', error.message); return false }
 
+  // The flyer is a job from this moment: it gets its task now. A failure leaves a plan item, as before.
+  const { data: made } = await admin.from(ITEMS).select('id').like('notes', `%${likeSafe(messageMarker(m.id))}%`).limit(1)
+  const itemId = (made?.[0] as { id: string } | undefined)?.id
+  const taskId = itemId
+    ? await ensureFlyerTask(admin, { itemId, clientId: client, title: OFFER_ITEM_TITLE, workDate: day, products, offer: dates, assigneeId: input.ownerId })
+      .catch(err => { console.warn('[whatsapp-listener] flyer task failed:', err); return null })
+    : null
+
   await tell(input, {
     title: `Offer list — ${input.clientName}`,
-    message: `${products} products${fromPhoto ? ' read from a photo' : ''}${noPrices ? ' (no prices in the list)' : ''} for the offer on ${dateLabel(dates)}${dates.given ? '' : ' (date not given, taken as the next day)'}. Added to the social calendar on ${dateLabel({ start: day, end: null })} as "${OFFER_ITEM_TITLE}".`,
+    message: `${products} products${fromPhoto ? ' read from a photo' : ''}${noPrices ? ' (no prices in the list)' : ''} for the offer on ${dateLabel(dates)}${dates.given ? '' : ' (date not given, taken as the next day)'}. Added to the social calendar on ${dateLabel({ start: day, end: null })} as "${OFFER_ITEM_TITLE}"${taskId ? ', with its task' : ''}.`,
     sourceKey: `whatsapp_offer:${m.id}`,
   })
   return true
@@ -172,10 +183,10 @@ async function addList(
 /** The client sent the date on its own: move the list it belongs to. */
 async function applyDate(admin: SupabaseClient, m: ListenerMessage, input: OfferPlanInput, dates: OfferDates): Promise<boolean> {
   const since = new Date(Date.now() - DATE_FOLLOW_UP_MINUTES * 60_000).toISOString()
-  const { data } = await admin.from(ITEMS).select('id, calendar_id, notes, scheduled_date, created_at')
+  const { data } = await admin.from(ITEMS).select('*')
     .like('notes', `%${likeSafe(chatMarker(m.chatId))}%`).like('notes', `%${DATE_ASSUMED_LINE}%`)
-    .eq('status', 'planned').gte('created_at', since).order('created_at', { ascending: false }).limit(1)
-  const item = data?.[0] as { id: string; calendar_id: string; notes: string; scheduled_date: string; created_at: string } | undefined
+    .neq('status', 'cancelled').gte('created_at', since).order('created_at', { ascending: false }).limit(1)
+  const item = data?.[0] as { id: string; calendar_id: string; notes: string; scheduled_date: string; created_at: string; task_id?: string | null } | undefined
   if (!item) return false
 
   const day = workDate(indiaDay(item.created_at), dates.start)
@@ -191,6 +202,7 @@ async function applyDate(admin: SupabaseClient, m: ListenerMessage, input: Offer
     notes: notesWithDate(item.notes, dates), updated_at: new Date().toISOString(),
   }, r => admin.from(ITEMS).update(r).eq('id', item.id))
   if (error) return false
+  if (item.task_id) await moveFlyerTask(admin, item.task_id, day).catch(() => {})
 
   await tell(input, {
     title: `Offer date — ${input.clientName}`,

@@ -387,6 +387,7 @@ export async function POST(req: NextRequest) {
         enabled: deps.enabled,
         clientName: deps.groups.get(message.chatId) || '',
         isStaffPhone: deps.isStaffPhone,
+        ownerId: chatAccess?.owner ?? null,
         // Looked up only for a chat shared with a department: most messages need no extra query.
         tellIds: chatAlertTargets(chatAccess, chatAccess?.departments.length && !chatAccess.owner ? await departmentMembers(admin).catch(() => new Map()) : new Map()),
         mediaText,

@@ -155,3 +155,15 @@ describe('designs posted around the approval', () => {
     expect(flyerProgress(chat, '2026-11-14T12:00:00Z', null).stage).toBe('sent')
   })
 })
+
+describe('the flyer task', () => {
+  it('says where the list is and carries the markers Offer Studio looks for', async () => {
+    const { FLYER_TASK_MARK, flyerTaskDescription, flyerTaskMarker } = await import('./flyer-task')
+    const d = flyerTaskDescription({ itemId: 'ITEM1', products: 43, offer: { start: '2026-11-15', end: null } })
+    expect(d).toContain('43 products, offer 15 Nov')
+    expect(d).toContain(flyerTaskMarker('ITEM1'))
+    expect(d).toContain(FLYER_TASK_MARK)
+    // The Offer Studio route matches on "[offer:<first day>..".
+    expect(d).toContain('[offer:2026-11-15..')
+  })
+})
