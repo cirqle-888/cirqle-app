@@ -58,6 +58,18 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* ── Motion tokens ──
+   Shared easing curves, so motion is not hand-typed per component. Each one
+   also becomes a utility: `ease-out-strong`, `ease-drawer`.
+   `static` keeps the variables on :root even where only plain CSS (not a
+   utility class) reads them. */
+@theme static {
+  /* Entrances, exits and press feedback: fast start, soft landing. */
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  /* Bottom sheets and drawers: the iOS sheet curve. */
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    Cirqle theme tokens
    :root holds the LIGHT theme. The `.dark` class on <html> (set by the
@@ -169,9 +181,14 @@
   /* ── Reduced motion ──
      Users with vestibular disorders opt out at the OS level; honor it
      globally. Durations clamp to near-zero (not 0 — transitionend/
-     animationend events must still fire for any JS that waits on them). */
+     animationend events must still fire for any JS that waits on them).
+
+     Spinners and skeleton pulses are exempt: the clamp also forces one
+     iteration, which froze every loading indicator mid-turn and left a
+     reduced-motion user with no sign that anything was happening. A small
+     spinner and an opacity pulse are status, not travel across the screen. */
   @media (prefers-reduced-motion: reduce) {
-    *, ::before, ::after {
+    *:not(.animate-spin, .animate-pulse), ::before, ::after {
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
@@ -211,6 +228,44 @@
     select,
     textarea {
       font-size: 16px !important;
+    }
+  }
+
+  /* ── Press feedback for plain <button>s on touch ──
+     Most buttons in the app are raw <button> elements, not the shared
+     <Button>, and had no pressed state. On a phone there is no hover either,
+     so a tap gave no sign it had landed until the action finished.
+
+     Touch only: with a mouse the hover styles already answer, and a 3% shrink
+     on a full-width desktop row would read as a glitch.
+
+     In `@layer base` on purpose, so any utility on the element still wins —
+     `active:scale-90` on the steppers, `disabled:active:scale-100`, and so on.
+     Left out: the shared <Button> (it has its own press state), controls
+     whose state change is the feedback (switch, checkbox, radio, tab, menu
+     and list items, menu triggers), and anything marked `data-no-press`. */
+  @media (pointer: coarse) {
+    button:where(:not(
+      :disabled,
+      [data-slot='button'],
+      [data-no-press],
+      [aria-haspopup],
+      [role='switch'], [role='checkbox'], [role='radio'], [role='tab'],
+      [role='option'], [role='menuitem'], [role='menuitemcheckbox'], [role='menuitemradio']
+    )) {
+      /* Only lands on buttons that declare no transition of their own; a
+         `transition-colors` utility replaces it and the press simply snaps. */
+      transition: scale 160ms var(--ease-out-strong);
+    }
+    button:where(:not(
+      :disabled,
+      [data-slot='button'],
+      [data-no-press],
+      [aria-haspopup],
+      [role='switch'], [role='checkbox'], [role='radio'], [role='tab'],
+      [role='option'], [role='menuitem'], [role='menuitemcheckbox'], [role='menuitemradio']
+    )):active {
+      scale: 0.97;
     }
   }
 

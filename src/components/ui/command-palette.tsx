@@ -470,7 +470,7 @@ export function CommandPalette() {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onMouseDown={() => setOpen(false)} />
 
       {/* Panel */}
-      <div role="dialog" aria-modal="true" aria-label="Command palette" className="relative w-full max-w-xl bg-secondary border border-foreground/15 rounded-2xl shadow-2xl shadow-black/60 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div role="dialog" aria-modal="true" aria-label="Command palette" className="relative w-full max-w-xl bg-secondary border border-foreground/15 rounded-2xl shadow-2xl shadow-black/60 overflow-hidden">
 
         {/* Search input */}
         <div className="flex items-center gap-3 px-4 py-3.5 border-b border-foreground/[0.06]">

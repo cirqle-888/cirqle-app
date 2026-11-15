@@ -138,6 +138,18 @@ export function ModalOverlay({
     : 'items-center justify-center'
   const padding = sheetOnMobile ? 'p-0 sm:p-4' : 'p-4'
 
+  // Entrance. The backdrop fades, and the content arrives the way its shape
+  // suggests: a centred dialog settles in from 96% scale, a mobile sheet
+  // slides up from the bottom edge it is docked to (by its own height, so it
+  // works at any sheet size) on the slower drawer curve. Keyframes are fine
+  // here — a modal opens once per mount, it is never re-triggered mid-flight.
+  // There is no exit animation: callers unmount the overlay to close it.
+  // The global reduced-motion rule in globals.css makes all of this instant.
+  const dialogEnter = 'animate-in zoom-in-96 duration-250 ease-out-strong'
+  const contentEnter = sheetOnMobile
+    ? 'animate-in slide-in-from-bottom duration-500 ease-drawer sm:slide-in-from-bottom-0 sm:zoom-in-96 sm:duration-250 sm:ease-out-strong'
+    : dialogEnter
+
   return (
     <div
       // Hook for the side-panel coexistence rule in globals.css: while a
@@ -147,7 +159,7 @@ export function ModalOverlay({
       // the panel is already open is offset on its first paint too.
       // See src/components/ui/side-panel-room.ts.
       data-modal-overlay
-      className={`fixed inset-0 ${zIndex} flex ${alignment} bg-black/60 backdrop-blur-sm ${padding} ${className}`}
+      className={`fixed inset-0 ${zIndex} flex ${alignment} bg-black/60 backdrop-blur-sm animate-in fade-in duration-250 ease-out-strong ${padding} ${className}`}
       onMouseDown={e => {
         if (!isConfirmation && contentRef.current && !contentRef.current.contains(e.target as Node)) {
           onClose()
@@ -159,7 +171,7 @@ export function ModalOverlay({
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
-        className={sheetOnMobile ? "w-full max-h-[90dvh] sm:max-h-[85dvh] sm:w-auto flex flex-col focus:outline-none" : "w-full max-h-[90dvh] flex flex-col focus:outline-none max-w-fit"}
+        className={`${sheetOnMobile ? 'w-full max-h-[90dvh] sm:max-h-[85dvh] sm:w-auto flex flex-col focus:outline-none' : 'w-full max-h-[90dvh] flex flex-col focus:outline-none max-w-fit'} ${contentEnter}`}
         tabIndex={-1}
       >
         {children}
