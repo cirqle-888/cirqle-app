@@ -47,7 +47,7 @@ export default function RankingClient({ scores, showAmounts }: { scores: ClientS
         subtitle="Strategic value and payment reliability per client, combined into one score"
         actions={
           <Link href="/dashboard/invoices/follow-ups"
-            className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-border/80 transition-all shadow-sm hover:shadow">
+            className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-border/80 transition shadow-sm hover:shadow">
             <History className="w-3.5 h-3.5" /> Back to Follow-ups
           </Link>
         }
@@ -57,7 +57,7 @@ export default function RankingClient({ scores, showAmounts }: { scores: ClientS
         {/* Classification summary */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-2 mb-6">
           {(Object.keys(CLASS_STYLE) as ClientClass[]).map(c => (
-            <div key={c} className="rounded-2xl border border-border/60 bg-card px-4 py-3 hover:border-border hover:shadow-sm transition-all flex flex-col items-start justify-between min-h-[90px]">
+            <div key={c} className="rounded-2xl border border-border/60 bg-card px-4 py-3 hover:border-border hover:shadow-sm transition flex flex-col items-start justify-between min-h-[90px]">
               <span className={`text-[10px] px-2 py-0.5 rounded-md border font-medium ${CLASS_STYLE[c]}`}>{c}</span>
               <div className="text-2xl font-semibold text-foreground mt-2">{counts.get(c) ?? 0}</div>
             </div>
@@ -74,7 +74,7 @@ export default function RankingClient({ scores, showAmounts }: { scores: ClientS
             const Icon = t.icon
             return (
               <button key={t.id} onClick={() => setTab(t.id)}
-                className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition-all ${
+                className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
                   tab === t.id ? 'border-violet-500 text-violet-600 dark:text-violet-400' : 'border-transparent text-muted-foreground hover:text-foreground'
                 }`}>
                 <Icon className="w-4 h-4" /> {t.label}
@@ -88,7 +88,7 @@ export default function RankingClient({ scores, showAmounts }: { scores: ClientS
           <input
             value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search client…"
-            className="w-full bg-card border border-border rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 hover:border-border/80 transition-all shadow-sm"
+            className="w-full bg-card border border-border rounded-xl pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 hover:border-border/80 transition shadow-sm"
           />
         </div>
 

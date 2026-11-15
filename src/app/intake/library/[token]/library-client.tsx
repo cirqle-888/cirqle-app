@@ -270,7 +270,7 @@ export default function LibraryClient({
             type="button"
             onClick={() => void handleSubmit()}
             disabled={saving || uploading || !name.trim()}
-            className="w-full mt-5 py-3.5 text-sm font-bold rounded-2xl bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-900/40 disabled:opacity-40 transition-all flex items-center justify-center gap-2"
+            className="w-full mt-5 py-3.5 text-sm font-bold rounded-2xl bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-900/40 disabled:opacity-40 transition flex items-center justify-center gap-2"
           >
             {saving
               ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>

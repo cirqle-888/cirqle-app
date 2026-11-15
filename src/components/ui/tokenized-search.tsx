@@ -136,7 +136,7 @@ export function TokenizedSearch({
     <div ref={containerRef} className={`relative w-full sm:w-auto ${className}`}>
       <div
         onClick={() => inputRef.current?.focus()}
-        className="flex items-center flex-wrap gap-1.5 bg-secondary border border-foreground/15 rounded-xl min-h-[44px] sm:min-h-[36px] px-3 py-1.5 cursor-text focus-within:border-violet-500/50 focus-within:ring-1 focus-within:ring-violet-500/20 transition-all w-full"
+        className="flex items-center flex-wrap gap-1.5 bg-secondary border border-foreground/15 rounded-xl min-h-[44px] sm:min-h-[36px] px-3 py-1.5 cursor-text focus-within:border-violet-500/50 focus-within:ring-1 focus-within:ring-violet-500/20 transition w-full"
       >
         <Search size={14} className="text-muted-foreground shrink-0" />
 

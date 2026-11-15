@@ -64,6 +64,8 @@
    `static` keeps the variables on :root even where only plain CSS (not a
    utility class) reads them. */
 @theme static {
+  /* Hover tints and layout shifts already on screen: the gentle default. */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
   /* Entrances, exits and press feedback: fast start, soft landing. */
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
   /* Bottom sheets and drawers: the iOS sheet curve. */
@@ -305,7 +307,7 @@
         under the panel. */
   [data-app-shell] {
     width: 100%;
-    transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: width 200ms var(--ease-standard);
   }
   [data-side-panel-open] [data-app-shell] {
     width: calc(100% - var(--side-panel-w, 0px));
@@ -315,7 +317,7 @@
         shrinking it above does not move them — they still need their own
         reservation. */
   [data-modal-overlay] {
-    transition: padding-right 200ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: padding-right 200ms var(--ease-standard);
   }
   [data-side-panel-open] [data-modal-overlay] {
     padding-right: calc(1rem + var(--side-panel-w, 0px));
@@ -442,8 +444,8 @@ body:has([data-modal-overlay]) [data-chat-launcher] {
   ───────────────────────────────────────────────────────────────── */
   .hover-gradient-row {
     transition:
-      background-color 250ms cubic-bezier(0.4, 0, 0.2, 1),
-      box-shadow       250ms cubic-bezier(0.4, 0, 0.2, 1);
+      background-color 250ms var(--ease-standard),
+      box-shadow       250ms var(--ease-standard);
     cursor: pointer;
   }
   .hover-gradient-row:hover {
@@ -461,9 +463,9 @@ body:has([data-modal-overlay]) [data-chat-launcher] {
   ───────────────────────────────────────────────────────────────── */
   .hover-gradient-card {
     transition:
-      background-color 250ms cubic-bezier(0.4, 0, 0.2, 1),
-      border-color     250ms cubic-bezier(0.4, 0, 0.2, 1),
-      box-shadow       250ms cubic-bezier(0.4, 0, 0.2, 1);
+      background-color 250ms var(--ease-standard),
+      border-color     250ms var(--ease-standard),
+      box-shadow       250ms var(--ease-standard);
     cursor: pointer;
   }
   .hover-gradient-card:hover {

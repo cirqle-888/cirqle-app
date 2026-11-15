@@ -146,7 +146,7 @@ export default function RichTextEditor({
   const empty = !value || !value.replace(/<[^>]*>|&nbsp;|&#65279;/g, '').trim()
 
   return (
-    <div className={`rounded-xl border border-border/80 bg-background overflow-visible shadow-sm focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10 transition-all ${disabled ? 'opacity-60' : ''}`}>
+    <div className={`rounded-xl border border-border/80 bg-background overflow-visible shadow-sm focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10 transition ${disabled ? 'opacity-60' : ''}`}>
       <div className="flex flex-wrap items-center gap-1.5 px-2 py-1.5 border-b border-border/40 bg-secondary/30 relative rounded-t-xl">
         
         {/* Typography */}
@@ -183,7 +183,7 @@ export default function RichTextEditor({
           <div className="relative">
             <EditorTool disabled={disabled} icon={<Palette className="w-3.5 h-3.5 text-blue-500" />} title="Text colour" on={() => setOpenMenu(m => m === 'color' ? null : 'color')} />
             {openMenu === 'color' && (
-              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 flex gap-1 p-1.5 rounded-lg border border-border bg-card shadow-xl animate-in fade-in zoom-in-95 duration-100">
+              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 flex gap-1 p-1.5 rounded-lg border border-border bg-card shadow-xl origin-top animate-in fade-in zoom-in-95 duration-100">
                 {CAPTION_COLORS.map(c => (
                   <button key={c} type="button" title={c} onMouseDown={e => { e.preventDefault(); run('foreColor', c, true) }}
                     className="w-5 h-5 rounded-full border border-black/10 hover:scale-110 transition-transform" style={{ backgroundColor: c }} />
@@ -194,7 +194,7 @@ export default function RichTextEditor({
           <div className="relative">
             <EditorTool disabled={disabled} icon={<Highlighter className="w-3.5 h-3.5 text-amber-500" />} title="Highlight" on={() => setOpenMenu(m => m === 'highlight' ? null : 'highlight')} />
             {openMenu === 'highlight' && (
-              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 flex gap-1 p-1.5 rounded-lg border border-border bg-card shadow-xl animate-in fade-in zoom-in-95 duration-100">
+              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 flex gap-1 p-1.5 rounded-lg border border-border bg-card shadow-xl origin-top animate-in fade-in zoom-in-95 duration-100">
                 {CAPTION_HIGHLIGHTS.map(c => (
                   <button key={c} type="button" title={c} onMouseDown={e => { e.preventDefault(); run('hiliteColor', c, true) }}
                     className="w-5 h-5 rounded border border-black/10 hover:scale-110 transition-transform" style={{ backgroundColor: c }} />
@@ -208,7 +208,7 @@ export default function RichTextEditor({
           <div className="relative">
             <EditorTool disabled={disabled} icon={<Smile className="w-3.5 h-3.5 text-emerald-500" />} title="Emoji" on={() => setOpenMenu(m => m === 'emoji' ? null : 'emoji')} />
             {openMenu === 'emoji' && (
-              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 grid grid-cols-7 gap-0.5 p-1.5 rounded-lg border border-border bg-card shadow-xl w-56 animate-in fade-in zoom-in-95 duration-100">
+              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 grid grid-cols-7 gap-0.5 p-1.5 rounded-lg border border-border bg-card shadow-xl w-56 origin-top animate-in fade-in zoom-in-95 duration-100">
                 {CAPTION_EMOJI.map(e => (
                   <button key={e} type="button" onMouseDown={ev => { ev.preventDefault(); insert(e) }}
                     className="w-7 h-7 flex justify-center items-center rounded hover:bg-secondary text-base hover:scale-110 transition-transform">{e}</button>
@@ -219,7 +219,7 @@ export default function RichTextEditor({
           <div className="relative">
             <EditorTool disabled={disabled} icon={<LinkIcon className="w-3.5 h-3.5" />} title="Insert link" on={openLinkMenu} />
             {openMenu === 'link' && (
-              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 p-1.5 rounded-lg border border-border bg-card shadow-xl animate-in fade-in zoom-in-95 duration-100">
+              <div className="absolute top-9 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1.5 p-1.5 rounded-lg border border-border bg-card shadow-xl origin-top animate-in fade-in zoom-in-95 duration-100">
                 <input
                   autoFocus
                   value={linkUrl}

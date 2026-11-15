@@ -548,7 +548,7 @@ export default function ImportClient() {
               <>
                 <p className="text-sm text-muted-foreground mb-4">{progress.done} / {progress.total}</p>
                 <div className="w-64 h-1.5 bg-secondary rounded-full overflow-hidden">
-                  <div className="h-full gradient-bg rounded-full transition-all" style={{ width: `${(progress.done / progress.total) * 100}%` }} />
+                  <div className="h-full gradient-bg rounded-full transition-[width]" style={{ width: `${(progress.done / progress.total) * 100}%` }} />
                 </div>
               </>
             )}

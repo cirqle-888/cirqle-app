@@ -499,7 +499,7 @@ export default function FeedPlannerClient({
                     onDragOver={e => { if (planned && dragId) { e.preventDefault(); setOverIndex(idx) } }}
                     onDrop={e => { if (planned && dragId) { e.preventDefault(); void drop(idx) } }}
                     onClick={() => setDetail(t)}
-                    className={`relative ${tileAspect} group cursor-pointer overflow-hidden bg-secondary transition-all ${
+                    className={`relative ${tileAspect} group cursor-pointer overflow-hidden bg-secondary transition ${
                       isDragging ? 'opacity-30' : ''
                     } ${overIndex === idx && dragId && !isDragging ? 'ring-2 ring-primary ring-inset' : ''}`}
                   >

@@ -266,7 +266,7 @@ export default function SkillsTab({ employees, contributions, parameters, groups
                               ${isFirstInGroup ? 'border-l border-border/30' : ''}
                               ${isHovered ? 'ring-1 ring-inset ring-white/20' : ''}`}
                           >
-                            <div className={`inline-flex items-center justify-center w-14 h-8 rounded ${c.bg} transition-all`}>
+                            <div className={`inline-flex items-center justify-center w-14 h-8 rounded ${c.bg} transition-colors`}>
                               {band === 'Insufficient' ? (
                                 <span className="text-[10px] text-muted-foreground/40">
                                   {ps ? `${ps.taskCount}t` : '—'}
@@ -340,7 +340,7 @@ export default function SkillsTab({ employees, contributions, parameters, groups
                       setRadarEmpIds(prev => [...prev, emp.id])
                     }
                   }}
-                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-all
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors
                     ${active
                       ? 'border-transparent text-white'
                       : 'border-border text-muted-foreground hover:text-foreground hover:border-border/60'
@@ -458,7 +458,7 @@ export default function SkillsTab({ employees, contributions, parameters, groups
                       {/* Bar */}
                       <div className="flex-1 h-3 bg-secondary/60 rounded-full overflow-hidden">
                         <div
-                          className={`h-full rounded-full transition-all ${rc.bar}`}
+                          className={`h-full rounded-full transition-[width,background-color] ${rc.bar}`}
                           style={{ width: `${pct}%` }}
                         />
                       </div>
@@ -599,7 +599,7 @@ function SubtabBar({ active, onChange }: { active: Subtab; onChange: (t: Subtab)
         <button
           key={t}
           onClick={() => onChange(t)}
-          className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+          className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition ${
             active === t
               ? 'bg-card text-foreground shadow-sm'
               : 'text-muted-foreground hover:text-foreground'

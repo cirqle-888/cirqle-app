@@ -272,7 +272,7 @@ export function PrivacyBadge() {
     <button
       onClick={isUnlocked ? lock : openUnlockModal}
       title={isUnlocked ? 'Names visible — click to lock' : 'Names hidden — click to unlock'}
-      className={`flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full border transition-all ${
+      className={`flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors ${
         isUnlocked
           ? 'bg-green-500/10 border-green-500/25 text-green-400 hover:bg-red-500/10 hover:border-red-500/25 hover:text-red-400'
           : 'bg-secondary border-border text-muted-foreground hover:border-primary/30 hover:text-foreground'
@@ -302,7 +302,7 @@ export function FiguresToggle() {
       title={figuresHidden
         ? 'Amounts are blurred for screen sharing — click, or press Cmd/Ctrl+Shift+H, to show them'
         : 'Blur every amount on screen for sharing (Cmd/Ctrl+Shift+H)'}
-      className={`flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full border transition-all ${
+      className={`flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors ${
         figuresHidden
           ? 'bg-amber-500/10 border-amber-500/25 text-amber-400 hover:bg-amber-500/20'
           : 'bg-secondary border-border text-muted-foreground hover:border-primary/30 hover:text-foreground'

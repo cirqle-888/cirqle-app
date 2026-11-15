@@ -908,7 +908,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
         actions={
           <div className="flex items-center gap-2">
             {tab === 'Records' && <>
-              <button onClick={exportPayrollCSV} className="flex items-center gap-1.5 bg-secondary/50 hover:bg-secondary border border-border/50 text-[13px] font-medium px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-all shadow-sm whitespace-nowrap">
+              <button onClick={exportPayrollCSV} className="flex items-center gap-1.5 bg-secondary/50 hover:bg-secondary border border-border/50 text-[13px] font-medium px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-colors shadow-sm whitespace-nowrap">
                 <Download className="w-4 h-4 shrink-0" /><span className="hidden sm:inline">Export CSV</span>
               </button>
               <button onClick={() => setShowPayrollForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-[13px] font-medium px-3 py-1.5 rounded-lg hover:opacity-90 whitespace-nowrap shadow-sm">
@@ -916,12 +916,12 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
               </button>
             </>}
             {tab === 'Overview' && (
-              <button onClick={() => setShowBulkGenerate(true)} className="flex items-center gap-1.5 bg-secondary/50 hover:bg-secondary border border-border/50 text-[13px] font-medium px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-all shadow-sm whitespace-nowrap">
+              <button onClick={() => setShowBulkGenerate(true)} className="flex items-center gap-1.5 bg-secondary/50 hover:bg-secondary border border-border/50 text-[13px] font-medium px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-colors shadow-sm whitespace-nowrap">
                 <Zap className="w-4 h-4 shrink-0" /> Bulk Generate
               </button>
             )}
             {tab === 'Advances' && <>
-              <button onClick={exportAdvancesCSV} className="flex items-center gap-1.5 bg-secondary/50 hover:bg-secondary border border-border/50 text-[13px] font-medium px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-all shadow-sm whitespace-nowrap">
+              <button onClick={exportAdvancesCSV} className="flex items-center gap-1.5 bg-secondary/50 hover:bg-secondary border border-border/50 text-[13px] font-medium px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground transition-colors shadow-sm whitespace-nowrap">
                 <Download className="w-4 h-4 shrink-0" /><span className="hidden sm:inline">Export CSV</span>
               </button>
               <button onClick={() => setShowAdvanceForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-[13px] font-medium px-3 py-1.5 rounded-lg hover:opacity-90 whitespace-nowrap shadow-sm">
@@ -946,7 +946,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
             {TABS.map(t => (
               <button key={t} onClick={() => setTab(t)}
                 className={cn(
-                  "px-4 py-1.5 rounded-lg text-[13px] font-medium transition-all relative whitespace-nowrap",
+                  "px-4 py-1.5 rounded-lg text-[13px] font-medium transition relative whitespace-nowrap",
                   tab === t ? "bg-background text-foreground shadow-sm ring-1 ring-border/50" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
                 )}>
                 {t}
@@ -1136,7 +1136,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
 
                 return (
                   <div key={emp.id}
-                    className="group bg-card border border-border/40 rounded-2xl p-5 hover:border-primary/20 hover:shadow-sm transition-all cursor-pointer flex flex-col"
+                    className="group bg-card border border-border/40 rounded-2xl p-5 hover:border-primary/20 hover:shadow-sm transition cursor-pointer flex flex-col"
                     onClick={() => setSelectedEmp(emp)}>
                     {/* Card header */}
                     <div className="flex items-start justify-between mb-4">
@@ -1274,12 +1274,12 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     {record && record.status !== 'paid' && (
                       <div className="flex gap-2 mt-auto">
                         <button onClick={e => { e.stopPropagation(); confirmMarkPaid(record.id) }}
-                          className="flex-1 text-[13px] py-2 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 transition-all font-medium shadow-sm">
+                          className="flex-1 text-[13px] py-2 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 transition-colors font-medium shadow-sm">
                           Mark Paid
                         </button>
                         <button onClick={e => { e.stopPropagation(); setPayslipModal({ employeeId: emp.id }) }}
                           title="Send payslip"
-                          className="px-3 py-2 rounded-lg bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground border border-border/50 transition-all shadow-sm">
+                          className="px-3 py-2 rounded-lg bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground border border-border/50 transition-colors shadow-sm">
                           <Mail className="w-4 h-4" />
                         </button>
                       </div>
@@ -1287,12 +1287,12 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                     {record && record.status === 'paid' && (
                       <div className="flex gap-2 mt-auto">
                         <button onClick={e => { e.stopPropagation(); setPayslipModal({ employeeId: emp.id }) }}
-                          className="flex-1 text-[13px] py-2 rounded-lg bg-secondary hover:bg-secondary/80 text-foreground border border-border/50 transition-all font-medium flex items-center justify-center gap-2 shadow-sm">
+                          className="flex-1 text-[13px] py-2 rounded-lg bg-secondary hover:bg-secondary/80 text-foreground border border-border/50 transition-colors font-medium flex items-center justify-center gap-2 shadow-sm">
                           <Mail className="w-4 h-4 text-muted-foreground" /> Send Payslip
                         </button>
                         <button onClick={e => { e.stopPropagation(); confirmMarkUnpaid(record.id) }}
                           title="Undo payment"
-                          className="px-3 py-2 rounded-lg text-muted-foreground hover:text-red-600 dark:hover:text-red-400 bg-secondary/30 hover:bg-red-500/10 border border-border/30 hover:border-red-500/20 transition-all shadow-sm">
+                          className="px-3 py-2 rounded-lg text-muted-foreground hover:text-red-600 dark:hover:text-red-400 bg-secondary/30 hover:bg-red-500/10 border border-border/30 hover:border-red-500/20 transition-colors shadow-sm">
                           Undo
                         </button>
                       </div>
@@ -1304,7 +1304,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                           setPayForm(p => ({ ...p, employee_id: emp.id, month: viewMonth, year: viewYear, base_salary: String(emp.base_salary || ''), commission_earned: String(commission) }))
                           setShowPayrollForm(true)
                         }}
-                        className="w-full text-[13px] py-2 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-all font-medium mt-auto shadow-sm">
+                        className="w-full text-[13px] py-2 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-colors font-medium mt-auto shadow-sm">
                         Add to Payroll
                       </button>
                     )}
@@ -1323,26 +1323,26 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
             {/* Filter Bar */}
             <div className="px-5 py-4 border-b border-border flex flex-wrap gap-3 bg-secondary/10">
               <select value={recordsFilterMonth} onChange={e => setRecordsFilterMonth(e.target.value)}
-                className="text-[13px] bg-background border border-border/50 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm">
+                className="text-[13px] bg-background border border-border/50 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition shadow-sm">
                 <option value="all">All Months</option>
                 {MONTHS.map((m, i) => <option key={m} value={String(i + 1)}>{m}</option>)}
               </select>
               <select value={recordsFilterYear} onChange={e => setRecordsFilterYear(e.target.value)}
-                className="text-[13px] bg-background border border-border/50 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm">
+                className="text-[13px] bg-background border border-border/50 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition shadow-sm">
                 <option value="all">All Years</option>
                 {Array.from(new Set(payroll.map(r => r.year))).sort().reverse().map(y => (
                   <option key={y} value={String(y)}>{y}</option>
                 ))}
               </select>
               <select value={recordsFilterEmpId} onChange={e => setRecordsFilterEmpId(e.target.value)}
-                className="text-[13px] bg-background border border-border/50 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm max-w-[200px] truncate">
+                className="text-[13px] bg-background border border-border/50 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition shadow-sm max-w-[200px] truncate">
                 <option value="all">All Employees</option>
                 {empList.filter(e => e.is_active).map(e => (
                   <option key={e.id} value={e.id}>{dn(e)}</option>
                 ))}
               </select>
               <select value={recordsFilterStatus} onChange={e => setRecordsFilterStatus(e.target.value)}
-                className="text-[13px] bg-background border border-border/50 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all shadow-sm">
+                className="text-[13px] bg-background border border-border/50 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition shadow-sm">
                 <option value="all">All Status</option>
                 <option value="paid">Paid</option>
                 <option value="pending">Pending</option>
@@ -1353,7 +1353,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   setRecordsFilterYear('all')
                   setRecordsFilterEmpId('all')
                   setRecordsFilterStatus('all')
-                }} className="text-[13px] font-medium text-muted-foreground hover:text-foreground px-3 py-2 rounded-lg hover:bg-secondary/50 transition-all">
+                }} className="text-[13px] font-medium text-muted-foreground hover:text-foreground px-3 py-2 rounded-lg hover:bg-secondary/50 transition-colors">
                   Clear Filters
                 </button>
               )}
@@ -1625,7 +1625,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 const totalComm = monthNets.reduce((s, m) => s + (!m.hasRecord ? m.commission : 0), 0)
                 const displayTotal = totalNet + totalComm
                 return (
-                  <div key={emp.id} className="bg-card rounded-xl border border-border/50 p-4 shadow-sm cursor-pointer hover:border-primary/30 transition-all flex flex-col gap-3" onClick={() => setSelectedEmp(emp)}>
+                  <div key={emp.id} className="bg-card rounded-xl border border-border/50 p-4 shadow-sm cursor-pointer hover:border-primary/30 transition-colors flex flex-col gap-3" onClick={() => setSelectedEmp(emp)}>
                     <div className="flex items-center justify-between pb-3 border-b border-border/50">
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-xl gradient-bg flex items-center justify-center shrink-0 shadow-sm border border-border/50">
@@ -1714,7 +1714,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
 
               return (
                   <div key={emp.id}
-                    className="group bg-card border border-border/40 rounded-2xl p-5 hover:border-primary/20 hover:shadow-sm transition-all cursor-pointer flex flex-col"
+                    className="group bg-card border border-border/40 rounded-2xl p-5 hover:border-primary/20 hover:shadow-sm transition cursor-pointer flex flex-col"
                     onClick={() => setSelectedEmp(emp)}>
                     <div className="flex items-start justify-between mb-5">
                       <div className="flex items-center gap-3">
@@ -2043,7 +2043,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                           disabled={!worked}
                           onClick={() => setSelectedDay(isOpen ? null : dateStr)}
                           title={worked ? `${d} ${MONTHS[viewMonth - 1]} — see what was done` : `${d} ${MONTHS[viewMonth - 1]}`}
-                          className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-medium border transition-all
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-medium border transition
                             ${isOpen   ? 'bg-green-500/40 text-green-100 border-green-400 ring-2 ring-green-400/40' :
                               worked   ? 'bg-green-500/20 text-green-700 dark:text-green-300 border-green-500/30 hover:bg-green-500/30 cursor-pointer' :
                               isToday  ? 'bg-blue-500/15 text-blue-400 border-blue-500/20 cursor-default' :
@@ -2889,7 +2889,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 Cancel
               </button>
               <button onClick={handleBulkPayslips} disabled={bulkSending}
-                className="flex-1 bg-primary text-primary-foreground text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+                className="flex-1 bg-primary text-primary-foreground text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 transition flex items-center justify-center gap-2">
                 {bulkSending ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</> : <>Send all</>}
               </button>
             </div>

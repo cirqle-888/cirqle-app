@@ -575,7 +575,7 @@ export function CommandPaletteTrigger({ className = '', isCollapsed = false }: {
       onClick={() => {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }))
       }}
-      className={`flex items-center h-8 ${isCollapsed ? 'justify-center w-8 px-0 gap-0' : 'gap-2 px-3'} rounded-lg text-xs text-muted-foreground/60 bg-foreground/[0.03] border border-foreground/[0.06] hover:border-foreground/[0.12] hover:text-muted-foreground transition-all ${className}`}
+      className={`flex items-center h-8 ${isCollapsed ? 'justify-center w-8 px-0 gap-0' : 'gap-2 px-3'} rounded-lg text-xs text-muted-foreground/60 bg-foreground/[0.03] border border-foreground/[0.06] hover:border-foreground/[0.12] hover:text-muted-foreground transition-[width,padding,gap,color,border-color] ${className}`}
       title={isCollapsed ? 'Search (⌘K)' : undefined}
     >
       <Search className="w-3 h-3 shrink-0" />

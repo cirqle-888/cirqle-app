@@ -206,7 +206,7 @@ export function NotificationBell({ isCollapsed = false }: { isCollapsed?: boolea
         ref={btnRef}
         type="button"
         onClick={handleOpen}
-        className={`relative flex items-center justify-center h-8 ${isCollapsed ? 'w-8' : 'w-8'} rounded-lg text-muted-foreground/60 bg-foreground/[0.03] border border-foreground/[0.06] hover:border-foreground/[0.12] hover:text-muted-foreground transition-all shrink-0`}
+        className={`relative flex items-center justify-center h-8 ${isCollapsed ? 'w-8' : 'w-8'} rounded-lg text-muted-foreground/60 bg-foreground/[0.03] border border-foreground/[0.06] hover:border-foreground/[0.12] hover:text-muted-foreground transition-colors shrink-0`}
         title="Notifications"
       >
         <Bell className="w-3.5 h-3.5" />

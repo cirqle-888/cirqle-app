@@ -250,7 +250,7 @@ export function HelpGuide() {
       {active && step && (
         <>
           {here && rect && (
-            <div aria-hidden className="pointer-events-none fixed z-[395] rounded-xl ring-4 ring-primary ring-offset-2 ring-offset-background transition-all duration-150"
+            <div aria-hidden className="pointer-events-none fixed z-[395] rounded-xl ring-4 ring-primary ring-offset-2 ring-offset-background transition-[top,left,width,height] duration-150"
               style={{ top: rect.top - 4, left: rect.left - 4, width: rect.width + 8, height: rect.height + 8 }}>
               <span className="absolute inset-0 animate-ping rounded-xl ring-2 ring-primary/60" />
             </div>

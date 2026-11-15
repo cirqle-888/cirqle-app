@@ -287,7 +287,7 @@ function BriefText({ text }: { text: string }) {
         <div className="flex flex-wrap gap-2 pt-1">
           {images.map((src, i) => (
             <a key={i} href={src} target="_blank" rel="noreferrer" title="Open reference image"
-              className="block w-24 h-24 rounded-lg overflow-hidden border border-border bg-secondary hover:ring-2 hover:ring-violet-500/40 transition-all">
+              className="block w-24 h-24 rounded-lg overflow-hidden border border-border bg-secondary hover:ring-2 hover:ring-violet-500/40 transition">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={src} alt={`Reference ${i + 1}`} loading="lazy" className="w-full h-full object-cover" />
             </a>
@@ -1254,7 +1254,7 @@ export default function RequestsClient({
           <div className="inline-flex p-0.5 rounded-lg bg-secondary border border-border/60">
             {(['status', 'client', 'assignee'] as const).map(g => (
               <button key={g} onClick={() => setBoardBy(g)}
-                className={`px-3 py-1 rounded-md text-xs font-medium capitalize transition-all ${
+                className={`px-3 py-1 rounded-md text-xs font-medium capitalize transition ${
                   boardBy === g ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                 {g}
               </button>
@@ -1436,7 +1436,7 @@ export default function RequestsClient({
                     </span>
                     <span className="block text-xs text-muted-foreground">{t.description}</span>
                   </span>
-                  <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground group-hover:translate-x-0.5 transition-all ml-auto shrink-0" />
+                  <ChevronRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-muted-foreground group-hover:translate-x-0.5 transition ml-auto shrink-0" />
                 </button>
               ))}
             </div>
@@ -1500,11 +1500,11 @@ export default function RequestsClient({
           <div className="flex items-center gap-2 ml-auto shrink-0">
             <div className="inline-flex p-0.5 rounded-lg bg-secondary border border-border/60">
               <button onClick={() => setView('list')} title="List view" aria-pressed={view === 'list'}
-                className={`p-1.5 rounded-md transition-all ${view === 'list' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                className={`p-1.5 rounded-md transition ${view === 'list' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                 <List className="w-4 h-4" />
               </button>
               <button onClick={() => setView('board')} title="Board view" aria-pressed={view === 'board'}
-                className={`p-1.5 rounded-md transition-all ${view === 'board' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                className={`p-1.5 rounded-md transition ${view === 'board' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                 <LayoutGrid className="w-4 h-4" />
               </button>
             </div>
@@ -1653,7 +1653,7 @@ export default function RequestsClient({
                 return (
                 <SortableListItem key={r.id} id={r.id} disabled={!isDraggableTab}>
                   {(handle) => (
-                    <div className="group flex items-stretch bg-card border border-border/70 rounded-xl hover:border-violet-500/40 hover:shadow-sm transition-all">
+                    <div className="group flex items-stretch bg-card border border-border/70 rounded-xl hover:border-violet-500/40 hover:shadow-sm transition">
                       {isDraggableTab && (
                         <div className="flex flex-col items-center justify-center shrink-0 w-10 gap-0.5 border-r border-border/40" onClick={e => e.stopPropagation()}>
                           {handle}
@@ -1688,7 +1688,7 @@ export default function RequestsClient({
               return (
               <SortableListItem key={r.id} id={r.id} disabled={!isDraggableTab}>
                 {(handle) => (
-                  <div className={`group flex items-stretch bg-card border rounded-xl transition-all ${batchSel.mode && batchSel.isSelected(r.id) ? 'border-violet-500/60 bg-violet-500/[0.04] ring-1 ring-violet-500/20' : 'border-border/70 hover:border-violet-500/40 hover:shadow-sm'}`}>
+                  <div className={`group flex items-stretch bg-card border rounded-xl transition ${batchSel.mode && batchSel.isSelected(r.id) ? 'border-violet-500/60 bg-violet-500/[0.04] ring-1 ring-violet-500/20' : 'border-border/70 hover:border-violet-500/40 hover:shadow-sm'}`}>
                     {batchSel.mode && (
                       <label className="flex items-center justify-center shrink-0 w-10 self-stretch cursor-pointer" onClick={e => e.stopPropagation()}>
                         <input type="checkbox" className="accent-violet-500 w-3.5 h-3.5" checked={batchSel.isSelected(r.id)} onChange={() => batchSel.toggle(r.id)} />

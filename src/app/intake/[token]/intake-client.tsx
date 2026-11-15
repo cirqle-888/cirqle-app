@@ -281,7 +281,7 @@ export default function IntakeClient({
         <h2 className="text-base font-bold">Your requests ({requests.length})</h2>
         <button
           onClick={() => { setFormOpen(o => !o); setSentRef(null) }}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-all shrink-0 ${
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition shrink-0 ${
             formOpen ? 'bg-secondary border border-border text-foreground' : 'gradient-bg text-white shadow hover:opacity-90'
           }`}>
           <Plus className={`w-4 h-4 transition-transform duration-200 ${formOpen ? 'rotate-45' : ''}`} />

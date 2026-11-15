@@ -454,7 +454,7 @@ export default function ReportsClient({
               const active = selectedEmp === e.id
               return (
                 <button key={e.id} onClick={() => setSelectedEmp(e.id)}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition ${
                     active ? 'gradient-bg text-white shadow-md' : 'bg-card border border-border text-muted-foreground hover:text-foreground hover:border-border/80'
                   }`}>
                   <span className={`w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold ${active ? 'bg-foreground/20' : 'bg-secondary'}`}
@@ -520,7 +520,7 @@ export default function ReportsClient({
             <div className="flex items-center gap-1 bg-secondary/60 rounded-xl p-1 w-fit flex-wrap">
               {(['overview', 'tasks', 'monthly', 'team', 'clients', 'skills'] as const).map(t => (
                 <button key={t} onClick={() => setActiveTab(t)}
-                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
                     activeTab === t ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
                   }`}>
                   {t === 'monthly' ? 'Month-wise'
@@ -626,13 +626,13 @@ export default function ReportsClient({
                             <div className="flex flex-col gap-1">
                               {/* Overall tasks bar */}
                               <div className="bg-secondary rounded-full h-2 overflow-hidden">
-                                <div className="h-full rounded-full transition-all duration-500"
+                                <div className="h-full rounded-full transition-[width] duration-500"
                                   style={{ width: `${pct}%`, backgroundColor: BAND_COLORS[b.band] }} />
                               </div>
                               {/* Split bar: emp vs company */}
                               {b.count > 0 && (
                                 <div className="bg-secondary rounded-full h-1.5 overflow-hidden flex">
-                                  <div className="h-full bg-green-500/70 transition-all" style={{ width: `${empPct}%` }} />
+                                  <div className="h-full bg-green-500/70 transition-[width]" style={{ width: `${empPct}%` }} />
                                   <div className="h-full bg-blue-500/40 flex-1" />
                                 </div>
                               )}

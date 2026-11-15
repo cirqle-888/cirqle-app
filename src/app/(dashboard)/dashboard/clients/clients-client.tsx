@@ -318,7 +318,7 @@ export default function ClientsClient({ clients: initialClients, stats, departme
           <div className="flex bg-secondary/30 border border-border/50 rounded-lg p-0.5 shrink-0">
             {(['active', ...(totals.drafts > 0 || filter === 'drafts' ? ['drafts' as const] : []), 'archived', 'all'] as const).map(f => (
               <button key={f} onClick={() => setFilter(f)}
-                className={`px-3 py-1.5 text-[13px] font-medium rounded-md transition-all ${
+                className={`px-3 py-1.5 text-[13px] font-medium rounded-md transition ${
                   filter === f ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50' : 'text-muted-foreground hover:text-foreground'
                 }`}>
                 {f === 'active' ? 'Active' : f === 'drafts' ? `Drafts (${totals.drafts})` : f === 'archived' ? 'Archived' : 'All'}
@@ -354,7 +354,7 @@ export default function ClientsClient({ clients: initialClients, stats, departme
           )}
           {canEdit && canSetDepartment && departments.length > 0 && (
             <button onClick={() => { if (batchSel.mode) batchSel.clear(); else batchSel.setMode(true) }}
-              className={`flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border transition-all shrink-0 ${
+              className={`flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border transition-colors shrink-0 ${
                 batchSel.mode
                   ? 'bg-primary/10 border-primary/30 text-primary'
                   : 'bg-secondary/30 border-border/50 text-muted-foreground hover:text-foreground'
@@ -364,7 +364,7 @@ export default function ClientsClient({ clients: initialClients, stats, departme
           )}
           {departments.length > 0 && (
             <button onClick={() => setGroupByDept(g => !g)}
-              className={`flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border transition-all shrink-0 ${
+              className={`flex items-center gap-1.5 text-[13px] font-medium px-3 py-1.5 rounded-lg border transition-colors shrink-0 ${
                 groupByDept
                   ? 'bg-primary/10 border-primary/30 text-primary'
                   : 'bg-secondary/30 border-border/50 text-muted-foreground hover:text-foreground'
@@ -438,7 +438,7 @@ export default function ClientsClient({ clients: initialClients, stats, departme
             const picked = batchSel.mode && batchSel.isSelected(client.id)
             return (
               <div key={client.id}
-                className={`group bg-card border rounded-2xl px-4 md:px-5 py-3.5 flex items-center gap-3 hover:shadow-sm transition-all cursor-pointer ${
+                className={`group bg-card border rounded-2xl px-4 md:px-5 py-3.5 flex items-center gap-3 hover:shadow-sm transition cursor-pointer ${
                   picked
                     ? 'border-violet-500/60 bg-violet-500/[0.04] ring-1 ring-violet-500/20'
                     : 'border-border/60 hover:border-primary/25'

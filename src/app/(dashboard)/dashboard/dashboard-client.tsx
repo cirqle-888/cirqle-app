@@ -376,7 +376,7 @@ function AdminDashboard({
             <div className="flex items-center bg-secondary rounded-lg p-0.5 gap-0.5">
               {(['daily','monthly','quarterly','yearly'] as Granularity[]).map(g => (
                 <button key={g} onClick={() => setGranularity(g)}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium capitalize transition-all ${granularity === g ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium capitalize transition ${granularity === g ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                   {g}
                 </button>
               ))}
@@ -387,14 +387,14 @@ function AdminDashboard({
               <div className="flex items-center bg-secondary rounded-lg p-0.5 gap-0">
                 <button
                   onClick={() => setAmountDisplay('short')}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${amountDisplay === 'short' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition ${amountDisplay === 'short' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
                   title="Abbreviated (₹1.5L)"
                 >
                   1.5L
                 </button>
                 <button
                   onClick={() => setAmountDisplay('full')}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${amountDisplay === 'full' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition ${amountDisplay === 'full' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
                   title="Full figures (₹1,50,000)"
                 >
                   Full
@@ -407,13 +407,13 @@ function AdminDashboard({
               >
                 <button
                   onClick={() => setFxMode('booked')}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${fxMode === 'booked' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition ${fxMode === 'booked' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
                 >
                   Booked
                 </button>
                 <button
                   onClick={() => setFxMode('live')}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all flex items-center gap-1 ${fxMode === 'live' ? 'bg-violet-500/20 text-violet-600 dark:text-violet-300 shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition flex items-center gap-1 ${fxMode === 'live' ? 'bg-violet-500/20 text-violet-600 dark:text-violet-300 shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
                 >
                   <Zap className="w-2.5 h-2.5" />
                   Live
@@ -680,7 +680,7 @@ function FocusCard({ icon, color, title, count, unit, sub, items, onClick }: {
     violet: 'bg-violet-500/15', cyan: 'bg-cyan-500/15', amber: 'bg-amber-500/15', emerald: 'bg-emerald-500/15',
   }
   return (
-    <button onClick={onClick} className={`group text-left bg-card border ${borders[color]} shadow-sm rounded-xl p-4.5 transition-all hover:shadow-md hover:bg-muted/30`}>
+    <button onClick={onClick} className={`group text-left bg-card border ${borders[color]} shadow-sm rounded-xl p-4.5 transition hover:shadow-md hover:bg-muted/30`}>
       <div className="flex items-start gap-3.5">
         <div className={`w-8 h-8 rounded-lg ${bgs[color]} flex items-center justify-center shrink-0 mt-0.5`}>{icon}</div>
         <div className="flex-1 min-w-0">
@@ -1139,7 +1139,7 @@ function EmployeeDashboard({
           <div className="flex items-center gap-0.5">
             {(['daily','monthly','quarterly','yearly'] as Granularity[]).map(g => (
               <button key={g} onClick={() => setGranularity(g)}
-                className={`px-2.5 py-1 rounded-md text-[11px] font-medium capitalize transition-all ${granularity === g ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium capitalize transition ${granularity === g ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                 {g}
               </button>
             ))}

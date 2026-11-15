@@ -647,7 +647,7 @@ export function ContributionEntryPanel({
                   return (
                     <button key={tool.id} type="button"
                       onClick={() => setToolsUsed(prev => ({ ...prev, [tool.id]: !prev[tool.id] }))}
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border transition-all ${
+                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
                         used ? 'bg-purple-500/15 border-purple-500/30 text-purple-700 dark:text-purple-300' : 'bg-secondary border-transparent text-muted-foreground hover:border-border'
                       }`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${used ? 'bg-purple-400' : 'bg-muted-foreground/40'}`} />
@@ -689,7 +689,7 @@ export function ContributionEntryPanel({
                 const isOwnScope = viewScope === 'own'
 
                 return (
-                  <div key={emp.id} className={`bg-card border rounded-xl overflow-hidden transition-all ${isExpanded ? 'border-primary/20' : 'border-border'}`}>
+                  <div key={emp.id} className={`bg-card border rounded-xl overflow-hidden transition-colors ${isExpanded ? 'border-primary/20' : 'border-border'}`}>
                     {/* Card header: clickable to expand/collapse in 'all' scope;
                         static name banner in 'own' scope (already expanded) */}
                     {isOwnScope ? (
@@ -783,11 +783,11 @@ export function ContributionEntryPanel({
 
                           return (
                             <div key={group.id}
-                              className={`rounded-xl border transition-all ${isGroupOn ? 'border-primary/25 bg-primary/[0.03]' : 'border-border bg-secondary/20'}`}>
+                              className={`rounded-xl border transition-colors ${isGroupOn ? 'border-primary/25 bg-primary/[0.03]' : 'border-border bg-secondary/20'}`}>
 
                               <button type="button" onClick={() => toggleGroup(emp.id, group.id)}
                                 className="w-full flex items-center gap-3 px-4 py-3 text-left">
-                                <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${
+                                <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
                                   isGroupOn ? 'border-primary bg-primary' : 'border-muted-foreground/30 hover:border-muted-foreground'
                                 }`}>
                                   {isGroupOn && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
@@ -805,7 +805,7 @@ export function ContributionEntryPanel({
                                     <span className="text-[10px] text-muted-foreground shrink-0">{doneP}/{totalP}</span>
                                   </div>
                                   <div className="mt-1.5 h-1 w-full max-w-[170px] rounded-full bg-foreground/10 overflow-hidden">
-                                    <div className="h-full rounded-full bg-blue-500 dark:bg-blue-400 transition-all" style={{ width: `${progressPct}%` }} />
+                                    <div className="h-full rounded-full bg-blue-500 dark:bg-blue-400 transition-[width]" style={{ width: `${progressPct}%` }} />
                                   </div>
                                 </div>
                                 {isGroupOn && masterVal > 0 && (
@@ -833,7 +833,7 @@ export function ContributionEntryPanel({
                                           {[25, 50, 75, 100].map(pct => (
                                             <button key={pct} type="button"
                                               onClick={() => setContrib(master.id, emp.id, masterVal === pct ? 0 : pct)}
-                                              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                                              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
                                                 masterVal === pct ? 'gradient-bg text-white shadow-sm' : 'bg-secondary text-muted-foreground hover:text-foreground'
                                               }`}>
                                               {pct}%
@@ -849,7 +849,7 @@ export function ContributionEntryPanel({
                                         <div className="flex items-center gap-2">
                                           <button type="button" onClick={() => setContrib(master.id, emp.id, Math.max(0, masterVal - 1))}
                                             disabled={masterVal === 0}
-                                            className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-90 disabled:opacity-30 disabled:active:scale-100 transition-all">
+                                            className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-95 disabled:opacity-30 disabled:active:scale-100 transition">
                                             <Minus className="w-4 h-4" />
                                           </button>
                                           <input type="number" inputMode="numeric" min="0" step="1"
@@ -858,7 +858,7 @@ export function ContributionEntryPanel({
                                             className="w-16 h-10 bg-background border border-border rounded-lg px-2 text-base text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary/50"
                                             placeholder="0" />
                                           <button type="button" onClick={() => setContrib(master.id, emp.id, masterVal + 1)}
-                                            className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-90 transition-all">
+                                            className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-95 transition">
                                             <Plus className="w-4 h-4" />
                                           </button>
                                           <span className="text-xs text-muted-foreground">items</span>
@@ -894,7 +894,7 @@ export function ContributionEntryPanel({
                                             <button type="button" aria-label={`Decrease ${param.name}`}
                                               onClick={() => setContrib(param.id, emp.id, Math.max(0, count - 1))}
                                               disabled={count === 0}
-                                              className="w-9 h-9 rounded-lg bg-background/60 border border-border flex items-center justify-center hover:bg-secondary active:scale-90 disabled:opacity-30 disabled:active:scale-100 transition-all">
+                                              className="w-9 h-9 rounded-lg bg-background/60 border border-border flex items-center justify-center hover:bg-secondary active:scale-95 disabled:opacity-30 disabled:active:scale-100 transition">
                                               <Minus className="w-4 h-4" />
                                             </button>
                                             <input type="number" inputMode="numeric" min="0" step="1"
@@ -905,7 +905,7 @@ export function ContributionEntryPanel({
                                               }`} />
                                             <button type="button" aria-label={`Increase ${param.name}`}
                                               onClick={() => setContrib(param.id, emp.id, count + 1)}
-                                              className="w-9 h-9 rounded-lg bg-background/60 border border-border flex items-center justify-center hover:bg-secondary active:scale-90 transition-all">
+                                              className="w-9 h-9 rounded-lg bg-background/60 border border-border flex items-center justify-center hover:bg-secondary active:scale-95 transition">
                                               <Plus className="w-4 h-4" />
                                             </button>
                                           </div>

@@ -37,7 +37,7 @@ function SortableFavoriteRow({
         href={fav.href}
         onClick={onNavClick}
         title={isCollapsed ? fav.label : undefined}
-        className={`flex items-center rounded-lg text-sm font-medium transition-all duration-300 ${
+        className={`flex items-center rounded-lg text-sm font-medium transition-[color,background-color,padding,gap] duration-200 ease-out-strong ${
           isCollapsed ? 'justify-center p-2.5' : 'gap-2 pl-1.5 pr-3 py-2.5'
         } ${
           active
@@ -57,7 +57,7 @@ function SortableFavoriteRow({
           </span>
         )}
         <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-primary' : 'text-muted-foreground'}`} />
-        <span className={`flex-1 truncate whitespace-nowrap transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0' : 'opacity-100'} ${isCollapsed ? '' : 'pr-4'}`}>
+        <span className={`flex-1 truncate whitespace-nowrap transition-[width,opacity,padding] duration-200 ease-out-strong ${isCollapsed ? 'w-0 opacity-0' : 'opacity-100'} ${isCollapsed ? '' : 'pr-4'}`}>
           {fav.label}
         </span>
       </Link>

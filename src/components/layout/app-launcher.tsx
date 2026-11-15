@@ -174,7 +174,7 @@ export function AppLauncherTrigger() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="relative flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground/60 bg-foreground/[0.03] border border-foreground/[0.06] hover:border-foreground/[0.12] hover:text-muted-foreground transition-all shrink-0"
+        className="relative flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground/60 bg-foreground/[0.03] border border-foreground/[0.06] hover:border-foreground/[0.12] hover:text-muted-foreground transition-colors shrink-0"
         title="All apps"
       >
         <LayoutGrid className="w-3.5 h-3.5" />

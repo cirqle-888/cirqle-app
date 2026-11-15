@@ -218,7 +218,7 @@ function ClientCard({ c, access }: { c: DirectoryEntry; access: MarketingAccess 
   return (
     <Link
       href={`/dashboard/marketing/${c.id}`}
-      className="group flex flex-col gap-4 rounded-2xl border border-border bg-card p-4 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5"
+      className="group flex flex-col gap-4 rounded-2xl border border-border bg-card p-4 transition hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5"
     >
       <div className="flex items-start gap-3">
         <ClientAvatar id={c.id} name={c.name} />

@@ -2463,13 +2463,13 @@ export default function ImportClient({ clients, services, employees, groups, par
         <div className="flex gap-1 bg-card border border-border rounded-lg p-1 shrink-0">
           <button
             onClick={() => setPageTab('import')}
-            className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${pageTab === 'import' ? 'bg-violet-600 text-white shadow' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold transition ${pageTab === 'import' ? 'bg-violet-600 text-white shadow' : 'text-muted-foreground hover:text-foreground'}`}
           >
             📥 Import
           </button>
           <button
             onClick={() => { setPageTab('cleanup'); loadCleanupRecords(cleanupMode) }}
-            className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${pageTab === 'cleanup' ? 'bg-red-600 text-white shadow' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold transition ${pageTab === 'cleanup' ? 'bg-red-600 text-white shadow' : 'text-muted-foreground hover:text-foreground'}`}
           >
             🗑️ Clean Up
           </button>
@@ -2507,7 +2507,7 @@ export default function ImportClient({ clients, services, employees, groups, par
                     <button
                       key={key}
                       onClick={() => { setMode(key); reset() }}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 ${
                         mode === key
                           ? `${activeColor[tier.color]} text-white shadow`
                           : 'bg-background border border-border text-muted-foreground hover:text-foreground'
@@ -2526,7 +2526,7 @@ export default function ImportClient({ clients, services, employees, groups, par
               <button
                 key={key}
                 onClick={() => { setCleanupMode(key); loadCleanupRecords(key) }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 ${
                   cleanupMode === key
                     ? 'bg-red-600 text-white shadow'
                     : 'bg-card border border-border text-muted-foreground hover:text-foreground'

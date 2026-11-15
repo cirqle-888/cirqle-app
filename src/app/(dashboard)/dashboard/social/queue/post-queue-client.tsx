@@ -163,7 +163,7 @@ export default function PostQueueClient({
                   </div>
                   {p.target ? (
                     <div className="mt-2 h-1.5 rounded-full bg-secondary overflow-hidden">
-                      <div className="h-full bg-green-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                      <div className="h-full bg-green-500 rounded-full transition-[width]" style={{ width: `${pct}%` }} />
                     </div>
                   ) : (
                     <p className="mt-1.5 text-[11px] text-muted-foreground">

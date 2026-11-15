@@ -33,6 +33,7 @@ import { EmployeeAvatar } from '@/components/ui/employee-avatar'
 import { FavoritesSection } from '@/components/layout/favorites-section'
 import { FavoriteToggle } from '@/components/ui/favorite-toggle'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { useSheetDismiss } from '@/components/ui/use-sheet-dismiss'
 import { resolveFavoriteIcon, iconKeyFor } from '@/lib/favorites/icon-map'
 import { useFavorites } from '@/contexts/favorites-context'
 import type { FavoriteEntry } from '@/lib/favorites/queries'
@@ -313,8 +314,8 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
   return (
     <div className="flex flex-col flex-1 overflow-hidden min-h-0">
       {/* Logo */}
-      <div className={`py-5 border-b border-sidebar-border transition-all duration-300 ${isCollapsed ? 'flex flex-col items-center px-0' : 'px-5'}`}>
-        <div className={`flex items-center transition-all duration-300 ${isCollapsed ? 'justify-center gap-0' : 'gap-2.5'}`}>
+      <div className={`py-5 border-b border-sidebar-border transition-[padding] duration-200 ease-out-strong ${isCollapsed ? 'flex flex-col items-center px-0' : 'px-5'}`}>
+        <div className={`flex items-center transition-[gap] duration-200 ease-out-strong ${isCollapsed ? 'justify-center gap-0' : 'gap-2.5'}`}>
           {/* When a workspace logo is configured, show ONLY the logo — it
               already contains the brand wordmark, so the "Cirqle / Design
               Agency" text is redundant. Falls back to the gradient "C" tile
@@ -334,7 +335,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
                 src={faviconUrl}
                 alt="Workspace icon"
                 onError={() => setFaviconBroken(true)}
-                className="w-8 h-8 object-contain transition-all duration-300"
+                className="w-8 h-8 object-contain"
               />
             ) : (
               <>
@@ -345,7 +346,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
                   alt="Workspace logo"
                   ref={failedBeforeHydration(lightLogo)}
                   onError={() => markBroken(lightLogo)}
-                  className={`object-contain transition-all duration-300 block dark:hidden ${
+                  className={`object-contain transition-[width,height,max-width] duration-200 ease-out-strong block dark:hidden ${
                     isCollapsed ? 'w-8 h-8' : 'h-10 max-w-[160px]'
                   }`}
                 />
@@ -357,7 +358,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
                   alt="Workspace logo"
                   ref={failedBeforeHydration(darkLogo)}
                   onError={() => markBroken(darkLogo)}
-                  className={`object-contain transition-all duration-300 hidden dark:block ${
+                  className={`object-contain transition-[width,height,max-width] duration-200 ease-out-strong hidden dark:block ${
                     isCollapsed ? 'w-8 h-8' : 'h-10 max-w-[160px]'
                   }`}
                 />
@@ -368,7 +369,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
               <div className="w-8 h-8 rounded-lg gradient-bg flex items-center justify-center shrink-0">
                 <span className="text-white font-bold text-sm">C</span>
               </div>
-              <div className={`overflow-hidden transition-all duration-300 flex flex-col justify-center ${isCollapsed ? 'w-0 opacity-0' : 'w-[120px] opacity-100'}`}>
+              <div className={`overflow-hidden transition-[width,opacity] duration-200 ease-out-strong flex flex-col justify-center ${isCollapsed ? 'w-0 opacity-0' : 'w-[120px] opacity-100'}`}>
                 <div className="font-bold text-sidebar-foreground text-sm leading-tight gradient-text whitespace-nowrap">Cirqle</div>
                 <div className="text-[10px] text-muted-foreground leading-tight whitespace-nowrap">Design Agency</div>
               </div>
@@ -378,7 +379,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
 
         {/* Designation badge */}
         {(user.isAdmin || user.designationName) && (
-          <div className={`overflow-hidden transition-all duration-300 ${isCollapsed ? 'max-h-0 opacity-0 mt-0' : 'max-h-10 opacity-100 mt-3'}`}>
+          <div className={`overflow-hidden transition-[max-height,opacity,margin] duration-200 ease-out-strong ${isCollapsed ? 'max-h-0 opacity-0 mt-0' : 'max-h-10 opacity-100 mt-3'}`}>
             <span className={`inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${
               user.isAdmin
                 ? 'bg-purple-500/15 text-purple-400 border-purple-500/25'
@@ -437,7 +438,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
                       onClick={onNavClick}
                       title={isCollapsed ? label : undefined}
                       aria-current={active ? 'page' : undefined}
-                      className={`relative flex items-center rounded-lg text-sm transition-all duration-200 ${
+                      className={`relative flex items-center rounded-lg text-sm transition-[color,background-color,padding,gap] duration-200 ease-out-strong ${
                         isCollapsed ? 'justify-center p-2.5' : 'gap-2.5 px-3 py-2'
                       } ${
                         active
@@ -455,7 +456,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
                           <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400" />
                         )}
                       </span>
-                      <div className={`flex items-center overflow-hidden transition-all duration-300 ${isCollapsed ? 'w-0 opacity-0' : 'flex-1 opacity-100'}`}>
+                      <div className={`flex items-center overflow-hidden transition-[width,flex-grow,opacity] duration-200 ease-out-strong ${isCollapsed ? 'w-0 opacity-0' : 'flex-1 opacity-100'}`}>
                         <span className="flex-1 truncate whitespace-nowrap">{label}</span>
                         {href === '/dashboard/requests' && requestsBadge > 0 && (
                           <span className="ml-2 shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold flex items-center justify-center">
@@ -539,21 +540,37 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
 function EmployeeProfileSheet({ onClose, onChangePassword }: { onClose: () => void; onChangePassword: () => void }) {
   const { user } = usePermissions()
   const { isUnlocked } = usePrivacy()
+  // The sheet draws a grab handle, so it can be grabbed: drag or flick it down
+  // to close, and tapping the backdrop slides it out the way it came in.
+  const { sheetRef, backdropRef, sheetProps, dismiss } = useSheetDismiss(onClose)
 
   return (
     <>
       {/* Backdrop */}
       <div
+        ref={backdropRef}
         className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
-        onClick={onClose}
+        onClick={dismiss}
         aria-hidden="true"
       />
       {/* Sheet — sits directly on top of the bottom nav bar.
           --bottom-nav-h rather than a literal: the old `bottom-[57px]` both
           understated the bar's real height and ignored the home-indicator
           inset entirely, so on a notched phone the sheet's lower edge slid
-          underneath the very bar it is anchored to. */}
-      <div className="fixed bottom-[var(--bottom-nav-h,0px)] left-0 right-0 z-50 bg-sidebar border-t border-sidebar-border rounded-t-2xl shadow-2xl px-4 pt-4 pb-3 animate-in slide-in-from-bottom-4 duration-200">
+          underneath the very bar it is anchored to.
+
+          The outer box is only a window: it ends at the nav bar's top edge and
+          clips, so the sheet rises out of that edge and sinks back into it
+          instead of sliding across the bar. It ignores pointer events so taps
+          on the backdrop still land. The `after:` strip extends the sheet's
+          own colour below it, so pulling the sheet up past its resting place
+          stretches it rather than opening a gap above the bar. */}
+      <div className="fixed inset-x-0 top-0 bottom-[var(--bottom-nav-h,0px)] z-50 overflow-hidden pointer-events-none">
+      <div
+        ref={sheetRef}
+        {...sheetProps}
+        className="absolute bottom-0 left-0 right-0 pointer-events-auto touch-none bg-sidebar border-t border-sidebar-border rounded-t-2xl shadow-2xl px-4 pt-4 pb-3 after:absolute after:inset-x-0 after:top-full after:h-24 after:bg-sidebar"
+      >
         {/* Handle */}
         <div className="w-10 h-1 bg-border rounded-full mx-auto mb-4" />
 
@@ -586,6 +603,7 @@ function EmployeeProfileSheet({ onClose, onChangePassword }: { onClose: () => vo
         <div className="h-px bg-border mb-2" />
 
         <ProfileActions onChangePassword={() => { onClose(); onChangePassword() }} compact />
+      </div>
       </div>
     </>
   )
@@ -638,12 +656,12 @@ export default function Sidebar() {
   return (
     <>
       {/* Spacer for desktop layout so main content doesn't shift on hover when unpinned */}
-      <div className={`hidden md:block shrink-0 relative transition-[width] duration-300 ease-in-out ${effectivePinned ? 'w-60' : 'w-[72px]'}`}>
+      <div className={`hidden md:block shrink-0 relative transition-[width] duration-200 ease-out-strong ${effectivePinned ? 'w-60' : 'w-[72px]'}`}>
         {/* ── Desktop sidebar ── */}
         <aside 
           onMouseEnter={() => !effectivePinned && setIsHovered(true)}
           onMouseLeave={() => !effectivePinned && setIsHovered(false)}
-          className={`absolute left-0 top-0 h-dvh flex-col bg-sidebar border-r border-sidebar-border transition-all duration-300 ease-in-out z-40 flex overflow-hidden ${effectiveCollapsed ? 'w-[72px]' : 'w-60'}`}
+          className={`absolute left-0 top-0 h-dvh flex-col bg-sidebar border-r border-sidebar-border transition-[width] duration-200 ease-out-strong z-40 flex overflow-hidden ${effectiveCollapsed ? 'w-[72px]' : 'w-60'}`}
         >
           <SidebarContent isCollapsed={effectiveCollapsed} />
           
@@ -654,7 +672,7 @@ export default function Sidebar() {
               className="flex w-full items-center gap-3 px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded-lg transition-colors"
             >
               {effectivePinned ? <ChevronLeft className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
-              <span className={`truncate whitespace-nowrap transition-all duration-300 ${effectiveCollapsed ? 'opacity-0 w-0' : 'opacity-100'}`}>
+              <span className={`truncate whitespace-nowrap transition-[width,opacity] duration-200 ease-out-strong ${effectiveCollapsed ? 'opacity-0 w-0' : 'opacity-100'}`}>
                 {effectivePinned ? 'Collapse' : 'Pin sidebar'}
               </span>
             </button>
@@ -747,7 +765,7 @@ export default function Sidebar() {
             const Icon = item.icon
             return (
               <Link key={item.href} href={item.href} className="flex flex-col items-center justify-center py-2 px-1 w-1/5">
-                <div className={`w-10 h-8 flex items-center justify-center rounded-full transition-all ${active ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}>
+                <div className={`w-10 h-8 flex items-center justify-center rounded-full transition-colors ${active ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}>
                   <Icon className="w-5 h-5" />
                 </div>
                 <span
@@ -772,7 +790,7 @@ export default function Sidebar() {
             aria-expanded={mobileOpen}
             className="flex flex-col items-center justify-center py-2 px-1 w-1/5"
           >
-            <div className={`w-10 h-8 flex items-center justify-center rounded-full transition-all ${mobileOpen ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}>
+            <div className={`w-10 h-8 flex items-center justify-center rounded-full transition-colors ${mobileOpen ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}>
               <Menu className="w-5 h-5" />
             </div>
             <span className={`text-[10px] mt-1 font-medium transition-colors ${mobileOpen ? 'text-foreground' : 'text-muted-foreground'}`}>More</span>
@@ -783,7 +801,7 @@ export default function Sidebar() {
             onClick={() => setProfileSheetOpen(o => !o)}
             className="flex flex-col items-center justify-center py-2 px-1 w-1/5"
           >
-            <div className={`w-10 h-8 flex items-center justify-center rounded-full transition-all ${profileSheetOpen ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}>
+            <div className={`w-10 h-8 flex items-center justify-center rounded-full transition-colors ${profileSheetOpen ? 'bg-primary/20 text-primary' : 'text-muted-foreground'}`}>
               <UserCircle className="w-5 h-5" />
             </div>
             <span className={`text-[10px] mt-1 font-medium transition-colors ${profileSheetOpen ? 'text-foreground' : 'text-muted-foreground'}`}>

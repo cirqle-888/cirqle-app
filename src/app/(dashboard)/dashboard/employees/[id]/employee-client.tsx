@@ -312,7 +312,7 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
                     required
                     value={form.agreement_value}
                     onChange={e => setForm({ ...form, agreement_value: e.target.value })}
-                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition"
                   />
                 </div>
                 {form.agreement_type === 'fixed_per_task' && (
@@ -336,7 +336,7 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
                     required
                     value={form.effective_from}
                     onChange={e => setForm({ ...form, effective_from: e.target.value })}
-                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition"
                   />
                 </div>
                 <div>
@@ -345,7 +345,7 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
                     type="date"
                     value={form.effective_to}
                     onChange={e => setForm({ ...form, effective_to: e.target.value })}
-                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                    className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition"
                   />
                 </div>
               </div>
@@ -356,7 +356,7 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
                   rows={2}
                   value={form.notes}
                   onChange={e => setForm({ ...form, notes: e.target.value })}
-                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                  className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition"
                 />
               </div>
 

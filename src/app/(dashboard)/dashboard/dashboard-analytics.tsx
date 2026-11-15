@@ -422,7 +422,7 @@ export default function DashboardAnalytics({
             { key: 'insights', label: 'Insights', icon: <Trophy className="w-3.5 h-3.5" /> },
           ] as { key: PulseTab; label: string; icon: React.ReactNode }[]).map(({ key, label, icon }) => (
             <button key={key} onClick={() => setPulseTab(key)}
-              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium transition-all ${pulseTab === key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+              className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium transition ${pulseTab === key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
               {icon} {label}
             </button>
           ))}
@@ -773,7 +773,7 @@ function KpiCard({ label, value, icon, color, sub, badge, trend, onClick, clicka
   const neutral   = showTrend && trend!.pct === 0
 
   return (
-    <Tag onClick={onClick} className={`bg-card border border-border shadow-sm rounded-xl p-4 ${clickable ? 'hover:border-primary/30 hover:shadow-md hover:bg-muted/30 transition-all text-left w-full cursor-pointer' : ''}`}>
+    <Tag onClick={onClick} className={`bg-card border border-border shadow-sm rounded-xl p-4 ${clickable ? 'hover:border-primary/30 hover:shadow-md hover:bg-muted/30 transition text-left w-full cursor-pointer' : ''}`}>
       <div className="flex items-center justify-between mb-3">
         <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">{label}</p>
         <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${cm[color] || cm.purple}`}>{icon}</div>

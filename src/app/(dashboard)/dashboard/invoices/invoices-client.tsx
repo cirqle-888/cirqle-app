@@ -4016,7 +4016,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                       aria-label="Remove item"
                       onClick={e => { e.stopPropagation(); removeItem(inv.id, item.id) }}
                       disabled={removingItemId === item.id}
-                      className="sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all shrink-0 mt-0.5">
+                      className="sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition shrink-0 mt-0.5">
                       <X className="w-3.5 h-3.5" />
                     </button>
                   )}
@@ -4193,7 +4193,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                           ))
                         }
                       }}
-                      className="opacity-0 group-hover:opacity-100 p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all shrink-0 mt-0.5"
+                      className="opacity-0 group-hover:opacity-100 p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition shrink-0 mt-0.5"
                       title="Remove expense from invoice"
                     >
                       <X className="w-3.5 h-3.5" />
@@ -4215,7 +4215,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                     <input
                       type="number" min="0" placeholder={getCurrencySymbol(inv.currency)}
                       onChange={e => { addPrice = parseFloat(e.target.value) || 0 }}
-                      className="w-20 bg-background border border-border/50 rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
+                      className="w-20 bg-background border border-border/50 rounded-lg px-2 py-1 text-sm text-right focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition"
                     />
                     <button
                       onClick={() => addManualItem(inv.id, addDesc, addPrice)}
@@ -4245,7 +4245,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                 <select
                   value={inv.currency}
                   onChange={e => updateInvoiceCurrency(inv.id, e.target.value as Currency)}
-                  className="bg-background border border-border/50 rounded-lg px-2.5 py-1 text-xs font-mono font-medium focus:outline-none focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/20 transition-all">
+                  className="bg-background border border-border/50 rounded-lg px-2.5 py-1 text-xs font-mono font-medium focus:outline-none focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/20 transition">
                   {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
@@ -4478,7 +4478,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                                 value={manualDiscount}
                                 onChange={e => setManualDiscount(e.target.value)}
                                 placeholder={`Max ${fmt(discountCalc.suggestedMax, inv.currency)}`}
-                                className="w-full bg-background border border-border/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
+                                className="w-full bg-background border border-border/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition"
                               />
                             </div>
                             <div className="text-center pt-8 text-xs font-medium text-muted-foreground w-16">
@@ -4494,7 +4494,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                               value={discountReason}
                               onChange={e => setDiscountReason(e.target.value)}
                               placeholder="e.g. Loyalty discount, early payment…"
-                              className="w-full bg-background border border-border/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all"
+                              className="w-full bg-background border border-border/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition"
                             />
                           </div>
                           <div className="flex gap-3 pt-1">
@@ -4606,7 +4606,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                 <div className="space-y-2">
                   {/* Direct Payments */}
                   {payments.map(p => (
-                    <div key={p.id} className="flex items-center justify-between p-3 bg-emerald-500/5 rounded-xl border border-emerald-500/20 text-sm hover:border-emerald-500/40 hover:shadow-sm transition-all group">
+                    <div key={p.id} className="flex items-center justify-between p-3 bg-emerald-500/5 rounded-xl border border-emerald-500/20 text-sm hover:border-emerald-500/40 hover:shadow-sm transition group">
                       <div>
                         <div className="font-bold text-emerald-600 dark:text-emerald-400 mb-1">{fmt(p.amount, (p.currency as Currency) || inv.currency)}</div>
                         <div className="text-xs text-muted-foreground font-medium flex flex-wrap items-center gap-1.5">
@@ -4631,14 +4631,14 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                         <button
                           onClick={() => setReceiptPayment({ pmt: p, invoice: inv })}
                           title="Get / share receipt"
-                          className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted-foreground hover:text-emerald-500 transition-all"
+                          className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted-foreground hover:text-emerald-500 transition-colors"
                         >
                           <Receipt className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => deletePayment(inv.id, p.id)}
                           title="Remove this payment"
-                          className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-all"
+                          className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -4648,7 +4648,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
 
                   {/* Cash Book Allocations */}
                   {standaloneLinks.map(a => (
-                    <div key={a.id} className="flex items-center justify-between p-3 bg-violet-500/5 rounded-xl border border-violet-500/20 text-sm hover:border-violet-500/40 hover:shadow-sm transition-all group">
+                    <div key={a.id} className="flex items-center justify-between p-3 bg-violet-500/5 rounded-xl border border-violet-500/20 text-sm hover:border-violet-500/40 hover:shadow-sm transition group">
                       <div>
                         <div className="font-bold text-emerald-600 dark:text-emerald-400 mb-1">
                           ₹{Number(a.allocated_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
@@ -4688,13 +4688,13 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                             invoice: inv,
                           })}
                           title="Get / share receipt"
-                          className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted-foreground hover:text-emerald-500 transition-all"
+                          className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted-foreground hover:text-emerald-500 transition-colors"
                         >
                           <Receipt className="w-4 h-4" />
                         </button>
                         <a
                           href={`/dashboard/cashbook?client=${inv.client_id}&focus=${a.cashbook_entry!.id}`}
-                          className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-violet-500/10 text-muted-foreground hover:text-violet-500 transition-all"
+                          className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-violet-500/10 text-muted-foreground hover:text-violet-500 transition"
                           title="View in Cash Book"
                         >
                           <ExternalLink className="w-4 h-4" />
@@ -4898,7 +4898,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                       const fx = payFx(v.toFixed(2), p.currency, p.rate)
                       return { ...p, amount: v.toFixed(2), rate: fx.rate, amountInr: fx.amountInr, rateSource: fx.rateSource }
                     })}
-                    className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-all ${parseFloat(payForm.amount) === v ? 'bg-violet-500/10 border-violet-500/40 text-violet-600 dark:text-violet-400' : 'border-border/60 text-muted-foreground hover:bg-secondary/50 hover:border-border hover:text-foreground'}`}>
+                    className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${parseFloat(payForm.amount) === v ? 'bg-violet-500/10 border-violet-500/40 text-violet-600 dark:text-violet-400' : 'border-border/60 text-muted-foreground hover:bg-secondary/50 hover:border-border hover:text-foreground'}`}>
                     {i === 0 ? 'Full' : 'Half'} {fmt(v, inv.currency)}
                   </button>
                 ))}
@@ -4923,7 +4923,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
               <label className="text-xs font-semibold text-foreground">Date</label>
               <input type="date" value={payForm.payment_date}
                 onChange={e => setPayForm(p => ({ ...p, payment_date: e.target.value }))}
-                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
+                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition shadow-sm"
               />
             </div>
             {bankAccounts.length > 0 && (
@@ -4944,7 +4944,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
               {PAYMENT_METHODS.map(m => (
                 <button key={m}
                   onClick={() => setPayForm(p => ({ ...p, payment_method: m }))}
-                  className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-all shadow-sm ${payForm.payment_method === m ? 'bg-violet-500 border-violet-600 text-white shadow-violet-500/20' : 'bg-card border-border/60 text-muted-foreground hover:bg-secondary hover:border-border hover:text-foreground'}`}>
+                  className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition shadow-sm ${payForm.payment_method === m ? 'bg-violet-500 border-violet-600 text-white shadow-violet-500/20' : 'bg-card border-border/60 text-muted-foreground hover:bg-secondary hover:border-border hover:text-foreground'}`}>
                   {METHOD_LABEL[m]}
                 </button>
               ))}
@@ -4957,7 +4957,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
               <input type="text" value={payForm.reference}
                 onChange={e => setPayForm(p => ({ ...p, reference: e.target.value }))}
                 placeholder="Txn ID / cheque number…"
-                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
+                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition shadow-sm"
               />
             </div>
 
@@ -4966,7 +4966,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
               <input type="text" value={payForm.notes}
                 onChange={e => setPayForm(p => ({ ...p, notes: e.target.value }))}
                 placeholder="Any notes about this payment…"
-                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
+                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition shadow-sm"
               />
             </div>
           </div>
@@ -4981,7 +4981,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
             const after   = balance - entered
             if (entered <= 0) return null
             return (
-              <div className={`flex items-center justify-between px-4 py-3 rounded-xl border text-sm font-bold transition-all shadow-sm ${
+              <div className={`flex items-center justify-between px-4 py-3 rounded-xl border text-sm font-bold transition-colors shadow-sm ${
                 after <= 0
                   ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
                   : 'bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400'
@@ -4995,7 +4995,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
           })()}
 
           {/* Advance payment toggle */}
-          <div className={`flex items-start gap-3 p-4 rounded-xl border transition-all cursor-pointer shadow-sm ${isAdvancePayment ? 'bg-amber-500/10 border-amber-500/30' : 'bg-card border-border/50 hover:border-border/80'}`}
+          <div className={`flex items-start gap-3 p-4 rounded-xl border transition-colors cursor-pointer shadow-sm ${isAdvancePayment ? 'bg-amber-500/10 border-amber-500/30' : 'bg-card border-border/50 hover:border-border/80'}`}
             onClick={() => setIsAdvancePayment(p => !p)}>
             <div className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${isAdvancePayment ? 'bg-amber-500 border-amber-600' : 'border-border/80'}`}>
               {isAdvancePayment && <Check className="w-3 h-3 text-white stroke-[3]" />}
@@ -5018,7 +5018,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
           <button
             onClick={() => handlePayment(inv.id)}
             disabled={saving || !payForm.amount}
-            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm">
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition shadow-sm">
             <CreditCard className="w-4 h-4" />
             {saving ? 'Saving…' : isAdvancePayment ? `Record Advance ${payForm.amount ? fmt(parseFloat(payForm.amount), inv.currency) : ''}` : `Record ${payForm.amount ? fmt(parseFloat(payForm.amount), inv.currency) : 'Payment'}`}
           </button>
@@ -5080,14 +5080,14 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
               <label className="text-xs font-semibold text-foreground">Issue Date</label>
               <input type="date" value={newForm.issue_date}
                 onChange={e => setNewForm(p => ({ ...p, issue_date: e.target.value }))}
-                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
+                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition shadow-sm"
               />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-foreground">Due Date</label>
               <input type="date" value={newForm.due_date}
                 onChange={e => setNewForm(p => ({ ...p, due_date: e.target.value }))}
-                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
+                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition shadow-sm"
               />
             </div>
           </div>
@@ -5106,18 +5106,18 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                 <div key={idx} className="flex gap-2 items-start group">
                   <input value={item.description} onChange={e => updateNewItem(idx, 'description', e.target.value)}
                     placeholder="Description…"
-                    className="flex-1 bg-background border border-border/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
+                    className="flex-1 bg-background border border-border/50 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition"
                   />
                   <div className="relative">
                     <span className="absolute left-2.5 top-2 text-muted-foreground text-sm font-medium">{getCurrencySymbol(newForm.currency as any)}</span>
                     <input type="number" value={item.unit_price || ''} onChange={e => updateNewItem(idx, 'unit_price', parseFloat(e.target.value) || 0)}
                       placeholder="0.00"
-                      className="w-24 bg-background border border-border/50 rounded-lg pl-7 pr-3 py-2 text-sm text-right focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all font-medium"
+                      className="w-24 bg-background border border-border/50 rounded-lg pl-7 pr-3 py-2 text-sm text-right focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition font-medium"
                     />
                   </div>
                   {newForm.items.length > 1 && (
                     <button aria-label="Remove line" onClick={() => setNewForm(p => ({ ...p, items: p.items.filter((_, i) => i !== idx) }))}
-                      className="p-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all shrink-0">
+                      className="p-2 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition shrink-0">
                       <X className="w-4 h-4" />
                     </button>
                   )}
@@ -5135,12 +5135,12 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
             <label className="text-xs font-semibold text-foreground">Notes <span className="text-muted-foreground font-normal">(optional)</span></label>
             <textarea value={newForm.notes} onChange={e => setNewForm(p => ({ ...p, notes: e.target.value }))}
               rows={2} placeholder="Optional notes for this invoice…"
-              className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm resize-none focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
+              className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm resize-none focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition shadow-sm"
             />
           </div>
 
           <button onClick={createManualInvoice} disabled={saving || !newForm.client_id}
-            className="w-full py-3 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm hover:shadow-violet-500/25 disabled:hover:shadow-none mt-2">
+            className="w-full py-3 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition shadow-sm hover:shadow-violet-500/25 disabled:hover:shadow-none mt-2">
             <FileText className="w-4 h-4" />
             {saving ? 'Creating…' : 'Create Invoice'}
           </button>
@@ -5189,7 +5189,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
             <div className="flex gap-2">
               {(['range', 'day'] as const).map(m => (
                 <button key={m} onClick={() => setGenForm(p => ({ ...p, mode: m }))}
-                  className={`flex-1 py-2 text-sm font-medium rounded-xl border transition-all shadow-sm ${genForm.mode === m ? 'bg-violet-500 border-violet-600 text-white shadow-violet-500/20' : 'bg-card border-border/60 text-muted-foreground hover:bg-secondary hover:border-border hover:text-foreground'}`}>
+                  className={`flex-1 py-2 text-sm font-medium rounded-xl border transition shadow-sm ${genForm.mode === m ? 'bg-violet-500 border-violet-600 text-white shadow-violet-500/20' : 'bg-card border-border/60 text-muted-foreground hover:bg-secondary hover:border-border hover:text-foreground'}`}>
                   {m === 'range' ? '📅 Date Range' : '📌 Specific Day'}
                 </button>
               ))}
@@ -5203,14 +5203,14 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                 <label className="text-xs font-semibold text-foreground">From</label>
                 <input type="date" value={genForm.date_from}
                   onChange={e => setGenForm(p => ({ ...p, date_from: e.target.value }))}
-                  className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
+                  className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition shadow-sm"
                 />
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-foreground">To</label>
                 <input type="date" value={genForm.date_to}
                   onChange={e => setGenForm(p => ({ ...p, date_to: e.target.value }))}
-                  className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
+                  className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition shadow-sm"
                 />
               </div>
             </div>
@@ -5219,14 +5219,14 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
               <label className="text-xs font-semibold text-foreground">Date</label>
               <input type="date" value={genForm.specific_date}
                 onChange={e => setGenForm(p => ({ ...p, specific_date: e.target.value }))}
-                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all shadow-sm"
+                className="w-full bg-card border border-border/50 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition shadow-sm"
               />
             </div>
           )}
 
           {/* Fetch button */}
           <button onClick={fetchGenTasks} disabled={genLoading || !genForm.client_id}
-            className="w-full py-3 bg-secondary hover:bg-secondary/80 border border-border/50 text-sm font-bold text-foreground rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm disabled:opacity-50 mt-2">
+            className="w-full py-3 bg-secondary hover:bg-secondary/80 border border-border/50 text-sm font-bold text-foreground rounded-xl flex items-center justify-center gap-2 transition shadow-sm disabled:opacity-50 mt-2">
             <Search className="w-4 h-4 text-muted-foreground" />
             {genLoading ? 'Fetching…' : 'Fetch Done Tasks'}
           </button>
@@ -5250,7 +5250,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                     const activeConflict = existInvs.filter((inv: any) => inv.status !== 'cancelled')
                     const hasConflict = activeConflict.length > 0
                     return (
-                  <label key={task.id} className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all shadow-sm
+                  <label key={task.id} className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition shadow-sm
                     ${hasConflict ? 'bg-amber-500/10 border-amber-500/30' : genSelectedIds.has(task.id) ? 'bg-violet-500/10 border-violet-500/40 shadow-violet-500/5' : 'bg-background border-border/50 hover:border-border/80'}`}>
                     <input type="checkbox" checked={genSelectedIds.has(task.id)}
                       onChange={e => setGenSelectedIds(prev => {
@@ -5301,7 +5301,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                   <span className="text-base font-bold text-violet-600 dark:text-violet-400">{fmt(selectedTotal)}</span>
                 </div>
                 <button onClick={createFromGenTasks} disabled={saving || selectedCount === 0}
-                  className="w-full py-3 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm hover:shadow-violet-500/25 disabled:hover:shadow-none">
+                  className="w-full py-3 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition shadow-sm hover:shadow-violet-500/25 disabled:hover:shadow-none">
                   <FileText className="w-4 h-4" />
                   {saving ? 'Creating…' : `Create Invoice · ${fmt(selectedTotal)}`}
                 </button>
@@ -5374,7 +5374,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
               Scans all <strong>Done</strong> tasks without an active invoice, then groups them by client and billing month.
             </p>
             <button onClick={fetchBatchGroups}
-              className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-sm hover:shadow-emerald-500/25">
+              className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition shadow-sm hover:shadow-emerald-500/25">
               Scan Un-invoiced Tasks
             </button>
           </div>
@@ -5399,7 +5399,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                   <input
                     type="text" placeholder="Filter by client…" value={batchFilterClient}
                     onChange={e => setBatchFilterClient(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 text-sm bg-background border border-border/50 rounded-xl focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all shadow-sm"
+                    className="w-full pl-9 pr-3 py-2 text-sm bg-background border border-border/50 rounded-xl focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition shadow-sm"
                   />
                 </div>
                 <select value={batchSortBy} onChange={e => setBatchSortBy(e.target.value as any)}
@@ -5417,13 +5417,13 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                 <div className="flex gap-2 flex-1">
                   <input type="month" value={batchFilterMonthFrom}
                     onChange={e => setBatchFilterMonthFrom(e.target.value)}
-                    className="flex-1 text-sm font-medium bg-background border border-border/50 rounded-xl px-3 py-1.5 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 text-foreground transition-all shadow-sm"
+                    className="flex-1 text-sm font-medium bg-background border border-border/50 rounded-xl px-3 py-1.5 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 text-foreground transition shadow-sm"
                     title="From month"
                   />
                   <span className="text-muted-foreground/50 text-sm font-medium self-center">→</span>
                   <input type="month" value={batchFilterMonthTo}
                     onChange={e => setBatchFilterMonthTo(e.target.value)}
-                    className="flex-1 text-sm font-medium bg-background border border-border/50 rounded-xl px-3 py-1.5 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 text-foreground transition-all shadow-sm"
+                    className="flex-1 text-sm font-medium bg-background border border-border/50 rounded-xl px-3 py-1.5 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 text-foreground transition shadow-sm"
                     title="To month"
                   />
                 </div>
@@ -5431,7 +5431,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                   <IndianRupee className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
                   <input type="number" placeholder="Min ₹" value={batchFilterMinAmount}
                     onChange={e => setBatchFilterMinAmount(e.target.value)}
-                    className="w-24 pl-7 pr-3 py-1.5 text-sm font-medium bg-background border border-border/50 rounded-xl focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition-all shadow-sm"
+                    className="w-24 pl-7 pr-3 py-1.5 text-sm font-medium bg-background border border-border/50 rounded-xl focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 transition shadow-sm"
                     title="Minimum invoice amount"
                   />
                 </div>
@@ -5457,7 +5457,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                   return (
                     <button key={label}
                       onClick={() => { setBatchFilterMonthFrom(active ? '' : from); setBatchFilterMonthTo(active ? '' : to) }}
-                      className={`text-xs font-bold px-2.5 py-1 rounded-lg border transition-all ${active ? 'bg-emerald-500 border-emerald-600 text-white shadow-emerald-500/20' : 'bg-background border-border/50 text-muted-foreground hover:bg-secondary hover:border-border hover:text-foreground shadow-sm'}`}>
+                      className={`text-xs font-bold px-2.5 py-1 rounded-lg border transition ${active ? 'bg-emerald-500 border-emerald-600 text-white shadow-emerald-500/20' : 'bg-background border-border/50 text-muted-foreground hover:bg-secondary hover:border-border hover:text-foreground shadow-sm'}`}>
                       {label}
                     </button>
                   )
@@ -5507,7 +5507,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                 const groupTasks = group.tasks || []
                 return (
                   <div key={group.key}
-                    className={`rounded-xl border transition-all shadow-sm ${checked ? 'bg-emerald-500/5 border-emerald-500/40 shadow-emerald-500/5' : 'bg-card border-border/50 hover:border-border/80'}`}>
+                    className={`rounded-xl border transition shadow-sm ${checked ? 'bg-emerald-500/5 border-emerald-500/40 shadow-emerald-500/5' : 'bg-card border-border/50 hover:border-border/80'}`}>
 
                     {/* ── Group header row ── */}
                     <div className="flex items-center gap-3 p-3">
@@ -5607,7 +5607,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                     <span className="text-emerald-600 dark:text-emerald-400">{batchDone} / {totalInvoices}</span>
                   </div>
                   <div className="h-2 bg-secondary rounded-full overflow-hidden relative z-10">
-                    <div className="h-full bg-emerald-500 transition-all duration-300 rounded-full"
+                    <div className="h-full bg-emerald-500 transition-[width] duration-300 rounded-full"
                       style={{ width: totalInvoices > 0 ? `${Math.round((batchDone / totalInvoices) * 100)}%` : '0%' }} />
                   </div>
                 </div>
@@ -5624,7 +5624,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
               {totalInvoices > 0 && <span className="ml-2 font-bold text-emerald-600 dark:text-emerald-400 text-sm">{fmt(totalAmount)}</span>}
             </div>
             <button onClick={runBatchGenerate} disabled={batchGenerating || totalInvoices === 0}
-              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl transition-all shadow-sm hover:shadow-emerald-500/25 disabled:opacity-50 disabled:hover:shadow-none disabled:cursor-not-allowed">
+              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl transition shadow-sm hover:shadow-emerald-500/25 disabled:opacity-50 disabled:hover:shadow-none disabled:cursor-not-allowed">
               <Zap className="w-4 h-4" />
               {batchGenerating ? `Creating… (${batchDone}/${totalInvoices})` : `Generate ${totalInvoices} Invoice${totalInvoices !== 1 ? 's' : ''}`}
             </button>
@@ -5752,7 +5752,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                 if (t.id === 'job_losses') loadJobLosses()
                 if (t.id === 'expenses')  loadExpenseReport()
               }}
-              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-t-lg border border-b-0 transition-all shrink-0 ${analyticsTab === t.id ? t.active : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-foreground/5'}`}>
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-t-lg border border-b-0 transition-colors shrink-0 ${analyticsTab === t.id ? t.active : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-foreground/5'}`}>
               {t.label}
               {t.count > 0 && (
                 <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${analyticsTab === t.id ? 'bg-background/20 shadow-sm' : 'bg-foreground/[0.06]'}`}>{t.count}</span>
@@ -5949,7 +5949,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                         <span className="font-semibold text-green-400">{fmt(totalBadDebt - badDebtUnpaid)}</span>
                       </div>
                       <div className="h-2 bg-foreground/[0.06] rounded-full overflow-hidden">
-                        <div className="h-full bg-green-500/60 rounded-full transition-all"
+                        <div className="h-full bg-green-500/60 rounded-full transition-[width]"
                           style={{ width: `${totalBadDebt > 0 ? ((totalBadDebt - badDebtUnpaid) / totalBadDebt) * 100 : 0}%` }} />
                       </div>
                       <div className="text-[10px] text-muted-foreground mt-1">

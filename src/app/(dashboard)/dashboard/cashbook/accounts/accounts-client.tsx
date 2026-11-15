@@ -209,7 +209,7 @@ export default function AccountsClient({ entries, accounts, isAdmin }: Props) {
               <button
                 key={acct.id}
                 onClick={() => { setSelectedId(acct.id); setSearch('') }}
-                className={`text-left rounded-xl border p-4 transition-all ${
+                className={`text-left rounded-xl border p-4 transition ${
                   isSelected
                     ? 'border-primary/50 bg-primary/5 ring-1 ring-primary/30'
                     : 'border-border bg-card hover:border-border/80 hover:bg-secondary/30'

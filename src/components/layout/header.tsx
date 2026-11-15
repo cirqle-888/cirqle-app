@@ -288,7 +288,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
       <div className="relative ml-1" ref={profileRef} data-profile-menu>
         <button 
           onClick={() => setProfileOpen(!profileOpen)}
-          className="flex items-center gap-2 rounded-full hover:bg-secondary/80 p-1 pr-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary group"
+          className="flex items-center gap-2 rounded-full hover:bg-secondary/80 p-1 pr-2 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-primary group"
           title="Account Settings"
         >
           {user.cqid ? (
@@ -306,7 +306,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
 
         {profileOpen && (
           <>
-            <div className="absolute right-0 top-full mt-2 w-72 max-h-[80vh] overflow-y-auto bg-card border border-border shadow-xl shadow-black/5 rounded-xl p-2 z-50 animate-in fade-in zoom-in-95 duration-200">
+            <div className="absolute right-0 top-full mt-2 w-72 max-h-[80vh] overflow-y-auto bg-card border border-border shadow-xl shadow-black/5 rounded-xl p-2 z-50 origin-top-right animate-in fade-in zoom-in-95 duration-200">
               <div className="px-2 py-2 mb-2 border-b border-border/50">
                 <div className="font-semibold text-foreground text-sm truncate tracking-tight">{user.cqid ?? 'Account'}</div>
                 {/* eslint-disable-next-line no-restricted-syntax -- deliberate: the SIGNED-IN user's own name in their own account menu, and only while privacy is unlocked. Never another employee's name. */}
@@ -346,7 +346,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
   return (
     <div
       ref={setBarRef}
-      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-x-3 gap-y-2 sm:gap-x-4 ${stackActions ? 'sm:flex-wrap' : ''} pr-3 md:px-5 border-b border-border/80 bg-background/95 supports-[backdrop-filter]:bg-background/60 backdrop-blur-md sticky top-0 z-30 transition-all ${isEmployee ? 'pl-3 py-2 sm:pl-16 sm:py-3.5' : 'pl-3 sm:pl-16 py-2.5 sm:py-3.5'}`}
+      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-x-3 gap-y-2 sm:gap-x-4 ${stackActions ? 'sm:flex-wrap' : ''} pr-3 md:px-5 border-b border-border/80 bg-background/95 supports-[backdrop-filter]:bg-background/60 backdrop-blur-md sticky top-0 z-30 transition-colors ${isEmployee ? 'pl-3 py-2 sm:pl-16 sm:py-3.5' : 'pl-3 sm:pl-16 py-2.5 sm:py-3.5'}`}
     >
       <div className="flex items-center justify-between w-full sm:w-auto sm:flex-1 min-w-0 sm:min-w-[10rem] gap-2">
         {/* Left: Branding & Title */}

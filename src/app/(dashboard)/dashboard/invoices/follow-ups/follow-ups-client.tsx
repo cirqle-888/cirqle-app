@@ -1172,7 +1172,7 @@ function InvoiceCard(p: CardProps) {
                 <button
                   onClick={() => p.onDeleteFollowup(h.id)}
                   title="Delete this entry"
-                  className="opacity-0 group-hover/h:opacity-100 text-muted-foreground hover:text-red-500 transition-all shrink-0"
+                  className="opacity-0 group-hover/h:opacity-100 text-muted-foreground hover:text-red-500 transition shrink-0"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>

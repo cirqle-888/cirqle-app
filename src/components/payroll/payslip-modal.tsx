@@ -189,7 +189,7 @@ export function PayslipModal({ employeeId, month, year, monthLabel, onClose, onS
                 <button
                   onClick={handleSend}
                   disabled={sending || !recipient.trim() || !emailConfigured || !!sentTo}
-                  className="flex-1 bg-primary text-primary-foreground text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+                  className="flex-1 bg-primary text-primary-foreground text-sm font-medium py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50 transition flex items-center justify-center gap-2"
                 >
                   {sentTo ? <><CheckCircle className="w-4 h-4" /> Sent</>
                     : sending ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</>

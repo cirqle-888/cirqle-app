@@ -154,7 +154,7 @@ export function IntegrationsClient({
           {/* Meta */}
           <button
             onClick={() => openClientSelector('meta')}
-            className="flex items-center gap-3 rounded-xl border border-border bg-secondary/30 p-4 hover:border-pink-500/40 hover:bg-secondary/60 transition-all text-left group"
+            className="flex items-center gap-3 rounded-xl border border-border bg-secondary/30 p-4 hover:border-pink-500/40 hover:bg-secondary/60 transition-colors text-left group"
           >
             <div className="h-10 w-10 rounded-xl bg-blue-500/10 flex items-center justify-center shrink-0">
               <svg className="h-6 w-6" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -172,7 +172,7 @@ export function IntegrationsClient({
           {/* Google */}
           <button
             disabled aria-describedby="google-ads-capability"
-            className="flex items-center gap-3 rounded-xl border border-border bg-secondary/30 p-4 hover:border-pink-500/40 hover:bg-secondary/60 transition-all text-left group"
+            className="flex items-center gap-3 rounded-xl border border-border bg-secondary/30 p-4 hover:border-pink-500/40 hover:bg-secondary/60 transition-colors text-left group"
           >
             <div className="h-10 w-10 rounded-xl bg-green-500/10 flex items-center justify-center shrink-0">
               <svg className="h-6 w-6" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">

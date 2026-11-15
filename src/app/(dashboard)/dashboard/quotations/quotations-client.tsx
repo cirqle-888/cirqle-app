@@ -274,7 +274,7 @@ export default function QuotationsClient({ initialQuotations }: Props) {
                       <button
                         onClick={() => setConvertConfirm(quo)}
                         disabled={convertingId === quo.id}
-                        className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20 disabled:opacity-50 transition-all group/btn"
+                        className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20 disabled:opacity-50 transition group/btn"
                         title="Convert to Invoice"
                       >
                         {convertingId === quo.id
@@ -297,7 +297,7 @@ export default function QuotationsClient({ initialQuotations }: Props) {
                       <button
                         title="Edit client in Settings"
                         onClick={() => { if (quo.client?.id) setEditClientId(quo.client.id) }}
-                        className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-muted-foreground hover:text-violet-400 transition-all p-1.5 rounded hover:bg-violet-500/10"
+                        className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-muted-foreground hover:text-violet-400 transition p-1.5 rounded hover:bg-violet-500/10"
                       >
                         <ExternalLink style={{ width: 12, height: 12 }} />
                       </button>

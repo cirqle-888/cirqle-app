@@ -89,7 +89,7 @@ function Toast({ toast, onDismiss }: ToastProps) {
 
   return (
     <div className={`relative flex items-start gap-3 bg-card border ${borders[toast.type]} rounded-xl px-4 py-3 shadow-2xl shadow-black/40 max-w-sm w-full overflow-hidden
-      transition-all duration-300 ease-out
+      transition-[opacity,translate] duration-300 ease-out
       ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}>
 
       {/* Progress bar (shows undo window) */}

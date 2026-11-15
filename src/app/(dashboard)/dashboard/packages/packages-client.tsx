@@ -434,7 +434,7 @@ export default function PackagesClient({
                       </div>
                       <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
                         <div
-                          className={`h-full rounded-full transition-all ${extras > 0 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                          className={`h-full rounded-full transition-[width,background-color] ${extras > 0 ? 'bg-amber-500' : 'bg-emerald-500'}`}
                           style={{ width: `${pct}%` }}
                         />
                       </div>

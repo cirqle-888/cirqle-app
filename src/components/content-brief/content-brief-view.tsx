@@ -78,7 +78,7 @@ export default function ContentBriefView({ brief, platforms, scheduledDate }: {
           <div className="flex flex-wrap gap-2">
             {images.map((src, i) => (
               <a key={i} href={src} target="_blank" rel="noreferrer" title="Open full size"
-                className="block w-24 h-24 rounded-lg overflow-hidden border border-border bg-secondary hover:ring-2 hover:ring-violet-500/40 transition-all">
+                className="block w-24 h-24 rounded-lg overflow-hidden border border-border bg-secondary hover:ring-2 hover:ring-violet-500/40 transition">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={src} alt={`Reference ${i + 1}`} loading="lazy" className="w-full h-full object-cover" />
               </a>

@@ -179,7 +179,7 @@ export default function GridArranger({
                 onDragEnd={() => { setDragKey(null); setOverKey(null) }}
                 onDragOver={e => { if (dragKey) { e.preventDefault(); setOverKey(key) } }}
                 onDrop={e => { if (dragKey) { e.preventDefault(); handleDrop(key) } }}
-                className={`relative ${tileAspect} group overflow-hidden bg-secondary transition-all ${
+                className={`relative ${tileAspect} group overflow-hidden bg-secondary transition ${
                   dragKey === key ? 'opacity-30' : ''
                 } ${overKey === key && dragKey && dragKey !== key ? 'ring-2 ring-primary ring-inset' : ''} ${
                   canPlan ? 'cursor-grab active:cursor-grabbing' : ''

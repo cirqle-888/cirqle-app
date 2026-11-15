@@ -320,7 +320,7 @@ function Switch({ label, checked, busy, onChange }: { label: string; checked: bo
         onClick={() => onChange(!checked)}
         className={`relative h-5 w-9 rounded-full transition-colors disabled:opacity-50 ${checked ? 'bg-emerald-500' : 'bg-secondary border border-border'}`}
       >
-        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${checked ? 'left-[18px]' : 'left-0.5'}`} />
+        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-[left] ${checked ? 'left-[18px]' : 'left-0.5'}`} />
       </button>
       {label}
     </span>

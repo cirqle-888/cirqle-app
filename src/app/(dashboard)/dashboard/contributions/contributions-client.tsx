@@ -1655,17 +1655,17 @@ export default function ContributionsClient({
                 <div className="flex items-center bg-secondary rounded-lg p-0.5 gap-0.5 border border-border/50 shrink-0">
                   <button type="button" onClick={() => setFilterEmployeeMode('worked')}
                     title="Tasks this employee worked on"
-                    className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'worked' ? 'bg-primary text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                    className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition ${filterEmployeeMode === 'worked' ? 'bg-primary text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                     Worked
                   </button>
                   <button type="button" onClick={() => setFilterEmployeeMode('solo')}
                     title="Sole contributor"
-                    className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'solo' ? 'bg-amber-500 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                    className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition ${filterEmployeeMode === 'solo' ? 'bg-amber-500 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                     Solo
                   </button>
                   <button type="button" onClick={() => setFilterEmployeeMode('any')}
                     title="Contributed or assigned"
-                    className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'any' ? 'bg-primary text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                    className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition ${filterEmployeeMode === 'any' ? 'bg-primary text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                     + Assigned
                   </button>
                   {/* "Everyone else" — the inverse of the three modes above, so
@@ -1673,7 +1673,7 @@ export default function ContributionsClient({
                       the rest of the team do without them". */}
                   <button type="button" onClick={() => setFilterEmployeeMode('without')}
                     title="Tasks everyone EXCEPT this person worked on"
-                    className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition-all ${filterEmployeeMode === 'without' ? 'bg-rose-500 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                    className={`text-[11px] font-medium px-2.5 py-1 rounded-md transition ${filterEmployeeMode === 'without' ? 'bg-rose-500 text-white shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
                     Everyone else
                   </button>
                 </div>
@@ -1943,7 +1943,7 @@ export default function ContributionsClient({
                                       <button key={emp.id} type="button"
                                         onClick={showFinancials && !done ? () => toggleAssignment(task.id, emp.id) : undefined}
                                         title={showFinancials ? (done ? `${dn(emp)} contributed` : assigned ? `Unassign ${dn(emp)}` : `Assign ${dn(emp)}`) : undefined}
-                                        className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium border transition-all ${chipStyle} ${showFinancials && !done ? 'hover:scale-105 cursor-pointer' : 'cursor-default'}`}>
+                                        className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-medium border transition ${chipStyle} ${showFinancials && !done ? 'hover:scale-105 cursor-pointer' : 'cursor-default'}`}>
                                         {done ? <Check className="w-2.5 h-2.5" /> : assigned ? <UserCheck className="w-2.5 h-2.5" /> : null}
                                         {dn(emp)}
                                         {done && scoreDetail && (
@@ -1973,7 +1973,7 @@ export default function ContributionsClient({
                                   href={`/dashboard/tasks?highlight=${task.id}`}
                                   title={`Open "${task.title}" in Tasks`}
                                   onClick={e => e.stopPropagation()}
-                                  className="p-1.5 rounded-md text-muted-foreground/50 hover:text-violet-400 hover:bg-violet-500/10 transition-all">
+                                  className="p-1.5 rounded-md text-muted-foreground/50 hover:text-violet-400 hover:bg-violet-500/10 transition-colors">
                                   <ExternalLink className="w-3.5 h-3.5" />
                                 </a>
                               )}
@@ -1985,14 +1985,14 @@ export default function ContributionsClient({
                               <button type="button"
                                 onClick={() => openEditTask(task)}
                                 title="Edit task details"
-                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-secondary transition-all">
+                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-secondary transition-colors">
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
                               <button type="button"
                                 onClick={() => handleDuplicateTask(task)}
                                 title="Duplicate task to today"
                                 disabled={duplicatingTaskId === task.id}
-                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-secondary transition-all disabled:opacity-40">
+                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-secondary transition disabled:opacity-40">
                                 {duplicatingTaskId === task.id
                                   ? <span className="w-3.5 h-3.5 border-2 border-muted-foreground/30 border-t-muted-foreground rounded-full animate-spin inline-block" />
                                   : <Copy className="w-3.5 h-3.5" />
@@ -2814,7 +2814,7 @@ export default function ContributionsClient({
                 return (
                   <button key={tool.id} type="button"
                     onClick={() => setToolsUsed(prev => ({ ...prev, [tool.id]: !prev[tool.id] }))}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border transition-all ${
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
                       used ? 'bg-purple-500/15 border-purple-500/30 text-purple-700 dark:text-purple-300' : 'bg-secondary border-transparent text-muted-foreground hover:border-border'
                     }`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${used ? 'bg-purple-400' : 'bg-muted-foreground/40'}`} />
@@ -2859,7 +2859,7 @@ export default function ContributionsClient({
                 .filter(g => g.masterVal > 0 || g.subTotal > 0)
 
               return (
-                <div key={emp.id} className={`bg-card border rounded-xl overflow-hidden transition-all ${isExpanded || isOwnScope ? 'border-primary/20' : 'border-border'}`}>
+                <div key={emp.id} className={`bg-card border rounded-xl overflow-hidden transition-colors ${isExpanded || isOwnScope ? 'border-primary/20' : 'border-border'}`}>
 
                   {/* Own-scope: static header — card always open, no toggle needed */}
                   {isOwnScope ? (
@@ -2954,11 +2954,11 @@ export default function ContributionsClient({
 
                         return (
                           <div key={group.id}
-                            className={`rounded-xl border transition-all ${isGroupOn ? 'border-primary/25 bg-primary/[0.03]' : 'border-border bg-secondary/20'}`}>
+                            className={`rounded-xl border transition-colors ${isGroupOn ? 'border-primary/25 bg-primary/[0.03]' : 'border-border bg-secondary/20'}`}>
 
                             <button type="button" onClick={() => toggleGroup(emp.id, group.id)}
                               className="w-full flex items-center gap-3 px-4 py-3 text-left">
-                              <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${
+                              <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
                                 isGroupOn ? 'border-primary bg-primary' : 'border-muted-foreground/30 hover:border-muted-foreground'
                               }`}>
                                 {isGroupOn && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
@@ -2977,7 +2977,7 @@ export default function ContributionsClient({
                                 </div>
                                 {/* progress bar */}
                                 <div className="mt-1.5 h-1 w-full max-w-[170px] rounded-full bg-foreground/10 overflow-hidden">
-                                  <div className="h-full rounded-full bg-blue-500 dark:bg-blue-400 transition-all" style={{ width: `${progressPct}%` }} />
+                                  <div className="h-full rounded-full bg-blue-500 dark:bg-blue-400 transition-[width]" style={{ width: `${progressPct}%` }} />
                                 </div>
                               </div>
                               {isGroupOn && masterVal > 0 && (
@@ -3010,7 +3010,7 @@ export default function ContributionsClient({
                                         {[25, 50, 75, 100].map(pct => (
                                           <button key={pct} type="button"
                                             onClick={() => setContrib(master.id, emp.id, masterVal === pct ? 0 : pct)}
-                                            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                                            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
                                               masterVal === pct ? 'gradient-bg text-white shadow-sm' : 'bg-secondary text-muted-foreground hover:text-foreground'
                                             }`}>
                                             {pct}%
@@ -3026,7 +3026,7 @@ export default function ContributionsClient({
                                       <div className="flex items-center gap-2">
                                         <button type="button" onClick={() => setContrib(master.id, emp.id, Math.max(0, masterVal - 1))}
                                           disabled={masterVal === 0}
-                                          className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-90 disabled:opacity-30 disabled:active:scale-100 transition-all">
+                                          className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-95 disabled:opacity-30 disabled:active:scale-100 transition">
                                           <Minus className="w-4 h-4" />
                                         </button>
                                         <input type="number" inputMode="numeric" min="0" step="1"
@@ -3035,7 +3035,7 @@ export default function ContributionsClient({
                                           className="w-16 h-10 bg-background border border-border rounded-lg px-2 text-base text-center font-bold focus:outline-none focus:ring-2 focus:ring-primary/50"
                                           placeholder="0" />
                                         <button type="button" onClick={() => setContrib(master.id, emp.id, masterVal + 1)}
-                                          className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-90 transition-all">
+                                          className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-95 transition">
                                           <Plus className="w-4 h-4" />
                                         </button>
                                         <span className="text-xs text-muted-foreground">items</span>
@@ -3074,7 +3074,7 @@ export default function ContributionsClient({
                                           <button type="button" aria-label={`Decrease ${param.name}`}
                                             onClick={() => setContrib(param.id, emp.id, Math.max(0, count - 1))}
                                             disabled={count === 0}
-                                            className="w-9 h-9 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-90 disabled:opacity-30 disabled:active:scale-100 transition-all">
+                                            className="w-9 h-9 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-95 disabled:opacity-30 disabled:active:scale-100 transition">
                                             <Minus className="w-4 h-4" />
                                           </button>
                                           <input type="number" inputMode="numeric" min="0" step="1"
@@ -3085,7 +3085,7 @@ export default function ContributionsClient({
                                             }`} />
                                           <button type="button" aria-label={`Increase ${param.name}`}
                                             onClick={() => setContrib(param.id, emp.id, count + 1)}
-                                            className="w-9 h-9 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-90 transition-all">
+                                            className="w-9 h-9 rounded-lg bg-secondary flex items-center justify-center hover:bg-secondary/60 active:scale-95 transition">
                                             <Plus className="w-4 h-4" />
                                           </button>
                                         </div>
@@ -3186,7 +3186,7 @@ export default function ContributionsClient({
                       </div>
                       <div className="flex items-center gap-2">
                         <div className="flex-1 bg-secondary rounded-full h-2">
-                          <div className="h-2 rounded-full gradient-bg transition-all" style={{ width: `${pct}%` }} />
+                          <div className="h-2 rounded-full gradient-bg transition-[width]" style={{ width: `${pct}%` }} />
                         </div>
                         <span className="text-xs text-muted-foreground shrink-0 w-9 text-right">{pct.toFixed(1)}%</span>
                       </div>
@@ -3268,7 +3268,7 @@ export default function ContributionsClient({
               toast.info('Draft discarded')
             }}
             title="Discard draft"
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-red-400 px-3 py-2 rounded-lg hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-all shrink-0">
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-red-400 px-3 py-2 rounded-lg hover:bg-red-500/10 border border-transparent hover:border-red-500/20 transition-colors shrink-0">
             <Trash2 className="w-3.5 h-3.5 shrink-0" />
             <span className="hidden sm:inline">Discard draft</span>
           </button>

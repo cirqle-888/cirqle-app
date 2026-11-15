@@ -395,7 +395,7 @@ export function AvatarPicker({ value, onChange, name, cqid, onUpload }: AvatarPi
         type="button"
         onClick={() => onChange(preset.id)}
         title={preset.label}
-        className={`relative rounded-xl overflow-hidden transition-all ${
+        className={`relative rounded-xl overflow-hidden transition ${
           selected
             ? 'ring-2 ring-primary ring-offset-2 ring-offset-background scale-105'
             : 'ring-1 ring-border hover:ring-primary/50 hover:scale-105'

@@ -180,7 +180,7 @@ function BudgetBar({ spent, total }: { spent: number; total: number }) {
         <span>{pct.toFixed(0)}%</span>
       </div>
       <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
-        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
+        <div className={`h-full rounded-full transition-[width,background-color] ${color}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
   )
@@ -726,7 +726,7 @@ export default function AdvertisingClient({
             {filteredCards.map(c => <CampaignCard key={c.p.id} card={c} walletOn={walletSupported} showBilling={perms.viewBilling} />)}
             <Link
               href="/dashboard/connections"
-              className="group rounded-xl border border-dashed border-border bg-card/50 p-5 flex flex-col items-center justify-center gap-2 hover:border-pink-500/40 hover:bg-card transition-all text-center"
+              className="group rounded-xl border border-dashed border-border bg-card/50 p-5 flex flex-col items-center justify-center gap-2 hover:border-pink-500/40 hover:bg-card transition-colors text-center"
             >
               <div className="h-10 w-10 rounded-xl bg-pink-500/10 flex items-center justify-center">
                 <Link2 className="h-5 w-5 text-pink-500" />
@@ -1093,7 +1093,7 @@ export function CampaignCard({ card, walletOn, showBilling }: { card: CardData; 
   return (
     <Link
       href={`/dashboard/advertising/${p.id}`}
-      className="group relative rounded-xl border border-border bg-card p-5 hover:border-pink-500/40 hover:shadow-md transition-all"
+      className="group relative rounded-xl border border-border bg-card p-5 hover:border-pink-500/40 hover:shadow-md transition"
     >
       {/* Card header */}
       <div className="flex items-start justify-between gap-2 mb-3">

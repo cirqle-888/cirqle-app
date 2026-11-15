@@ -181,7 +181,7 @@ export function FilterDropdown({
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className={`flex items-center gap-1.5 ${compact ? 'h-[30px] px-2 text-xs' : 'h-[34px] px-3 text-sm'} rounded-xl font-medium transition-all border
+        className={`flex items-center gap-1.5 ${compact ? 'h-[30px] px-2 text-xs' : 'h-[34px] px-3 text-sm'} rounded-xl font-medium transition-colors border
           ${isActive
             ? 'bg-violet-500/15 border-violet-500/40 text-violet-700 dark:text-violet-300'
             : 'bg-secondary border-foreground/15 text-muted-foreground hover:text-foreground hover:border-foreground/20'
@@ -300,7 +300,7 @@ function OptionRow({ opt, selected, onSelect, multiple = false }: { opt: FilterO
       className={`w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors
         ${selected ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300' : 'text-foreground hover:bg-foreground/[0.06]'}`}
     >
-      <span className={`w-4 h-4 ${square ? 'rounded' : 'rounded-full'} border-2 flex items-center justify-center shrink-0 transition-all
+      <span className={`w-4 h-4 ${square ? 'rounded' : 'rounded-full'} border-2 flex items-center justify-center shrink-0 transition-colors
         ${selected ? 'border-violet-500 bg-violet-500' : 'border-foreground/20'}`}>
         {selected && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
       </span>

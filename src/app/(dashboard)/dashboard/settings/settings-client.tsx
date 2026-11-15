@@ -90,7 +90,7 @@ function ArchFilterTabs({ value, onChange }: { value: 'active' | 'archived' | 'a
       {(['active', 'archived', 'all'] as const).map(f => (
         <button key={f} onClick={() => onChange(f)}
           className={cn(
-            'px-3 py-1.5 text-[13px] font-medium rounded-md transition-all',
+            'px-3 py-1.5 text-[13px] font-medium rounded-md transition',
             value === f ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/50',
           )}>
           {f === 'active' ? 'Active' : f === 'archived' ? 'Archived' : 'All'}
@@ -1495,7 +1495,7 @@ export default function SettingsClient(props: Props) {
                           key={opt.value}
                           type="button"
                           onClick={() => setCompanySettings(p => ({ ...p, invoice_bg_style: opt.value }))}
-                          className={`relative h-14 rounded-lg border-2 overflow-hidden text-xs font-medium transition-all ${active ? 'border-primary' : 'border-border hover:border-muted-foreground'}`}
+                          className={`relative h-14 rounded-lg border-2 overflow-hidden text-xs font-medium transition-colors ${active ? 'border-primary' : 'border-border hover:border-muted-foreground'}`}
                           style={{ background: '#fff' }}
                         >
                           {opt.value === 'dots' && (
@@ -1767,7 +1767,7 @@ export default function SettingsClient(props: Props) {
                       key={f}
                       onClick={() => setEmpFilter(f)}
                       className={cn(
-                        "px-3 py-1.5 text-[13px] font-medium rounded-md transition-all",
+                        "px-3 py-1.5 text-[13px] font-medium rounded-md transition",
                         empFilter === f
                           ? "bg-background text-foreground shadow-sm ring-1 ring-border/50"
                           : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
@@ -1816,7 +1816,7 @@ export default function SettingsClient(props: Props) {
                     </p>
                   </div>
                 ) : filteredEmployees.map(emp => (
-                  <div key={emp.id} className="group bg-card border border-border/40 rounded-2xl px-5 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-primary/20 hover:shadow-sm transition-all">
+                  <div key={emp.id} className="group bg-card border border-border/40 rounded-2xl px-5 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-primary/20 hover:shadow-sm transition">
                     <div className="flex items-center gap-4">
                       <PresenceAvatar
                         employeeId={emp.id}
@@ -1977,7 +1977,7 @@ export default function SettingsClient(props: Props) {
                 <div className="flex items-center gap-3">
                   <h2 className="text-sm font-semibold">Services ({filteredServices.length}{serviceSearch ? `/${services.length}` : ''})</h2>
                   <button onClick={() => setQuickEdit(q => !q)}
-                    className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-all ${
+                    className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors ${
                       quickEdit ? 'bg-amber-500/15 border-amber-500/30 text-amber-400' : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
                     }`}>
                     <Zap className="w-3 h-3" /> {quickEdit ? 'Exit edit' : 'Quick edit'}
@@ -2212,7 +2212,7 @@ export default function SettingsClient(props: Props) {
                       const res = await updateServiceCategory(c.id, { color: next })
                       if (!res.ok) toast.error('Colour not saved', res.error)
                     }}
-                    className={`w-3.5 h-3.5 rounded-full shrink-0 ring-2 ring-transparent hover:ring-border transition-all ${dotCls[c.color] || 'bg-muted-foreground/40'}`}
+                    className={`w-3.5 h-3.5 rounded-full shrink-0 ring-2 ring-transparent hover:ring-border transition ${dotCls[c.color] || 'bg-muted-foreground/40'}`}
                   />
                   <div className="flex-1 min-w-0">
                     <input
@@ -2358,7 +2358,7 @@ export default function SettingsClient(props: Props) {
                   <div className="flex items-center gap-3">
                     <h2 className="text-sm font-semibold">Contribution Groups ({filteredGroups.length}{groupSearch ? `/${groups.length}` : ''})</h2>
                     <button onClick={() => setQuickEdit(q => !q)}
-                      className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-all ${
+                      className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors ${
                         quickEdit ? 'bg-amber-500/15 border-amber-500/30 text-amber-400' : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
                       }`}>
                       <Zap className="w-3 h-3" /> {quickEdit ? 'Exit edit' : 'Quick edit'}
@@ -2375,7 +2375,7 @@ export default function SettingsClient(props: Props) {
                         key={f}
                         onClick={() => setGpFilter(f)}
                         className={cn(
-                          "px-3 py-1.5 text-[13px] font-medium rounded-md transition-all",
+                          "px-3 py-1.5 text-[13px] font-medium rounded-md transition",
                           gpFilter === f
                             ? "bg-background text-foreground shadow-sm ring-1 ring-border/50"
                             : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
@@ -2601,7 +2601,7 @@ export default function SettingsClient(props: Props) {
                 <div className="flex items-center gap-3">
                   <h2 className="text-sm font-semibold">AI / Design Tools ({filteredTools.length}{toolSearch ? `/${tools.length}` : ''})</h2>
                   <button onClick={() => setQuickEdit(q => !q)}
-                    className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-all ${
+                    className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors ${
                       quickEdit ? 'bg-amber-500/15 border-amber-500/30 text-amber-400' : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
                     }`}>
                     <Zap className="w-3 h-3" /> {quickEdit ? 'Exit edit' : 'Quick edit'}
@@ -3161,7 +3161,7 @@ export default function SettingsClient(props: Props) {
             />
           )}
           {tab === 'Matching' && (
-            <div className="max-w-4xl space-y-6 animate-in fade-in zoom-in-95 duration-200">
+            <div className="max-w-4xl space-y-6">
               <div className="flex flex-col gap-1 border-b border-border/50 pb-4 mb-4">
                 <h2 className="text-lg font-semibold tracking-tight flex items-center gap-2">
                   <RefreshCw className="w-5 h-5 text-amber-500" />
@@ -3732,7 +3732,7 @@ export default function SettingsClient(props: Props) {
                                 : [...selected, g.id]
                               setForm((p: any) => ({ ...p, _groupIds: next }))
                             }}
-                            className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border text-sm transition-all ${
+                            className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border text-sm transition-colors ${
                               isSelected
                                 ? 'bg-primary/10 border-primary/30 text-foreground'
                                 : 'bg-secondary border-transparent text-muted-foreground hover:border-border'
@@ -3746,7 +3746,7 @@ export default function SettingsClient(props: Props) {
                               </p>
                               <p className="text-xs opacity-60">Relative weight: {g.weight}</p>
                             </div>
-                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${
+                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
                               isSelected ? 'border-primary bg-primary' : 'border-muted-foreground/30'
                             }`}>
                               {isSelected && <span className="text-white text-xs font-bold">✓</span>}
@@ -3919,7 +3919,7 @@ export default function SettingsClient(props: Props) {
                     <FieldRow label={<span className="flex items-center gap-1">Main Contribution? <InfoTip text="Mark this as the primary parameter for its group (e.g. Design, Products). Each group should have exactly one master parameter." /></span>}>
                       <button type="button"
                         onClick={() => setForm((p: any) => ({ ...p, is_master: !p.is_master }))}
-                        className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm font-medium transition-all ${
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
                           form.is_master
                             ? 'bg-purple-500/15 border-purple-500/30 text-purple-700 dark:text-purple-300'
                             : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
@@ -3935,7 +3935,7 @@ export default function SettingsClient(props: Props) {
                       <div className="flex gap-2">
                         <button type="button"
                           onClick={() => setForm((p: any) => ({ ...p, input_type: 'percentage' }))}
-                          className={`flex-1 py-2 rounded-lg border text-sm font-medium transition-all ${
+                          className={`flex-1 py-2 rounded-lg border text-sm font-medium transition-colors ${
                             (form.input_type || 'count') === 'percentage'
                               ? 'bg-blue-500/15 border-blue-500/30 text-blue-700 dark:text-blue-300'
                               : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
@@ -3944,7 +3944,7 @@ export default function SettingsClient(props: Props) {
                         </button>
                         <button type="button"
                           onClick={() => setForm((p: any) => ({ ...p, input_type: 'count' }))}
-                          className={`flex-1 py-2 rounded-lg border text-sm font-medium transition-all ${
+                          className={`flex-1 py-2 rounded-lg border text-sm font-medium transition-colors ${
                             (form.input_type || 'count') === 'count'
                               ? 'bg-secondary border-primary/40 text-foreground'
                               : 'bg-secondary border-border text-muted-foreground hover:text-foreground'

@@ -3960,7 +3960,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                             <div
                               key={task.id + section.label + (section.paramName || '')}
                               onClick={() => openEdit(task)}
-                              className="bg-card border border-border/60 rounded-xl p-3 hover:border-violet-500/30 hover:shadow-sm transition-all group cursor-pointer"
+                              className="bg-card border border-border/60 rounded-xl p-3 hover:border-violet-500/30 hover:shadow-sm transition group cursor-pointer"
                             >
                               <div className="flex items-start gap-2">
                                 <div className="flex-1 min-w-0">
@@ -4000,7 +4000,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                                   <button
                                     onClick={e => { e.stopPropagation(); openAssignModal(task) }}
                                     title="Assign team"
-                                    className="lg:opacity-0 opacity-100 group-hover:opacity-100 text-muted-foreground hover:text-blue-400 transition-all p-1 rounded hover:bg-blue-500/10 shrink-0"
+                                    className="lg:opacity-0 opacity-100 group-hover:opacity-100 text-muted-foreground hover:text-blue-400 transition p-1 rounded hover:bg-blue-500/10 shrink-0"
                                   >
                                     <Users className="w-3.5 h-3.5" />
                                   </button>
@@ -4010,7 +4010,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                                     onClick={e => { e.stopPropagation(); duplicateTask(task) }}
                                     disabled={duplicatingId === task.id}
                                     title="Duplicate task"
-                                    className="lg:opacity-0 opacity-100 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-all p-1 rounded hover:bg-secondary shrink-0 disabled:opacity-40"
+                                    className="lg:opacity-0 opacity-100 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition p-1 rounded hover:bg-secondary shrink-0 disabled:opacity-40"
                                   >
                                     <Copy className="w-3.5 h-3.5" />
                                   </button>
@@ -4554,7 +4554,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                               else next.add(emp.id)
                               return next
                             })}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border transition-all ${
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
                               on
                                 ? 'bg-blue-500/15 border-blue-500/40 text-blue-700 dark:text-blue-300'
                                 : 'bg-foreground/[0.04] border-foreground/15 text-muted-foreground hover:border-foreground/20 hover:text-foreground'
@@ -4910,7 +4910,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                                 <span>{pctDone}%</span>
                               </div>
                               <div className="h-1.5 bg-foreground/[0.06] rounded-full overflow-hidden">
-                                <div className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all" style={{ width: `${pctDone}%` }} />
+                                <div className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-[width]" style={{ width: `${pctDone}%` }} />
                               </div>
                             </div>
                           )}

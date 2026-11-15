@@ -153,7 +153,7 @@ export function DateFilter({ value, onChange, className = '', compact = false }:
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className={`flex items-center gap-1.5 ${compact ? 'h-[30px] px-2 text-xs' : 'h-[34px] px-3 text-sm'} rounded-lg font-medium transition-all border ${
+        className={`flex items-center gap-1.5 ${compact ? 'h-[30px] px-2 text-xs' : 'h-[34px] px-3 text-sm'} rounded-lg font-medium transition-colors border ${
           isActive
             ? 'bg-primary/10 border-primary/30 text-primary'
             : 'bg-secondary border-transparent text-muted-foreground hover:text-foreground hover:border-border/50'
@@ -185,7 +185,7 @@ export function DateFilter({ value, onChange, className = '', compact = false }:
           <div className="flex items-center gap-1 p-2 border-b border-border">
             {(['presets', 'month', 'range', 'day'] as PanelMode[]).map(m => (
               <button key={m} type="button" onClick={() => setMode(m)}
-                className={`flex-1 text-[11px] font-semibold py-1.5 rounded-lg transition-all ${
+                className={`flex-1 text-[11px] font-semibold py-1.5 rounded-lg transition-colors ${
                   mode === m
                     ? 'bg-primary/15 text-primary'
                     : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
@@ -202,7 +202,7 @@ export function DateFilter({ value, onChange, className = '', compact = false }:
                 const active = value?.type === p.key
                 return (
                   <button key={p.key} type="button" onClick={() => selectPreset(p.key)}
-                    className={`px-3 py-2.5 rounded-xl text-sm font-medium text-left transition-all border ${
+                    className={`px-3 py-2.5 rounded-xl text-sm font-medium text-left transition border ${
                       active
                         ? 'gradient-bg text-white border-transparent shadow-sm'
                         : 'bg-secondary border-transparent text-muted-foreground hover:text-foreground hover:border-border/50'
@@ -237,7 +237,7 @@ export function DateFilter({ value, onChange, className = '', compact = false }:
                   const isCurrent  = now.getFullYear() === monthNav.year && now.getMonth() === i
                   return (
                     <button key={m} type="button" onClick={() => selectMonth(monthNav.year, i)}
-                      className={`py-2 rounded-xl text-xs font-semibold transition-all ${
+                      className={`py-2 rounded-xl text-xs font-semibold transition ${
                         isSelected
                           ? 'gradient-bg text-white shadow-sm'
                           : isCurrent
@@ -299,7 +299,7 @@ export function DateFilter({ value, onChange, className = '', compact = false }:
                   const label = offset === 0 ? 'Today' : offset === -1 ? 'Yesterday' : d.toLocaleDateString('en', { weekday: 'short', day: 'numeric' })
                   return (
                     <button key={offset} type="button" onClick={() => setSingleDay(iso)}
-                      className={`text-[11px] font-semibold py-1.5 rounded-lg transition-all ${
+                      className={`text-[11px] font-semibold py-1.5 rounded-lg transition ${
                         singleDay === iso
                           ? 'gradient-bg text-white shadow-sm'
                           : 'bg-secondary text-muted-foreground hover:text-foreground'
