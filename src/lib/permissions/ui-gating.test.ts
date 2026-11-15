@@ -220,7 +220,9 @@ describe('portfolio aggregates are gated on showTotals, not showAmounts', () => 
 
   it('dues-by-month is hidden wholesale, being nothing but money', () => {
     const src = read3('src/app/(dashboard)/dashboard/invoices/invoices-client.tsx')
-    expect(src).toContain('{showTotals && !showRightPanel && stats.monthDues.length > 0 && (')
+    // The money gate is `showTotals`. The layout condition that used to sit
+    // beside it (`!showRightPanel`) was dropped in 744b521 and is not pinned.
+    expect(src).toContain('{showTotals && stats.monthDues.length > 0 && (')
   })
 
   it('per-client and per-invoice figures still follow showAmounts', () => {

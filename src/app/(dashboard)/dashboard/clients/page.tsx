@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { collectedAmount, isRevenueInvoice, outstandingAmount, recognisedRevenue } from '@/lib/finance/invoice-revenue'
-import { createAdminClient, fetchAll, columnExists } from '@/lib/supabase/server'
+import { createAdminClient, fetchAll, fetchAllParallel, columnExists } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { financialVisibility } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
@@ -42,7 +42,7 @@ export default async function ClientsPage() {
   // BOTH features.
   const hasDeptOverride = await columnExists(supabase, 'clients', 'department_id')
 
-  const [clientsRes, invoicesRes, tasksRes, pricingRes, servicesRes] = await Promise.all([
+  const [clientsRes, invoicesRes, tasksRes, pricingRes, servicesRes, departmentsRes] = await Promise.all([
     // Draft (trial) columns need 20261003100000_draft_clients; without them
     // the list loads as before and nothing shows as a draft.
     (async () => {
@@ -60,23 +60,27 @@ export default async function ClientsPage() {
       : Promise.resolve({ data: [] as any[] }),
     // service_id so the task rollups can be filtered to the viewer's
     // departments — otherwise the counts leak cross-department volume.
-    fetchAll(supabase.from('tasks').select('client_id, service_id, status').is('deleted_at', null)),
+    //
+    // Every task ever, so past 1,000 rows: the pages are requested together
+    // (they were fetched one after another), and ordered by id — paging an
+    // unordered read can repeat or skip rows at a page boundary, which here
+    // would have miscounted a client's tasks without any error.
+    fetchAllParallel(() => supabase.from('tasks').select('client_id, service_id, status').is('deleted_at', null).order('id'), 4),
     // Canonical commitment predicate — without is_active the "services" stat
     // counts services the client no longer buys.
     fetchAll(supabase.from('client_service_pricing').select('client_id, service_id').eq('is_active', true)),
     supabase.from('services').select('id, name, category_id').eq('is_active', true),
-  ])
-
-  // Departments for the "group by department" view. Graceful pre-migration.
-  let departments: any[] = []
-  {
-    const { data } = await supabase
+    // Departments for the "group by department" view. Graceful pre-migration.
+    // In the batch: it waits on nothing above, and used to add a round trip
+    // of its own after everything else had landed.
+    supabase
       .from('service_categories')
       .select('id, name, color, display_order')
       .eq('is_active', true)
-      .order('display_order')
-    departments = data || []
-  }
+      .order('display_order'),
+  ])
+
+  const departments: any[] = departmentsRes.data || []
 
   // Clients with no pricing rows are "not configured yet", not "buys nothing" —
   // they stay visible to everyone so they can be found and configured.

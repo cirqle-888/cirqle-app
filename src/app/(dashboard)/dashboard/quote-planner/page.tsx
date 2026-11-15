@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { fetchAll } from '@/lib/supabase/server'
+import { fetchAll, fetchAllParallel } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { userCanSee } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
@@ -37,8 +37,14 @@ export default async function QuotePlannerPage() {
       fetchAll(admin.from('exchange_rates').select('currency, rate_to_inr')),
       fetchAll(admin.from('quote_plans').select('id, name, client_id, status, currency, term_months, updated_at').is('deleted_at', null).order('updated_at', { ascending: false })),
       // Historical shares: what each employee actually averaged, per service.
-      fetchAll(admin.from('contribution_scores').select('task_id, employee_id, score_percentage')),
-      fetchAll(admin.from('tasks').select('id, service_id').is('deleted_at', null)),
+      //
+      // The two big reads on this page — 5,683 score rows and ~2,100 tasks on
+      // 15 Nov 2026, six pages and three. fetchAll asked for them one page
+      // after another (the six alone were ~2.3 s from a laptop); these ask for
+      // every page together. Ordered by id, which paging needs to be stable
+      // and which the unordered reads before this never guaranteed.
+      fetchAllParallel(() => admin.from('contribution_scores').select('task_id, employee_id, score_percentage').order('id'), 8),
+      fetchAllParallel(() => admin.from('tasks').select('id, service_id').is('deleted_at', null).order('id'), 4),
     ])
 
   return (

@@ -181,6 +181,37 @@ async function verifyProfile(cookie: string | undefined, authId: string): Promis
   }
 }
 
+/**
+ * The same profile, held in this server instance's memory.
+ *
+ * Exists for Server Actions, which may not be handed a cookie (see
+ * `isServerAction` in updateSession). Same payload, same 60 s expiry and the
+ * same binding to the auth id as the cookie, so it can never outlive or widen
+ * what the cookie would have allowed. Per instance, so a cold one simply
+ * reads the database once.
+ */
+const PROFILE_MEMO = new Map<string, ProfileCachePayload>()
+
+export function recallProfile(authId: string, nowSec = Math.floor(Date.now() / 1000)): ProfileCachePayload | null {
+  const hit = PROFILE_MEMO.get(authId)
+  if (!hit) return null
+  if (hit.exp < nowSec || hit.authId !== authId) {
+    PROFILE_MEMO.delete(authId)
+    return null
+  }
+  return hit
+}
+
+export function rememberProfile(profile: ProfileCachePayload, nowSec = Math.floor(Date.now() / 1000)): void {
+  // Bounded: one entry per signed-in person, swept when it grows past any
+  // plausible head-count so a long-lived instance cannot leak.
+  if (PROFILE_MEMO.size >= 500) {
+    for (const [k, v] of PROFILE_MEMO) if (v.exp < nowSec) PROFILE_MEMO.delete(k)
+    if (PROFILE_MEMO.size >= 500) PROFILE_MEMO.clear()
+  }
+  PROFILE_MEMO.set(profile.authId, profile)
+}
+
 // ── Rate Limiter ─────────────────────────────────────────────────────────────
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
 const RATE_LIMIT = 60 // requests
@@ -230,7 +261,7 @@ export async function updateSession(request: NextRequest) {
       cookies: {
         getAll() { return request.cookies.getAll() },
         setAll(cookiesToSet: { name: string, value: string, options: any }[]) {
-          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           request.headers.set('x-pathname', request.nextUrl.pathname)
           supabaseResponse = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) =>
@@ -350,11 +381,36 @@ export async function updateSession(request: NextRequest) {
   // Missing profiles are rejected. Missing designations get no permissions;
   // they may still open the dashboard while an admin assigns their access.
   if (user && pathname.startsWith('/dashboard')) {
+    // A Server Action POST must never be answered with a cookie from here.
+    //
+    // Next copies every cookie this proxy sets into the action's own cookie
+    // jar, and it cannot tell that apart from the action itself calling
+    // `cookies().set()` — so it marks the path revalidated, RE-RENDERS THE
+    // WHOLE PAGE into the action's response, and tells the browser to drop its
+    // entire router cache (request-store.js `mergeMiddlewareCookies` →
+    // request-cookies.js `pathWasRevalidated`).
+    //
+    // The profile cookie lives 60 s and the presence heartbeat fires every
+    // 60 s, so the cookie was always expired when the heartbeat arrived:
+    // every open tab re-ran every query on its page once a minute and
+    // downloaded the result again — measured 15 Nov 2026 on the dashboard,
+    // 720 KB and 5.2 s per minute per tab, 2.7 MB on Contributions — and the
+    // 30 s / 5 min client cache in next.config.ts was wiped each time. The
+    // same happened to the first thing a person clicked after a minute's
+    // pause.
+    //
+    // So an action reads the profile from the cookie, then from this
+    // instance's memory, then from the database — and never writes the
+    // cookie. The next ordinary page request renews it as before. Only
+    // actions consult the memory: every other request keeps exactly the
+    // cookie-or-database behaviour it had.
+    const isServerAction = request.method === 'POST' && request.headers.has('next-action')
+
     // Fast path: profile already cached this session?
     const cached = await verifyProfile(
       request.cookies.get(PROFILE_COOKIE)?.value,
       user.id,
-    )
+    ) ?? (isServerAction ? recallProfile(user.id) : null)
     let profile: ProfileCachePayload | null = cached
 
     if (!profile) {
@@ -414,9 +470,12 @@ export async function updateSession(request: NextRequest) {
         exp: Math.floor(Date.now() / 1000) + PROFILE_TTL_SEC,
       }
 
+      rememberProfile(profile)
+
       // Persist cache on the outgoing response. The signed cookie lets the
-      // next request skip both DB queries entirely.
-      const signed = await signProfile(profile)
+      // next request skip both DB queries entirely. Not on a Server Action —
+      // see `isServerAction` above.
+      const signed = isServerAction ? null : await signProfile(profile)
       if (signed) {
         supabaseResponse.cookies.set(PROFILE_COOKIE, signed, {
           httpOnly: true,

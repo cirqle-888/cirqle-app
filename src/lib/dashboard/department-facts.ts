@@ -10,6 +10,8 @@ export interface DepartmentFacts {
   departments: { id: string; name: string }[]
 }
 
+type CashRow = CashFlowRow & { id: string; entry_date: string }
+
 /**
  * Day facts for the dashboard's department panel (lib/finance/department-flows).
  *
@@ -17,13 +19,25 @@ export interface DepartmentFacts {
  * `id`, so the panel's Inflow adds up to the Income card. Tasks are read from
  * `tasksFrom` — the dashboard's 36-month analytics window, so Job Value
  * matches. Invoices and allocations are small and read whole.
+ *
+ * ONE wave of reads. This used to be three, each waiting for the last:
+ * the batch, then invoice lines `.in()` the invoice ids, then scores `.in()`
+ * ~2,000 task ids (21 chunks, three rounds). Neither follow-up needed the ids
+ * to ask its question — invoices are read whole, so their lines are simply
+ * all lines; and the scores wanted are those of tasks dated inside the
+ * window, which the database can decide with a join. Both now leave with the
+ * batch. Measured 15 Nov 2026 from a laptop: the panel's reads went from
+ * three round-trip waves (~2.5 s) to one.
+ *
+ * `cash` may be a promise, so a caller that is still fetching the cash book
+ * can start this at the same time rather than after it.
  */
 export async function loadDepartmentFacts(
   admin: SupabaseClient,
-  cash: readonly (CashFlowRow & { id: string; entry_date: string })[],
+  cashInput: readonly CashRow[] | PromiseLike<readonly CashRow[]>,
   tasksFrom: string,
 ): Promise<DepartmentFacts> {
-  const [catsRes, svcRes, tasksRes, invRes, allocRes] = await Promise.all([
+  const [catsRes, svcRes, tasksRes, invRes, allocRes, linesRes, scoresRes, cash] = await Promise.all([
     fetchAll(admin.from('service_categories').select('id, name').order('display_order').order('name')),
     fetchAll(admin.from('services').select('id, category_id').order('id')),
     // 36 months is ~2,000 rows, three pages: paged together, not in sequence.
@@ -38,28 +52,34 @@ export async function loadDepartmentFacts(
     fetchAll(admin.from('cashbook_invoice_allocations')
       .select('cashbook_entry_id, invoice_id, allocated_amount')
       .is('deleted_at', null).order('id')),
+    // Every invoice is read above, so every line is wanted: no id list needed.
+    fetchAllParallel(() => admin.from('invoice_items')
+      .select('id, invoice_id, total, task_id, service_id').order('id'), 4),
+    // Scores of tasks dated inside the window. The loop below still drops any
+    // whose task is cancelled or deleted (absent from `taskById`), exactly as
+    // the id-list lookup did.
+    fetchAllParallel(() => admin.from('contribution_scores')
+      .select('id, task_id, earnings_inr, tasks!inner(task_date)')
+      .gte('tasks.task_date', tasksFrom)
+      .order('id'), 8),
+    cashInput,
   ])
-  for (const r of [catsRes, svcRes, tasksRes, invRes, allocRes]) if (r.error) throw new Error(r.error.message)
+  for (const r of [catsRes, svcRes, tasksRes, invRes, allocRes, linesRes, scoresRes]) if (r.error) throw new Error(r.error.message)
 
   const categoryOf = new Map<string, string | null>((svcRes.data as any[]).map(s => [s.id, s.category_id ?? null]))
   const deptOfService = (s: string | null | undefined) => (s ? categoryOf.get(s) ?? null : null)
   const tasks = tasksRes.data as { id: string; task_date: string; service_id: string | null; billing_amount_inr: number | null }[]
   const invoices = invRes.data as any[]
 
-  const linesRes = await fetchAllIn(ids => admin.from('invoice_items')
-    .select('id, invoice_id, total, task_id, service_id').in('invoice_id', ids).order('id'), invoices.map(i => i.id))
-  if (linesRes.error) throw new Error(linesRes.error.message)
   const lines = linesRes.data as { invoice_id: string; total: number | null; task_id: string | null; service_id: string | null }[]
 
   // A line's department: its task's service, else its own service.
   const serviceOfTask = new Map(tasks.map(t => [t.id, t.service_id]))
   const missing = [...new Set(lines.map(l => l.task_id).filter((t): t is string => !!t && !serviceOfTask.has(t)))]
-  const [lineTasksRes, scoresRes] = await Promise.all([
-    fetchAllIn(ids => admin.from('tasks').select('id, service_id').in('id', ids).order('id'), missing),
-    fetchAllIn(ids => admin.from('contribution_scores').select('id, task_id, earnings_inr').in('task_id', ids).order('id'), tasks.map(t => t.id)),
-  ])
+  // Lines whose task falls outside the window (older, cancelled or deleted)
+  // still need that task's service. Usually a handful; often none.
+  const lineTasksRes = await fetchAllIn(ids => admin.from('tasks').select('id, service_id').in('id', ids).order('id'), missing)
   if (lineTasksRes.error) throw new Error(lineTasksRes.error.message)
-  if (scoresRes.error) throw new Error(scoresRes.error.message)
   for (const t of lineTasksRes.data as any[]) serviceOfTask.set(t.id, t.service_id ?? null)
 
   const linesByInvoice = new Map<string, { deptId: string | null; amount: number }[]>()

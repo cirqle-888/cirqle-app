@@ -224,6 +224,51 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     // a bad cookie must never leave someone with no identity at all.
   }
 
+  // The permission read, as a function of the two facts that decide it.
+  const readPermissions = async (asAdmin: boolean, designationId: string | null): Promise<Set<string>> => {
+    if (asAdmin) {
+      try {
+        const { data: all } = await db.from('permissions').select('key')
+        return new Set((all ?? []).map((p: any) => p.key))
+      } catch {
+        // permissions table missing — admin-by-flag still works via isAdmin=true
+        return new Set()
+      }
+    }
+    if (!designationId) return new Set()
+    try {
+      const { data: dp } = await db
+        .from('designation_permissions')
+        .select('allowed, permission:permission_id(key)')
+        .eq('designation_id', designationId)
+        .eq('allowed', true)
+      return new Set(
+        (dp ?? [])
+          .map((r: any) => Array.isArray(r.permission) ? r.permission[0]?.key : r.permission?.key)
+          .filter(Boolean)
+      )
+    } catch {
+      // designation_permissions missing — no perms
+      return new Set()
+    }
+  }
+
+  // Start the permission read NOW, beside the employee read, instead of after
+  // it. Which permissions to read depends on the employee's designation, so
+  // the two used to be one round trip after another on every page opened more
+  // than 30 s after the last (~50 ms each on Vercel, ~380 ms from a laptop) —
+  // and nearly every page awaits this before it can start its own reads.
+  //
+  // The expired cache entry is used as a GUESS at the designation, nothing
+  // more: no permission is ever taken from it. Both reads below are fresh, and
+  // the early one is used only if the fresh employee row confirms the same
+  // designation and admin flag it was started for; otherwise it is discarded
+  // and the read is made again for the right one.
+  const guess = cached?.user && !cached.user.isViewAs ? cached.user : null
+  const early = guess
+    ? { isAdmin: guess.isAdmin, designationId: guess.designationId, permissions: readPermissions(guess.isAdmin, guess.designationId) }
+    : null
+
   // Try the new shape first (with designation_id + new columns)
   let emp: any = null
   try {
@@ -266,30 +311,10 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const designation = Array.isArray(emp.designation) ? emp.designation[0] : emp.designation
   const isAdmin = designation?.is_admin === true
 
-  let permissions = new Set<string>()
-  if (isAdmin) {
-    try {
-      const { data: all } = await db.from('permissions').select('key')
-      permissions = new Set((all ?? []).map((p: any) => p.key))
-    } catch {
-      // permissions table missing — admin-by-flag still works via isAdmin=true
-    }
-  } else if (designation?.id) {
-    try {
-      const { data: dp } = await db
-        .from('designation_permissions')
-        .select('allowed, permission:permission_id(key)')
-        .eq('designation_id', designation.id)
-        .eq('allowed', true)
-      permissions = new Set(
-        (dp ?? [])
-          .map((r: any) => Array.isArray(r.permission) ? r.permission[0]?.key : r.permission?.key)
-          .filter(Boolean)
-      )
-    } catch {
-      // designation_permissions missing — no perms
-    }
-  }
+  const designationId: string | null = designation?.id ?? null
+  const permissions = early && early.isAdmin === isAdmin && early.designationId === designationId
+    ? await early.permissions
+    : await readPermissions(isAdmin, designationId)
 
   return cacheAndReturn({
     authId: user.id,
