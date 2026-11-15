@@ -32,8 +32,12 @@ export interface DeskMessage {
 
 export interface FlyerProgress {
   stage: FlyerStage
-  /** Designs Cirqle posted for this flyer (photos or files). */
+  /** Pictures and files Cirqle posted for this flyer. One page is often posted several times. */
   designs: number
+  /** Different pages among them, told apart by what each one says. Null when none could be read. */
+  pages: number | null
+  /** Designs whose writing could not be read (a PDF, a very large file), so they are in no page count. */
+  unreadDesigns: number
   /** Times the client came back with changes after a design. */
   corrections: number
   firstDesignAt: string | null
@@ -46,6 +50,46 @@ export interface FlyerProgress {
 export const SAME_BURST_MINUTES = 3
 
 const isDesign = (m: DeskMessage) => m.from_cirqle && (m.type === 'image' || m.type === 'document')
+
+// ── Pages, not pictures ─────────────────────────────────────────────────────
+
+/**
+ * Two readings of one page share this much of their wording; two pages of one flyer
+ * share far less. Measured on real flyers: the same page posted small, large and
+ * corrected scored 0.74 to 0.97 against itself, and 0.35 to 0.41 against the other
+ * page (the shop name, heading and dates are on both).
+ */
+export const SAME_PAGE = 0.58
+/** Fewer words than this is a logo or a stray photo, not a flyer page. */
+export const MIN_PAGE_WORDS = 8
+
+const pageWords = (text: string) =>
+  new Set(text.toLowerCase().replace(/[^a-z\u0d00-\u0d7f]+/g, ' ').split(' ').filter(w => w.length >= 3))
+
+function alike(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
+  let both = 0
+  for (const w of a) if (b.has(w)) both++
+  return both / (a.size + b.size - both || 1)
+}
+
+/**
+ * How many different pages a set of posted designs is. A page goes up more than
+ * once (a small and a large copy, then again after each correction), so counting
+ * pictures overstates the flyer; pictures that say the same thing are one page.
+ * `texts` is what each design says, null when it was not read.
+ */
+export function countPages(texts: readonly (string | null | undefined)[]): { pages: number | null; unread: number } {
+  const pages: Set<string>[][] = []
+  let unread = 0
+  for (const t of texts) {
+    const words = pageWords(String(t || ''))
+    if (words.size < MIN_PAGE_WORDS) { unread++; continue }
+    const same = pages.find(page => page.some(seen => alike(seen, words) >= SAME_PAGE))
+    if (same) same.push(words)
+    else pages.push([words])
+  }
+  return { pages: pages.length || null, unread }
+}
 
 // "Ok" after a design is the approval. Greetings are acknowledgements too, but approve nothing.
 const NOT_APPROVAL = /^(hi|hello|hey|good morning|good night|gm|gn|no|welcome)$/i
@@ -62,11 +106,13 @@ export function isApproval(text: string): boolean {
  * (`untilIso`) belongs to this flyer.
  */
 export function flyerProgress(messages: readonly DeskMessage[], fromIso: string, untilIso: string | null): FlyerProgress {
-  const p: FlyerProgress = { stage: 'new', designs: 0, corrections: 0, firstDesignAt: null, approvedAt: null, designText: null }
+  const p: FlyerProgress = { stage: 'new', designs: 0, pages: null, unreadDesigns: 0, corrections: 0, firstDesignAt: null, approvedAt: null, designText: null }
+  const designTexts: (string | null)[] = []
   for (const m of messages) {
     if (m.sent_at <= fromIso || (untilIso && m.sent_at >= untilIso)) continue
     if (isDesign(m)) {
       p.designs++
+      designTexts.push(m.media_text ?? null)
       p.firstDesignAt ??= m.sent_at
       if (m.media_text?.trim()) p.designText = m.media_text.trim()
       // Pages posted in one go straddle the client's "ok": a design within a few minutes
@@ -87,7 +133,19 @@ export function flyerProgress(messages: readonly DeskMessage[], fromIso: string,
       p.approvedAt = null
     }
   }
+  const counted = countPages(designTexts)
+  p.pages = counted.pages
+  p.unreadDesigns = counted.unread
   return p
+}
+
+/** "2 pages" for the desk and its alerts; says so when the count rests on pictures that could not all be read. */
+export function pagesLabel(p: Pick<FlyerProgress, 'designs' | 'pages' | 'unreadDesigns'>): string {
+  if (!p.designs) return ''
+  const pictures = `${p.designs} picture${p.designs === 1 ? '' : 's'} sent`
+  if (!p.pages) return `${pictures}, pages not counted`
+  const unread = p.unreadDesigns ? `, ${p.unreadDesigns} not read` : ''
+  return `${p.pages} page${p.pages === 1 ? '' : 's'} (${pictures}${unread})`
 }
 
 export const STAGE_LABEL: Record<FlyerStage, string> = {
@@ -187,8 +245,19 @@ export function priceWarnings(list: string, earlier: readonly string[] = []): st
 
 /** Written in the notes once an approved flyer has been renamed and closed, so it is done once. */
 export const APPROVED_MARK = '[approved:'
-export function notesWithApproval(notes: string | null | undefined, day: string): string {
-  return `${String(notes || '').trimEnd()}\n\nApproved by the client in WhatsApp on ${day}. ${APPROVED_MARK}${day}]`
+/** Beside the approval: the page count the task was billed on, so a page that turns up later is noticed. */
+export const PAGES_MARK = '[pages:'
+export function notesWithApproval(notes: string | null | undefined, day: string, pages?: number | null): string {
+  return `${String(notes || '').trimEnd()}\n\nApproved by the client in WhatsApp on ${day}. ${APPROVED_MARK}${day}]${pages ? ` ${PAGES_MARK}${pages}]` : ''}`
+}
+/** The page count written at approval, or null for a flyer approved without one. */
+export function approvedPages(notes: string | null | undefined): number | null {
+  const m = String(notes || '').match(/\[pages:(\d+)\]/)
+  return m ? Number(m[1]) : null
+}
+/** The same notes with the page count brought up to date. */
+export function notesWithPages(notes: string, pages: number): string {
+  return notes.replace(/\[pages:\d+\]/, `${PAGES_MARK}${pages}]`)
 }
 
 /** A usable offer title: a few words, not a price line, not the placeholder. */

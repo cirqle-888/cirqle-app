@@ -14,10 +14,11 @@ import { chatAlertTargets } from './insights'
 import { chatTitle, departmentMembers, type ListenerContext } from './insights-run'
 import { addDays, dateLabel, offerTagDates } from './offer-plan'
 import {
-  APPROVED_MARK, STAGE_LABEL, TITLE_PROMPT, campaignTitle, cleanOfferTitle, flyerProgress, isBehind, notesWithApproval, offerFollowUps, offerList, offerSource,
-  priceWarnings, pricedProducts, type CampaignRow,
+  APPROVED_MARK, STAGE_LABEL, TITLE_PROMPT, approvedPages, campaignTitle, cleanOfferTitle, flyerProgress, isBehind, notesWithApproval, notesWithPages,
+  offerFollowUps, offerList, offerSource, pagesLabel, priceWarnings, pricedProducts, type CampaignRow,
   type DeskMessage, type FlyerProgress,
 } from './flyer-desk'
+import { MAX_AUTO_PAGES, setFlyerTaskPages, type FlyerBilling } from './flyer-task'
 
 export const FLYERS_LINK = '/dashboard/requests/whatsapp/flyers'
 /** How far back the desk looks: last week's flyers are history. */
@@ -179,8 +180,34 @@ export async function finishApprovedFlyers(admin: SupabaseClient, ctx: ListenerC
   const today = indiaDay(new Date().toISOString())
   const { flyers } = await loadFlyerDesk(admin, onlyChats ?? new Set(ctx.groups.keys()), today)
   const ready = flyers.filter(f => f.progress.stage === 'approved' && !f.notes.includes(APPROVED_MARK))
-  if (!ready.length) return 0
+  // A page posted after the "ok" was not there to count when the flyer was closed.
+  const grown = flyers.filter(f => f.progress.stage === 'approved' && f.notes.includes(APPROVED_MARK)
+    && approvedPages(f.notes) !== null && (f.progress.pages ?? 0) > approvedPages(f.notes)!)
+  if (!ready.length && !grown.length) return 0
   const members = await departmentMembers(admin)
+  const tell = async (f: DeskFlyer, content: Omit<Parameters<typeof notifyAdmins>[0], 'type' | 'link'>) => {
+    const full = { type: 'whatsapp_pending' as const, link: FLYERS_LINK, ...content }
+    const targets = chatAlertTargets(ctx.access[f.chatId], members)
+    if (targets.length) for (const employeeId of targets) await createNotification({ ...full, employeeId })
+    else await notifyAdmins(full)
+  }
+
+  for (const f of grown) {
+    const before = approvedPages(f.notes)!
+    const pages = f.progress.pages!
+    const claim = await admin.from('social_calendar_items')
+      .update({ notes: notesWithPages(f.notes, pages), updated_at: new Date().toISOString() })
+      .eq('id', f.itemId).like('notes', `%[pages:${before}]%`).select('id')
+    if (claim.error || !claim.data?.length) continue
+    const taskId = await flyerTaskId(admin, f)
+    const billed = taskId ? await setFlyerTaskPages(admin, taskId, pages, before) : null
+    await tell(f, {
+      title: `Flyer has ${pages} pages — ${f.client || chatTitle(ctx, f.chatId)}`,
+      message: `${f.title || 'The flyer'} was counted as ${before} when the client approved it; another page was posted afterwards. ${billingLine(pages, billed, !!taskId)}`,
+      sourceKey: `whatsapp_flyer_pages:${f.itemId}:${pages}`,
+    })
+  }
+
   let done = 0
   for (const f of ready) {
     const found = await offerTitleFor(admin, f)
@@ -188,17 +215,15 @@ export async function finishApprovedFlyers(admin: SupabaseClient, ctx: ListenerC
 
     // Claimed with the marker first, so two deliveries arriving together cannot both close it.
     const claim = await admin.from('social_calendar_items')
-      .update({ ...(title ? { title } : {}), notes: notesWithApproval(f.notes, today), updated_at: new Date().toISOString() })
+      .update({ ...(title ? { title } : {}), notes: notesWithApproval(f.notes, today, f.progress.pages), updated_at: new Date().toISOString() })
       .eq('id', f.itemId).not('notes', 'like', `%${APPROVED_MARK}%`).select('id')
     if (claim.error || !claim.data?.length) continue
 
-    let taskId = f.taskId
-    if (!taskId && f.requestId) {
-      const { data: req } = await admin.from('task_requests').select('promoted_task_id').eq('id', f.requestId).maybeSingle()
-      taskId = (req?.promoted_task_id as string | null) ?? null
-      if (title) await admin.from('task_requests').update({ title }).eq('id', f.requestId).then(() => {}, () => {})
-    }
+    const taskId = await flyerTaskId(admin, f)
+    if (title && !f.taskId && f.requestId) await admin.from('task_requests').update({ title }).eq('id', f.requestId).then(() => {}, () => {})
     let closed = false
+    // Billed by the page: the quantity follows the pages the designs show.
+    const billed = taskId && f.progress.pages ? await setFlyerTaskPages(admin, taskId, f.progress.pages) : null
     if (taskId) {
       const { data: task } = await admin.from('tasks').select('status, deleted_at').eq('id', taskId).maybeSingle()
       if (task && !task.deleted_at && task.status !== 'cancelled') {
@@ -213,21 +238,38 @@ export async function finishApprovedFlyers(admin: SupabaseClient, ctx: ListenerC
       }
     }
 
-    const name = f.client || chatTitle(ctx, f.chatId)
-    const content = {
-      type: 'whatsapp_pending' as const,
-      title: `Flyer approved — ${name}`,
+    await tell(f, {
+      title: `Flyer approved — ${f.client || chatTitle(ctx, f.chatId)}`,
       message: [
         title ? `Named "${title}".` : 'No offer title could be found, so it is still "Untitled": name it by hand.',
         closed ? 'Its task is marked done.' : taskId ? 'Its task was already closed.' : 'It has no task yet, so nothing was marked done.',
+        f.progress.pages
+          ? billingLine(f.progress.pages, billed, !!taskId) + (f.progress.unreadDesigns ? ` ${f.progress.unreadDesigns} of the pictures could not be read, so check the page count.` : '')
+          : `The pages could not be counted (${pagesLabel(f.progress)}): check the quantity on its task.`,
       ].join(' '),
-      link: FLYERS_LINK,
       sourceKey: `whatsapp_flyer_approved:${f.itemId}`,
-    }
-    const targets = chatAlertTargets(ctx.access[f.chatId], members)
-    if (targets.length) for (const employeeId of targets) await createNotification({ ...content, employeeId })
-    else await notifyAdmins(content)
+    })
     done++
   }
-  return done
+  return done + grown.length
+}
+
+/** The flyer's task: linked straight to the calendar item, or made from its request. */
+async function flyerTaskId(admin: SupabaseClient, f: DeskFlyer): Promise<string | null> {
+  if (f.taskId || !f.requestId) return f.taskId
+  const { data: req } = await admin.from('task_requests').select('promoted_task_id').eq('id', f.requestId).maybeSingle()
+  return (req?.promoted_task_id as string | null) ?? null
+}
+
+/** What happened to the task's quantity, in one sentence for the alert. */
+function billingLine(pages: number, billed: FlyerBilling | null, hasTask: boolean): string {
+  const count = `${pages} page${pages === 1 ? '' : 's'}`
+  if (!hasTask) return `${count}.`
+  if (billed?.changed) {
+    const amount = billed.amount ? ` (${billed.currency === 'INR' || !billed.currency ? '₹' : `${billed.currency} `}${billed.amount})` : ''
+    return `${count}: its task is set to quantity ${pages}${amount}.`
+  }
+  if (billed?.quantity === pages) return `${count}, and its task already has quantity ${pages}.`
+  if (pages > MAX_AUTO_PAGES) return `${count} were counted, which is unusually many: set the quantity on its task by hand.`
+  return `${count} were counted, but its task has quantity ${billed?.quantity ?? 1}: it was left as it is, so check it.`
 }

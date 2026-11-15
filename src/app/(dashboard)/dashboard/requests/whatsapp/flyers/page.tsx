@@ -7,7 +7,7 @@ import { OFFER_STUDIO_URL } from '@/lib/offers/studio'
 import { indiaDay } from '@/lib/whatsapp-listener/chat-log'
 import { chatTitle, loadChatViewer } from '@/lib/whatsapp-listener/insights-run'
 import { addDays, dateLabel } from '@/lib/whatsapp-listener/offer-plan'
-import { STAGE_LABEL, isBehind, type FlyerStage } from '@/lib/whatsapp-listener/flyer-desk'
+import { STAGE_LABEL, isBehind, pagesLabel, type FlyerStage } from '@/lib/whatsapp-listener/flyer-desk'
 import { DESK_DAYS, loadFlyerDesk, type DeskFlyer } from '@/lib/whatsapp-listener/flyer-desk-run'
 import { CopyListButton, WhatsAppTabs } from '../insights-client'
 
@@ -61,7 +61,7 @@ export default async function WhatsAppFlyersPage() {
           {f.dateAssumed && ' (date not given, set to the next day)'}
           {' · '}{f.products} products{f.fromPhoto && ', read from a photo'}{f.unpriced > 0 && `, ${f.unpriced} without a price`}
           {' · '}received {time(f.receivedAt)}
-          {f.progress.designs > 0 && <>{' · '}{f.progress.designs} design{f.progress.designs === 1 ? '' : 's'} sent</>}
+          {f.progress.designs > 0 && <>{' · '}{pagesLabel(f.progress)}</>}
           {f.progress.corrections > 0 && <>{' · '}{f.progress.corrections} round{f.progress.corrections === 1 ? '' : 's'} of changes</>}
           {f.calendarStatus === 'requested' && ' · sent to Requests'}
           {f.taskId ? ' · has a task' : f.calendarStatus === 'planned' && ' · no task yet'}
@@ -138,6 +138,7 @@ export default async function WhatsAppFlyersPage() {
             <p className="text-[11px] text-muted-foreground/70">
               The stage is read from the chat: a photo or file posted by Cirqle counts as a design, the client&apos;s &quot;ok&quot; as approval, and anything else
               the client says after a design as changes. It can be wrong when people reply about something else, so open the chat to check.
+              Pages are counted by what each picture says, so the same page posted twice is one page; on approval the task&apos;s quantity is set to that count.
               Price checks compare a list with the same client&apos;s earlier lists. Nothing is sent to WhatsApp.
             </p>
           </>

@@ -112,6 +112,39 @@ async function priceFlyerTask(taskId: string, clientId: string, serviceId: strin
   }
 }
 
+/** More pages than this is more likely a misreading than a flyer: left for a person to set. */
+export const MAX_AUTO_PAGES = 8
+
+export interface FlyerBilling { changed: boolean; quantity: number | null; amount: number | null; currency: string | null }
+
+/**
+ * Bills the flyer by its pages: the task's quantity becomes the page count and the
+ * app's own pricing fill works out the amount (client price per page, else the
+ * service default). Only while the quantity is still what the listener last set
+ * (`from`: 1 when the task was made), so a number someone typed is never
+ * overwritten, and never on a task that is already invoiced or paid.
+ */
+export async function setFlyerTaskPages(admin: SupabaseClient, taskId: string, pages: number, from = 1): Promise<FlyerBilling> {
+  const read = async () => {
+    const { data } = await admin.from('tasks').select('quantity, status, client_id, service_id, billing_amount, currency, deleted_at').eq('id', taskId).maybeSingle()
+    return data as { quantity: number | null; status: string; client_id: string | null; service_id: string | null; billing_amount: number | null; currency: string | null; deleted_at: string | null } | null
+  }
+  const task = await read()
+  const same = (changed: boolean, t = task): FlyerBilling => ({ changed, quantity: t?.quantity ?? null, amount: t?.billing_amount ?? null, currency: t?.currency ?? null })
+  if (!task || task.deleted_at || ['cancelled', 'invoiced', 'paid'].includes(task.status)) return same(false)
+  if (!Number.isInteger(pages) || pages < 1 || pages > MAX_AUTO_PAGES || pages === from || (task.quantity ?? 1) !== from) return same(false)
+
+  const { error } = await admin.from('tasks').update({ quantity: pages }).eq('id', taskId)
+  if (error) return same(false)
+  try {
+    const { serverFillTaskBilling } = await import('@/app/(dashboard)/dashboard/tasks/actions')
+    await serverFillTaskBilling(taskId, task.client_id, task.service_id, pages)
+  } catch (err) {
+    console.warn('[whatsapp-listener] flyer task quantity set, amount not refreshed:', err)
+  }
+  return same(true, await read())
+}
+
 /** Keeps an open task's date on the flyer's work day when the client gives the offer date later. */
 export async function moveFlyerTask(admin: SupabaseClient, taskId: string, workDate: string): Promise<void> {
   await admin.from('tasks').update({ task_date: workDate }).eq('id', taskId).in('status', ['pending', 'in_progress']).is('deleted_at', null)

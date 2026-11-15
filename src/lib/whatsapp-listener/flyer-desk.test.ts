@@ -1,5 +1,13 @@
-import { describe, expect, it } from 'vitest'
-import { APPROVED_MARK, campaignTitle, cleanOfferTitle, notesWithApproval, flyerProgress, isApproval, isBehind, offerList, offerSource, priceWarnings, pricedProducts, type DeskMessage } from './flyer-desk'
+import { describe, expect, it, vi } from 'vitest'
+
+// The app's pricing fill, stood in for: the client's price per page times the quantity.
+const pricing = vi.hoisted(() => ({ task: null as Record<string, unknown> | null, perPage: 250 }))
+vi.mock('@/app/(dashboard)/dashboard/tasks/actions', () => ({
+  serverFillTaskBilling: async (_id: string, _client: string | null, _service: string | null, quantity: number) => {
+    if (pricing.task) Object.assign(pricing.task, { billing_amount: pricing.perPage * quantity, currency: 'INR' })
+  },
+}))
+import { APPROVED_MARK, approvedPages, campaignTitle, cleanOfferTitle, countPages, notesWithApproval, notesWithPages, pagesLabel, flyerProgress, isApproval, isBehind, offerList, offerSource, priceWarnings, pricedProducts, type DeskMessage } from './flyer-desk'
 import { offerDates, offerNotes, notesWithAddition } from './offer-plan'
 import { isPaymentMessage, looksLikeEnquiry, paymentAmount } from './signals'
 
@@ -165,5 +173,77 @@ describe('the flyer task', () => {
     expect(d).toContain(FLYER_TASK_MARK)
     // The Offer Studio route matches on "[offer:<first day>..".
     expect(d).toContain('[offer:2026-11-15..')
+  })
+})
+
+describe('pages, not pictures', () => {
+  const head = 'SEA STAR SUPERMARKET\nTASTY TREASURES\n4th Anniversary Fest\nOffer valid 15 November\nKodungallur'
+  const sweets = `${head}\nLADDU 250G 45\nCUP CAKE 6PCS 30\nJILEBI 250G 49\nMYSORE PAK 250G 65\nHALWA 500G 89\nCOCONUT BISCUIT 109\nRUSK 300G 35\nBUN 6PCS 25`
+  const mixtures = `${head}\nMADAKK 200G 40\nSP MIXTURE 400G 75\nBANANA CHIPS 250G 85\nPAKKAVADA 200G 38\nMURUKKU 200G 42\nSWEET BYTES 150G 30\nKAPPA CHIPS 200G 45\nACHAPPAM 10PCS 55`
+  it('counts a page once however often it was posted', () => {
+    // Small and large copies of both pages, then the two finals with one price corrected.
+    const posted = [mixtures, mixtures, sweets, sweets, mixtures.replace('SP MIXTURE 400G 75', 'SP MIXTURE 400G 79'), sweets.replace('LADDU 250G 45', 'LADDU 250G 49')]
+    expect(countPages(posted)).toEqual({ pages: 2, unread: 0 })
+  })
+  it('keeps pages of one flyer apart although they share the shop and the headline', () => {
+    expect(countPages([sweets, mixtures]).pages).toBe(2)
+    expect(countPages([sweets]).pages).toBe(1)
+  })
+  it('does not count what it could not read', () => {
+    expect(countPages([sweets, null, 'LOGO'])).toEqual({ pages: 1, unread: 2 })
+    expect(countPages([null, ''])).toEqual({ pages: null, unread: 2 })
+  })
+  it('gives the flyer its pages', () => {
+    const d = (h: number, text: string | null) => ({ ...msg(h, 'cirqle', 'image'), media_text: text })
+    const p = flyerProgress([d(6, mixtures), d(6, mixtures), d(7, sweets), d(7, null), msg(9, 'client', 'text', 'ok')], at(5), null)
+    expect(p).toMatchObject({ stage: 'approved', designs: 4, pages: 2, unreadDesigns: 1 })
+    expect(pagesLabel(p)).toBe('2 pages (4 pictures sent, 1 not read)')
+    expect(pagesLabel({ designs: 1, pages: 1, unreadDesigns: 0 })).toBe('1 page (1 picture sent)')
+    expect(pagesLabel({ designs: 2, pages: null, unreadDesigns: 2 })).toBe('2 pictures sent, pages not counted')
+    expect(pagesLabel({ designs: 0, pages: null, unreadDesigns: 0 })).toBe('')
+  })
+  it('writes the count beside the approval and can raise it later', () => {
+    const notes = notesWithApproval('List', '2026-11-14', 1)
+    expect(approvedPages(notes)).toBe(1)
+    expect(approvedPages(notesWithPages(notes, 2))).toBe(2)
+    expect(approvedPages(notesWithApproval('List', '2026-11-14'))).toBeNull()
+    expect(approvedPages(notesWithApproval('List', '2026-11-14', null))).toBeNull()
+  })
+})
+
+describe('billing the flyer by its pages', () => {
+  const taskDb = (task: Record<string, unknown>) => {
+    pricing.task = task
+    return {
+      from: () => ({
+        select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { ...task } }) }) }),
+        update: (patch: Record<string, unknown>) => ({ eq: async () => { Object.assign(task, patch); return { error: null } } }),
+      }),
+    } as never
+  }
+  const open = () => ({ quantity: 1, status: 'pending', client_id: 'C', service_id: 'S', billing_amount: 250, currency: 'INR', deleted_at: null })
+
+  it('sets the quantity to the pages and lets the app price it', async () => {
+    const { setFlyerTaskPages } = await import('./flyer-task')
+    const task = open()
+    expect(await setFlyerTaskPages(taskDb(task), 'T', 2)).toEqual({ changed: true, quantity: 2, amount: 500, currency: 'INR' })
+    expect(task.quantity).toBe(2)
+  })
+  it('raises it again when a page turns up after the approval', async () => {
+    const { setFlyerTaskPages } = await import('./flyer-task')
+    const task = { ...open(), quantity: 2, billing_amount: 500, status: 'done' }
+    expect(await setFlyerTaskPages(taskDb(task), 'T', 3, 2)).toMatchObject({ changed: true, quantity: 3, amount: 750 })
+  })
+  it('never overwrites a quantity someone typed, an invoiced task, or a one-page flyer', async () => {
+    const { MAX_AUTO_PAGES, setFlyerTaskPages } = await import('./flyer-task')
+    const typed = { ...open(), quantity: 3, billing_amount: 750 }
+    expect(await setFlyerTaskPages(taskDb(typed), 'T', 2)).toEqual({ changed: false, quantity: 3, amount: 750, currency: 'INR' })
+    for (const status of ['invoiced', 'paid', 'cancelled']) {
+      const task = { ...open(), status }
+      expect((await setFlyerTaskPages(taskDb(task), 'T', 2)).changed, status).toBe(false)
+      expect(task.quantity).toBe(1)
+    }
+    expect((await setFlyerTaskPages(taskDb(open()), 'T', 1)).changed).toBe(false)
+    expect((await setFlyerTaskPages(taskDb(open()), 'T', MAX_AUTO_PAGES + 1)).changed).toBe(false)
   })
 })

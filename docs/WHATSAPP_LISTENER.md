@@ -402,3 +402,26 @@ approves a flyer"). If the designer also saves the offer in Offer Studio, that s
 
 An item someone already sent to Requests by hand is left alone, and if the task cannot be made the
 flyer simply stays a plan item.
+
+### Pages, not pictures (15 Nov 2026)
+
+A flyer is billed by the page, and one page is posted in the group several times: a small and a
+large copy, then again after each correction. Counting pictures therefore overstates the flyer
+(Tasty Treasures: 6 pictures, 2 pages). `countPages` in `flyer-desk.ts` counts pages by what each
+picture says: two pictures whose wording overlaps by 58% or more are the same page. On the real
+flyers the same page scored 74 to 97% against itself and 35 to 41% against the other page.
+
+- The Flyers tab shows "2 pages (6 pictures sent)" instead of "6 designs sent".
+- On the client's "ok" the task's quantity is set to the page count and the app's own pricing fill
+  works out the amount (`setFlyerTaskPages` in `flyer-task.ts`). The count is written beside the
+  approval in the notes as `[pages:N]`.
+- A page posted after the "ok" is picked up by the evening run, which raises the quantity and
+  sends an alert.
+- The quantity is changed only while it is still what the listener set. A number someone typed, and
+  a task already invoiced or paid, are never touched; the alert says so instead.
+- A picture that could not be read (a PDF, a file over 2.8 MB, or with image reading off) is in no
+  count. The tab and the alert say how many were not read, so the count can be checked by hand.
+  When no picture could be read the quantity stays as it is and the alert asks for it to be set.
+- More than 8 pages is treated as a misreading and left for a person.
+
+Known limit: the same products laid out twice (a post and a story size) count as one page.
