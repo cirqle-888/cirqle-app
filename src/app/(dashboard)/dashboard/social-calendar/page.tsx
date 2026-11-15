@@ -30,6 +30,84 @@ export default async function SocialCalendarPage({
 
   const admin = createAdminClient()
 
+  // ── Loading order ──────────────────────────────────────────────────────────
+  // This page used to await every read below in turn — thirteen round trips in
+  // a row before anything rendered (2.2–2.5 s measured 15 Nov 2026, for 83 KB
+  // of data). Only two things genuinely depend on an earlier answer: which
+  // plan is selected (needs the plan list), and that plan's items, packages
+  // and delivered work (need the selection). Everything else is started here,
+  // at once, and collected at the end.
+  //
+  // `early` starts a read now to be awaited later. It marks a rejection as
+  // handled so Node does not report it while it waits its turn — it does NOT
+  // swallow it: the await further down still throws exactly as it did.
+  const early = <T,>(p: PromiseLike<T>): Promise<T> => {
+    const q = Promise.resolve(p)
+    q.catch(() => {})
+    return q
+  }
+
+  // Every variant tag ever used, across all plans — powers the "Also as"
+  // autocomplete so free-text tags converge on a shared vocabulary instead of
+  // fragmenting into "reel"/"reels"/"Reel". A missing `variants` column
+  // (pre-migration) just yields an empty list.
+  const knownVariantsP: Promise<string[]> = early((async () => {
+    try {
+      const { data } = await admin
+        .from('social_calendar_items')
+        .select('variants')
+        .not('variants', 'is', null)
+        .limit(2000)
+      const set = new Set<string>()
+      for (const row of (data || []) as { variants: string[] | null }[]) {
+        for (const v of row.variants || []) if (v) set.add(String(v))
+      }
+      return [...set].sort()
+    } catch { return [] /* column not migrated yet — suggestions fall back to the built-ins */ }
+  })())
+
+  // Designers available for the optional per-item assignment.
+  //
+  // NAME IS DELIBERATELY NOT SELECTED. Employee names are private: the picker
+  // shows CQIDs only, so the name never reaches the browser in the first place
+  // — a stronger guarantee than masking it at render time.
+  const employeesP = early(admin
+    .from('employees').select('id, cqid')
+    .eq('is_active', true).eq('is_archived', false).order('cqid'))
+
+  // Service → department, for every service. Read once and used twice: the
+  // assignee picker's effective-service map, and the "which services count as
+  // social" filter on delivered work (which used to ask the same table two
+  // more times, one after the other).
+  const serviceCategoriesP = early(admin.from('services').select('id, category_id'))
+  const employeeScopeP = early(Promise.all([
+    admin.from('employee_service_categories').select('employee_id, category_id'),
+    admin.from('employee_services').select('employee_id, service_id'),
+  ]))
+
+  // Department names for the picker's group headers.
+  const departmentsP = early(admin
+    .from('service_categories').select('id, name')
+    .eq('is_active', true).order('display_order'))
+
+  // is_draft labels trial clients "Draft" in the New Plan picker.
+  const clientsP = early(withDraftFlag(x => admin
+    .from('clients').select(`id, name, code${x}`).eq('is_active', true).order('name')))
+
+  // Services power the item modal's Service picker — the same catalogue the
+  // Requests form uses, so calendar items align with request types.
+  const servicesP = early(admin
+    .from('services').select('id, name, category_id').eq('is_active', true)
+    .order('display_order').order('name'))
+
+  // Full settings map: the PDF export borrows the invoice template's branding
+  // keys (logo, colors, company identity), and the content-type → service
+  // defaults live under 'social_content_type_services'.
+  // EGRESS: shared 5-minute cache (getCompanySettings) rather than an
+  // unfiltered select on every render — the PDF branding keys live alongside
+  // the base64 logo blobs in this table.
+  const companySettingsP: Promise<Record<string, string>> = early(getCompanySettings())
+
   // All plans, newest month first, with just enough embedded item data for
   // the picker's progress counts. Plans are few (one per client per month).
   let calendars: any[] = []
@@ -57,8 +135,9 @@ export default async function SocialCalendarPage({
   // Full items for the selected plan, with the live pipeline join:
   // item → request → promoted task. The calendar displays this chain's
   // status; it never stores it.
-  let items: any[] = []
-  if (migrated && selectedId) {
+  const loadItems = async () => {
+    let items: any[] = []
+    if (!(migrated && selectedId)) return items
     // service_id / variants need the 202607170xxxxx patch migrations — fall back without them.
     const ITEM_COLS = `
         id, calendar_id, scheduled_date, title, content_type, platforms,
@@ -109,34 +188,69 @@ export default async function SocialCalendarPage({
       if (!col) break
       extraCols = extraCols.filter(c => c !== col)
     }
+    return items
   }
 
-  // Every variant tag ever used, across all plans — powers the "Also as"
-  // autocomplete so free-text tags converge on a shared vocabulary instead of
-  // fragmenting into "reel"/"reels"/"Reel". A missing `variants` column
-  // (pre-migration) just yields an empty list.
-  let knownVariants: string[] = []
-  try {
-    const { data } = await admin
-      .from('social_calendar_items')
-      .select('variants')
-      .not('variants', 'is', null)
-      .limit(2000)
-    const set = new Set<string>()
-    for (const row of (data || []) as { variants: string[] | null }[]) {
-      for (const v of row.variants || []) if (v) set.add(String(v))
-    }
-    knownVariants = [...set].sort()
-  } catch { /* column not migrated yet — suggestions fall back to the built-ins */ }
+  // The selected plan's items, its package commitments and its delivered work
+  // all hang off the selection and off nothing else, so they leave together.
+  const selectedCalendar = calendars.find(c => c.id === selectedId) ?? null
+  const itemsP = early(loadItems())
 
-  // Designers available for the optional per-item assignment.
+  // ── Package commitments for the plan on screen ────────────────────────────
   //
-  // NAME IS DELIBERATELY NOT SELECTED. Employee names are private: the picker
-  // shows CQIDs only, so the name never reaches the browser in the first place
-  // — a stronger guarantee than masking it at render time.
-  const employees = (await admin
-    .from('employees').select('id, cqid')
-    .eq('is_active', true).eq('is_archived', false).order('cqid')).data || []
+  // A content plan for a client on a retainer is planning against a promise:
+  // 15 posts this cycle, of which some are already done. The calendar cannot
+  // show what is still owed without knowing that promise, so it is loaded here
+  // and the client re-derives progress from its live item list.
+  //
+  // Degrades to nothing when the package tables aren't migrated — the calendar
+  // is useful without them and must not fail because of them.
+  type PackageRows = { packages: any[]; packageTasks: any[] }
+  const packagesP: Promise<PackageRows> = early((async (): Promise<PackageRows> => {
+    if (!selectedCalendar?.client_id) return { packages: [], packageTasks: [] }
+    try {
+      const { data: pkgs, error } = await admin
+        .from('client_packages')
+        .select('*, items:client_package_items(*)')
+        .eq('client_id', selectedCalendar.client_id)
+        .is('deleted_at', null)
+      if (error || !pkgs?.length) return { packages: [], packageTasks: [] }
+      const ids = pkgs.map((p: { id: string }) => p.id)
+      const { data: linked } = await admin
+        .from('tasks')
+        .select(await coverageTaskColumns(admin))
+        .in('package_id', ids)
+        .is('deleted_at', null)
+      return { packages: pkgs, packageTasks: linked || [] }
+    } catch { return { packages: [], packageTasks: [] } /* packages not migrated — the calendar simply shows no commitment */ }
+  })())
+
+  // Completed work for the plan's client and month — the raw rows behind the
+  // monthly-report overlay further down. Needs only the selection.
+  const deliveredWindow = (() => {
+    if (!(selectedCalendar?.client_id && selectedCalendar?.month)) return null
+    const monthStart = String(selectedCalendar.month).slice(0, 10)
+    const d = new Date(`${monthStart}T00:00:00`)
+    const nextMonth = new Date(d.getFullYear(), d.getMonth() + 1, 1)
+      .toLocaleDateString('en-CA')
+    return { monthStart, nextMonth }
+  })()
+  const doneTasksP = early<{ data: Record<string, unknown>[] | null }>(deliveredWindow
+    ? admin
+        .from('tasks')
+        .select('id, task_number, title, task_date, status, service_id, service:services!service_id(name)')
+        .eq('client_id', selectedCalendar.client_id)
+        .is('deleted_at', null)
+        .in('status', ['delivered', 'done', 'invoiced', 'paid'])
+        .gte('task_date', deliveredWindow.monthStart)
+        .lt('task_date', deliveredWindow.nextMonth)
+        .order('task_date', { ascending: true })
+    : Promise.resolve({ data: [] }))
+
+  const items = await itemsP
+  const knownVariants = await knownVariantsP
+  const employees = (await employeesP).data || []
+  const serviceCategoryRows = ((await serviceCategoriesP).data || []) as { id: string; category_id: string | null }[]
 
   // Employee → department(s) AND employee → effective service ids, so the
   // picker can offer only the people who actually work this kind of content.
@@ -150,12 +264,8 @@ export default async function SocialCalendarPage({
   const employeeDepartments: Record<string, string[]> = {}
   const employeeServices: Record<string, string[]> = {}
   try {
-    const [{ data: cats }, { data: direct }, { data: svcs }] = await Promise.all([
-      admin.from('employee_service_categories').select('employee_id, category_id'),
-      admin.from('employee_services').select('employee_id, service_id'),
-      admin.from('services').select('id, category_id'),
-    ])
-    const svcRows = (svcs || []) as { id: string; category_id: string | null }[]
+    const [{ data: cats }, { data: direct }] = await employeeScopeP
+    const svcRows = serviceCategoryRows
     const svcDept = new Map(svcRows.map(s => [s.id, s.category_id ?? null]))
     const deptServices = new Map<string, string[]>()
     for (const s of svcRows) {
@@ -187,47 +297,13 @@ export default async function SocialCalendarPage({
   // Department names for the picker's group headers.
   let departments: { id: string; name: string }[] = []
   try {
-    const { data } = await admin
-      .from('service_categories').select('id, name')
-      .eq('is_active', true).order('display_order')
+    const { data } = await departmentsP
     departments = (data || []) as { id: string; name: string }[]
   } catch { /* pre-migration — picker falls back to a flat list */ }
 
-  // is_draft labels trial clients "Draft" in the New Plan picker.
-  const clients = (await withDraftFlag(x => admin
-    .from('clients').select(`id, name, code${x}`).eq('is_active', true).order('name'))).data || []
-
-  // ── Package commitments for the plan on screen ────────────────────────────
-  //
-  // A content plan for a client on a retainer is planning against a promise:
-  // 15 posts this cycle, of which some are already done. The calendar cannot
-  // show what is still owed without knowing that promise, so it is loaded here
-  // and the client re-derives progress from its live item list.
-  //
-  // Degrades to nothing when the package tables aren't migrated — the calendar
-  // is useful without them and must not fail because of them.
-  let packages: any[] = []
-  let packageTasks: any[] = []
-  const selectedCalendar = calendars.find(c => c.id === selectedId) ?? null
-  if (selectedCalendar?.client_id) {
-    try {
-      const { data: pkgs, error } = await admin
-        .from('client_packages')
-        .select('*, items:client_package_items(*)')
-        .eq('client_id', selectedCalendar.client_id)
-        .is('deleted_at', null)
-      if (!error && pkgs?.length) {
-        packages = pkgs
-        const ids = pkgs.map((p: { id: string }) => p.id)
-        const { data: linked } = await admin
-          .from('tasks')
-          .select(await coverageTaskColumns(admin))
-          .in('package_id', ids)
-          .is('deleted_at', null)
-        packageTasks = linked || []
-      }
-    } catch { /* packages not migrated — the calendar simply shows no commitment */ }
-  }
+  const clients = (await clientsP).data || []
+  const { packages, packageTasks } = await packagesP
+  const companySettings: Record<string, string> = await companySettingsP
 
   // ── Delivered work for the month (the monthly-report overlay) ──────────────
   // The plan answers "what did we say we would do". A monthly report also has
@@ -240,13 +316,8 @@ export default async function SocialCalendarPage({
   // is left is delivered work that never appeared on the plan — precisely the
   // gap worth seeing.
   let deliveredTasks: any[] = []
-  if (selectedCalendar?.client_id && selectedCalendar?.month) {
+  if (deliveredWindow) {
     try {
-      const monthStart = String(selectedCalendar.month).slice(0, 10)
-      const d = new Date(`${monthStart}T00:00:00`)
-      const nextMonth = new Date(d.getFullYear(), d.getMonth() + 1, 1)
-        .toLocaleDateString('en-CA')
-
       // ── Which services count as "social"? ──────────────────────────────────
       // Client + month alone is not enough: a client buys packaging, logos and
       // print from the same agency, and none of that belongs on a SOCIAL
@@ -259,7 +330,7 @@ export default async function SocialCalendarPage({
       // items use — and allow everything sharing their category. So mapping
       // "post → Social Media Poster" admits the whole Social Media category
       // (stories, DPs, covers) and still excludes Print & Collateral.
-      const settings: Record<string, string> = await getCompanySettings()
+      const settings = companySettings
       let seedServiceIds: string[] = []
       try {
         if (settings.social_content_type_services) {
@@ -273,15 +344,17 @@ export default async function SocialCalendarPage({
 
       let allowedServiceIds: Set<string> | null = null
       if (seedServiceIds.length) {
-        const { data: seedRows } = await admin
-          .from('services').select('id, category_id').in('id', seedServiceIds)
-        const cats = [...new Set((seedRows ?? []).map((r: any) => r.category_id).filter(Boolean))]
+        // From the service → department map read at the top; these were two
+        // more reads of the same table, one waiting on the other.
+        const seedSet = new Set(seedServiceIds)
+        const seedRows = serviceCategoryRows.filter(r => seedSet.has(r.id))
+        const cats = [...new Set(seedRows.map(r => r.category_id).filter((c): c is string => !!c))]
         if (cats.length) {
-          const { data: sameCat } = await admin
-            .from('services').select('id').in('category_id', cats)
+          const catSet = new Set(cats)
+          const sameCat = serviceCategoryRows.filter(r => !!r.category_id && catSet.has(r.category_id))
           allowedServiceIds = new Set([
             ...seedServiceIds,
-            ...(sameCat ?? []).map((r: any) => r.id),
+            ...sameCat.map(r => r.id),
           ])
         } else {
           // Services exist but carry no category — fall back to exactly the
@@ -290,15 +363,7 @@ export default async function SocialCalendarPage({
         }
       }
 
-      const { data: done } = await admin
-        .from('tasks')
-        .select('id, task_number, title, task_date, status, service_id, service:services!service_id(name)')
-        .eq('client_id', selectedCalendar.client_id)
-        .is('deleted_at', null)
-        .in('status', ['delivered', 'done', 'invoiced', 'paid'])
-        .gte('task_date', monthStart)
-        .lt('task_date', nextMonth)
-        .order('task_date', { ascending: true })
+      const { data: done } = await doneTasksP
 
       // Ids already on the plan, via either exit: item → task directly, or
       // item → request → promoted task.
@@ -325,19 +390,8 @@ export default async function SocialCalendarPage({
     } catch { /* tasks unreadable — the calendar is still useful without the overlay */ }
   }
 
-  // Services power the item modal's Service picker — the same catalogue the
-  // Requests form uses, so calendar items align with request types.
-  const services = (await admin
-    .from('services').select('id, name, category_id').eq('is_active', true)
-    .order('display_order').order('name')).data || []
+  const services = (await servicesP).data || []
 
-  // Full settings map: the PDF export borrows the invoice template's branding
-  // keys (logo, colors, company identity), and the content-type → service
-  // defaults live under 'social_content_type_services'.
-  // EGRESS: shared 5-minute cache (getCompanySettings) rather than an
-  // unfiltered select on every render — the PDF branding keys live alongside
-  // the base64 logo blobs in this table.
-  const companySettings: Record<string, string> = await getCompanySettings()
   let serviceMap: Record<string, string> = {}
   try {
     if (companySettings.social_content_type_services) {

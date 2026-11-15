@@ -29,7 +29,7 @@ export default async function PayrollPage() {
   scoresWindowFrom.setMonth(scoresWindowFrom.getMonth() - 24)
   const scoresWindowFromStr = scoresWindowFrom.toISOString()
 
-  const [employeesRes, payrollRes, advancesRes, creditRes, deductionsRes, scoresRes, tasksRes, awardsRes, adjustmentsRes] = await Promise.all([
+  const [employeesRes, payrollRes, advancesRes, creditRes, deductionsRes, scoresRes, tasksRes, awardsRes, adjustmentsRes, bankAccountsRes] = await Promise.all([
     fetchAll(stablePaginationQuery(
       supabase.from('employees').select('*').order('cqid')
     )),
@@ -112,6 +112,14 @@ export default async function PayrollPage() {
         .order('source_year', { ascending: false })
         .order('source_month', { ascending: false })
     )),
+    // "Paid from" on Mark Paid. Small table; the default account is
+    // preselected. In the batch — it waited on nothing, and used to be one
+    // more round trip after everything else on the page had finished.
+    supabase
+      .from('bank_accounts')
+      .select('id, name, is_default')
+      .eq('is_active', true)
+      .order('display_order'),
   ])
 
 
@@ -168,7 +176,11 @@ export default async function PayrollPage() {
     [`${p.employee_id}|${p.month}|${p.year}`, p.status === 'paid' ? p.paid_date : null]))
   const changesByAdj = new Map<string, AdjustmentChange[]>()
   if (vis.payrollAmounts) {
-    for (const a of (adjustmentsRes.data || []) as Record<string, unknown>[]) {
+    // Together, not one after another. Each correction without stored lineage
+    // reads the audit trail for its own employee and month, and nothing one
+    // of them learns is needed by the next — in a loop of awaits the page
+    // paid for them in sequence, one round trip (or more) per correction.
+    await Promise.all(((adjustmentsRes.data || []) as Record<string, unknown>[]).map(async a => {
       const stored = (a.breakdown as { changedTasks?: AdjustmentChange[] } | null)?.changedTasks
       const found = stored ?? await loadAdjustmentChanges(
         supabase, String(a.employee_id), Number(a.source_month), Number(a.source_year),
@@ -177,7 +189,7 @@ export default async function PayrollPage() {
       changesByAdj.set(String(a.id), forViewer(found, {
         viewerEmployeeId: me?.employeeId ?? null, subjectEmployeeId: String(a.employee_id), viewerIsAdmin: me?.isAdmin ?? false,
       }))
-    }
+    }))
   }
   const payrollAdjustments = vis.payrollAmounts
     ? (adjustmentsRes.data || []).map((a: Record<string, unknown>) => ({
@@ -195,13 +207,7 @@ export default async function PayrollPage() {
       }))
     : []
 
-  // "Paid from" on Mark Paid. Small table; the default account is preselected.
-  const { data: bankAccountRows } = await supabase
-    .from('bank_accounts')
-    .select('id, name, is_default')
-    .eq('is_active', true)
-    .order('display_order')
-  const bankAccounts = (bankAccountRows || []) as { id: string; name: string; is_default: boolean | null }[]
+  const bankAccounts = (bankAccountsRes.data || []) as { id: string; name: string; is_default: boolean | null }[]
 
   return (
     <PayrollClient

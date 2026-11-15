@@ -1,4 +1,4 @@
-import { createAdminClient, fetchAll, stablePaginationQuery, columnExists } from '@/lib/supabase/server'
+import { createAdminClient, fetchAll, fetchAllParallel, stablePaginationQuery, columnExists } from '@/lib/supabase/server'
 import { buildCreditLedger, creditSalaryJournalLines, fetchCreditMovements } from '@/lib/finance/credit-ledger'
 import { getHistoricalAnalytics, getHistoricalEarnings } from '@/lib/analytics/cache'
 import { mergeEarnings, type EarningsAggregate, type ScoreRow } from '@/lib/analytics/earnings'
@@ -309,6 +309,88 @@ export default async function DashboardPage() {
     ? fetchJournalLines(supabase, { from: stripFrom }).catch(() => null)
     : Promise.resolve(null)
 
+  // Cashbook — admin only, all-time for accurate bank balance calculation.
+  // Filter out soft-deleted entries so deleted/edited entries don't appear
+  // in the dashboard Cash Flow widget or distort the bank balance.
+  // transfer_ref / reversal_of let the Income and Outflow figures leave out
+  // internal transfers and net returned payments, and the category's
+  // statement section lets them leave out credit, capital and drawings
+  // (lib/finance/cash-flow). Bank balance still sums every row.
+  //
+  // Its own promise, started here, for two reasons. The pages are requested
+  // together instead of one after another (the table is past 1,000 rows, so
+  // fetchAll was a chain of round trips inside the batch the shell waits on).
+  // And the department panel below needs these rows: handed the promise, it
+  // starts its own reads NOW, beside the batch, instead of after it.
+  const cashbookPromise: ReturnType<typeof fetchAll> = isAdmin
+    ? fetchAllParallel(() => supabase
+        .from('cashbook_entries')
+        .select(`id, type, amount_inr, entry_date, description, transfer_ref${hasReversalColumn ? ', reversal_of' : ''}, category:cashbook_categories(statement_section)`)
+        .is('deleted_at', null)
+        .order('entry_date', { ascending: true })
+        .order('id', { ascending: true }), 4)
+    : Promise.resolve({ data: [] })
+
+  // Department panel — streamed like the analytics view, so it never holds up
+  // the shell. Null (panel hidden) for non-admins or if a read fails.
+  const departmentFactsPromise: Promise<DepartmentFacts | null> = isAdmin
+    ? loadDepartmentFacts(
+        supabase,
+        cashbookPromise.then(r => operatingRows((r.data || []) as any[])),
+        analyticsFromStr,
+      ).catch(e => {
+        console.error('[dashboard] department facts:', e instanceof Error ? e.message : e)
+        return null
+      })
+    : Promise.resolve(null)
+
+  // Payslips generated but not yet paid, per employee — what the company still
+  // owes the team. A balance, not a period figure, so it ignores the date
+  // filter. Admin only; a failed read just hides the line. Streamed, and
+  // started here so it does not wait for the batch it never depended on.
+  const pendingPayPromise: Promise<Record<string, PendingPay>> = isAdmin
+    ? Promise.resolve(fetchAll(supabase.from('payroll')
+        .select('employee_id, month, year, payslip_number, net_salary, commission_earned, ownership_earned')
+        .eq('status', 'pending')
+        .order('year').order('month').order('id')))
+        .then(res => {
+          if (res.error) throw new Error(res.error.message)
+          return pendingPayByEmployee((res.data || []) as any[])
+        })
+        .catch(e => {
+          console.error('[dashboard] pending pay:', e instanceof Error ? e.message : e)
+          return {}
+        })
+    : Promise.resolve({})
+
+  // Invoices — admin only. Its own promise so the follow-up read, the one
+  // thing that genuinely needs the invoice ids, starts the moment they land
+  // rather than after the slowest member of the batch.
+  const invoicesPromise: ReturnType<typeof fetchAll> = isAdmin
+    ? fetchAll(supabase
+        .from('invoices')
+        .select('id, invoice_number, total_amount, paid_amount, total_amount_inr, paid_amount_inr, exchange_rate, status, currency, due_date, issue_date, client:clients(id, name)')
+        .order('due_date', { ascending: true })
+        .order('id', { ascending: true }))
+    : Promise.resolve({ data: [] })
+
+  // ── Follow-up widget counts (admin only) ─────────────────────────────────────
+  // Uses the SAME classifier as the Follow-ups page so counts never drift.
+  // Defensive: if invoice_followups doesn't exist yet, fu is null → counts fall
+  // back to status-only buckets (drafts→to-send, overdue→urgent), still useful.
+  const followupCountsPromise: Promise<{ needsSent: number; urgent: number; regular: number }> = isAdmin
+    ? invoicesPromise.then(async res => {
+        const pendingForFollowup = (res.data || []).filter(i =>
+          ['draft', 'reviewed', 'sent', 'partial', 'overdue'].includes(i.status))
+        if (!pendingForFollowup.length) return { needsSent: 0, urgent: 0, regular: 0 }
+        const { data: fu } = await supabase
+          .from('invoice_followups')
+          .select('id, invoice_id, promised_date, next_followup_date, created_at')
+          .in('invoice_id', pendingForFollowup.map(i => i.id))
+        return summarizeFollowups(pendingForFollowup as any[], (fu || []) as any[])
+      })
+    : Promise.resolve({ needsSent: 0, urgent: 0, regular: 0 })
+
   // Only fetch invoices, cashbook, and all payroll history if admin
   const [
     invoicesRes,
@@ -326,14 +408,9 @@ export default async function DashboardPage() {
     billingQueue,
     myActions,
     journal,
+    followupCounts,
   ] = await Promise.all([
-    isAdmin
-      ? fetchAll(supabase
-          .from('invoices')
-          .select('id, invoice_number, total_amount, paid_amount, total_amount_inr, paid_amount_inr, exchange_rate, status, currency, due_date, issue_date, client:clients(id, name)')
-          .order('due_date', { ascending: true })
-          .order('id', { ascending: true }))
-      : Promise.resolve({ data: [] }),
+    invoicesPromise,
 
     // Live exchange rates — used by the FX toggle on the dashboard (pure UI, no DB writes).
     // Small table (~10 rows), negligible overhead. Non-admins get an empty array.
@@ -341,21 +418,7 @@ export default async function DashboardPage() {
       ? supabase.from('exchange_rates').select('currency, rate_to_inr')
       : Promise.resolve({ data: [] }),
 
-    // Cashbook — admin only, all-time for accurate bank balance calculation.
-    // Filter out soft-deleted entries so deleted/edited entries don't appear
-    // in the dashboard Cash Flow widget or distort the bank balance.
-    // transfer_ref / reversal_of let the Income and Outflow figures leave out
-    // internal transfers and net returned payments, and the category's
-    // statement section lets them leave out credit, capital and drawings
-    // (lib/finance/cash-flow). Bank balance still sums every row.
-    isAdmin
-      ? fetchAll(supabase
-          .from('cashbook_entries')
-          .select(`id, type, amount_inr, entry_date, description, transfer_ref${hasReversalColumn ? ', reversal_of' : ''}, category:cashbook_categories(statement_section)`)
-          .is('deleted_at', null)
-          .order('entry_date', { ascending: true })
-          .order('id', { ascending: true }))
-      : Promise.resolve({ data: [] }),
+    cashbookPromise,
 
     // Display tasks (used for widgets: active, overdue, to-be-invoiced) — admin only.
     // Bounded to 90 days because the widgets surface "recent work" and would never
@@ -379,17 +442,21 @@ export default async function DashboardPage() {
           .order('cqid')))
       : Promise.resolve({ data: [] }),
 
-    // Scored task IDs — used to detect "unscored done tasks" in displayTasks
-    // (the latter is ordered by task_date desc and shown only as a widget hint,
-    // so 36-month window is enough). Bounds an otherwise unbounded scan of all
-    // historical scores.
+    // Scored task IDs — used to detect "unscored done tasks" in displayTasks.
+    //
+    // Only the scores of tasks inside the display window. This used to read
+    // every score of the last 36 months to answer a question about the last
+    // 90 days: 5,683 rows on 15 Nov 2026, six pages fetched ONE AFTER ANOTHER
+    // (~2.3 s from a laptop) inside the batch the dashboard shell waits on —
+    // the single slowest thing on the page, and growing every month. The
+    // display tasks are all dated on or after `displayFromStr`, so their
+    // scores are exactly the ones this filter keeps; pages are requested
+    // together.
     isAdmin
-      ? fetchAll(stablePaginationQuery(
-          supabase.from('contribution_scores')
-            .select('task_id')
-            .gte('calculated_at', analyticsFromStr)
-            .order('id', { ascending: true })
-        ))
+      ? fetchAllParallel(() => supabase.from('contribution_scores')
+          .select('task_id, tasks!inner(task_date)')
+          .gte('tasks.task_date', displayFromStr)
+          .order('id', { ascending: true }), 3)
       : Promise.resolve({ data: [] }),
 
     // Today's tasks — admin dashboard widget only
@@ -427,6 +494,7 @@ export default async function DashboardPage() {
     billingQueuePromise,
     myActionsPromise,
     journalPromise,
+    followupCountsPromise,
   ])
 
   const invoices           = invoicesRes.data || []
@@ -439,33 +507,6 @@ export default async function DashboardPage() {
   const payrollRecords     = payrollRes.data || []
 
   const today = new Date()
-
-  // Payslips generated but not yet paid, per employee — what the company still
-  // owes the team. A balance, not a period figure, so it ignores the date
-  // filter. Admin only; a failed read just hides the line.
-  const pendingPayPromise: Promise<Record<string, PendingPay>> = isAdmin
-    ? Promise.resolve(fetchAll(supabase.from('payroll')
-        .select('employee_id, month, year, payslip_number, net_salary, commission_earned, ownership_earned')
-        .eq('status', 'pending')
-        .order('year').order('month').order('id')))
-        .then(res => {
-          if (res.error) throw new Error(res.error.message)
-          return pendingPayByEmployee((res.data || []) as any[])
-        })
-        .catch(e => {
-          console.error('[dashboard] pending pay:', e instanceof Error ? e.message : e)
-          return {}
-        })
-    : Promise.resolve({})
-
-  // Department panel — streamed like the analytics view, so it never holds up
-  // the shell. Null (panel hidden) for non-admins or if a read fails.
-  const departmentFactsPromise: Promise<DepartmentFacts | null> = isAdmin
-    ? loadDepartmentFacts(supabase, operatingRows(allCashbook as any[]), analyticsFromStr).catch(e => {
-        console.error('[dashboard] department facts:', e instanceof Error ? e.message : e)
-        return null
-      })
-    : Promise.resolve(null)
 
   // ── Bank balance ────────────────────────────────────────────────────────────
   const bankBalance = allCashbook.reduce((s, e) =>
@@ -515,22 +556,6 @@ export default async function DashboardPage() {
     return s + Math.max(0, invTotalInr(i) - invPaidInr(i))
   }, 0)
 
-  // ── Follow-up widget counts (admin only) ─────────────────────────────────────
-  // Uses the SAME classifier as the Follow-ups page so counts never drift.
-  // Defensive: if invoice_followups doesn't exist yet, fu is null → counts fall
-  // back to status-only buckets (drafts→to-send, overdue→urgent), still useful.
-  let followupCounts = { needsSent: 0, urgent: 0, regular: 0 }
-  if (isAdmin) {
-    const pendingForFollowup = invoices.filter(i =>
-      ['draft', 'reviewed', 'sent', 'partial', 'overdue'].includes(i.status))
-    if (pendingForFollowup.length) {
-      const { data: fu } = await supabase
-        .from('invoice_followups')
-        .select('id, invoice_id, promised_date, next_followup_date, created_at')
-        .in('invoice_id', pendingForFollowup.map(i => i.id))
-      followupCounts = summarizeFollowups(pendingForFollowup as any[], (fu || []) as any[])
-    }
-  }
   // To be invoiced = draft + reviewed totals (prepared but not sent yet)
   const toBeInvoicedAmount = draftInvoices.reduce((s, i) => s + invTotalInr(i), 0)
 

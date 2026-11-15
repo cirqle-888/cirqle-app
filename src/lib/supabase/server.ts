@@ -85,6 +85,88 @@ function getQueryTable(query: any): string | null {
   return typeof t === 'string' && t ? t : null
 }
 
+/**
+ * An independent copy of a PostgREST query builder, or null if `query` is not
+ * shaped like the builder this knows how to copy.
+ *
+ * A builder is mutable — `.range()` writes `offset` and `limit` into its one
+ * URL — which is why {@link fetchAll} could only ever page in sequence: two
+ * `.range()` calls on a shared builder before awaiting make both requests
+ * fetch the same page, and that silently dropped rows when it was tried. A
+ * copy with its OWN URL and headers has no such sharing: each page is a
+ * separate request object that happens to start from the same filters.
+ *
+ * Deliberately strict. Everything a builder holds besides the URL and headers
+ * is a value or a shared-by-design reference (method, schema, the fetch
+ * function, flags), so a prototype-preserving shallow copy plus those two is a
+ * complete copy — for the builder installed today. If a future supabase-js
+ * changes that shape, the checks here fail closed and fetchAll falls back to
+ * the sequential paging it always did; `fetch-all.test.ts` runs this against
+ * the real library so a silent change cannot get past CI.
+ */
+export function cloneQuery(query: unknown): PagedQuery | null {
+  const q = query as Partial<PagedQuery> | null | undefined
+  if (!q || typeof q.range !== 'function') return null
+  if (!(q.url instanceof URL) || !(q.headers instanceof Headers)) return null
+  const copy = Object.create(Object.getPrototypeOf(q)) as PagedQuery
+  Object.assign(copy, q)
+  copy.url = new URL(q.url.toString())
+  copy.headers = new Headers(q.headers)
+  return copy
+}
+
+/** One page's answer, as PostgREST gives it. */
+type PageResult = { data: unknown[] | null; error: { code?: string; message?: string } | null }
+
+/**
+ * One page, asked twice at most: a dropped connection is retried once.
+ *
+ * A failure with no error `code` never reached the database — PostgREST and
+ * Postgres always send one — so it is the transport: a kept-alive socket the
+ * far side had already closed, cut off while the body was being read (undici's
+ * "TypeError: terminated"). supabase-js retries a fetch that fails to START,
+ * but deliberately not one that dies mid-response, and since the sockets are
+ * kept warm for 30 s (src/instrumentation.ts) there are more old sockets to
+ * lose that race on: five times in one 6½-hour dev session on 15 Nov 2026.
+ * Each one left a page reading a table as shorter than it is, or empty, with
+ * nothing on screen to say so. Reads are idempotent, so asking again is safe;
+ * a second failure is reported exactly as the first would have been.
+ */
+async function askPage(run: () => PromiseLike<PageResult>): Promise<PageResult> {
+  const first = await run()
+  if (!first.error || first.error.code) return first
+  return run()
+}
+
+/** The parts of a PostgREST builder that paging touches. */
+export interface PagedQuery {
+  url: URL
+  headers: Headers
+  range(from: number, to: number): PromiseLike<PageResult>
+}
+
+/**
+ * Every row of a query, past PostgREST's 1,000-row response cap.
+ *
+ * The first page is one request, exactly as it always was — most tables fit
+ * in it and pay nothing extra. Only when that page comes back FULL does this
+ * fetch the rest, and then several pages at a time (2, then 4, then 8 …)
+ * instead of one after another. Each sequential page was a full round trip:
+ * ~380 ms from a laptop, ~50 ms on Vercel. Measured 15 Nov 2026, the 5,683-row
+ * score table was six of them in a row (~2.3 s) wherever it was read; it is
+ * now three rounds, and a 2,100-row task read is two instead of three.
+ *
+ * Pages go out together only when BOTH hold, else it pages in sequence as
+ * before:
+ *  · the builder can be copied ({@link cloneQuery}), and
+ *  · the query has an explicit `.order()`. Concurrent pages of an unordered
+ *    read have nothing fixing which rows land on which page.
+ *
+ * Same contract as ever: rows in page order; on a failed page, `error` is set
+ * and `data` holds what was read before it; a missing table reads as empty.
+ * Use {@link fetchAllParallel} where a caller wants a known-large table in a
+ * single round.
+ */
 export async function fetchAll(query: any): Promise<{ data: any[]; error?: any }> {
   const table = getQueryTable(query)
   if (table && MISSING_TABLES.has(table)) {
@@ -101,13 +183,21 @@ export async function fetchAll(query: any): Promise<{ data: any[]; error?: any }
   const allData: any[] = []
   const PAGE = 1000
   // Fetch up to 100,000 rows max to prevent infinite loops
-  for (let page = 0; page < 100; page++) {
-    const { data, error } = await query.range(page * PAGE, (page + 1) * PAGE - 1)
+  const MAX_PAGES = 100
+  let rounds = 0
+
+  // Taken BEFORE the first `.range()` touches the builder, so every later page
+  // starts from the caller's filters and nothing else.
+  const template = cloneQuery(query)
+  const canFanOut = !!template && template.url.searchParams.has('order')
+
+  /** Folds one page in. False = stop: it failed, or it was the last page. */
+  const take = ({ data, error }: PageResult): boolean => {
     if (error) {
       // PGRST205 = "Could not find the table in the schema cache" — the table
       // doesn't exist in this database (likely an unapplied migration). Cache
       // the absence and short-circuit future calls instead of logging every time.
-      if ((error as any).code === 'PGRST205' && table) {
+      if (error.code === 'PGRST205' && table) {
         MISSING_TABLES.add(table)
         if (process.env.NODE_ENV === 'development' && !MISSING_TABLES_LOGGED.has(table)) {
           MISSING_TABLES_LOGGED.add(table)
@@ -117,14 +207,40 @@ export async function fetchAll(query: any): Promise<{ data: any[]; error?: any }
         console.error('[fetchAll] Error fetching data:', error)
         failure = error
       }
-      break
+      return false
     }
     if (data) allData.push(...data)
-    if (!data || data.length < PAGE) break
+    return !!data && data.length >= PAGE
+  }
+
+  rounds++
+  let more = take(await askPage(() => query.range(0, PAGE - 1)))
+  let page = 1
+  let width = 2
+  while (more && page < MAX_PAGES) {
+    rounds++
+    if (!canFanOut) {
+      const p = page
+      more = take(await askPage(() => query.range(p * PAGE, (p + 1) * PAGE - 1)))
+      page++
+      continue
+    }
+    const pages = Array.from({ length: Math.min(width, MAX_PAGES - page) }, (_, i) => page + i)
+    const results = await Promise.all(
+      pages.map(p => askPage(() => cloneQuery(template)!.range(p * PAGE, (p + 1) * PAGE - 1))),
+    )
+    // In page order, stopping at the first short or failed page: anything
+    // after it is past the end (or past the failure) and is dropped unread.
+    for (const r of results) {
+      more = take(r)
+      if (!more) break
+    }
+    page += pages.length
+    width = Math.min(width * 2, 8)
   }
 
   if (allData.length >= 5000) {
-    console.warn(`[PERF WARNING] fetchAll fetched ${allData.length} rows from "${table ?? 'unknown'}" (${Math.ceil(allData.length / PAGE)} sequential round-trips) — consider adding date filters or cursor pagination.`)
+    console.warn(`[PERF WARNING] fetchAll fetched ${allData.length} rows from "${table ?? 'unknown'}" (${Math.ceil(allData.length / PAGE)} pages in ${rounds} round-trips) — consider adding date filters or cursor pagination.`)
   }
 
   // Dev-only duplicate detection: catches unstable ordering bugs early
@@ -189,7 +305,7 @@ export async function fetchAllParallel(
   // 100 pages = the same 100,000-row ceiling fetchAll has.
   while (!plan.done && pages.size < 100) {
     const results = await Promise.all(plan.nextPages.map(async p => {
-      const { data, error } = await makeQuery().range(p * PAGE, (p + 1) * PAGE - 1)
+      const { data, error } = await askPage(() => makeQuery().range(p * PAGE, (p + 1) * PAGE - 1))
       return { p, data: (data || []) as any[], error }
     }))
     for (const r of results) {
