@@ -46,7 +46,7 @@ export async function GET(request: Request) {
         }
       })
     }
-  } catch (err) {}
+  } catch {}
 
   return NextResponse.redirect('https://app.cirqle.work/icon.svg')
 }

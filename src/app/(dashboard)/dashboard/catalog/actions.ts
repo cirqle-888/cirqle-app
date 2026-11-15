@@ -30,7 +30,6 @@ export async function getProducts(filters?: {
 }): Promise<ActionResult<{ products: any[] }>> {
   const guard = await requireReadPermission(PERMS.OFFER_PREPARE)
   if (!guard.ok) return { ok: false, error: guard.error }
-  const empId = guard.employeeId
 
   const admin = createAdminClient()
 
@@ -76,7 +75,6 @@ export async function getProducts(filters?: {
 export async function createProduct(row: ProductRow): Promise<ActionResult<{ product: any }>> {
   const guard = await requirePermission(PERMS.OFFER_PREPARE)
   if (!guard.ok) return { ok: false, error: guard.error }
-  const empId = guard.employeeId
 
   const admin = createAdminClient()
   const { data, error } = await admin
@@ -106,7 +104,6 @@ export async function updateProduct(
 ): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.OFFER_PREPARE)
   if (!guard.ok) return { ok: false, error: guard.error }
-  const empId = guard.employeeId
 
   const admin = createAdminClient()
   const updates: Record<string, any> = { updated_at: new Date().toISOString() }
@@ -132,7 +129,6 @@ export async function bulkImportProducts(
 ): Promise<ActionResult<{ inserted: number; skipped: number; errors: string[] }>> {
   const guard = await requirePermission(PERMS.OFFER_PREPARE)
   if (!guard.ok) return { ok: false, error: guard.error }
-  const empId = guard.employeeId
   if (!rows.length) return { ok: false, error: 'No rows to import.' }
 
   const admin = createAdminClient()
@@ -183,7 +179,6 @@ export async function getProductImageUploadUrl(
 ): Promise<ActionResult<{ uploadUrl: string; publicUrl: string; storagePath: string }>> {
   const guard = await requirePermission(PERMS.OFFER_PREPARE)
   if (!guard.ok) return { ok: false, error: guard.error }
-  const empId = guard.employeeId
 
   const admin = createAdminClient()
 
@@ -227,7 +222,6 @@ export async function saveProductImage(
 ): Promise<ActionResult<{ imageId: string }>> {
   const guard = await requirePermission(PERMS.OFFER_PREPARE)
   if (!guard.ok) return { ok: false, error: guard.error }
-  const empId = guard.employeeId
 
   const admin = createAdminClient()
 
@@ -260,7 +254,6 @@ export async function saveProductImage(
 export async function setPrimaryImage(productId: string, imageId: string): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.OFFER_PREPARE)
   if (!guard.ok) return { ok: false, error: guard.error }
-  const empId = guard.employeeId
 
   const admin = createAdminClient()
   await admin.from('product_catalog_images').update({ is_primary: false }).eq('product_id', productId).eq('is_primary', true)
@@ -278,7 +271,6 @@ export async function setPrimaryImage(productId: string, imageId: string): Promi
 export async function deleteProductImage(imageId: string): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.OFFER_PREPARE)
   if (!guard.ok) return { ok: false, error: guard.error }
-  const empId = guard.employeeId
 
   const admin = createAdminClient()
   const { data: img } = await admin.from('product_catalog_images').select('storage_path, product_id, is_primary').eq('id', imageId).maybeSingle()
@@ -311,7 +303,6 @@ export async function assignProductToClients(
 ): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.OFFER_PREPARE)
   if (!guard.ok) return { ok: false, error: guard.error }
-  const empId = guard.employeeId
 
   const admin = createAdminClient()
 
@@ -338,7 +329,6 @@ export async function removeClientAssignment(
 ): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.OFFER_PREPARE)
   if (!guard.ok) return { ok: false, error: guard.error }
-  const empId = guard.employeeId
 
   const admin = createAdminClient()
   const { error } = await admin
@@ -361,7 +351,6 @@ export async function getCatalogMeta(): Promise<ActionResult<{
 }>> {
   const guard = await requireReadPermission(PERMS.OFFER_PREPARE)
   if (!guard.ok) return { ok: false, error: guard.error }
-  const empId = guard.employeeId
 
   const admin = createAdminClient()
   const [catRes, brandRes, clientRes] = await Promise.all([
@@ -541,7 +530,6 @@ export async function updateProductLocalName(
 ): Promise<ActionResult> {
   const guard = await requirePermission(PERMS.OFFER_PREPARE)
   if (!guard.ok) return { ok: false, error: guard.error }
-  const empId = guard.employeeId
   if (!id) return { ok: false, error: 'Missing product id.' }
 
   const code = (lang || '').trim().toLowerCase()
