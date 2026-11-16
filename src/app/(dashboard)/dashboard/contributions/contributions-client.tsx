@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
+import { viaPriced } from '@/lib/supabase/priced'
 import { recalculatePayrollForMonth } from '@/app/(dashboard)/dashboard/payroll/actions'
 import { serverFillTaskBilling } from '@/app/(dashboard)/dashboard/tasks/actions'
 import { saveTaskContributions } from './actions'
@@ -1143,7 +1144,11 @@ export default function ContributionsClient({
     const [contribRes, toolRes, scoreRes] = await Promise.all([
       supabase.from('contributions').select('parameter_id, employee_id, value').eq('task_id', task.id),
       supabase.from('task_tools').select('tool_id').eq('task_id', task.id),
-      supabase.from('contribution_scores').select('employee_id, score_percentage, earnings_inr').eq('task_id', task.id),
+      // Earnings only for someone allowed to see them, and only through the
+      // priced view — the base table no longer hands them to the browser.
+      canSeeFinancials
+        ? viaPriced(src => supabase.from(src.scores).select('employee_id, score_percentage, earnings_inr').eq('task_id', task.id))
+        : supabase.from('contribution_scores').select('employee_id, score_percentage').eq('task_id', task.id),
     ])
 
     if (scoreRes.data?.length && (!contribRes.data || contribRes.data.length === 0)) {
@@ -1365,6 +1370,19 @@ export default function ContributionsClient({
   }
 
 
+  /**
+   * A new task row comes back from the base table without its price (the
+   * browser cannot read it there). Someone allowed to see money gets it added
+   * from the priced view; everyone else gets the row as it is.
+   */
+  async function withTaskPrice<T extends { id: string }>(row: T): Promise<T & { billing_amount_inr?: number | null }> {
+    if (!canSeeFinancials) return row
+    const { data } = await viaPriced(src =>
+      supabase.from(src.tasks).select('billing_amount_inr').eq('id', row.id).maybeSingle())
+    const price = (data as { billing_amount_inr: number | null } | null)?.billing_amount_inr
+    return price === undefined ? row : { ...row, billing_amount_inr: price }
+  }
+
   // ── Duplicate task ──────────────────────────────────────
   async function handleDuplicateTask(task: any) {
     setDuplicatingTaskId(task.id)
@@ -1390,11 +1408,12 @@ export default function ContributionsClient({
     if (task.billing_amount) payload.billing_amount = task.billing_amount
     if (task.currency) payload.currency = task.currency
 
-    const { data, error } = await supabase
+    const { data: inserted, error } = await supabase
       .from('tasks')
       .insert(payload)
-      .select('id, task_number, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services!service_id(id, name)')
+      .select('id, task_number, title, service_id, status, task_date, client:clients(id, name), service:services!service_id(id, name)')
       .single()
+    const data = inserted ? await withTaskPrice(inserted) : inserted
 
     if (!error && data) {
       setLocalTasks(prev => [data, ...prev])
@@ -1423,11 +1442,12 @@ export default function ContributionsClient({
     if (addTaskForm.service_id) payload.service_id = addTaskForm.service_id
     if (addTaskForm.billing_amount_inr) payload.billing_amount_inr = parseFloat(addTaskForm.billing_amount_inr as string) || 0
 
-    const { data, error } = await supabase
+    const { data: inserted, error } = await supabase
       .from('tasks')
       .insert(payload)
-      .select('id, title, service_id, billing_amount_inr, status, task_date, client:clients(id, name), service:services!service_id(id, name)')
+      .select('id, title, service_id, status, task_date, client:clients(id, name), service:services!service_id(id, name)')
       .single()
+    const data = inserted ? await withTaskPrice(inserted) : inserted
 
     if (error) { setAddTaskError(error.message); setAddingTask(false); return }
     if (data) {

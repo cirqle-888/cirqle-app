@@ -18,6 +18,7 @@ import {
   Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, Building2, BarChart2, Copy, GripVertical, Settings2, ChevronUp, Inbox, Loader2, CheckSquare, Columns3,
 } from 'lucide-react'
 import { TASK_COLUMNS_NO_PRICING, TASK_JOINS } from '@/lib/tasks/select-columns'
+import { viaPriced } from '@/lib/supabase/priced'
 import { ToolbarSegment, SegmentButton, ScopeToggle, FiltersButton, StatusChip, ToolbarDivider } from '@/components/ui/list-toolbar'
 import { formatCurrency } from '@/lib/calculations/currency'
 import Link from 'next/link'
@@ -498,6 +499,17 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
   // money fields are simply absent (undefined), exactly as on the server load.
   const taskRowCols = (canSeeTaskPricing ? `*, ${TASK_JOINS}` : `${TASK_COLUMNS_NO_PRICING}, ${TASK_JOINS}`) as
     '*, client:clients(id, name, code), service:services!service_id(id, name)'
+  // What an INSERT may ask back from the base table. The money columns are not
+  // readable from `tasks` in the browser (20261116120000), so a price-allowed
+  // user's new row is re-read through the priced view right after.
+  const insertReturnCols = `${TASK_COLUMNS_NO_PRICING}, ${TASK_JOINS}` as typeof taskRowCols
+  /** One task row as this user may see it: priced view with pricing, base table without. */
+  async function readTaskRow(id: string): Promise<Task | null> {
+    const { data } = canSeeTaskPricing
+      ? await viaPriced(src => supabase.from(src.tasks).select(taskRowCols).eq('id', id).maybeSingle())
+      : await supabase.from('tasks').select(taskRowCols).eq('id', id).maybeSingle()
+    return (data as unknown as Task | null) ?? null
+  }
   const showEmpNames    = canSee(visibilitySettings?.employee_names)
   const [editClientId, setEditClientId] = useState<string | null>(null)
   const [editClientServiceId, setEditClientServiceId] = useState<string | null>(null)
@@ -601,9 +613,11 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
 
       type Q = ReturnType<typeof supabase.from> extends { select: (...a: any[]) => infer R } ? R : any
 
+      // Built per source: prices come from the priced view (see lib/supabase/priced).
+      const build = (table: 'tasks' | 'tasks_priced') => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let q: any = supabase
-        .from('tasks')
+        .from(table)
         .select(taskRowCols, { count: 'exact' })
 
       if (hasSoftDelete) q = q.is('deleted_at', null)
@@ -645,15 +659,20 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       // Sort
       if (sortBy === 'date_asc')    q = q.order('task_date',           { ascending: true,  nullsFirst: false })
       else if (sortBy === 'date_desc')   q = q.order('task_date',      { ascending: false, nullsFirst: false })
-      else if (sortBy === 'amount_desc') q = q.order('billing_amount_inr', { ascending: false, nullsFirst: false })
+      // Sorting by price needs the price: only on the priced view.
+      else if (sortBy === 'amount_desc' && table === 'tasks_priced') q = q.order('billing_amount_inr', { ascending: false, nullsFirst: false })
       else if (sortBy === 'client')      q = q.order('client_id',      { ascending: true,  nullsFirst: false })
       else                               q = q.order('task_number',    { ascending: false, nullsFirst: false })
 
       // Paginate (Add deterministic stable sort for non-unique sorts)
       q = q.order('id', { ascending: true })
       q = q.range(page * DB_PAGE_SIZE, (page + 1) * DB_PAGE_SIZE - 1)
+      return q as PromiseLike<{ data: unknown[] | null; count: number | null; error: { code?: string; message?: string } | null }>
+      }
 
-      const { data, count, error } = await q
+      const { data, count, error } = canSeeTaskPricing
+        ? await viaPriced(src => build(src.tasks))
+        : await build('tasks')
       if (!error) {
         // Post-filter by assignee client-side (task_assignments is loaded).
         // Employees are blocked from reaching this code by the early return above,
@@ -1480,7 +1499,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     // Check if this task has any contribution scores — if so we show a stronger warning.
     const { count } = await supabase
       .from('contribution_scores')
-      .select('*', { count: 'exact', head: true })
+      .select('task_id', { count: 'exact', head: true })
       .eq('task_id', id)
     setDeleteConfirmHasScores((count ?? 0) > 0)
     setDeleteConfirm(id)
@@ -1660,9 +1679,10 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       }
       const { data: inserted, error } = await retryWithoutScope(strip =>
         supabase.from('tasks').insert(strip ? withoutScope(duplicateRow) : duplicateRow)
-          .select(taskRowCols).single()
+          .select(insertReturnCols).single()
       )
-      const data = inserted as unknown as Task | null
+      let data = inserted as unknown as Task | null
+      if (data && canSeeTaskPricing) data = (await readTaskRow(data.id)) ?? data
       if (data) {
         setTasks(prev => [data as Task, ...prev])
         // Source had no amount (e.g. pricing was hidden or unset when it was
@@ -1794,7 +1814,8 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       } : {}),
     }
 
-    const selectCols = taskRowCols
+    // The base table cannot return a price to the browser; see readTaskRow.
+    const selectCols = insertReturnCols
     let { data, error } = await supabase
       .from('tasks')
       .insert(billingSnapshot ? { ...insertPayload, billing_snapshot: billingSnapshot } : insertPayload)
@@ -1824,6 +1845,11 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     if (error && isScopeColumnMissing(error)) {
       console.warn('tasks.scope missing — saving without scope. Apply supabase/migrations/20260714090000_finance_scope_foundation.sql.')
       ;({ data, error } = await supabase.from('tasks').insert(withoutScope(insertPayload)).select(selectCols).single())
+    }
+
+    if (!error && data && canSeeTaskPricing) {
+      const full = await readTaskRow(data.id)
+      if (full) data = full as unknown as typeof data
     }
 
     if (!error && data) {
@@ -1898,9 +1924,8 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
           .then(async () => {
             // Pull the computed amount back into the row we just optimistically
             // added, so the list shows the real figure without a full reload.
-            const { data: priced } = await supabase
-              .from('tasks').select(selectCols).eq('id', data!.id).single()
-            if (priced) setTasks(prev => prev.map(t => t.id === data!.id ? (priced as Task) : t))
+            const priced = await readTaskRow(data!.id)
+            if (priced) setTasks(prev => prev.map(t => t.id === data!.id ? priced : t))
           })
           .catch(() => {})
       }

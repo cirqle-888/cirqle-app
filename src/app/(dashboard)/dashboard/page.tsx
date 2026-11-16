@@ -210,7 +210,13 @@ export default async function DashboardPage() {
     || hasPermission(me, PERMS.REQUESTS_MANAGE)
   const canSeeInvoices = isAdmin || hasPermission(me, PERMS.BILLING_VIEW_INVOICES)
 
-  const creditMovementsPromise = fetchCreditMovements(supabase)
+  // Admin only. Every figure it feeds (credit outstanding, total expected cash,
+  // the Company Ops strip) is admin-only on screen, but `stats` is serialised
+  // into the page for whoever opens it — so reading this for a non-admin with
+  // dashboard access shipped the company's credit total in the payload.
+  const creditMovementsPromise: Promise<Awaited<ReturnType<typeof fetchCreditMovements>>> = isAdmin
+    ? fetchCreditMovements(supabase)
+    : Promise.resolve([])
   const pendingPricingPromise = canSeePricing
     ? getPendingPricing(supabase)
     : Promise.resolve({ clients: [], services: [], total: 0 })

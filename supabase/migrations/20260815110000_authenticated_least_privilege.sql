@@ -66,6 +66,9 @@ DECLARE
     'clients',
     'contribution_groups',
     'contribution_scores',
+    -- Read-only, permission-checked views of task prices and earnings
+    -- (20261116110000). Listed so a re-run of this migration keeps their grant.
+    'contribution_scores_priced',
     'contributions',
     'conversation_members',
     'conversations',
@@ -106,6 +109,7 @@ DECLARE
     'task_requests',
     'task_tools',
     'tasks',
+    'tasks_priced',
     'tool_services',
     'tools'
   ];
