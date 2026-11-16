@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -34,6 +34,7 @@ import { FavoritesSection } from '@/components/layout/favorites-section'
 import { FavoriteToggle } from '@/components/ui/favorite-toggle'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { useSheetDismiss } from '@/components/ui/use-sheet-dismiss'
+import { useLiquidGlass } from '@/components/ui/use-liquid-glass'
 import { resolveFavoriteIcon, iconKeyFor } from '@/lib/favorites/icon-map'
 import { useFavorites } from '@/contexts/favorites-context'
 import type { FavoriteEntry } from '@/lib/favorites/queries'
@@ -616,6 +617,10 @@ export default function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [showPwdModal, setShowPwdModal] = useState(false)
   const [profileSheetOpen, setProfileSheetOpen] = useState(false)
+  // Liquid glass on the mobile bottom nav: pages scroll under it and bend
+  // along its top edge (Chromium; frosted only elsewhere).
+  const bottomNavRef = useRef<HTMLDivElement>(null)
+  useLiquidGlass(bottomNavRef, { bezel: 14, strength: 16 })
   const [isPinned, setIsPinned] = useState(true)
   const [isHovered, setIsHovered] = useState(false)
   const [mounted, setMounted] = useState(false)
@@ -733,7 +738,7 @@ export default function Sidebar() {
           hamburger rather than sitting beside it: More opens the same drawer,
           from where a thumb already is. */}
       {(
-        <div className="md:hidden fixed bottom-0 left-0 w-full z-50 bg-sidebar border-t border-sidebar-border pb-safe pt-1 px-2 flex items-center justify-around shadow-[0_-4px_20px_rgba(0,0,0,0.2)]">
+        <div ref={bottomNavRef} className="md:hidden fixed bottom-0 left-0 w-full z-50 liquid-glass liquid-glass-bar-bottom pb-safe pt-1 px-2 flex items-center justify-around">
           {/* Home is fixed; the shortcuts beside it are the person's own first
               Favorites, which they already curate from ⌘K or the star and which
               only ever contain pages their permissions allow. Someone with no
