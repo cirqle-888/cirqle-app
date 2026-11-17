@@ -62,8 +62,14 @@ export interface PromptPreset {
   values: Record<string, string>
 }
 
-export type CategoryId = 'flyer' | 'ad' | 'film' | 'product' | 'agency' | 'fix'
-export const CATEGORY_IDS: CategoryId[] = ['flyer', 'ad', 'film', 'product', 'agency', 'fix']
+export type CategoryId = 'flyer' | 'social' | 'ad' | 'film' | 'product' | 'agency' | 'fix'
+export const CATEGORY_IDS: CategoryId[] = ['flyer', 'social', 'ad', 'film', 'product', 'agency', 'fix']
+/**
+ * Categories a team-made template can be saved under: the ones the
+ * prompt_templates table accepts. 'social' is built-in only; a copy of a
+ * social template is filed under Agency Services.
+ */
+export const CUSTOM_CATEGORY_IDS: CategoryId[] = ['flyer', 'ad', 'film', 'product', 'agency', 'fix']
 
 export interface PromptCategory {
   id: CategoryId
@@ -102,6 +108,12 @@ export interface PromptTemplate {
    * not to a chat AI first: no "Generate here" and no Answer box.
    */
   direct?: boolean
+  /**
+   * The task needs live web search (today's trends, this year's festival
+   * dates). "Generate here" has no web search, so it is hidden: an answer made
+   * without one would be invented.
+   */
+  web?: boolean
 }
 
 /** Values of one client's card, keyed by CLIENT_CARD_FIELDS[].key. */

@@ -3,7 +3,8 @@
  * final paste-ready text. Pure functions, no I/O, safe on server and client.
  */
 import { TOGGLE_ON, type ClientCard, type PromptTemplate } from './types'
-import { CLIENT_CARD_FIELDS } from './client-card'
+import { CLIENT_CARD_FIELDS, CARD_SPECIAL_KEYS } from './client-card'
+import { colourRule } from './colors'
 import { styleBlock } from './style'
 
 /**
@@ -51,9 +52,14 @@ export function missingRequired(t: PromptTemplate, values: Record<string, string
 export function renderClientCard(card: ClientCard | null | undefined): string {
   if (!card) return ''
   const lines = CLIENT_CARD_FIELDS
+    .filter(f => !CARD_SPECIAL_KEYS.includes(f.key))
     .map(f => [f.label, (card[f.key] ?? '').trim()] as const)
     .filter(([, v]) => v)
     .map(([label, v]) => `${label}: ${v.replace(/\s*\n\s*/g, '; ')}`)
+  // The link itself is no use to the AI: what matters is that the logo is attached and left alone.
+  if ((card.logo ?? '').trim()) lines.push('Logo: I am attaching the logo file. Use it exactly as it is: never redraw, recolour, stretch or restyle it.')
+  const rule = colourRule(card.colors, card.colorUse)
+  if (rule) lines.push(rule)
   return lines.length ? `CLIENT CARD\n${lines.join('\n')}` : ''
 }
 
@@ -82,16 +88,18 @@ const CARD_POINTER = /[ \t]*Use the CLIENT CARD above\.?/g
 /**
  * Card (if the template uses it) + filled body. This is what gets copied.
  * `language` overrides the card's language for this one prompt (and works
- * without a card); `style` mixes in a saved style recipe. With no card at all, the body's pointer to it is removed so
+ * without a card); `colorUse` overrides the card's colour rule the same way; `style` mixes in a saved style recipe. With no card at all, the body's pointer to it is removed so
  * the AI isn't told to use something that isn't there.
  */
 export function renderPrompt(
   t: PromptTemplate,
   values: Record<string, string>,
   card?: ClientCard | null,
-  opts?: { language?: string; style?: string },
+  opts?: { language?: string; style?: string; colorUse?: string },
 ): string {
-  const merged = opts?.language ? { ...(card || {}), language: opts.language } : card
+  let merged = opts?.language ? { ...(card || {}), language: opts.language } : card
+  // "Use matching colours this time" without touching the saved card.
+  if (opts?.colorUse && merged) merged = { ...merged, colorUse: opts.colorUse }
   const head = t.usesClientCard ? renderClientCard(merged) : ''
   let body = renderBody(t, values)
   if (!head) body = body.replace(CARD_POINTER, '').replace(/^[ \t]+$/gm, '')

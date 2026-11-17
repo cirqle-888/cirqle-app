@@ -9,8 +9,12 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { TEMPLATES, CATEGORIES } from "@/lib/prompt-studio/templates";
 import {
   CLIENT_CARD_FIELDS,
+  CARD_GROUPS,
   CARD_PREFILL_FROM_CLIENT,
 } from "@/lib/prompt-studio/client-card";
+import { COLOR_USE_OPTIONS, swatches } from "@/lib/prompt-studio/colors";
+import { CopyForAi } from "@/components/prompt-studio/copy-for-ai";
+import { LogoUpload } from "./logo-upload";
 import {
   renderPrompt,
   renderClientCard,
@@ -37,7 +41,7 @@ import type {
   CategoryId,
   ActionResult,
 } from "@/lib/prompt-studio/types";
-import { FIELD_TYPES } from "@/lib/prompt-studio/types";
+import { FIELD_TYPES, CUSTOM_CATEGORY_IDS } from "@/lib/prompt-studio/types";
 import * as actions from "./actions";
 import { StudioFields, GrowingTextarea } from "./studio-fields";
 import { SkillsTab } from "./skills-tab";
@@ -57,6 +61,19 @@ const tabs = [
   "Library",
   "Skills",
 ] as const;
+/** Shown only with Advanced on: most people never build templates or download skills. */
+const ADVANCED_TABS: readonly string[] = ["My Templates", "Skills"];
+/** A card as the editor opens it: the saved one, or a new one started from the client's own record. */
+function cardDraftFor(id: string, cards: SavedCard[], clients: StudioClient[]): ClientCard {
+  const saved = cards.find((c) => c.client_id === id);
+  const client = clients.find((c) => c.id === id);
+  return (
+    saved?.card ||
+    Object.fromEntries(
+      Object.entries(CARD_PREFILL_FROM_CLIENT).map(([k, v]) => [k, client?.[v] || ""]),
+    )
+  );
+}
 const panel =
   "bg-card border border-border rounded-xl p-4 sm:p-6 space-y-4 min-w-0";
 const blank = (): CustomTemplate => ({
@@ -82,6 +99,8 @@ export default function PromptStudioClient({
   myId = null,
   initialStyles = [],
   initialQuickLooks = [],
+  initialClientId = "",
+  initialTab = "",
 }: {
   clients: StudioClient[];
   initialCards: SavedCard[];
@@ -93,16 +112,27 @@ export default function PromptStudioClient({
   myId?: string | null;
   initialStyles?: SavedStyle[];
   initialQuickLooks?: SavedQuickLook[];
+  /** From a "Copy for AI" link on another page: open on this client… */
+  initialClientId?: string;
+  /** …and, with "cards", straight in that client's card. */
+  initialTab?: string;
 }) {
   const toast = useToast();
   const [quickLooks, setQuickLooks] = useState(initialQuickLooks);
   const [lookName, setLookName] = useState("");
   const [deleteLookId, setDeleteLookId] = useState<string | null>(null);
-  const [tab, setTab] = useState<(typeof tabs)[number]>("Create");
+  const linked = clients.some((c) => c.id === initialClientId) ? initialClientId : "";
+  const toCard = !!linked && initialTab === "cards";
+  const [tab, setTab] = useState<(typeof tabs)[number]>(toCard ? "Client Cards" : "Create");
+  // Help: the hints and explanations. Advanced: template building, styles, Quick looks, skills.
+  const [help, setHelp] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
+  const [colorUse, setColorUse] = useState("");
+  const [cardMore, setCardMore] = useState(false);
   const [cards, setCards] = useState(initialCards);
   const [custom, setCustom] = useState(initialTemplates);
   const [library, setLibrary] = useState(initialLibrary);
-  const [clientId, setClientId] = useState("");
+  const [clientId, setClientId] = useState(linked);
   const [clientSearch, setClientSearch] = useState("");
   const [category, setCategory] = useState("flyer");
   const [templateKey, setTemplateKey] = useState(TEMPLATES[0].key);
@@ -121,10 +151,14 @@ export default function PromptStudioClient({
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
-  const [cardClient, setCardClient] = useState("");
-  const [cardDraft, setCardDraft] = useState<ClientCard>({});
+  const [cardClient, setCardClient] = useState(toCard ? linked : "");
+  const [cardDraft, setCardDraft] = useState<ClientCard>(() =>
+    toCard ? cardDraftFor(linked, initialCards, clients) : {},
+  );
   /** updated_at of the card as opened, so a save can't overwrite someone else's newer one. */
-  const [cardBase, setCardBase] = useState<string | null>(null);
+  const [cardBase, setCardBase] = useState<string | null>(() =>
+    toCard ? (initialCards.find((c) => c.client_id === linked)?.updated_at ?? null) : null,
+  );
   const [cardSearch, setCardSearch] = useState("");
   const [editor, setEditor] = useState<CustomTemplate | null>(null);
   const [samples, setSamples] = useState<Record<string, string>>({});
@@ -137,6 +171,7 @@ export default function PromptStudioClient({
   const prompt = renderPrompt(template, values, card?.card, {
     language,
     style: mixed?.recipe,
+    colorUse,
   });
   const shown = withDefaults(template, values);
   const missing = missingRequired(template, values);
@@ -166,8 +201,11 @@ export default function PromptStudioClient({
     const frame = requestAnimationFrame(() => {
       try {
         const saved = JSON.parse(localStorage.getItem("prompt-studio") || "{}");
-        if (clients.some((c) => c.id === saved.clientId))
+        // A link from a client's page names its client: that wins over the last one used here.
+        if (!linked && clients.some((c) => c.id === saved.clientId))
           setClientId(saved.clientId);
+        if (saved.help === true) setHelp(true);
+        if (saved.advanced === true) setAdvanced(true);
         if (
           [...CATEGORIES.map((c) => c.id), "custom", "favorites"].includes(
             saved.category,
@@ -188,19 +226,19 @@ export default function PromptStudioClient({
       setReady(true);
     });
     return () => cancelAnimationFrame(frame);
-  }, [clients, initialTemplates]);
+  }, [clients, initialTemplates, linked]);
   useEffect(() => {
     if (ready) {
       try {
         localStorage.setItem(
           "prompt-studio",
-          JSON.stringify({ clientId, category, templateKey, stars }),
+          JSON.stringify({ clientId, category, templateKey, stars, help, advanced }),
         );
       } catch {
         /* Storage may be full or disabled. */
       }
     }
-  }, [ready, clientId, category, templateKey, stars]);
+  }, [ready, clientId, category, templateKey, stars, help, advanced]);
   const copy = useCallback(
     async (text: string) => {
       try {
@@ -257,19 +295,9 @@ export default function PromptStudioClient({
   }
   function openCard(id: string, fill?: ClientCard) {
     setCardClient(id);
-    const saved = cards.find((c) => c.client_id === id);
-    const client = clients.find((c) => c.id === id);
-    setCardBase(saved?.updated_at ?? null);
-    setCardDraft({
-      ...(saved?.card ||
-        Object.fromEntries(
-          Object.entries(CARD_PREFILL_FROM_CLIENT).map(([k, v]) => [
-            k,
-            client?.[v] || "",
-          ]),
-        )),
-      ...(fill || {}),
-    });
+    setCardBase(cards.find((c) => c.client_id === id)?.updated_at ?? null);
+    setCardDraft({ ...cardDraftFor(id, cards, clients), ...(fill || {}) });
+    setCardMore(false);
     setTab("Client Cards");
   }
   /** Start another template with this answer already in its input box. */
@@ -325,7 +353,7 @@ export default function PromptStudioClient({
     <>
       <Header
         title="Prompt Studio"
-        subtitle="Pick a client. Fill a few boxes. Make a better prompt."
+        subtitle={help ? "Pick a client. Fill a few boxes. Make a better prompt." : undefined}
       />
       <main className="prompt-studio mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
         <style>{`.prompt-studio .studio-button { min-height:44px; padding:10px 14px; border:1px solid var(--border); border-radius:8px; font-size:14px; font-weight:500; } .prompt-studio .studio-button:hover { background:var(--secondary); } .prompt-studio button:disabled { opacity:.45; cursor:not-allowed; } .prompt-studio .field { min-height:44px; } .prompt-studio .primary { background:var(--primary); color:var(--primary-foreground); }`}</style>
@@ -335,7 +363,9 @@ export default function PromptStudioClient({
           role="tablist"
           aria-label="Prompt Studio"
         >
-          {tabs.map((t) => (
+          {tabs
+            .filter((t) => advanced || tab === t || !ADVANCED_TABS.includes(t))
+            .map((t) => (
             <button
               key={t}
               role="tab"
@@ -346,6 +376,26 @@ export default function PromptStudioClient({
               {t}
             </button>
           ))}
+          <span className="ml-auto flex gap-2">
+            <button
+              type="button"
+              className={`studio-button ${help ? "border-primary text-primary" : "text-muted-foreground"}`}
+              aria-pressed={help}
+              title="Show or hide the hints and explanations"
+              onClick={() => setHelp((v) => !v)}
+            >
+              Help
+            </button>
+            <button
+              type="button"
+              className={`studio-button ${advanced ? "border-primary text-primary" : "text-muted-foreground"}`}
+              aria-pressed={advanced}
+              title="Show or hide template building, styles, Quick looks and skills"
+              onClick={() => setAdvanced((v) => !v)}
+            >
+              Advanced
+            </button>
+          </span>
         </div>
         {tab === "Create" && (
           <div className="space-y-5">
@@ -397,6 +447,13 @@ export default function PromptStudioClient({
                       No card yet · Add
                     </button>
                   ))}
+                {clientId && (
+                  <CopyForAi
+                    clientId={clientId}
+                    card={card?.card ?? null}
+                    onEditCard={() => openCard(clientId)}
+                  />
+                )}
                 <select
                   className="field sm:w-56"
                   aria-label="Language for voice and text"
@@ -415,7 +472,7 @@ export default function PromptStudioClient({
                   ))}
                 </select>
               </div>
-              {template.usesClientCard && !card && (
+              {help && template.usesClientCard && !card && (
                 <p className="text-sm text-muted-foreground">
                   {clientId
                     ? "This client has no card yet, so the prompt goes without brand details."
@@ -458,6 +515,7 @@ export default function PromptStudioClient({
                       className="flex-1 min-w-0 p-4 text-left"
                       onClick={() => choose(t)}
                       aria-pressed={template.key === t.key}
+                      title={t.purpose}
                     >
                       <span className="font-medium">{t.name}</span>
                       {custom.some((c) => c.key === t.key) && (
@@ -465,9 +523,11 @@ export default function PromptStudioClient({
                           Custom
                         </span>
                       )}
-                      <span className="mt-1 block text-sm text-muted-foreground">
-                        {t.purpose}
-                      </span>
+                      {help && (
+                        <span className="mt-1 block text-sm text-muted-foreground">
+                          {t.purpose}
+                        </span>
+                      )}
                     </button>
                     <button
                       className="w-11 shrink-0 self-start py-3 text-xl"
@@ -497,11 +557,15 @@ export default function PromptStudioClient({
             <div className="grid gap-5 lg:grid-cols-2 items-start">
               <section className={panel}>
                 <h2 className="font-semibold">3. Fill · {template.name}</h2>
-                <p className="text-sm text-muted-foreground">
-                  {template.direct
-                    ? `Paste this prompt with the photo into: ${template.useIn}`
-                    : `Paste the answer into: ${template.useIn}`}
-                </p>
+                {help && (
+                  <p className="text-sm text-muted-foreground">
+                    {template.direct
+                      ? `Paste this prompt with the photo into: ${template.useIn}`
+                      : template.web
+                        ? `Paste this prompt into: ${template.useIn}`
+                        : `Paste the answer into: ${template.useIn}`}
+                  </p>
+                )}
                 {!!template.presets?.length && (
                   <div className="space-y-2">
                     <h3 className="text-sm font-medium">Quick looks</h3>
@@ -521,7 +585,7 @@ export default function PromptStudioClient({
                           }
                         >
                           <span className="block font-medium">{p.name}</span>
-                          {p.note && (
+                          {help && p.note && (
                             <span className="block text-xs text-muted-foreground">{p.note}</span>
                           )}
                         </button>
@@ -543,7 +607,7 @@ export default function PromptStudioClient({
                       {canManage && <button className="studio-button" disabled={busy} aria-label={`Delete ${p.name}`} onClick={() => setDeleteLookId(p.id)}>Delete</button>}
                     </div>
                   ))}
-                  {canManage && installed && <div className="space-y-2 rounded-lg border border-border p-3">
+                  {advanced && canManage && installed && <div className="space-y-2 rounded-lg border border-border p-3">
                     <label className="block text-sm font-medium" htmlFor="quick-look-name">Save as a Quick look</label>
                     <div className="flex gap-2">
                       <input id="quick-look-name" className="field min-w-0 flex-1" maxLength={120} value={lookName} onChange={e => setLookName(e.target.value)} placeholder="Name this look" />
@@ -552,7 +616,7 @@ export default function PromptStudioClient({
                         p => { setQuickLooks(s => [...s, p]); setLookName(""); }, "Quick look saved",
                       )}>Save look</button>
                     </div>
-                    <p className="text-xs text-muted-foreground">{clientId ? `For ${clients.find(c => c.id === clientId)?.name || "this client"}` : "For the whole team"}. Remembers choices, notes, style and language. Leaves out product names, headline text and pictures.</p>
+                    {help && <p className="text-xs text-muted-foreground">{clientId ? `For ${clients.find(c => c.id === clientId)?.name || "this client"}` : "For the whole team"}. Remembers choices, notes, style and language. Leaves out product names, headline text and pictures.</p>}
                   </div>}
                 </div>
                 <StudioFields
@@ -561,8 +625,9 @@ export default function PromptStudioClient({
                   onChange={(k, v) => setValues((s) => ({ ...s, [k]: v }))}
                   attachments={attachments}
                   onAttach={attach}
+                  showHelp={help}
                 />
-                {template.tip && (
+                {help && template.tip && (
                   <p className="text-sm text-muted-foreground">
                     {template.tip}
                   </p>
@@ -582,11 +647,31 @@ export default function PromptStudioClient({
                 )}
                 <div className="flex justify-between gap-2">
                   <h2 className="font-semibold">4. Result</h2>
-                  <span className="text-xs text-muted-foreground">
-                    ≈ {estimateTokens(prompt)} tokens
-                  </span>
+                  {advanced && (
+                    <span className="text-xs text-muted-foreground">
+                      ≈ {estimateTokens(prompt)} tokens
+                    </span>
+                  )}
                 </div>
-                {template.key !== STYLE_TEMPLATE_KEY && (
+                {template.usesClientCard && card && (advanced || !!colorUse) && (
+                  <label className="block space-y-1 text-sm">
+                    <span className="font-medium">Colours for this prompt</span>
+                    <select
+                      className="field w-full"
+                      aria-label="Colours for this prompt"
+                      value={colorUse}
+                      onChange={(e) => setColorUse(e.target.value)}
+                    >
+                      <option value="">
+                        {card.card.colorUse ? `As on the card (${card.card.colorUse})` : "As on the card (no rule)"}
+                      </option>
+                      {COLOR_USE_OPTIONS.map((o) => (
+                        <option key={o} value={o}>{o}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {template.key !== STYLE_TEMPLATE_KEY && (advanced || !!styleId) && (
                   <label className="block space-y-1 text-sm">
                     <span className="font-medium">Mix in a saved style (optional)</span>
                     <select
@@ -622,7 +707,7 @@ export default function PromptStudioClient({
                 >
                   Copy prompt
                 </button>
-                {template.direct && (
+                {help && template.direct && (
                   <p className="text-sm text-muted-foreground">
                     This prompt goes straight into the image tool: attach the
                     client’s photo there, paste, and send.
@@ -633,11 +718,18 @@ export default function PromptStudioClient({
                     Fill in: {missing.join(", ")}
                   </p>
                 ) : (
+                  help && (
+                    <p className="text-xs text-muted-foreground">
+                      Ctrl/Cmd+Enter to copy
+                    </p>
+                  )
+                )}
+                {template.web && (
                   <p className="text-xs text-muted-foreground">
-                    Ctrl/Cmd+Enter to copy
+                    Needs web search: paste into Claude, ChatGPT or Gemini.
                   </p>
                 )}
-                {aiEnabled && !template.direct && (
+                {aiEnabled && !template.direct && !template.web && (
                   <>
                     <button
                       className="studio-button"
@@ -782,13 +874,15 @@ export default function PromptStudioClient({
                 )}
                 {installed && (
                   <>
-                    <input
-                      className="field w-full"
-                      aria-label="Library title"
-                      placeholder="Title (optional)"
-                      value={title}
-                      onChange={(e) => setTitle(e.target.value)}
-                    />
+                    {(advanced || template.key === STYLE_TEMPLATE_KEY) && (
+                      <input
+                        className="field w-full"
+                        aria-label="Library title"
+                        placeholder="Title (optional)"
+                        value={title}
+                        onChange={(e) => setTitle(e.target.value)}
+                      />
+                    )}
                     <button
                       className="studio-button"
                       disabled={busy || !!missing.length}
@@ -814,7 +908,7 @@ export default function PromptStudioClient({
                   </>
                 )}
                 <div className="flex flex-wrap gap-2">
-                  {canManage && (
+                  {advanced && canManage && (
                     <button
                       className="studio-button"
                       onClick={() => {
@@ -823,6 +917,8 @@ export default function PromptStudioClient({
                           id: "",
                           key: "",
                           name: `${template.name} (copy)`,
+                          // Built-in-only categories are filed under Agency Services when copied.
+                          category: CUSTOM_CATEGORY_IDS.includes(template.category) ? template.category : "agency",
                           based_on: template.key,
                         });
                         setSamples({});
@@ -838,6 +934,7 @@ export default function PromptStudioClient({
                       setValues({});
                       setAnswer("");
                       setTitle("");
+                      setColorUse("");
                       Object.values(attachments).forEach((u) => URL.revokeObjectURL(u));
                       setAttachments({});
                     }}
@@ -892,24 +989,72 @@ export default function PromptStudioClient({
             <section className={panel}>
               {cardClient ? (
                 <>
-                  <h2 className="font-semibold">
-                    {clients.find((c) => c.id === cardClient)?.name}
-                  </h2>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="font-semibold">
+                      {clients.find((c) => c.id === cardClient)?.name}
+                    </h2>
+                    <CopyForAi clientId={cardClient} card={cardDraft} />
+                  </div>
                   {!canManage && (
                     <p className="text-sm text-muted-foreground">
                       You can view this card. Ask a manager to update it.
                     </p>
                   )}
-                  <StudioFields
-                    fields={CLIENT_CARD_FIELDS}
-                    values={cardDraft}
-                    onChange={(k, v) => setCardDraft((s) => ({ ...s, [k]: v }))}
-                    readOnly={!canManage}
-                  />
-                  <h3 className="font-medium">How it will appear</h3>
-                  <pre className="whitespace-pre-wrap break-words rounded-lg bg-secondary p-4 text-sm">
-                    {renderClientCard(cardDraft)}
-                  </pre>
+                  {CARD_GROUPS.map((g) => {
+                    const fields = CLIENT_CARD_FIELDS.filter((f) => g.keys.includes(f.key));
+                    const filled = fields.filter((f) => (cardDraft[f.key] || "").trim()).length;
+                    // "More details" stays folded until asked for, so a new card is a short form.
+                    const openGroup = !g.advanced || cardMore;
+                    return (
+                      <div key={g.id} className="space-y-4 border-t border-border pt-4 first:border-t-0 first:pt-0">
+                        {g.advanced ? (
+                          <button
+                            type="button"
+                            className="flex w-full items-center justify-between text-left font-medium"
+                            aria-expanded={openGroup}
+                            onClick={() => setCardMore((v) => !v)}
+                          >
+                            <span>{g.name}</span>
+                            <span className="text-xs font-normal text-muted-foreground">
+                              {filled ? `${filled} filled · ` : ""}{openGroup ? "Hide" : "Show"}
+                            </span>
+                          </button>
+                        ) : (
+                          <h3 className="font-medium">{g.name}</h3>
+                        )}
+                        {openGroup && (
+                          <StudioFields
+                            fields={fields}
+                            values={cardDraft}
+                            onChange={(k, v) => setCardDraft((s) => ({ ...s, [k]: v }))}
+                            readOnly={!canManage}
+                            showHelp={help}
+                          />
+                        )}
+                        {g.id === "brand" && installed && canManage && (
+                          <LogoUpload
+                            clientId={cardClient}
+                            onUploaded={(url) => setCardDraft((s) => ({ ...s, logo: url }))}
+                          />
+                        )}
+                        {g.id === "brand" && swatches(cardDraft.colors, cardDraft.colorUse).length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5" aria-label="Colours the AI will be told to use">
+                            {swatches(cardDraft.colors, cardDraft.colorUse).map((c) => (
+                              <span key={c} title={c} className="h-7 w-7 rounded-md border border-border" style={{ background: c }} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {advanced && (
+                    <>
+                      <h3 className="font-medium">How it will appear</h3>
+                      <pre className="whitespace-pre-wrap break-words rounded-lg bg-secondary p-4 text-sm">
+                        {renderClientCard(cardDraft)}
+                      </pre>
+                    </>
+                  )}
                   {installed && canManage && (
                     <button
                       className="studio-button primary"
@@ -1025,7 +1170,7 @@ export default function PromptStudioClient({
                           })
                         }
                       >
-                        {CATEGORIES.map((c) => (
+                        {CATEGORIES.filter((c) => CUSTOM_CATEGORY_IDS.includes(c.id)).map((c) => (
                           <option key={c.id} value={c.id}>
                             {c.name}
                           </option>

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { CopyForAi } from '@/components/prompt-studio/copy-for-ai'
 import Header from '@/components/layout/header'
 import { SocialTabs } from '@/components/social-hub/social-tabs'
 import { PostingTimeField } from '@/components/social-hub/posting-time-field'
@@ -1094,6 +1095,8 @@ export default function SocialCalendarClient({
             <Settings2 className="w-4 h-4" />
           </button>
         )}
+
+        {selected && <CopyForAi clientId={selected.client_id} align="left" />}
 
         {selected && (
           <div className="flex items-center gap-1.5 ml-auto flex-wrap justify-end">

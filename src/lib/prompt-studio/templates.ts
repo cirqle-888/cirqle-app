@@ -20,6 +20,7 @@ import type { PromptCategory, PromptField, PromptTemplate } from './types'
 
 export const CATEGORIES: PromptCategory[] = [
   { id: 'flyer',   name: 'Offer Flyer',         description: '3D offer text and clean product photos for flyers' },
+  { id: 'social',  name: 'Social Media',        description: 'Today’s trends, monthly calendars, post ideas and briefs' },
   { id: 'ad',      name: 'Ad Video',            description: 'Offer and promotion reels, step by step' },
   { id: 'film',    name: 'Film & Series',       description: 'Stories, episodes, characters and scenes' },
   { id: 'product', name: 'Product Videography', description: 'Packshots, hero clips, UGC and food' },
@@ -750,6 +751,124 @@ Output only the image.`,
 ]
 
 // ── Ad Video ─────────────────────────────────────────────────────────────────
+// ── Social Media ────────────────────────────────────────────────────────────
+// Planning, not picture-making: the AI answers with the plan itself. The first
+// two need live web search (today's trends, this year's festival dates), so
+// they are marked `web` and "Generate here" stays hidden for them.
+const SOCIAL_SAFE = `Skip politics, religious disputes, deaths, accidents and anything that could embarrass a local business.
+Use the idea of a film, song or meme, never the footage, the audio or a celebrity's photo.
+Prices, offers and dates only from the Client Card or what I give you; if one is missing, write [ask client] in its place.`
+const SOCIAL_WEB = 'Claude, ChatGPT or Gemini with web search on'
+
+const SOCIAL: PromptTemplate[] = [
+  {
+    key: 'social-trends-today', name: 'Today’s trends', category: 'social', web: true,
+    purpose: 'What is trending today near this client, with a post idea for each',
+    useIn: SOCIAL_WEB, usesClientCard: true,
+    fields: [
+      { key: 'focus', label: 'Anything special today (optional)', type: 'text', placeholder: 'New stock arrived, heavy rain, match day' },
+    ],
+    body: `You are a social media planner. Use the CLIENT CARD above.
+
+Search the web for what is trending TODAY for this client. Look nearest first:
+1. The client's own town and district
+2. The state or region
+3. The country, only if local people are talking about it
+4. Gulf countries, only if the card lists a Gulf audience
+
+Check local news, search trends, weather, film and music releases, sports, and festivals or special days in the next 10 days (confirm this year's exact date).
+Also consider: {{focus}}
+
+Output only a table of the 8 trends that fit this client best: Trend | Why it fits | Post idea (poster, reel or story) | Hook in the card's language | Post by | Source link.
+Then list 3 things I should check by hand inside Instagram (audio, formats, hashtags), because you cannot see those.
+
+Rules:
+Only trends you found today, each with a link. A trend older than 3 days is finished: leave it out.
+${SOCIAL_SAFE}
+No explanation.`,
+    tip: 'Open the source link before using a trend, and check trending audio inside Instagram.',
+  },
+  {
+    key: 'social-calendar-month', name: 'Monthly calendar', category: 'social', web: true,
+    purpose: 'A month of posts: regular (same rhythm every week) or random (mixed)',
+    useIn: SOCIAL_WEB, usesClientCard: true,
+    fields: [
+      { key: 'month', label: 'Month', type: 'text', required: true, placeholder: 'December 2026' },
+      { key: 'mode', label: 'Plan type', type: 'select', options: ['Regular', 'Random'],
+        help: 'Regular: the same kind of post on the same weekday. Random: mixed days, themes and formats, for a feed that has started to repeat.' },
+      { key: 'notes', label: 'Offers or dates to include (optional)', type: 'textarea', placeholder: 'Weekend fish offer every Friday; shop anniversary on the 14th' },
+    ],
+    defaults: { mode: 'Regular' },
+    body: `You are a social media planner. Use the CLIENT CARD above.
+
+Plan the social media calendar for {{month}}.
+PLAN TYPE: {{mode|Regular}}
+Include: {{notes}}
+
+First search the web for every festival, special day, local event and season in that month that matters for this client's location and audience. Confirm this year's exact dates.
+
+Then build the calendar:
+- Use the platforms and the posts per week from the card (if they are missing, plan 3 posts a week on Instagram and Facebook).
+- If the plan type is Regular: give each posting weekday one fixed format and theme, the same every week.
+- If the plan type is Random: mix days, themes, formats and angles; no two ideas alike.
+- Put festival and special-day posts on the right dates, with a reminder post 2-3 days before the big ones.
+- Mark about one post in three as "TREND SLOT" and leave it empty: it is filled from the daily trend check.
+- Follow the colour rule on the card, so the whole month looks like one brand.
+
+Output only a table: Date | Day | Platform | Format (poster, reel, story, carousel) | Theme | Idea in one line | Hook in the card's language | What the designer needs.
+
+Rules:
+Simple ideas a small team can make.
+${SOCIAL_SAFE}
+No explanation.`,
+  },
+  {
+    key: 'social-fresh-ideas', name: 'Fresh ideas', category: 'social',
+    purpose: 'New post ideas when the feed feels repetitive or a slot is empty',
+    useIn: 'Claude, ChatGPT or Gemini', usesClientCard: true,
+    fields: [
+      { key: 'count', label: 'How many ideas', type: 'number', placeholder: '15' },
+      { key: 'theme', label: 'About (optional)', type: 'text', placeholder: 'Monsoon, new arrivals, weekend' },
+    ],
+    defaults: { count: '15' },
+    body: `You are a social media planner. Use the CLIENT CARD above.
+
+Give me {{count|15}} fresh content ideas for this client. No two with the same format and angle.
+About: {{theme}}
+
+Mix these kinds: funny or relatable local daily life; behind the scenes; customer questions, polls or contests; useful tips; a remake of a format that is popular now; community and hometown pride.
+Build on "What worked before" in the card; do not repeat it.
+
+Output only a table: Format | Idea | Hook in the card's language | Effort (easy, medium, needs a shoot) | Best day. Put a * before your 3 strongest.
+
+Rules:
+${SOCIAL_SAFE}
+No explanation.`,
+  },
+  {
+    key: 'social-post-brief', name: 'Poster brief or reel script', category: 'social',
+    purpose: 'Turn one idea into a ready-to-make brief for the designer or editor',
+    useIn: 'Claude, ChatGPT or Gemini', usesClientCard: true,
+    fields: [
+      { key: 'need', label: 'The idea', type: 'textarea', required: true, placeholder: 'Rain-day home delivery reminder' },
+      { key: 'format', label: 'Format', type: 'select', options: ['Poster', 'Carousel', 'Reel', 'Story'] },
+    ],
+    defaults: { format: 'Poster' },
+    body: `You are a social media planner. Use the CLIENT CARD above.
+
+IDEA: {{need}}
+FORMAT: {{format|Poster}}
+
+Write a ready-to-make brief.
+For a poster, carousel or story give: headline (6 words at most) and sub-line in the card's language; key message; call to action; visual direction (main image, mood); colours, following the colour rule on the card; where the logo goes; size (1080x1350 feed, 1080x1920 story); caption with 5-8 hashtags.
+For a reel give: length (15-30 seconds); hook for the first 2 seconds; shot list as a table (Shot | What we see | On-screen text | Seconds); voice-over in the card's language; the kind of audio to look for; caption, hashtags and cover text. Keep it possible with a phone.
+
+Rules:
+${SOCIAL_SAFE}
+Output only the brief. No explanation.`,
+  },
+]
+
 const AD: PromptTemplate[] = [
   {
     key: 'ad-concepts', name: 'Ad concepts', category: 'ad',
@@ -1626,7 +1745,7 @@ Output only the fields, one per line as "Field: value". No explanation.`,
   },
 ]
 
-export const TEMPLATES: PromptTemplate[] = [...FLYER, ...AD, ...FILM, ...PRODUCT_T, ...AGENCY, ...FIX]
+export const TEMPLATES: PromptTemplate[] = [...FLYER, ...SOCIAL, ...AD, ...FILM, ...PRODUCT_T, ...AGENCY, ...FIX]
 
 export function templateByKey(key: string): PromptTemplate | undefined {
   return TEMPLATES.find(t => t.key === key)
