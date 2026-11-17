@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { viaPriced } from '@/lib/supabase/priced'
 import { calculateCommission } from '@/lib/calculations/commission'
 import { getEffectivePerformanceRating } from '@/lib/calculations/performance-history'
 import { cn, ROW_INTERACTIVE_CLASS } from '@/lib/utils'
@@ -72,6 +73,21 @@ export function ContributionEntryPanel({
     ? allEmployees.filter(e => e.id === currentEmployeeId)
     : allEmployees
   const supabase = createClient()
+
+  /**
+   * This task's saved scores. Earnings only with showEarnings, and then only
+   * through the priced view — the base table does not give them to the
+   * browser (20261116120000). Without showEarnings they are never fetched.
+   */
+  function readScores(): PromiseLike<{ data: any[] | null; error: { code?: string; message?: string } | null }> {
+    return showEarnings
+      ? viaPriced(src => supabase.from(src.scores)
+          .select('employee_id, score_percentage, earnings_inr, calculated_at')
+          .eq('task_id', task.id))
+      : supabase.from('contribution_scores')
+          .select('employee_id, score_percentage, calculated_at')
+          .eq('task_id', task.id)
+  }
   const { dn } = usePrivacy()
   const toast = useToast()
 
@@ -112,9 +128,7 @@ export function ContributionEntryPanel({
         // Earnings and the client price are only ever shown with showEarnings;
         // without it they are not fetched at all, so they never reach the
         // browser (saving recomputes them on the server either way).
-        supabase.from('contribution_scores')
-          .select(showEarnings ? 'employee_id, score_percentage, earnings_inr, calculated_at' : 'employee_id, score_percentage, calculated_at')
-          .eq('task_id', task.id),
+        readScores(),
         task.client_id && showEarnings
           ? supabase.from('client_service_pricing')
               .select('commission_percentage, price, currency')
@@ -441,10 +455,7 @@ export function ContributionEntryPanel({
     // Re-read what actually landed rather than echoing what we sent — a
     // manually-overridden row keeps its old figure, so trusting the local
     // computation here would show a number the database does not hold.
-    const { data: saved } = await supabase
-      .from('contribution_scores')
-      .select('employee_id, score_percentage, earnings_inr, calculated_at')
-      .eq('task_id', task.id)
+    const { data: saved } = await readScores()
     if (saved) {
       setExistingScores(saved)
       setLastUpdated(

@@ -23,6 +23,7 @@ import {
   formatLocalDate,
 } from '@/lib/invoices/numbering'
 import { createClient } from '@/lib/supabase/client'
+import { viaPriced, isMissingPricedSource } from '@/lib/supabase/priced'
 import { compareInvoiceItems, formatBillingPeriod, getNextAction, getStatusColor, getStatusLabel, isDueToSend, isEditable, isOverdue } from '@/lib/utils/invoice'
 import { publicInvoiceUrl, buildInvoiceShareText, whatsappShareUrl } from '@/lib/invoices/share'
 import { TEMPLATE_KEYS } from '@/lib/messaging/templates'
@@ -2191,8 +2192,9 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
     const to   = genForm.mode === 'day' ? genForm.specific_date : genForm.date_to
 
     // Fetch done AND invoiced tasks in range (so we can warn about already-invoiced ones)
-    const { data: rawTasks } = await supabase
-      .from('tasks')
+    // Prices come from the priced view (lib/supabase/priced).
+    const { data: rawTasks } = await viaPriced(src => supabase
+      .from(src.tasks)
       .select('id, title, task_date, billing_amount, billing_amount_inr, currency, status, quantity, service:services!service_id(name)')
       .eq('client_id', genForm.client_id)
       // Waived work is delivered and paid for internally, but never charged —
@@ -2201,7 +2203,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
       .in('status', ['done', 'invoiced'])
       .gte('task_date', from)
       .lte('task_date', to)
-      .order('task_date')
+      .order('task_date'))
 
     if (!rawTasks?.length) { setGenTasks([]); setGenLoading(false); return }
 
@@ -2341,7 +2343,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
       await supabase.from('invoices').update({ subtotal, total_amount: totalAmount, updated_at: new Date().toISOString() }).eq('id', invId)
 
       const { data: full } = await supabase.from('invoices')
-        .select('*, client:clients(id,name,code,phone,email,address), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency,service:services!service_id(id,name)), service:services(id,name)), payments(*)')
+        .select('*, client:clients(id,name,code,phone,email,address), items:invoice_items(*, task:tasks(id,title,task_date,status,currency,service:services!service_id(id,name)), service:services(id,name)), payments(*)')
         .eq('id', invId).single()
 
       const fullInv = full as any
@@ -2370,9 +2372,12 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
     // so we page with .range() in 1000-row chunks until we get a partial page.
     const PAGE = 1000
     const doneTasks: any[] = []
+    // Prices come from the priced view; probe it once (lib/supabase/priced).
+    const { error: viewMissing } = await supabase.from('tasks_priced').select('id').limit(1)
+    const pricedTasks = isMissingPricedSource(viewMissing) ? 'tasks' as const : 'tasks_priced' as const
     for (let page = 0; page < 50; page++) {
       let q = supabase
-        .from('tasks')
+        .from(pricedTasks)
         .select('id, title, task_date, billing_amount, billing_amount_inr, currency, client_id, client:clients(id, name, code, default_currency)')
         .eq('status', 'done')
         .not('is_billable', 'is', false)      // waived work never reaches an invoice
@@ -2586,10 +2591,10 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
         // (Sea Star Supermarket INV-2610-015) — now it fails the group and
         // removes the invoice it just created.
         const createdHere = !(existingDraft && existingDraft.currency === invCurrency)
-        const { data: taskDetails, error: taskErr } = await supabase
-          .from('tasks')
+        const { data: taskDetails, error: taskErr } = await viaPriced(src => supabase
+          .from(src.tasks)
           .select('id, title, billing_amount, billing_amount_inr, currency, quantity')
-          .in('id', group.taskIds)
+          .in('id', group.taskIds))
         if (taskErr || !taskDetails?.length) {
           if (createdHere) await supabase.from('invoices').delete().eq('id', invId)
           throw taskErr ?? new Error('No tasks found for this group')
@@ -2686,7 +2691,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
     // Reload invoices
     const { data: newInvoices } = await supabase
       .from('invoices')
-      .select('*, client:clients(id,name,code,phone,email,address), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency,service:services!service_id(id,name)), service:services(id,name)), payments(*)')
+      .select('*, client:clients(id,name,code,phone,email,address), items:invoice_items(*, task:tasks(id,title,task_date,status,currency,service:services!service_id(id,name)), service:services(id,name)), payments(*)')
       .order('created_at', { ascending: false })
 
     if (newInvoices) setInvoices(newInvoices.map(inv => ({
@@ -2725,11 +2730,11 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
     setJobLossesLoading(true)
 
     // Step 1: fetch cancelled tasks — simple join only (no triple-nested alias)
-    const { data: tasks, error: tErr } = await supabase
-      .from('tasks')
+    const { data: tasks, error: tErr } = await viaPriced(src => supabase
+      .from(src.tasks)
       .select('id, title, task_date, billing_amount_inr, currency, cancelled_by, cancellation_notes, honor_contributions, loss_amount, completion_pct, client:clients(id, name), service:services!service_id(name)')
       .eq('status', 'cancelled')
-      .order('task_date', { ascending: false })
+      .order('task_date', { ascending: false }))
     if (tErr) console.error('loadJobLosses tasks error:', tErr)
 
     // Filter in JS — avoids any issues with .gt() on nullable decimal column
@@ -2738,10 +2743,10 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
     if (lostTasks.length > 0) {
       // Step 2: fetch contribution_scores for these tasks separately
       const taskIds = lostTasks.map((t: any) => t.id)
-      const { data: contribs, error: cErr } = await supabase
-        .from('contribution_scores')
+      const { data: contribs, error: cErr } = await viaPriced(src => supabase
+        .from(src.scores)
         .select('task_id, earnings_inr, employee:employees(name, cqid)')
-        .in('task_id', taskIds)
+        .in('task_id', taskIds))
       if (cErr) console.error('loadJobLosses contributions error:', cErr)
 
       // Merge contributions into tasks
@@ -2850,7 +2855,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
 
   async function refreshInvoice(invoiceId: string) {
     const { data } = await supabase.from('invoices')
-      .select('*, client:clients(id,name,code,phone,email), items:invoice_items(*, task:tasks(id,title,task_date,status,billing_amount_inr,currency,service:services!service_id(id,name)), service:services(id,name)), payments(*), cashbook_invoice_allocations(id, deleted_at, allocated_amount, cashbook_entry:cashbook_entries!cashbook_entry_id(id, reference, entry_date, description, receipt_number, bank_account:bank_accounts(name)))')
+      .select('*, client:clients(id,name,code,phone,email), items:invoice_items(*, task:tasks(id,title,task_date,status,currency,service:services!service_id(id,name)), service:services(id,name)), payments(*), cashbook_invoice_allocations(id, deleted_at, allocated_amount, cashbook_entry:cashbook_entries!cashbook_entry_id(id, reference, entry_date, description, receipt_number, bank_account:bank_accounts(name)))')
       .eq('id', invoiceId).single()
     if (data) {
       setInvoices(prev => prev.map(i => i.id === invoiceId ? data as any : i))

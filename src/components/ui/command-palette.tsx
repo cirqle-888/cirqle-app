@@ -12,6 +12,7 @@ import { availableCreateShortcuts, canOpenSearchHref, matchesNavSearch, searchRe
 import { resolveFavoriteIcon, iconKeyFor } from '@/lib/favorites/icon-map'
 import { recordUsage, listFrequent, listRecent, type UsageItem } from '@/lib/quick-actions/actions'
 import { FavoriteToggle } from '@/components/ui/favorite-toggle'
+import { useLiquidGlass } from '@/components/ui/use-liquid-glass'
 import {
   Search, X, ArrowRight,
   CheckSquare, FileText, Hash, User, AlertCircle, Star, Clock3, Flame,
@@ -155,6 +156,10 @@ export function CommandPalette() {
   const [searchError, setSearchError] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  // Thick liquid glass: the page stays faintly visible behind the panel and
+  // bends at its rounded edges (Chromium; frosted only elsewhere).
+  const panelRef = useRef<HTMLDivElement>(null)
+  useLiquidGlass(panelRef, { enabled: open, bezel: 18, strength: 22, blur: 20 })
   const [dbResults, setDbResults] = useState<Result[]>([])
   const [frequent, setFrequent] = useState<UsageItem[]>([])
   const [recent, setRecent] = useState<UsageItem[]>([])
@@ -466,11 +471,12 @@ export function CommandPalette() {
       className="fixed inset-0 z-[999] flex items-start justify-center pt-[12vh] px-4"
       onMouseDown={e => { if (e.target === e.currentTarget) setOpen(false) }}
     >
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onMouseDown={() => setOpen(false)} />
+      {/* Backdrop — a light dim, no blur of its own: the glass panel does the
+          blurring, and a heavy scrim would leave it nothing to show. */}
+      <div className="absolute inset-0 bg-black/25 dark:bg-black/45" onMouseDown={() => setOpen(false)} />
 
       {/* Panel */}
-      <div role="dialog" aria-modal="true" aria-label="Command palette" className="relative w-full max-w-xl bg-secondary border border-foreground/15 rounded-2xl shadow-2xl shadow-black/60 overflow-hidden">
+      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Command palette" className="relative w-full max-w-xl liquid-glass liquid-glass-thick rounded-2xl overflow-hidden">
 
         {/* Search input */}
         <div className="flex items-center gap-3 px-4 py-3.5 border-b border-foreground/[0.06]">

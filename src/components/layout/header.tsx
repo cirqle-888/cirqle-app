@@ -15,6 +15,7 @@ import { EmployeePresenceDot, PresenceNote } from '@/components/ui/presence-dot'
 import { StatusMenu } from '@/components/layout/status-menu'
 import { usePresence } from '@/contexts/presence-context'
 import { LiveClock } from '@/components/layout/live-clock'
+import { useLiquidGlass } from '@/components/ui/use-liquid-glass'
 import { ProfileActions, ChangePasswordModal } from '@/components/layout/sidebar'
 
 interface HeaderProps {
@@ -162,6 +163,8 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
     if (typeof ref === 'function') ref(el)
     else if (ref) ref.current = el
   }, [ref])
+  // Liquid glass: content scrolling up under the bar bends along its bottom edge.
+  useLiquidGlass(barRef, { bezel: 10, strength: 12 })
   const hasActions = !!actions
   useEffect(() => {
     const bar = barRef.current
@@ -346,7 +349,7 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
   return (
     <div
       ref={setBarRef}
-      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-x-3 gap-y-2 sm:gap-x-4 ${stackActions ? 'sm:flex-wrap' : ''} pr-3 md:px-5 border-b border-border/80 bg-background/95 supports-[backdrop-filter]:bg-background/60 backdrop-blur-md sticky top-0 z-30 transition-colors ${isEmployee ? 'pl-3 py-2 sm:pl-16 sm:py-3.5' : 'pl-3 sm:pl-16 py-2.5 sm:py-3.5'}`}
+      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-x-3 gap-y-2 sm:gap-x-4 ${stackActions ? 'sm:flex-wrap' : ''} pr-3 md:px-5 liquid-glass liquid-glass-bar-top sticky top-0 z-30 ${isEmployee ? 'pl-3 py-2 sm:pl-16 sm:py-3.5' : 'pl-3 sm:pl-16 py-2.5 sm:py-3.5'}`}
     >
       <div className="flex items-center justify-between w-full sm:w-auto sm:flex-1 min-w-0 sm:min-w-[10rem] gap-2">
         {/* Left: Branding & Title */}

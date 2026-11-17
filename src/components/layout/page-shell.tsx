@@ -62,7 +62,8 @@ function PageChrome({ children }: { children: ReactNode }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Frosted-glass toolbar that sits directly below the page Header.
+ * Glass toolbar that sits directly below the page Header — the same `liquid-glass`
+ * material as the Header (frosted only; the Header carries the edge refraction).
  * Must be wrapped inside <PageChrome> so it scrolls together with the Header.
  *
  * IMPORTANT: do NOT add `overflow-hidden` here. Several toolbar controls (Board-view ⚙
@@ -74,9 +75,7 @@ function StickyToolbar({ children }: { children: ReactNode }) {
   return (
     <div
       className="
-        bg-background/95 backdrop-blur-md
-        supports-[backdrop-filter]:bg-background/80
-        border-b border-border/40
+        liquid-glass liquid-glass-bar-top
         px-4 sm:px-6
         py-3 sm:py-4
         space-y-1.5 sm:space-y-2

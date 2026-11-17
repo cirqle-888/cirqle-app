@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { viaPriced } from '@/lib/supabase/priced'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { X, RefreshCw, AlertTriangle, Check } from 'lucide-react'
@@ -111,8 +112,9 @@ export function RecalcBillingModal({ open, onClose, clients, services, clientPri
   }, [clientPricings])
 
   /** Build the Supabase query for tasks matching the current filter. */
-  function buildQuery(countOnly = false) {
-    let q = supabase.from('tasks')
+  // Reads current prices, so it runs on the priced view (lib/supabase/priced).
+  function buildQuery(countOnly = false, table: 'tasks' | 'tasks_priced' = 'tasks_priced') {
+    let q = supabase.from(table)
       .select('id, task_number, title, client_id, service_id, task_date, quantity, billing_amount_inr, parent_task_id',
               countOnly ? { count: 'exact', head: true } : { count: 'exact' })
       .is('parent_task_id', null)  // never touch variant tasks
@@ -129,9 +131,9 @@ export function RecalcBillingModal({ open, onClose, clients, services, clientPri
   async function runPreview() {
     setLoading(true); setError(null); setApplied(null); setPreviewRows(null)
     try {
-      const { data, error: err, count } = await buildQuery(false)
+      const { data, error: err, count } = await viaPriced(src => buildQuery(false, src.tasks)
         .order('task_number', { ascending: false, nullsFirst: false })
-        .limit(PREVIEW_LIMIT)
+        .limit(PREVIEW_LIMIT))
       if (err) { setError(err.message); return }
       const rows: PreviewRow[] = (data ?? []).map((t: any) => {
         const svc = serviceById[t.service_id]
@@ -184,7 +186,7 @@ export function RecalcBillingModal({ open, onClose, clients, services, clientPri
     setLoading(true); setError(null); setApplied(null)
     try {
       // Fetch ALL matching tasks (not just 30), then batch-update
-      const { data, error: err } = await buildQuery(false).limit(10_000)
+      const { data, error: err } = await viaPriced(src => buildQuery(false, src.tasks).limit(10_000))
       if (err) { setError(err.message); return }
       const tasks = (data ?? []) as TaskRow[]
       let success = 0, failed = 0

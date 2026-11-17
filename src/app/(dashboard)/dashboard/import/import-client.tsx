@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { Download } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { viaPriced } from '@/lib/supabase/priced'
 import {
   exportEmployeeRows,
   fetchEmployeeRowsByIds,
@@ -1895,15 +1896,16 @@ export default function ImportClient({ clients, services, employees, groups, par
         .select('id, price, percentage_rate, commission_percentage, currency, is_active, clients(name, code), services(name)')
         .order('created_at', { ascending: false })
     } else if (m === 'jobs') {
-      q = supabase.from('tasks')
+      // Prices and earnings come from the priced views (lib/supabase/priced).
+      q = viaPriced(src => supabase.from(src.tasks)
         .select('id, title, task_date, status, billing_amount_inr, clients(name)')
         .order('task_date', { ascending: false })
-        .limit(500)
+        .limit(500))
     } else if (m === 'contributions') {
-      q = supabase.from('contribution_scores')
+      q = viaPriced(src => supabase.from(src.scores)
         .select('id, score_percentage, earnings_inr, calculated_at, tasks(title, task_date), employees(name, cqid)')
         .order('calculated_at', { ascending: false })
-        .limit(500)
+        .limit(500))
     } else {
       q = supabase.from(table).select('*').order('created_at', { ascending: false })
     }

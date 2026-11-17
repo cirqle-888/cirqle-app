@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/header'
 import { createClient, safeFetchAll } from '@/lib/supabase/client'
+import { isMissingPricedSource } from '@/lib/supabase/priced'
 import {
   bulkGeneratePayroll, createPayrollRecord, markPayrollPaid, markPayrollUnpaid,
   toggleRevealSalary, createSalaryAdvance, createCreditEntry, refreshPayrollRecord, recalculatePayrollForMonth,
@@ -356,8 +357,11 @@ export default function PayrollClient({
     setRefreshing(true)
     const windowFrom = new Date()
     windowFrom.setMonth(windowFrom.getMonth() - 24)
+    // Earnings come from the priced view (lib/supabase/priced). safeFetchAll
+    // swallows errors, so the view's presence is probed first.
+    const { error: viewMissing } = await supabase.from('contribution_scores_priced').select('task_id').limit(1)
     const query = supabase
-      .from('contribution_scores')
+      .from(isMissingPricedSource(viewMissing) ? 'contribution_scores' as const : 'contribution_scores_priced' as const)
       .select('task_id, employee_id, earnings_inr, calculated_at, task:tasks(id, task_date, title, status, deleted_at)')
       .gte('calculated_at', windowFrom.toISOString())
       .order('calculated_at', { ascending: false })

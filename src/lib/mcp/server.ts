@@ -5,6 +5,8 @@ import { findClient } from '@/lib/ai/request-capture'
 import {
   createRequest, createRequestFromText, duplicateTask, createTask, createExpense, recordPayment,
 } from '@/lib/shortcut/actions'
+import { planMonth, listSocialPlan, addSocialPlanItems, MAX_ITEMS_PER_CALL } from '@/lib/social/plan-mcp'
+import { CONTENT_TYPES, PLATFORMS } from '@/lib/social/plan'
 
 /**
  * Cirqle MCP server — lets an AI client (Claude Desktop, Claude Code, claude.ai
@@ -282,6 +284,31 @@ export function createCirqleMcpServer() {
     return result(`${rows.length} requests.`, { requests: rows })
   })
 
+  // ── Social Calendar ──────────────────────────────────────────────────────
+
+  const monthSchema = z.string().regex(/^\d{4}-\d{2}(-\d{2})?$/, 'YYYY-MM').describe('The plan month, YYYY-MM.')
+
+  server.registerTool('list_social_plan', {
+    title: 'Read a client\'s social plan',
+    description: 'One client\'s Social Calendar plan for a month: every planned item and undated idea with its date, type, platforms, caption and notes. Read this before adding items, so nothing is planned twice.',
+    inputSchema: {
+      client: z.string().min(1).describe('Client name (fuzzy) or id.'),
+      month: monthSchema,
+    },
+    annotations: { readOnlyHint: true },
+  }, async ({ client, month }) => {
+    const c = await resolveClient(admin, client)
+    if (!c) return fail(`No client matches "${client}".`)
+    const m = planMonth(month)
+    if (!m) return fail('Give the month as YYYY-MM.')
+    const r = await listSocialPlan(admin, c.id, m)
+    if (!r.ok) return fail(r.error)
+    if (!r.plan) return result(`${c.name} has no plan for ${m.slice(0, 7)} yet.`, { client: c.name, month: m.slice(0, 7), plan: null, items: [] })
+    const dated = r.items.filter((i) => i.scheduled_date).length
+    return result(`${c.name}, ${m.slice(0, 7)}: ${dated} dated items and ${r.items.length - dated} ideas.`,
+      { client: c.name, month: m.slice(0, 7), plan: r.plan, items: r.items })
+  })
+
   // ── Cash book ────────────────────────────────────────────────────────────
 
   server.registerTool('cashbook_summary', {
@@ -329,6 +356,36 @@ export function createCirqleMcpServer() {
   }, async ({ title, client, service, notes, due_date }) =>
     fromAction(await createRequest(admin, { title, client, service, notes, dueDate: due_date }),
       (r) => `Filed ${r.ref}: ${r.title}${r.client ? ` for ${r.client}` : ''}${r.matchedClient ? '' : ' (client not matched)'}.`))
+
+  server.registerTool('add_social_plan_items', {
+    title: 'Add items to a client\'s social plan',
+    description: `Put approved post ideas into a client's Social Calendar for a month, as PLANNED items (an item without a date lands on the Idea Board). Creates the month's plan if there is none. Items already in the plan (same day and title) are skipped, so it is safe to send again. This only plans: it never sends work to Requests, schedules or publishes anything. Show the list to the person and get a yes before calling. Up to ${MAX_ITEMS_PER_CALL} items a call; if one item is invalid, nothing is saved.`,
+    inputSchema: {
+      client: z.string().min(1).describe('Client name (fuzzy) or id.'),
+      month: monthSchema,
+      plan_title: z.string().optional().describe('Label for a newly created plan, e.g. "December content plan".'),
+      items: z.array(z.object({
+        title: z.string().min(1).describe('The post idea in one line.'),
+        date: isoDate.optional().describe('Day to post, inside the month. Leave out for an undated idea.'),
+        content_type: z.enum(CONTENT_TYPES).default('post'),
+        platforms: z.array(z.enum(PLATFORMS)).default([]),
+        caption: z.string().optional().describe('Draft caption, plain text.'),
+        notes: z.string().optional().describe('Brief for the designer: hook, visual direction, and the source link for a trend.'),
+        asap: z.boolean().default(false).describe('A trend post: publish as soon as it is approved.'),
+      })).min(1).max(MAX_ITEMS_PER_CALL),
+    },
+    annotations: writeAnnotations,
+  }, async ({ client, month, plan_title, items }) => {
+    const c = await resolveClient(admin, client)
+    if (!c) return fail(`No client matches "${client}". Nothing was saved.`)
+    const m = planMonth(month)
+    if (!m) return fail('Give the month as YYYY-MM.')
+    const r = await addSocialPlanItems(admin, { clientId: c.id, month: m, items, planTitle: plan_title })
+    if (!r.ok) return fail(r.error)
+    const skipped = r.skipped.length ? ` ${r.skipped.length} already there, skipped.` : ''
+    return result(`${c.name}, ${m.slice(0, 7)}: added ${r.added} planned item${r.added === 1 ? '' : 's'}${r.createdPlan ? ' in a new plan' : ''}.${skipped} Open: /dashboard/social-calendar?calendar=${r.calendarId}`,
+      { client: c.name, month: m.slice(0, 7), calendar_id: r.calendarId, created_plan: r.createdPlan, added: r.added, skipped: r.skipped, items: r.items })
+  })
 
   server.registerTool('create_request_from_text', {
     title: 'File a request from free text',
