@@ -77,6 +77,7 @@ matched fuzzily (`ilike`), exact name wins, else the shortest match.
 | `get_invoice` | One invoice with line items. |
 | `list_requests` | Requests inbox (open by default). |
 | `cashbook_summary` | Inflow/outflow for a date range grouped by category. |
+| `list_social_plan` | One client's Social Calendar plan for a month: dated items and undated ideas. |
 
 ### Writes (same handlers as `/api/shortcut`)
 
@@ -88,6 +89,7 @@ matched fuzzily (`ilike`), exact name wins, else the shortest match.
 | `duplicate_task` | Clones a task to today. |
 | `record_expense` | Cash-book outflow; incomplete if category/description missing. |
 | `record_payment` | Cash-book inflow allocated FIFO across the client's open invoices. |
+| `add_social_plan_items` | Adds approved post ideas to a client's Social Calendar as `planned` items (undated ones land on the Idea Board); creates the month's plan if needed. Skips items already there, saves nothing if one item is invalid, and never sends to Requests, schedules or publishes. Code: `src/lib/social/plan-mcp.ts`. |
 
 ## Adding a tool
 
