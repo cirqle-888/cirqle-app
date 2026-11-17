@@ -2745,7 +2745,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
       const taskIds = lostTasks.map((t: any) => t.id)
       const { data: contribs, error: cErr } = await viaPriced(src => supabase
         .from(src.scores)
-        .select('task_id, earnings_inr, employee:employees(name, cqid)')
+        .select('task_id, earnings_inr, employee:employees!employee_id(name, cqid)')
         .in('task_id', taskIds))
       if (cErr) console.error('loadJobLosses contributions error:', cErr)
 

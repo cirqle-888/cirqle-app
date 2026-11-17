@@ -1903,7 +1903,7 @@ export default function ImportClient({ clients, services, employees, groups, par
         .limit(500))
     } else if (m === 'contributions') {
       q = viaPriced(src => supabase.from(src.scores)
-        .select('id, score_percentage, earnings_inr, calculated_at, tasks(title, task_date), employees(name, cqid)')
+        .select('id, score_percentage, earnings_inr, calculated_at, tasks(title, task_date), employees!employee_id(name, cqid)')
         .order('calculated_at', { ascending: false })
         .limit(500))
     } else {
