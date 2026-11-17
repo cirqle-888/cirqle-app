@@ -17,9 +17,16 @@ import PromptStudioClient from "./prompt-studio-client";
 
 export const dynamic = "force-dynamic";
 
-export default async function PromptStudioPage() {
+export default async function PromptStudioPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+} = {}) {
   const me = await loadCurrentUser();
   if (!hasPermission(me, "prompt_studio.view")) redirect("/dashboard");
+  // "Copy for AI" on a client's page links here as ?client=<id>&tab=cards.
+  const sp = searchParams ? await searchParams : undefined;
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) || "";
   const db = createAdminClient();
   // Probe directly: fetchAll caches missing tables and intentionally suppresses PGRST205.
   const probes = await Promise.all(
@@ -121,6 +128,8 @@ export default async function PromptStudioPage() {
         }),
       )}
       aiEnabled={!!process.env.GROQ_API_KEY}
+      initialClientId={one(sp?.client)}
+      initialTab={one(sp?.tab)}
     />
   );
 }

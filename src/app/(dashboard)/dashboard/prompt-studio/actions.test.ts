@@ -25,6 +25,7 @@ describe("Prompt Studio action authorization", () => {
     ["prompt_studio.manage", () => actions.saveQuickLook({ name: "Test", template_key: "x", client_id: null, values: {}, style_id: null, language: "" })],
     ["prompt_studio.manage", () => actions.deleteQuickLook("id")],
     ["prompt_studio.manage", () => actions.saveClientCard("id", {})],
+    ["prompt_studio.manage", () => actions.prepareLogoUpload("11111111-1111-4111-8111-111111111111", "logo.png", "image/png")],
     [
       "prompt_studio.manage",
       () => actions.saveCustomTemplate({} as CustomTemplate),
@@ -59,6 +60,51 @@ it("rejects a custom template with undeclared placeholders before writing", asyn
     fields: [],
   });
   expect(result.ok).toBe(false);
+  expect(mocks.db).not.toHaveBeenCalled();
+});
+it("loading a card for Copy for AI needs view permission (a read) before touching storage", async () => {
+  expect(await actions.loadClientCard("11111111-1111-4111-8111-111111111111")).toEqual({ ok: false, error: "Permission denied." });
+  expect(mocks.read).toHaveBeenCalledWith("prompt_studio.view");
+  expect(mocks.db).not.toHaveBeenCalled();
+});
+it("Copy for AI gets the card, or null when the client has none yet", async () => {
+  mocks.read.mockResolvedValue({ ok: true, employeeId: "actor" });
+  const rows: Record<string, unknown> = { clients: { name: "Sea Star" }, prompt_client_cards: { card: { brand: "Sea Star" } } };
+  const from = (table: string) => {
+    const q = { select: () => q, eq: () => q, maybeSingle: async () => ({ data: rows[table] ?? null, error: null }) };
+    return q;
+  };
+  mocks.db.mockReturnValue({ from });
+  const id = "11111111-1111-4111-8111-111111111111";
+  expect(await actions.loadClientCard(id)).toEqual({ ok: true, data: { name: "Sea Star", card: { brand: "Sea Star" } } });
+  delete rows.prompt_client_cards;
+  expect(await actions.loadClientCard(id)).toEqual({ ok: true, data: { name: "Sea Star", card: null } });
+  expect((await actions.loadClientCard("not-an-id")).ok).toBe(false);
+  delete rows.clients;
+  expect(await actions.loadClientCard(id)).toEqual({ ok: false, error: "Client not found." });
+});
+it("a logo upload takes images only, under that client's folder", async () => {
+  mocks.guard.mockResolvedValue({ ok: true, employeeId: "actor" });
+  const paths: string[] = [];
+  const bucket = {
+    createSignedUploadUrl: async (p: string) => { paths.push(p); return { data: { signedUrl: "https://s.example/put" }, error: null }; },
+    getPublicUrl: (p: string) => ({ data: { publicUrl: `https://s.example/public/${p}` } }),
+  };
+  mocks.db.mockReturnValue({ storage: { createBucket: async () => ({}), from: () => bucket } });
+  const id = "11111111-1111-4111-8111-111111111111";
+  const bad = await actions.prepareLogoUpload(id, "logo.html", "text/html");
+  expect(bad.ok).toBe(false);
+  expect(paths).toEqual([]);
+  expect((await actions.prepareLogoUpload("not-an-id", "logo.png", "image/png")).ok).toBe(false);
+  const ok = await actions.prepareLogoUpload(id, "anything.html", "image/png");
+  expect(ok.ok).toBe(true);
+  expect(paths[0]).toMatch(new RegExp(`^logos/${id}/[0-9a-f-]{36}\\.png$`));
+  expect(ok.data?.publicUrl).toContain(paths[0]);
+});
+it("a copy of a social template cannot be saved under a category the database refuses", async () => {
+  mocks.guard.mockResolvedValue({ ok: true, employeeId: "actor" });
+  const r = await actions.saveCustomTemplate({ id: "", key: "", name: "Copy", category: "social", purpose: "", useIn: "", usesClientCard: true, body: "{{need}}", fields: [{ key: "need", label: "Need", type: "textarea" }] });
+  expect(r.ok).toBe(false);
   expect(mocks.db).not.toHaveBeenCalled();
 });
 it("loading the library needs view permission (a read) before touching storage", async () => {

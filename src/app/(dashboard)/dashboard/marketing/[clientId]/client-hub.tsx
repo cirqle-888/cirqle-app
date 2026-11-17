@@ -14,6 +14,7 @@
 
 import { useMemo } from 'react'
 import Link from 'next/link'
+import { CopyForAi } from '@/components/prompt-studio/copy-for-ai'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import Combobox from '@/components/ui/combobox'
@@ -161,6 +162,7 @@ export default function ClientHub({ client, clients, withMarketing, hub, issues,
               />
             </div>
             <div className="flex flex-wrap gap-2">
+              <CopyForAi clientId={client.id} />
               {access.social && (
                 <Link href={planHref}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium transition hover:border-primary/40">

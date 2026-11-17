@@ -166,6 +166,7 @@ export function StudioFields({
   readOnly = false,
   attachments,
   onAttach,
+  showHelp = true,
 }: {
   fields: PromptField[];
   values: Record<string, string>;
@@ -173,6 +174,8 @@ export function StudioFields({
   readOnly?: boolean;
   attachments?: Record<string, string>;
   onAttach?: (key: string, file: File | null) => void;
+  /** Hints under the fields. Off keeps the form short; the Help button turns them on. */
+  showHelp?: boolean;
 }) {
   return (
     <div className="space-y-5">
@@ -264,7 +267,7 @@ export function StudioFields({
                 onChange={(e) => set(e.target.value)}
               />
             )}
-            {f.help && (
+            {showHelp && f.help && (
               <span className="block text-xs text-muted-foreground">{f.help}</span>
             )}
           </Wrapper>

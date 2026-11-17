@@ -7,10 +7,11 @@ import {
   requireReadPermission,
 } from "@/lib/permissions/check";
 import { callGroqText } from "@/lib/ai/groq";
+import { resolveImageExt, IMAGE_UPLOAD_ERROR, IMAGE_EXT_BY_TYPE, MAX_IMAGE_BYTES } from "@/lib/uploads";
 import { CLIENT_CARD_FIELDS } from "@/lib/prompt-studio/client-card";
 import { placeholdersIn } from "@/lib/prompt-studio/render";
 import {
-  CATEGORY_IDS,
+  CUSTOM_CATEGORY_IDS,
   FIELD_TYPES,
   LIBRARY_PAGE,
   PREVIEW_KINDS,
@@ -116,6 +117,74 @@ export async function saveClientCard(
   }
 }
 
+/**
+ * One client's saved card, for the "Copy for AI" button on the client pages.
+ * `data` is null when the client has no card yet (or Prompt Studio is not set
+ * up): the button then points at the card instead of copying an empty brief.
+ */
+export async function loadClientCard(
+  clientId: string,
+): Promise<ActionResult<{ name: string; card: ClientCard | null }>> {
+  const auth = await requireReadPermission("prompt_studio.view");
+  if (!auth.ok) return auth;
+  try {
+    if (!text(clientId, 64) || !/^[0-9a-f-]{36}$/i.test(clientId))
+      throw new Error("Please choose a client.");
+    const db = createAdminClient();
+    const [client, saved] = await Promise.all([
+      db.from("clients").select("name").eq("id", clientId).maybeSingle(),
+      db.from("prompt_client_cards").select("card").eq("client_id", clientId).maybeSingle(),
+    ]);
+    if (!client.data) throw new Error("Client not found.");
+    // A missing table means "no card yet", not an error on someone else's page.
+    const card = saved.error ? null : ((saved.data?.card as ClientCard | undefined) ?? null);
+    return { ok: true, data: { name: client.data.name as string, card } };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Where uploaded logos live: the public bucket the Social Calendar's reference images already use. */
+const LOGO_BUCKET = "social-refs";
+
+/**
+ * A signed upload for a client's logo (optional: a pasted link works too).
+ * Hands out a WRITE capability, so it sits behind the manage permission like
+ * saving the card does. The address only reaches the card when it is saved.
+ */
+export async function prepareLogoUpload(
+  clientId: string,
+  filename: string,
+  contentType?: string,
+): Promise<ActionResult<{ uploadUrl: string; publicUrl: string }>> {
+  const auth = await requirePermission("prompt_studio.manage");
+  if (!auth.ok) return auth;
+  try {
+    if (!text(clientId, 64) || !/^[0-9a-f-]{36}$/i.test(clientId))
+      throw new Error("Please choose a client.");
+    // A public bucket: the extension comes from the declared type, never the file name alone.
+    const ext = resolveImageExt(filename, contentType);
+    if (!ext) throw new Error(IMAGE_UPLOAD_ERROR);
+    const db = createAdminClient();
+    try {
+      await db.storage.createBucket(LOGO_BUCKET, {
+        public: true,
+        fileSizeLimit: MAX_IMAGE_BYTES,
+        allowedMimeTypes: Object.keys(IMAGE_EXT_BY_TYPE),
+      });
+    } catch {
+      /* Already there. */
+    }
+    const file = `logos/${clientId.toLowerCase()}/${crypto.randomUUID()}.${ext}`;
+    const { data, error } = await db.storage.from(LOGO_BUCKET).createSignedUploadUrl(file);
+    if (error || !data) throw new Error("Could not prepare the upload.");
+    const { data: pub } = db.storage.from(LOGO_BUCKET).getPublicUrl(file);
+    return { ok: true, data: { uploadUrl: data.signedUrl, publicUrl: pub.publicUrl } };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
 function validField(f: PromptField): boolean {
   if (!f || typeof f !== "object") return false;
   if (!text(f.key, 60) || !text(f.label, 120) || !f.label.trim()) return false;
@@ -148,7 +217,7 @@ export async function saveCustomTemplate(
       !t.body.trim() ||
       !text(t.purpose, 500, true) ||
       !text(t.useIn, 300, true) ||
-      !CATEGORY_IDS.includes(t.category)
+      !CUSTOM_CATEGORY_IDS.includes(t.category)
     )
       throw new Error("Enter a name, category and template body.");
     const keys = placeholdersIn(t.body);
