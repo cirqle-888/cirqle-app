@@ -1,0 +1,179 @@
+/**
+ * Social Calendar — turning an AI's answer into plan items.
+ *
+ * The planner copies a brief for an outside AI (Codex, Gemini, ChatGPT,
+ * Claude), gets a table back, and pastes it here. This reads the table and
+ * returns the items it holds, ready for addSocialPlanItems. Pure: no I/O.
+ *
+ * It understands the three tables the Social Media templates ask for:
+ *   calendar  Date | Day | Platform | Format | Theme | Idea | Hook | What the designer needs
+ *   ideas     Format | Idea | Hook | Effort | Best day
+ *   trends    Trend | Why it fits | Post idea | Hook | Post by | Source link
+ * Columns are found by their heading, so a reordered or shortened table still
+ * works. Anything it cannot place is reported, never guessed.
+ */
+
+import { CONTENT_TYPES, PLATFORMS, type ContentType, type Platform } from '@/lib/social/plan'
+import type { PlanItemInput } from '@/lib/social/plan-mcp'
+
+export type PlanTableKind = 'calendar' | 'ideas' | 'trends' | 'unknown'
+
+export interface ParsedPlan {
+  kind: PlanTableKind
+  items: PlanItemInput[]
+  /** Rows that were left out, with the reason, so nothing disappears silently. */
+  skipped: { row: string; reason: string }[]
+}
+
+type Col = 'date' | 'day' | 'platform' | 'format' | 'theme' | 'idea' | 'hook' | 'needs' | 'effort' | 'bestday' | 'trend' | 'why' | 'postby' | 'source'
+
+/** Heading words → the column they mean. First match wins, so the specific ones come first. */
+const HEADINGS: [RegExp, Col][] = [
+  [/source|link/, 'source'],
+  [/post by|deadline/, 'postby'],
+  [/best day/, 'bestday'],
+  [/why/, 'why'],
+  [/trend/, 'trend'],
+  [/designer|needs|assets/, 'needs'],
+  [/effort/, 'effort'],
+  [/hook|caption|headline/, 'hook'],
+  [/idea|concept|post$|content/, 'idea'],
+  [/theme|pillar|topic/, 'theme'],
+  [/format|type/, 'format'],
+  [/platform|channel/, 'platform'],
+  [/date/, 'date'],
+  [/day/, 'day'],
+]
+
+const clean = (s: string) => s.replace(/\*\*|__|`/g, '').replace(/<br\s*\/?>/gi, ' ').replace(/\s+/g, ' ').trim()
+
+/** One table line → its cells. Pipes (markdown) or tabs (pasted from a sheet). */
+function cells(line: string): string[] | null {
+  if (line.includes('|')) {
+    const parts = line.split('|').map(clean)
+    if (parts[0] === '') parts.shift()
+    if (parts.length && parts[parts.length - 1] === '') parts.pop()
+    return parts.length >= 2 ? parts : null
+  }
+  if (line.includes('\t')) {
+    const parts = line.split('\t').map(clean)
+    return parts.length >= 2 ? parts : null
+  }
+  return null
+}
+
+const isDivider = (c: string[]) => c.every(x => /^:?-{2,}:?$/.test(x) || x === '')
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+const pad = (n: number) => String(n).padStart(2, '0')
+
+/**
+ * A date as the AI wrote it → YYYY-MM-DD inside the plan's month, or null.
+ * `month` is 'YYYY-MM'. Understands 2026-12-04, 04/12/2026, 4 Dec, Dec 4,
+ * "Friday 4" and a bare day number. A date in another month is refused (null
+ * with `outside`), because the plan holds one month.
+ */
+export function planDate(raw: string, month: string): { date: string | null; outside?: boolean } {
+  const s = clean(raw).toLowerCase()
+  if (!s) return { date: null }
+  const [py, pm] = month.split('-').map(Number)
+  let y = py, m = pm, d = 0
+  let hit: RegExpExecArray | null
+  if ((hit = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s))) { y = +hit[1]; m = +hit[2]; d = +hit[3] }
+  else if ((hit = /(\d{1,2})[/.](\d{1,2})[/.](\d{4})/.exec(s))) { d = +hit[1]; m = +hit[2]; y = +hit[3] }
+  else {
+    const mi = MONTHS.findIndex(n => new RegExp(`\\b${n}`).test(s))
+    const day = /\b(\d{1,2})(?:st|nd|rd|th)?\b/.exec(s)
+    if (!day) return { date: null }
+    d = +day[1]
+    if (mi >= 0) m = mi + 1
+  }
+  if (y !== py || m !== pm) return { date: null, outside: true }
+  const last = new Date(Date.UTC(py, pm, 0)).getUTCDate()
+  if (d < 1 || d > last) return { date: null }
+  return { date: `${py}-${pad(pm)}-${pad(d)}` }
+}
+
+/** "Reel", "Poster / Story", "Offer flyer post" → one of the app's content types. */
+export function contentTypeOf(raw: string): ContentType {
+  const s = clean(raw).toLowerCase()
+  // Longest names first, so "carousel post" is a carousel and "flyer post" a flyer.
+  const order: ContentType[] = ['carousel', 'poster', 'flyer', 'story', 'reel', 'video', 'blog', 'email', 'seo', 'ad', 'post']
+  for (const t of order) if (CONTENT_TYPES.includes(t) && new RegExp(`\\b${t}`).test(s)) return t
+  if (/\bshort\b/.test(s)) return 'reel'
+  if (/\bstatus\b/.test(s)) return 'story'
+  return 'post'
+}
+
+const PLATFORM_WORDS: [RegExp, Platform][] = [
+  [/instagram|\binsta\b|\big\b/, 'instagram'], [/facebook|\bfb\b/, 'facebook'], [/whatsapp|\bwa\b/, 'whatsapp'],
+  [/youtube|\byt\b/, 'youtube'], [/linkedin/, 'linkedin'], [/tiktok/, 'tiktok'], [/\bx\b|twitter/, 'x'],
+]
+
+/** "Instagram + Facebook", "IG/FB", "All" → the app's platform keys ("All" means none chosen: staff decide). */
+export function platformsOf(raw: string): Platform[] {
+  const s = clean(raw).toLowerCase()
+  return PLATFORM_WORDS.filter(([re]) => re.test(s)).map(([, p]) => p).filter(p => PLATFORMS.includes(p))
+}
+
+const isTrendSlot = (s: string) => /trend slot/i.test(s)
+const url = (s: string) => /https?:\/\/[^\s)>\]]+/.exec(s)?.[0] ?? ''
+
+/**
+ * Read the AI's answer. `month` ('YYYY-MM') is the plan the items will go
+ * into; it is only used for dates. Text around the table is ignored.
+ */
+export function parsePlanTable(text: string, month: string): ParsedPlan {
+  const rows = (text || '').split(/\r?\n/).map(cells).filter((c): c is string[] => !!c && !isDivider(c))
+  const headAt = rows.findIndex(r => r.filter(c => HEADINGS.some(([re]) => re.test(c.toLowerCase()))).length >= 2)
+  if (headAt < 0) return { kind: 'unknown', items: [], skipped: [] }
+
+  const cols: Partial<Record<Col, number>> = {}
+  rows[headAt].forEach((h, i) => {
+    const hit = HEADINGS.find(([re]) => re.test(h.toLowerCase()))
+    if (hit && cols[hit[1]] === undefined) cols[hit[1]] = i
+  })
+  const kind: PlanTableKind = cols.trend !== undefined ? 'trends' : cols.date !== undefined ? 'calendar' : cols.idea !== undefined ? 'ideas' : 'unknown'
+  if (kind === 'unknown') return { kind, items: [], skipped: [] }
+
+  const items: PlanItemInput[] = []
+  const skipped: ParsedPlan['skipped'] = []
+  for (const r of rows.slice(headAt + 1)) {
+    const get = (c: Col) => (cols[c] !== undefined ? clean(r[cols[c]!] ?? '') : '')
+    const line = r.join(' | ')
+    const idea = get('idea').replace(/^\*\s*/, '')
+    const theme = get('theme')
+    const trend = get('trend')
+    const slot = isTrendSlot(line)
+    const title = slot ? 'Trend slot (fill from the daily trend check)' : idea || theme || trend
+    if (!title) { skipped.push({ row: line, reason: 'No idea in this row.' }); continue }
+
+    let date: string | null = null
+    if (kind === 'calendar') {
+      const d = planDate(get('date'), month)
+      if (d.outside) { skipped.push({ row: line, reason: `That date is outside ${month}.` }); continue }
+      if (!d.date) { skipped.push({ row: line, reason: 'Could not read the date.' }); continue }
+      date = d.date
+    }
+    const notes = [
+      kind === 'trends' && trend && idea ? `Trend: ${trend}` : '',
+      theme && theme !== title ? `Theme: ${theme}` : '',
+      get('why') ? `Why it fits: ${get('why')}` : '',
+      get('needs') ? `Designer needs: ${get('needs')}` : '',
+      get('effort') ? `Effort: ${get('effort')}` : '',
+      get('bestday') ? `Best day: ${get('bestday')}` : '',
+      get('postby') ? `Post by: ${get('postby')}` : '',
+      url(get('source') || line) ? `Source: ${url(get('source') || line)}` : '',
+    ].filter(Boolean).join('\n')
+    items.push({
+      title,
+      date,
+      content_type: contentTypeOf(get('format') || (kind === 'trends' ? idea : '')),
+      platforms: platformsOf(get('platform')),
+      caption: slot ? null : get('hook') || null,
+      notes: notes || null,
+      asap: kind === 'trends' || slot,
+    })
+  }
+  return { kind, items, skipped }
+}

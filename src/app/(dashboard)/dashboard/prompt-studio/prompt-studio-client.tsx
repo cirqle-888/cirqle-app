@@ -15,6 +15,7 @@ import {
 import { COLOR_USE_OPTIONS, swatches } from "@/lib/prompt-studio/colors";
 import { CopyForAi } from "@/components/prompt-studio/copy-for-ai";
 import { LogoUpload } from "./logo-upload";
+import { ImportPlanButton } from "@/components/prompt-studio/import-plan";
 import {
   renderPrompt,
   renderClientCard,
@@ -699,6 +700,8 @@ export default function PromptStudioClient({
                   readOnly
                   value={prompt}
                   className="field w-full min-h-80 font-mono text-sm"
+                  // The page's own .field rule sets a 44px minimum, which beats min-h-80.
+                  style={{ minHeight: 320 }}
                 />
                 <button
                   className="studio-button primary w-full"
@@ -756,7 +759,7 @@ export default function PromptStudioClient({
                   value={answer}
                   onChange={setAnswer}
                   placeholder={
-                    aiEnabled
+                    aiEnabled && !template.web
                       ? "Press Generate here, or paste the answer from Claude, ChatGPT or Gemini to save it or use it next."
                       : "Paste the answer from Claude, ChatGPT or Gemini here to save it or use it in the next template."
                   }
@@ -766,6 +769,14 @@ export default function PromptStudioClient({
                     <button className="studio-button" onClick={() => copy(answer)}>
                       Copy answer
                     </button>
+                    {template.category === "social" && clientId && (
+                      <ImportPlanButton
+                        clientId={clientId}
+                        clientName={clients.find((c) => c.id === clientId)?.name}
+                        text={answer}
+                        label="Add to Social Calendar"
+                      />
+                    )}
                     {template.key === STYLE_TEMPLATE_KEY && installed && (
                       <button
                         className="studio-button primary"
@@ -1001,7 +1012,8 @@ export default function PromptStudioClient({
                     </p>
                   )}
                   {CARD_GROUPS.map((g) => {
-                    const fields = CLIENT_CARD_FIELDS.filter((f) => g.keys.includes(f.key));
+                    // In the group's own order (logo and colours before the look), not the card's print order.
+                    const fields = g.keys.flatMap((k) => CLIENT_CARD_FIELDS.filter((f) => f.key === k));
                     const filled = fields.filter((f) => (cardDraft[f.key] || "").trim()).length;
                     // "More details" stays folded until asked for, so a new card is a short form.
                     const openGroup = !g.advanced || cardMore;

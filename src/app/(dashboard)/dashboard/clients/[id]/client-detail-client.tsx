@@ -102,7 +102,7 @@ export default function ClientDetailClient({
         crumbLabel={client.name}
         actions={
           <>
-            <CopyForAi clientId={client.id} />
+            <CopyForAi clientId={client.id} compact />
             <ClientWorkspaceButton client={client} />
             <Link href={`/dashboard/tasks?q=${encodeURIComponent(client.name)}`}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
