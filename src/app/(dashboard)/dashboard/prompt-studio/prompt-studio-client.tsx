@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Combobox from "@/components/ui/combobox";
 import Header from "@/components/layout/header";
 import { copyToClipboard } from "@/lib/clipboard";
 import { useToast, ToastContainer } from "@/components/ui/toast";
@@ -981,6 +982,29 @@ export default function PromptStudioClient({
           <div className="grid gap-5 lg:grid-cols-[1fr_2fr]">
             <section className={panel}>
               <h2 className="font-semibold">Client Cards</h2>
+              {/* Phones and tablets: one searchable dropdown, the same picker
+                  Tasks and the Social Calendar use, instead of a list of 29
+                  tall buttons the card has to open underneath. */}
+              {clients.length > 0 && (
+                <div className="lg:hidden">
+                  <Combobox
+                    options={clients.map((c) => {
+                      const saved = cards.find((s) => s.client_id === c.id);
+                      return {
+                        id: c.id,
+                        label: c.name,
+                        sub: saved
+                          ? `Card saved · updated ${new Date(saved.updated_at).toLocaleDateString()}`
+                          : "No card",
+                      };
+                    })}
+                    value={cardClient}
+                    onChange={(id) => { if (id) openCard(id); }}
+                    placeholder="Choose a client…"
+                  />
+                </div>
+              )}
+              <div className="hidden lg:block space-y-4">
               <input
                 aria-label="Search Client Cards"
                 className="field w-full"
@@ -1010,6 +1034,7 @@ export default function PromptStudioClient({
                     </button>
                   );
                 })}
+              </div>
               {!clients.length && (
                 <EmptyState
                   title="No active clients"
