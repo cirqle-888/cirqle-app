@@ -2,18 +2,22 @@
 import { useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import { IMAGE_EXT_BY_TYPE, MAX_IMAGE_BYTES } from "@/lib/uploads";
+import { isDirectImageLink } from "@/lib/prompt-studio/render";
 import { prepareLogoUpload } from "./actions";
 
 /**
- * Optional: store the client's logo in the app instead of pasting a link.
+ * Store the client's logo in the app: it gets a public link the AI can open.
  * The file goes to storage and its address is put in the card's "Logo link"
  * box; nothing is kept until the card itself is saved.
  */
 export function LogoUpload({
   clientId,
+  current = "",
   onUploaded,
 }: {
   clientId: string;
+  /** The logo link on the card now; shown as a small preview when it opens an image. */
+  current?: string;
   onUploaded: (url: string) => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
@@ -47,7 +51,7 @@ export function LogoUpload({
         return;
       }
       onUploaded(res.data.publicUrl);
-      setNote("Uploaded. Save the card to keep it.");
+      setNote("Uploaded. Its public link is in the Logo link box. Save the card to keep it.");
     } catch {
       setNote("Upload failed. Check the connection and try again.");
     } finally {
@@ -57,13 +61,21 @@ export function LogoUpload({
 
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
+      {isDirectImageLink(current) && (
+        <span
+          role="img"
+          aria-label="Logo preview"
+          className="h-10 w-10 shrink-0 rounded-md border border-border bg-white bg-contain bg-center bg-no-repeat"
+          style={{ backgroundImage: `url(${JSON.stringify(current.trim())})` }}
+        />
+      )}
       <button
         type="button"
         className="studio-button inline-flex items-center gap-2"
         disabled={busy}
         onClick={() => input.current?.click()}
       >
-        <Upload className="h-4 w-4" /> {busy ? "Uploading…" : "Upload logo instead"}
+        <Upload className="h-4 w-4" /> {busy ? "Uploading…" : current ? "Replace logo" : "Upload logo"}
       </button>
       <input
         ref={input}

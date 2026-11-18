@@ -20,6 +20,7 @@ import { usePermissions } from '@/contexts/permission-context'
 import { copyToClipboard } from '@/lib/clipboard'
 import { AI_JOBS, buildAiBrief, planMonthLabel, socialGaps, type AiJob } from '@/lib/prompt-studio/ai-brief'
 import { COLOR_USE_OPTIONS, swatches } from '@/lib/prompt-studio/colors'
+import { isDirectImageLink } from '@/lib/prompt-studio/render'
 import type { ClientCard } from '@/lib/prompt-studio/types'
 import { loadClientCard } from '@/app/(dashboard)/dashboard/prompt-studio/actions'
 
@@ -80,7 +81,7 @@ export function CopyForAi({
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const [fetched, setFetched] = useState<{ id: string; card: ClientCard | null } | null>(null)
   const [error, setError] = useState('')
-  const [copied, setCopied] = useState<AiJob | 'logo' | null>(null)
+  const [copied, setCopied] = useState<AiJob | 'logo' | 'logo-link' | null>(null)
   const [options, setOptions] = useState(false)
   const [month, setMonth] = useState('')
   const [mode, setMode] = useState<'Regular' | 'Random'>('Regular')
@@ -144,6 +145,16 @@ export function CopyForAi({
     setError('')
     setCopied(job)
     window.setTimeout(() => { setCopied(null); setOpen(false) }, 900)
+  }
+
+  async function copyLogoLink() {
+    if (!(await copyToClipboard((card?.logo ?? '').trim()))) {
+      setError('Could not copy the link. Use "Open logo" and copy the address there.')
+      return
+    }
+    setError('')
+    setCopied('logo-link')
+    window.setTimeout(() => setCopied(null), 1500)
   }
 
   async function copyLogo() {
@@ -260,6 +271,11 @@ export function CopyForAi({
                   {editCard}
                   {isLink(card.logo) && (
                     <a href={card.logo.trim()} target="_blank" rel="noopener noreferrer" className="font-medium text-primary hover:underline">Open logo</a>
+                  )}
+                  {isDirectImageLink(card.logo) && (
+                    <button type="button" className="font-medium text-primary hover:underline" onClick={() => void copyLogoLink()}>
+                      {copied === 'logo-link' ? 'Link copied' : 'Copy logo link'}
+                    </button>
                   )}
                   {isLink(card.logo) && (
                     <button type="button" className="font-medium text-primary hover:underline" onClick={() => void copyLogo()}>

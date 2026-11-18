@@ -790,37 +790,67 @@ No explanation.`,
   },
   {
     key: 'social-calendar-month', name: 'Monthly calendar', category: 'social', web: true,
-    purpose: 'A month of posts: regular (same rhythm every week) or random (mixed)',
+    purpose: 'A month of posts, each with a full brief: words, visual direction, an AI prompt and references',
     useIn: SOCIAL_WEB, usesClientCard: true,
     fields: [
       { key: 'month', label: 'Month', type: 'text', required: true, placeholder: 'December 2026' },
       { key: 'mode', label: 'Plan type', type: 'select', options: ['Regular', 'Random'],
         help: 'Regular: the same kind of post on the same weekday. Random: mixed days, themes and formats, for a feed that has started to repeat.' },
+      { key: 'feed', label: 'Feed look', type: 'select', options: ['As the card says', 'One pattern', 'Same family', 'Mixed'],
+        help: 'One pattern: every post looks alike. Same family: same colours and text style, the layout changes. Mixed: each post can have its own style and colours.' },
+      { key: 'detail', label: 'Detail', type: 'select', options: ['Full brief for every post', 'Quick table'],
+        help: 'Full brief: caption, text on the design, visual direction, an AI prompt and references for each post. Quick table: one line per post.' },
       { key: 'notes', label: 'Offers or dates to include (optional)', type: 'textarea', placeholder: 'Weekend fish offer every Friday; shop anniversary on the 14th' },
     ],
-    defaults: { mode: 'Regular' },
-    body: `You are a social media planner. Use the CLIENT CARD above.
+    defaults: { mode: 'Regular', feed: 'As the card says', detail: 'Full brief for every post' },
+    body: `You are a senior creative director with decades in design, and also a digital marketer and content planner who works with today's AI tools. Use the CLIENT CARD above. Give this client the strongest month their page can have with a small team.
 
 Plan the social media calendar for {{month}}.
 PLAN TYPE: {{mode|Regular}}
+FEED LOOK: {{feed|As the card says}}
+DETAIL: {{detail|Full brief for every post}}
 Include: {{notes}}
 
-First search the web for every festival, special day, local event and season in that month that matters for this client's location and audience. Confirm this year's exact dates.
+First search the web for every festival, special day, local event and season in that month that matters for this client's location and audience. Confirm this year's exact dates. If the card has page links, open them and look at the last 12 posts, so the plan builds on what the page already does and does not repeat it.
 
 Then build the calendar:
 - Use the platforms and the posts per week from the card (if they are missing, plan 3 posts a week on Instagram and Facebook).
 - If the plan type is Regular: give each posting weekday one fixed format and theme, the same every week.
 - If the plan type is Random: mix days, themes, formats and angles; no two ideas alike.
+- Give the month a shape: reach early, proof and trust in the middle, offers and enquiries before the big dates. Every post has one job.
 - Put festival and special-day posts on the right dates, with a reminder post 2-3 days before the big ones.
 - Mark about one post in three as "TREND SLOT" and leave it empty: it is filled from the daily trend check.
 - Follow the colour rule on the card, so the whole month looks like one brand.
+- Feed look. One pattern: the same layout, headline style and colour treatment on every post; only the photo and the words change. Same family: the same colours and text style, with three layouts that take turns. Mixed: each post may have its own style and colours, but the logo position and the contact line never move. As the card says: follow the card's feed style and existing designs; if it has neither, use Same family.
 
-Output only a table: Date | Day | Platform | Format (poster, reel, story, carousel) | Theme | Idea in one line | Hook in the card's language | What the designer needs.
+If DETAIL is "Quick table": Output only a table: Date | Day | Platform | Format (poster, reel, story, carousel) | Theme | Idea in one line | Hook in the card's language | What the designer needs.
+
+Otherwise: Output only one block per post, in date order, in exactly this form. Keep the labels in English, each on its own line:
+
+### POST
+Date: YYYY-MM-DD
+Day:
+Platform:
+Format: poster, reel, story or carousel
+Theme:
+Idea: one line
+Goal: reach, trust or enquiry, and why this post on this date
+Hook: in the card's language
+Text on design: headline / sub line / call to action, in the card's language
+Visual direction: layout, photo or footage, colours, text style and where the logo goes; say how it follows the feed look
+Caption: ready to post, in the card's language, ending with a call to action
+Hashtags: 8 to 12, local ones first
+Designer needs: photos, footage and facts to get from the client
+AI prompt: one ready-to-paste prompt for an image tool (poster, story, carousel) or a video tool (reel) that makes a first draft: subject, composition, lighting, the card's colours, size, and empty space for the text. End it with "no text in the image, no logo".
+Reel script: reels only: 4 to 6 shots with seconds, on-screen text and sound
+References: 2 or 3 real links you opened that show a similar idea or style. If you have none, write search phrases instead. Never invent a link.
+
+For a TREND SLOT write only Date, Day, Platform, Format and "Idea: TREND SLOT".
 
 Rules:
 Simple ideas a small team can make.
 ${SOCIAL_SAFE}
-No explanation.`,
+No explanation before or after.`,
   },
   {
     key: 'social-fresh-ideas', name: 'Fresh ideas', category: 'social',

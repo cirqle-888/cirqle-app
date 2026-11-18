@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { hexesIn, hexToHsl, hslToHex, pairingPalette, colourRule, swatches, COLOR_USE_OPTIONS } from './colors'
 import { CLIENT_CARD_FIELDS, CARD_GROUPS } from './client-card'
-import { renderClientCard, renderPrompt } from './render'
+import { isDirectImageLink, renderClientCard, renderPrompt } from './render'
 import { TEMPLATES, templateByKey } from './templates'
 import { AI_JOBS, buildAiBrief, planMonthLabel, socialGaps } from './ai-brief'
 import { CUSTOM_CATEGORY_IDS } from './types'
@@ -76,9 +76,17 @@ describe('client card', () => {
     expect(renderClientCard({ brand: 'Seastar', colors: 'Maroon, gold' })).toBe('CLIENT CARD\nBrand: Seastar\nBrand colors: Maroon, gold')
   })
 
-  it('prints the logo as an instruction, not a link, and the colour rule last', () => {
-    const out = renderClientCard({ ...CARD, colorUse: MATCHING, platforms: 'Instagram; Facebook' })
-    expect(out).not.toContain('example.com')
+  it('gives the AI the logo link when it opens the image itself (a logo uploaded here)', () => {
+    const url = 'https://abc.supabase.co/storage/v1/object/public/social-refs/logos/c1/x.png'
+    const out = renderClientCard({ brand: 'Seastar', logo: url })
+    expect(out).toContain(`Logo: ${url} (open this link to get the logo file; if you cannot open links, I am attaching it). Use it exactly as it is`)
+    expect(isDirectImageLink('https://cdn.site.com/brand/logo.SVG?v=2')).toBe(true)
+    for (const no of ['https://drive.google.com/file/d/abc/view', 'http://site.com/logo.png', 'logo.png', '', undefined]) expect(isDirectImageLink(no), String(no)).toBe(false)
+  })
+
+  it('prints a page link to the logo as an instruction, not a link, and the colour rule last', () => {
+    const out = renderClientCard({ ...CARD, logo: 'https://drive.google.com/file/d/abc/view', colorUse: MATCHING, platforms: 'Instagram; Facebook' })
+    expect(out).not.toContain('drive.google.com')
     expect(out).toContain('Logo: I am attaching the logo file')
     expect(out).toContain('Platforms: Instagram; Facebook')
     expect(out).not.toContain('How to use colour')
@@ -125,9 +133,17 @@ describe('Copy for AI', () => {
     for (const j of AI_JOBS.filter(j => j.template)) {
       const out = buildAiBrief(CARD, j.id, { month: 'December 2026' })
       expect(out.startsWith('CLIENT CARD\nBrand: Sea Star'), j.id).toBe(true)
-      expect(out, j.id).toContain('You are a social media planner')
+      expect(out, j.id).toMatch(/You are a (social media planner|senior creative director)/)
       expect(out, j.id).not.toMatch(/\{\{|undefined/)
     }
+  })
+
+  it('the monthly calendar asks for a full brief per post that the importer can read', () => {
+    const out = buildAiBrief(CARD, 'calendar', { month: 'December 2026' })
+    for (const label of ['Date:', 'Idea:', 'Text on design:', 'Visual direction:', 'Caption:', 'AI prompt:', 'Reel script:', 'References:']) expect(out).toContain(`\n${label}`)
+    expect(out).toContain('FEED LOOK: As the card says')
+    expect(out).toContain('DETAIL: Full brief for every post')
+    expect(out).toContain('Never invent a link')
   })
 
   it('fills the month, the plan type and the format', () => {

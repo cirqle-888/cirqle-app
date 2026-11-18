@@ -372,6 +372,8 @@ export function createCirqleMcpServer() {
         caption: z.string().optional().describe('Draft caption, plain text.'),
         notes: z.string().optional().describe('Brief for the designer: hook, visual direction, and the source link for a trend.'),
         asap: z.boolean().default(false).describe('A trend post: publish as soon as it is approved.'),
+        links: z.array(z.object({ label: z.string().default(''), url: z.string() })).max(10).optional()
+          .describe('Reference links for the designer: real pages you opened, never invented.'),
       })).min(1).max(MAX_ITEMS_PER_CALL),
     },
     annotations: writeAnnotations,

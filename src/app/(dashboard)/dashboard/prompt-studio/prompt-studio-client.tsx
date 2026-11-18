@@ -15,6 +15,7 @@ import {
 import { COLOR_USE_OPTIONS, swatches } from "@/lib/prompt-studio/colors";
 import { CopyForAi } from "@/components/prompt-studio/copy-for-ai";
 import { LogoUpload } from "./logo-upload";
+import { CardFillPanel } from "./card-fill-panel";
 import { ImportPlanButton } from "@/components/prompt-studio/import-plan";
 import {
   renderPrompt,
@@ -1011,6 +1012,17 @@ export default function PromptStudioClient({
                       You can view this card. Ask a manager to update it.
                     </p>
                   )}
+                  {installed && canManage && (
+                    <CardFillPanel
+                      key={cardClient}
+                      clientName={clients.find((c) => c.id === cardClient)?.name ?? cardDraft.brand ?? ""}
+                      card={cardDraft}
+                      showHelp={help}
+                      onCopy={(t) => void copy(t)}
+                      onLinks={(v) => setCardDraft((s) => ({ ...s, links: v }))}
+                      onFill={(values) => setCardDraft((s) => ({ ...s, ...values }))}
+                    />
+                  )}
                   {CARD_GROUPS.map((g) => {
                     // In the group's own order (logo and colours before the look), not the card's print order.
                     const fields = g.keys.flatMap((k) => CLIENT_CARD_FIELDS.filter((f) => f.key === k));
@@ -1046,6 +1058,7 @@ export default function PromptStudioClient({
                         {g.id === "brand" && installed && canManage && (
                           <LogoUpload
                             clientId={cardClient}
+                            current={cardDraft.logo ?? ""}
                             onUploaded={(url) => setCardDraft((s) => ({ ...s, logo: url }))}
                           />
                         )}

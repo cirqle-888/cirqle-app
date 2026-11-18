@@ -5,6 +5,13 @@
 import type { PromptField } from './types'
 import { COLOR_USE_OPTIONS } from './colors'
 
+/** How alike the posts in a feed should look. The words after the colon are the rule the AI follows. */
+export const FEED_STYLE_OPTIONS = [
+  'One pattern: same layout, colours and text style on every post',
+  'Same family: same colours and text style, the layout changes',
+  'Mixed: a different style and colours for each post',
+] as const
+
 // New fields go at the END: the card prints in this order, and saved prompts
 // were built with the older fields first.
 export const CLIENT_CARD_FIELDS: PromptField[] = [
@@ -32,6 +39,12 @@ export const CLIENT_CARD_FIELDS: PromptField[] = [
   { key: 'gulf',       label: 'Gulf audience',       type: 'text',     placeholder: 'Malayali families in UAE (leave empty if none)' },
   { key: 'worked',     label: 'What worked before',  type: 'textarea', placeholder: 'Staff reels, weekend fish offer posters' },
   { key: 'competitors', label: 'Pages they like or compete with', type: 'text', placeholder: '@page1, @page2' },
+  { key: 'links',      label: 'Page links',          type: 'text',     placeholder: 'https://www.instagram.com/their_page/, their website',
+    help: 'Their Instagram, Facebook and website. "Fill with AI" reads these.' },
+  { key: 'feedStyle',  label: 'Feed style',          type: 'select',   options: [...FEED_STYLE_OPTIONS],
+    help: 'One pattern: every post looks alike. Same family: same colours and type, the layout changes. Mixed: each post can look different.' },
+  { key: 'history',    label: 'Existing designs',    type: 'textarea', placeholder: 'Red header band on every poster, bold Malayalam headline, food photo in the centre, logo bottom right; playful captions with 2-3 emoji',
+    help: 'How their posts look and sound today, and what to keep. "Fill with AI" can write this from their page.' },
 ]
 
 /** Fields that can be pre-filled from the clients table when a card is first opened. */
@@ -51,8 +64,8 @@ export interface CardGroup {
 
 /** How the card editor lays the fields out. Every field is in exactly one group. */
 export const CARD_GROUPS: CardGroup[] = [
-  { id: 'basics', name: 'Basics',       keys: ['brand', 'business', 'location', 'audience', 'language', 'contact'] },
-  { id: 'brand',  name: 'Brand look',   keys: ['logo', 'colors', 'colorUse', 'look'] },
+  { id: 'basics', name: 'Basics',       keys: ['brand', 'business', 'location', 'audience', 'language', 'contact', 'links'] },
+  { id: 'brand',  name: 'Brand look',   keys: ['logo', 'colors', 'colorUse', 'feedStyle', 'look', 'history'] },
   { id: 'social', name: 'Social media', keys: ['platforms', 'postsPerWeek', 'goal', 'gulf'] },
   { id: 'more',   name: 'More details', keys: ['offer', 'mustShow', 'neverShow', 'worked', 'competitors', 'lengthSize', 'tools'], advanced: true },
 ]

@@ -21,10 +21,11 @@ import {
   CONTENT_TYPES, PLATFORMS, sanitizeCaptionHtml, captionHtmlToText, suggestServiceId,
   type ContentType, type Platform,
 } from '@/lib/social/plan'
+import { cleanBriefLinks, type BriefLink } from '@/lib/content-brief'
 
 export const MAX_ITEMS_PER_CALL = 80
 const TITLE_MAX = 200
-const TEXT_MAX = 6000
+const TEXT_MAX = 12000
 
 export interface PlanItemInput {
   title?: string
@@ -38,6 +39,8 @@ export interface PlanItemInput {
   notes?: string | null
   /** A trend post: publish as soon as it is approved, without waiting for a slot. */
   asap?: boolean
+  /** Reference links for the designer (examples, a source, a search): http(s) only. */
+  links?: Partial<BriefLink>[] | null
 }
 
 export interface CleanPlanItem {
@@ -48,6 +51,7 @@ export interface CleanPlanItem {
   caption: string | null
   notes: string | null
   post_asap: boolean
+  links: BriefLink[]
 }
 
 /** 'YYYY-MM' or any date in the month → 'YYYY-MM-01'; null when it is not a month. */
@@ -102,6 +106,7 @@ export function cleanPlanItem(raw: PlanItemInput, month: string): { ok: true; it
       caption: captionFromText(raw.caption),
       notes: (raw.notes ?? '').trim().slice(0, TEXT_MAX) || null,
       post_asap: !!raw.asap,
+      links: cleanBriefLinks(raw.links),
     },
   }
 }
@@ -151,7 +156,7 @@ async function serviceResolver(admin: SupabaseClient<any, any, any>) {
 }
 
 /** Columns added by later migrations; an environment without one still saves the rest. */
-const OPTIONAL_COLS = ['service_id', 'post_asap', 'created_by'] as const
+const OPTIONAL_COLS = ['service_id', 'post_asap', 'created_by', 'links'] as const
 
 export async function addSocialPlanItems(
   admin: SupabaseClient<any, any, any>,
