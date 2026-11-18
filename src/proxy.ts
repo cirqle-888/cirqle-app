@@ -22,5 +22,5 @@ export const config = {
    * worker script that answers with a redirect, so a signed-out phone could never
    * update it. It holds no data, only how to show a notification.
    */
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|push-sw\\.js$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webmanifest|ico)$).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|push-sw\\.js$|theme-init\\.js$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webmanifest|ico)$).*)'],
 }

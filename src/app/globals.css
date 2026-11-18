@@ -354,6 +354,28 @@
   --bottom-bar-pb: 0.75rem;
   --bottom-safe-pb: 0px;
 }
+/* ── Native app opening cover ─────────────────────────────────────────────
+   public/theme-init.js sets data-intro-cover on <html> inside the native app,
+   before first paint; lib/mobile/intro-cover.ts fades it out and removes it.
+   A CSS background on a pseudo-element, so: it is `cover`-fitted (cropped to
+   the phone's shape, never stretched), it needs no element in the page, and
+   nothing outside the native app ever downloads the image. The tint behind it
+   is the artwork's own background, shown for the moment before it decodes. */
+html[data-intro-cover]::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  background: #f6f4fd url('/mobile/cover.webp') center / cover no-repeat;
+  opacity: 1;
+  transition: opacity 350ms ease;
+  /* Failsafe: if the script that removes the cover never runs, it still
+     leaves by itself, so the app can never be stuck behind it. */
+  animation: intro-cover-failsafe 400ms ease 8s forwards;
+}
+html[data-intro-cover='hide']::before { opacity: 0; pointer-events: none; }
+@keyframes intro-cover-failsafe { to { opacity: 0; visibility: hidden; } }
+
 /* Native app, keyboard open (lib/mobile/keyboard sets data-keyboard on <html>).
    The WebView has been shortened to end at the keyboard, so the `fixed
    bottom-0` nav would sit right on top of it and take 72px from the room left

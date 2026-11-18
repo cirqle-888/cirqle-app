@@ -6,6 +6,7 @@ import { isNative, capPlugin } from '@/lib/native'
 import { routeForDeepLink } from '@/lib/deep-link'
 import { syncRoute } from '@/lib/mobile/last-route'
 import { trackKeyboard } from '@/lib/mobile/keyboard'
+import { runIntroCover, loadImageInBrowser } from '@/lib/mobile/intro-cover'
 import { OfflineIndicator } from '@/components/mobile/offline-indicator'
 import { UpdateBanner } from '@/components/mobile/update-banner'
 
@@ -63,7 +64,14 @@ export function MobileShell() {
     }
 
     applyStatusBar()
-    SplashScreen?.hide?.().catch(() => {})
+    // Hands over from the native splash to the opening cover (when
+    // theme-init.js put one up) and then to the app. With no cover this just
+    // hides the splash, as before.
+    void runIntroCover(document.documentElement, {
+      loadImage: loadImageInBrowser,
+      hideSplash: () => { SplashScreen?.hide?.().catch(() => {}) },
+      setTimer: (fn, ms) => window.setTimeout(fn, ms),
+    })
 
     // Re-sync the status bar when the theme (.dark class) changes.
     const obs = new MutationObserver(applyStatusBar)
