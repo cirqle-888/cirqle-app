@@ -440,3 +440,26 @@ async function movePlanItem(
   revalidatePath('/dashboard/social-calendar'); revalidatePath('/dashboard/tasks')
   return { ok: true, data: { status: taskStatus, taskCreated: created, warning } }
 }
+
+/**
+ * The WhatsApp number of the person whose pending work is being shared, so the
+ * Share button can open a chat with them directly. Only the digits.
+ *
+ * Your own number needs requests.work_own (the page's own gate); anyone else's
+ * needs requests.manage — the same people who can open that person's board.
+ * Null when there is no usable number, and the button then just opens
+ * WhatsApp's chat picker.
+ */
+export async function employeeWhatsAppNumber(employeeId: string): Promise<ActionResult<string | null>> {
+  const own = await requireReadPermission(PERMS.REQUESTS_WORK_OWN)
+  const isSelf = own.ok && own.employeeId === employeeId
+  if (!isSelf) {
+    const guard = await requireReadPermission(PERMS.REQUESTS_MANAGE)
+    if (!guard.ok) return { ok: false, error: guard.error }
+  }
+  const { data, error } = await createAdminClient()
+    .from('employees').select('phone').eq('id', employeeId).maybeSingle()
+  if (error) return { ok: false, error: error.message }
+  const digits = String((data as { phone?: string | null } | null)?.phone ?? '').replace(/\D/g, '')
+  return { ok: true, data: digits.length >= 10 ? digits : null }
+}

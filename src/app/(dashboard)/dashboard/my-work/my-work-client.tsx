@@ -19,6 +19,7 @@ import {
 import { moveMyWork, moveTeamWork, type MyWorkRow, type TeamMemberLoad } from './actions'
 import { CHECKLIST_LABEL, CHECKLIST_HINT } from '@/lib/requests/kind'
 import { todayISO } from '@/lib/utils/local-date'
+import { SharePendingButton } from '@/components/my-work/share-pending'
 
 const DiscussButton = dynamicImport(
   () => import('@/components/chat/discuss-button').then(m => m.DiscussButton),
@@ -44,6 +45,8 @@ interface Props {
   /** Whose board this is when a manager opened someone else's; null = my own. */
   viewing?: { employeeId: string; cqid: string } | null
   myEmployeeId?: string
+  /** The signed-in person's CQID — what a shared summary is labelled with. */
+  myCqid?: string
 }
 
 
@@ -253,7 +256,7 @@ function Column({ stage, rows, busyId, totalCount, footer, onOpen }: {
   )
 }
 
-export default function MyWorkClient({ initialRows, firstName, team = [], viewing = null, myEmployeeId }: Props) {
+export default function MyWorkClient({ initialRows, firstName, team = [], viewing = null, myEmployeeId, myCqid }: Props) {
   const router = useRouter()
   const toast = useToast()
   const [rows, setRows] = useState(initialRows)
@@ -427,6 +430,15 @@ export default function MyWorkClient({ initialRows, firstName, team = [], viewin
             </button>
           ))}
         </div>
+
+        {/* Send this board's pending work to WhatsApp — as an image card or a
+            list, to a group or to the person themself. */}
+        <SharePendingButton
+          rows={rows}
+          owner={viewing ? viewing.cqid : (myCqid || 'My work')}
+          employeeId={viewing ? viewing.employeeId : myEmployeeId}
+          recipientLabel={viewing ? viewing.cqid : null}
+        />
 
         {/* Client chips — only when there is actually a choice to make. One
             client means one chip that does nothing, which is worse than none. */}

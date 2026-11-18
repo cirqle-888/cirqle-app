@@ -78,6 +78,7 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
         team={canManageTeam ? team : []}
         viewing={viewing ? { employeeId: viewing.employeeId, cqid: viewing.cqid } : null}
         myEmployeeId={me.employeeId}
+        myCqid={me.cqid}
       />
       {!viewing && canPost && queue.length > 0 && (
         <div className="px-4 sm:px-6 pb-6">
