@@ -48,6 +48,16 @@ export function missingRequired(t: PromptTemplate, values: Record<string, string
   return t.fields.filter(f => f.required && !(v[f.key] ?? '').trim()).map(f => f.label)
 }
 
+const LOGO_RULE = 'Use it exactly as it is: never redraw, recolour, stretch or restyle it.'
+
+/** True for a public link that opens the image itself: a logo uploaded to the app's storage, or any https link ending in an image type. */
+export function isDirectImageLink(v: string | null | undefined): boolean {
+  const s = (v ?? '').trim()
+  if (!/^https:\/\/\S+$/i.test(s)) return false
+  const path = s.split(/[?#]/)[0]
+  return /\/storage\/v1\/object\/public\//.test(path) || /\.(png|jpe?g|webp|svg)$/i.test(path)
+}
+
 /** The client card as a compact block. Empty lines are left out. */
 export function renderClientCard(card: ClientCard | null | undefined): string {
   if (!card) return ''
@@ -56,8 +66,11 @@ export function renderClientCard(card: ClientCard | null | undefined): string {
     .map(f => [f.label, (card[f.key] ?? '').trim()] as const)
     .filter(([, v]) => v)
     .map(([label, v]) => `${label}: ${v.replace(/\s*\n\s*/g, '; ')}`)
-  // The link itself is no use to the AI: what matters is that the logo is attached and left alone.
-  if ((card.logo ?? '').trim()) lines.push('Logo: I am attaching the logo file. Use it exactly as it is: never redraw, recolour, stretch or restyle it.')
+  const logo = (card.logo ?? '').trim()
+  // A link straight to the image (a logo uploaded here) is one the AI can open
+  // itself. A page link (Drive, a website) is not, so there the file is attached.
+  if (isDirectImageLink(logo)) lines.push(`Logo: ${logo} (open this link to get the logo file; if you cannot open links, I am attaching it). ${LOGO_RULE}`)
+  else if (logo) lines.push(`Logo: I am attaching the logo file. ${LOGO_RULE}`)
   const rule = colourRule(card.colors, card.colorUse)
   if (rule) lines.push(rule)
   return lines.length ? `CLIENT CARD\n${lines.join('\n')}` : ''

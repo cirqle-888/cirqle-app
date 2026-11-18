@@ -1046,6 +1046,7 @@ export default function PromptStudioClient({
                         {g.id === "brand" && installed && canManage && (
                           <LogoUpload
                             clientId={cardClient}
+                            current={cardDraft.logo ?? ""}
                             onUploaded={(url) => setCardDraft((s) => ({ ...s, logo: url }))}
                           />
                         )}
