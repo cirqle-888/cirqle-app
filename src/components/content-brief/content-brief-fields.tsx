@@ -15,9 +15,10 @@
  */
 
 import { useState } from 'react'
-import { ChevronDown, Clipboard, Link2, Loader2, Plus, Trash2, Upload, X } from 'lucide-react'
+import { ChevronDown, Clipboard, Link2, Loader2, Plus, Trash2, Upload } from 'lucide-react'
 import AppSelect from '@/components/ui/app-select'
 import RichTextEditor, { readImageFromClipboard } from './rich-text-editor'
+import { ReferenceGallery } from './reference-gallery'
 import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
 import CaptionCanvasEditor from '@/app/(dashboard)/dashboard/social-calendar/caption-canvas'
 import { getBriefImageUploadUrl } from '@/app/(dashboard)/dashboard/content-brief-actions'
@@ -218,25 +219,11 @@ export default function ContentBriefFields({
           onDrop={e => { if (!canAddImage) return; e.preventDefault(); void uploadFiles(Array.from(e.dataTransfer.files)) }}
           className="space-y-2"
         >
-          {images.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {images.map((url, i) => (
-                <div key={`${url}-${i}`} className="relative group">
-                  <a href={url} target="_blank" rel="noreferrer" title="Open full size">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={url} alt={`Reference ${i + 1}`} className="w-20 h-20 rounded-lg object-cover border border-border bg-secondary" />
-                  </a>
-                  {!disabled && (
-                    <button type="button" onClick={() => set({ referenceImages: images.filter((_, j) => j !== i) })}
-                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-card border border-border text-muted-foreground hover:text-red-500 flex items-center justify-center shadow sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
-                      title="Remove image" aria-label="Remove image">
-                      <X className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+          <ReferenceGallery
+            images={images}
+            thumb="w-20 h-20"
+            onRemove={disabled ? undefined : i => set({ referenceImages: images.filter((_, j) => j !== i) })}
+          />
           {canAddImage && (
             <div className="flex flex-wrap items-center gap-1.5">
               <label className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border bg-card text-xs text-muted-foreground hover:text-foreground hover:bg-secondary cursor-pointer transition-colors ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>

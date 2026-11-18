@@ -240,3 +240,17 @@ ${DETAILED}`, '2026-12')
     expect(parsePlan(CALENDAR, '2026-12')).toEqual(parsePlanTable(CALENDAR, '2026-12'))
   })
 })
+
+describe('reference pictures', () => {
+  it('a link to the picture itself becomes a reference image; pages and searches stay links', () => {
+    const p = parsePlanBlocks(`Date: 2026-12-01
+Idea: Package poster
+References: https://cdn.example.com/posters/wedding.JPG?w=800; [Page](https://example.com/post/1); red wedding poster`, '2026-12')
+    expect(p.items[0].images).toEqual(['https://cdn.example.com/posters/wedding.JPG?w=800'])
+    expect(p.items[0].links?.map(l => l.label)).toEqual(['Page', 'Pinterest: red wedding poster'])
+    const c = cleanPlanItem(p.items[0], '2026-12-01')
+    expect(c.ok && c.item.reference_urls).toEqual(['https://cdn.example.com/posters/wedding.JPG?w=800'])
+    expect(c.ok && c.item.reference_url).toBe('https://cdn.example.com/posters/wedding.JPG?w=800')
+  })
+})
+

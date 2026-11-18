@@ -32,7 +32,7 @@ describe('cleanPlanItem', () => {
   const M = '2026-12-01'
   it('normalises a full item', () => {
     const r = cleanPlanItem({ title: '  Weekend   fish offer ', date: '2026-12-04', content_type: 'Reel', platforms: ['Instagram', 'facebook', 'instagram'], caption: 'Hook', notes: ' brief ', asap: true }, M)
-    expect(r).toEqual({ ok: true, item: { scheduled_date: '2026-12-04', title: 'Weekend fish offer', content_type: 'reel', platforms: ['instagram', 'facebook'], caption: 'Hook', notes: 'brief', post_asap: true, links: [] } })
+    expect(r).toEqual({ ok: true, item: { scheduled_date: '2026-12-04', title: 'Weekend fish offer', content_type: 'reel', platforms: ['instagram', 'facebook'], caption: 'Hook', notes: 'brief', post_asap: true, links: [], reference_urls: [], reference_url: null } })
   })
   it('treats a missing date as an undated idea and defaults to a post', () => {
     const r = cleanPlanItem({ title: 'Rain-day delivery idea' }, M)

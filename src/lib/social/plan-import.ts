@@ -15,6 +15,7 @@
 
 import { CONTENT_TYPES, PLATFORMS, type ContentType, type Platform } from '@/lib/social/plan'
 import { itemKey, type PlanItemInput } from '@/lib/social/plan-mcp'
+import { isImageUrl } from '@/lib/content-brief'
 
 export type PlanTableKind = 'detailed' | 'calendar' | 'ideas' | 'trends' | 'unknown'
 
@@ -252,13 +253,17 @@ const BREAK_LINE = /^\s*(#{1,6}\s.*|[-=_*]{3,}|(?:\*\*)?post\s*#?\d*(?:\*\*)?[:.
 const NOTHING = /^(-|–|—|n\/?a|none|nil|not needed|not applicable)\.?$/i
 
 /** "[Label](https://…)", "Label: https://…" or a bare link → a reference link; anything else is a search phrase. */
-function references(raw: string): { links: { label: string; url: string }[]; searches: string[] } {
+function references(raw: string): { links: { label: string; url: string }[]; images: string[]; searches: string[] } {
   const links: { label: string; url: string }[] = []
+  const images: string[] = []
   const searches: string[] = []
   for (const piece of raw.split(/\n|;|\s\|\s/).map(x => x.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean)) {
     const md = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/.exec(piece)
     const href = md?.[2] ?? url(piece)
-    if (href) {
+    if (href && isImageUrl(href.replace(/[.,]+$/, ''))) {
+      // A link to the picture itself is a reference image: it previews inside the app.
+      images.push(href.replace(/[.,]+$/, ''))
+    } else if (href) {
       const label = (md?.[1] ?? piece.replace(href, '').replace(/[\s:,\-–()<>]+$/g, '').replace(/^[\s:,\-–()<>]+/g, '')).trim()
       links.push({ label: label.slice(0, 60), url: href.replace(/[.,]+$/, '') })
     } else {
@@ -266,7 +271,7 @@ function references(raw: string): { links: { label: string; url: string }[]; sea
       if (phrase && !NOTHING.test(phrase)) searches.push(phrase)
     }
   }
-  return { links, searches }
+  return { links, images, searches }
 }
 
 /** A search phrase the designer can open in one click. */
@@ -349,6 +354,7 @@ export function parsePlanBlocks(text: string, month: string): ParsedPlan {
       notes: notes || null,
       asap: slot || !!one('trend'),
       links: [...refs.links, ...refs.searches.slice(0, 3).map(pinterest)].slice(0, 10),
+      images: refs.images.slice(0, 8),
     })
   }
   return { kind: items.length || skipped.length ? 'detailed' : 'unknown', items, skipped }

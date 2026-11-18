@@ -58,6 +58,13 @@ export const EMPTY_BRIEF_DRAFT: ContentBriefDraft = {
 export const MAX_BRIEF_IMAGES = 8
 export const MAX_BRIEF_LINKS = 10
 
+/** True for a link that opens a picture itself (…/photo.jpg), not a page about one. */
+export function isImageUrl(url: string | null | undefined): boolean {
+  const s = (url ?? '').trim()
+  if (!/^https?:\/\//i.test(s)) return false
+  return /\.(png|jpe?g|webp|gif|avif)$/i.test(s.split(/[?#]/)[0])
+}
+
 /** Keep plausible public http(s) URLs only; normalise, de-duplicate, cap. */
 export function cleanImageUrls(urls: readonly (string | null | undefined)[] | null | undefined, max = MAX_BRIEF_IMAGES): string[] {
   const out: string[] = []
