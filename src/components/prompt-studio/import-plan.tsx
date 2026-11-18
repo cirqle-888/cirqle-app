@@ -92,15 +92,28 @@ function ImportPlanDialog({
   const [error, setError] = useState('')
   const [done, setDone] = useState<{ added: number; skipped: number; calendarId: string } | null>(null)
   const parsed = useMemo(() => parsePlan(text, month), [text, month])
-  const n = parsed.items.length
-  const undated = parsed.items.filter(it => !it.date).length
+  const found = parsed.items.length
+  // Every row starts ticked; the planner unticks the ones she does not want.
+  // Keyed by position and title, so a new paste starts fully ticked again.
+  const [off, setOff] = useState<Set<string>>(new Set())
+  const rowKey = (i: number) => `${i}|${parsed.items[i]?.title ?? ''}`
+  const chosen = parsed.items.filter((_, i) => !off.has(rowKey(i)))
+  const n = chosen.length
+  const undated = chosen.filter(it => !it.date).length
+  const toggle = (i: number) => setOff(prev => {
+    const next = new Set(prev)
+    const k = rowKey(i)
+    if (next.has(k)) next.delete(k)
+    else next.add(k)
+    return next
+  })
 
   async function add() {
     if (!n || busy) return
     setBusy(true)
     setError('')
     try {
-      const r = await importPlanItems(clientId, month, parsed.items)
+      const r = await importPlanItems(clientId, month, chosen)
       if (!r.ok || !r.data) { setError(r.error || 'Could not add the items.'); return }
       setDone({ added: r.data.added, skipped: r.data.skipped.length, calendarId: r.data.calendarId })
       onDone?.()
@@ -153,26 +166,45 @@ function ImportPlanDialog({
               onChange={e => setText(e.target.value)}
             />
 
-            {text.trim() && !n && (
+            {text.trim() && !found && (
               <p className="text-sm text-amber-700 dark:text-amber-300">
                 {parsed.skipped.length
                   ? 'The plan was found, but no post could be added. Check the plan month above.'
                   : 'No plan found. Ask the AI to answer in the format the prompt gives, and paste it again.'}
               </p>
             )}
-            {n > 0 && (
+            {found > 0 && (
               <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border">
-                <p className="sticky top-0 border-b border-border bg-card px-3 py-2 text-sm font-medium">
-                  {n} item{n === 1 ? '' : 's'} found ({KIND_LABEL[parsed.kind]})
+                <p className="sticky top-0 z-10 flex flex-wrap items-center gap-x-2 border-b border-border bg-card px-3 py-2 text-sm font-medium">
+                  <span>
+                    {n === found ? `${found} item${found === 1 ? '' : 's'} found` : `${n} of ${found} ticked`} ({KIND_LABEL[parsed.kind]})
+                  </span>
+                  {found > 1 && (
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-primary hover:underline"
+                      onClick={() => setOff(n ? new Set(parsed.items.map((_, i) => rowKey(i))) : new Set())}
+                    >
+                      {n ? 'Untick all' : 'Tick all'}
+                    </button>
+                  )}
                   {undated > 0 && (
                     <span className="font-normal text-muted-foreground">
-                      {' · '}{undated === n ? 'no dates, so they go' : `${undated} without a date go`} to the Idea Board
+                      {undated === n ? 'No dates, so they go' : `${undated} without a date go`} to the Idea Board
                     </span>
                   )}
                 </p>
                 <ul className="divide-y divide-border text-sm">
                   {parsed.items.map((it, i) => (
-                    <li key={i} className="flex gap-3 px-3 py-1.5">
+                    <li key={i}>
+                      <label className={`flex cursor-pointer items-center gap-3 px-3 py-1.5 hover:bg-secondary/60 ${off.has(rowKey(i)) ? 'opacity-50' : ''}`}>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 shrink-0 accent-violet-600"
+                        checked={!off.has(rowKey(i))}
+                        onChange={() => toggle(i)}
+                        aria-label={`Add "${it.title}"`}
+                      />
                       <span className="w-20 shrink-0 tabular-nums text-muted-foreground">{it.date ? it.date.slice(5) : 'Idea'}</span>
                       <span className="w-16 shrink-0 capitalize text-muted-foreground">{it.content_type}</span>
                       <span className="min-w-0 flex-1 truncate" title={it.title}>{it.title}</span>
@@ -181,6 +213,7 @@ function ImportPlanDialog({
                           brief{refCount(it) ? ` · ${refCount(it)} ref${refCount(it) === 1 ? '' : 's'}` : ''}
                         </span>
                       ) : null}
+                      </label>
                     </li>
                   ))}
                 </ul>
