@@ -5,11 +5,14 @@ const mocks = vi.hoisted(() => ({
   read: vi.fn(),
   db: vi.fn(),
   groq: vi.fn(),
+  scope: vi.fn(),
 }));
 vi.mock("@/lib/permissions/check", () => ({
   requirePermission: mocks.guard,
   requireReadPermission: mocks.read,
+  loadCurrentUser: vi.fn(),
 }));
+vi.mock("@/lib/scope/department-clients", () => ({ loadDepartmentClientScope: mocks.scope }));
 vi.mock("@/lib/supabase/server", () => ({ createAdminClient: mocks.db }));
 vi.mock("@/lib/ai/groq", () => ({ callGroqText: mocks.groq }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -69,6 +72,7 @@ it("loading a card for Copy for AI needs view permission (a read) before touchin
 });
 it("Copy for AI gets the card, or null when the client has none yet", async () => {
   mocks.read.mockResolvedValue({ ok: true, employeeId: "actor" });
+  mocks.scope.mockResolvedValue({ restricted: false, departmentIds: new Set(), clientIds: new Set() });
   const rows: Record<string, unknown> = { clients: { name: "Sea Star" }, prompt_client_cards: { card: { brand: "Sea Star" } } };
   const from = (table: string) => {
     const q = { select: () => q, eq: () => q, maybeSingle: async () => ({ data: rows[table] ?? null, error: null }) };
@@ -82,6 +86,19 @@ it("Copy for AI gets the card, or null when the client has none yet", async () =
   expect((await actions.loadClientCard("not-an-id")).ok).toBe(false);
   delete rows.clients;
   expect(await actions.loadClientCard(id)).toEqual({ ok: false, error: "Client not found." });
+});
+it("Copy for AI refuses a client outside the viewer's departments", async () => {
+  mocks.read.mockResolvedValue({ ok: true, employeeId: "actor" });
+  const mine = "11111111-1111-4111-8111-111111111111";
+  const other = "22222222-2222-4222-8222-222222222222";
+  mocks.scope.mockResolvedValue({ restricted: true, departmentIds: new Set(["social"]), clientIds: new Set([mine]) });
+  const from = () => {
+    const q = { select: () => q, eq: () => q, maybeSingle: async () => ({ data: { name: "X", card: { brand: "X" } }, error: null }) };
+    return q;
+  };
+  mocks.db.mockReturnValue({ from });
+  expect((await actions.loadClientCard(mine)).ok).toBe(true);
+  expect(await actions.loadClientCard(other)).toEqual({ ok: false, error: "This client is not in your department." });
 });
 it("a logo upload takes images only, under that client's folder", async () => {
   mocks.guard.mockResolvedValue({ ok: true, employeeId: "actor" });

@@ -7,6 +7,8 @@ import {
   requireReadPermission,
 } from "@/lib/permissions/check";
 import { callGroqText } from "@/lib/ai/groq";
+import { loadCurrentUser } from "@/lib/permissions/check";
+import { loadDepartmentClientScope } from "@/lib/scope/department-clients";
 import { resolveImageExt, IMAGE_UPLOAD_ERROR, IMAGE_EXT_BY_TYPE, MAX_IMAGE_BYTES } from "@/lib/uploads";
 import { CLIENT_CARD_FIELDS } from "@/lib/prompt-studio/client-card";
 import { placeholdersIn } from "@/lib/prompt-studio/render";
@@ -131,6 +133,11 @@ export async function loadClientCard(
     if (!text(clientId, 64) || !/^[0-9a-f-]{36}$/i.test(clientId))
       throw new Error("Please choose a client.");
     const db = createAdminClient();
+    // Same department rule as the Prompt Studio client list, enforced here
+    // too so a card outside the viewer's departments is not one call away.
+    const scope = await loadDepartmentClientScope(db, await loadCurrentUser());
+    if (scope.restricted && !scope.clientIds.has(clientId))
+      throw new Error("This client is not in your department.");
     const [client, saved] = await Promise.all([
       db.from("clients").select("name").eq("id", clientId).maybeSingle(),
       db.from("prompt_client_cards").select("card").eq("client_id", clientId).maybeSingle(),

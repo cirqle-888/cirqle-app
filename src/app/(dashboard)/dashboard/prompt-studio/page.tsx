@@ -14,6 +14,7 @@ import {
   type SavedStyle,
 } from "@/lib/prompt-studio/style";
 import PromptStudioClient from "./prompt-studio-client";
+import { loadDepartmentClientScope, scopeClientsByDepartment } from "@/lib/scope/department-clients";
 
 export const dynamic = "force-dynamic";
 
@@ -94,6 +95,16 @@ export default async function PromptStudioPage({
         .limit(100);
   if ([clients, cards, templates, library, styles].some((r) => r.error))
     throw new Error("Could not load Prompt Studio data. Please try again.");
+  // Each employee sees only the clients of their own departments (Settings →
+  // Departments); admins see every client. Holding prompt_studio.manage does
+  // NOT widen it — the people who use Prompt Studio day to day hold it, so it
+  // would cancel the restriction for exactly them. See lib/scope/department-clients.
+  const deptScope = await loadDepartmentClientScope(db, me);
+  const visibleClients = scopeClientsByDepartment(clients.data as StudioClient[], deptScope);
+  const visibleIds = new Set(visibleClients.map((c) => c.id));
+  const visibleCards = (cards.data as SavedCard[]).filter(
+    (c) => !deptScope.restricted || visibleIds.has(c.client_id),
+  );
   const looks = missing ? { data: [], error: null } : await db.from("prompt_quick_looks")
     .select("id, name, template_key, client_id, values, style_id, language")
     .is("deleted_at", null).order("name");
@@ -113,8 +124,8 @@ export default async function PromptStudioPage({
   return (
     <PromptStudioClient
       initialQuickLooks={looks.data || []}
-      clients={clients.data as StudioClient[]}
-      initialCards={cards.data as SavedCard[]}
+      clients={visibleClients}
+      initialCards={visibleCards}
       initialTemplates={custom}
       initialLibrary={(library.data || []) as LibraryItem[]}
       installed={!missing}
