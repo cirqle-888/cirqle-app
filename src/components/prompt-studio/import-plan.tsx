@@ -13,7 +13,7 @@ import Link from 'next/link'
 import { ClipboardPaste } from 'lucide-react'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { usePermissions } from '@/contexts/permission-context'
-import { parsePlanTable } from '@/lib/social/plan-import'
+import { parsePlanTable, planMonthIn } from '@/lib/social/plan-import'
 import { importPlanItems } from '@/app/(dashboard)/dashboard/social-calendar/actions'
 
 const KIND_LABEL = { calendar: 'calendar', ideas: 'ideas', trends: 'trends', unknown: '' } as const
@@ -83,12 +83,15 @@ function ImportPlanDialog({
   onDone?: () => void
 }) {
   const [text, setText] = useState(givenText)
-  const [month, setMonth] = useState(givenMonth || planMonthNow())
+  // The month follows the dates in the pasted answer until the planner picks one herself.
+  const [picked, setPicked] = useState('')
+  const month = picked || planMonthIn(text) || givenMonth || planMonthNow()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState<{ added: number; skipped: number; calendarId: string } | null>(null)
   const parsed = useMemo(() => parsePlanTable(text, month), [text, month])
   const n = parsed.items.length
+  const undated = parsed.items.filter(it => !it.date).length
 
   async function add() {
     if (!n || busy) return
@@ -133,7 +136,7 @@ function ImportPlanDialog({
             <div className="flex flex-wrap items-end gap-3">
               <label className="text-sm">
                 <span className="mb-1 block text-xs text-muted-foreground">Plan month</span>
-                <input type="month" className="field" value={month} onChange={e => e.target.value && setMonth(e.target.value)} />
+                <input type="month" className="field" value={month} onChange={e => e.target.value && setPicked(e.target.value)} />
               </label>
               <p className="flex-1 text-xs text-muted-foreground">
                 Paste the whole answer. Only the table is read.
@@ -150,14 +153,20 @@ function ImportPlanDialog({
 
             {text.trim() && !n && (
               <p className="text-sm text-amber-700 dark:text-amber-300">
-                No table found. Ask the AI to answer as a table and paste it again.
+                {parsed.skipped.length
+                  ? 'The table was found, but no row could be added. Check the plan month above.'
+                  : 'No table found. Ask the AI to answer as a table and paste it again.'}
               </p>
             )}
             {n > 0 && (
               <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border">
                 <p className="sticky top-0 border-b border-border bg-card px-3 py-2 text-sm font-medium">
                   {n} item{n === 1 ? '' : 's'} found ({KIND_LABEL[parsed.kind]})
-                  {parsed.kind !== 'calendar' && <span className="font-normal text-muted-foreground"> · no dates, so they go to the Idea Board</span>}
+                  {undated > 0 && (
+                    <span className="font-normal text-muted-foreground">
+                      {' · '}{undated === n ? 'no dates, so they go' : `${undated} without a date go`} to the Idea Board
+                    </span>
+                  )}
                 </p>
                 <ul className="divide-y divide-border text-sm">
                   {parsed.items.map((it, i) => (

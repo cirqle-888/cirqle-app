@@ -120,12 +120,59 @@ const isTrendSlot = (s: string) => /trend slot/i.test(s)
 const url = (s: string) => /https?:\/\/[^\s)>\]]+/.exec(s)?.[0] ?? ''
 
 /**
+ * The month the pasted dates are in ('YYYY-MM'), when they say: the month most
+ * full dates fall in, else a "December 2026" written in the text. Null when
+ * the answer only has day numbers, so the caller keeps its own month.
+ */
+export function planMonthIn(text: string): string | null {
+  const t = text || ''
+  const count = new Map<string, number>()
+  const add = (y: number, m: number) => {
+    if (y < 2000 || y > 2100 || m < 1 || m > 12) return
+    const k = `${y}-${pad(m)}`
+    count.set(k, (count.get(k) ?? 0) + 1)
+  }
+  for (const h of t.matchAll(/\b(\d{4})-(\d{1,2})-\d{1,2}\b/g)) add(+h[1], +h[2])
+  for (const h of t.matchAll(/\b\d{1,2}[/.](\d{1,2})[/.](\d{4})\b/g)) add(+h[2], +h[1])
+  if (!count.size) {
+    const named = new RegExp(`\\b(${MONTHS.join('|')})[a-z]*\\.?,?\\s+(\\d{4})\\b`, 'gi')
+    for (const h of t.matchAll(named)) add(+h[2], MONTHS.indexOf(h[1].toLowerCase()) + 1)
+  }
+  let best: string | null = null
+  for (const [k, n] of count) if (!best || n > count.get(best)!) best = k
+  return best
+}
+
+const headingCount = (r: string[]) => r.filter(c => HEADINGS.some(([re]) => re.test(c.toLowerCase()))).length
+
+/**
  * Read the AI's answer. `month` ('YYYY-MM') is the plan the items will go
- * into; it is only used for dates. Text around the table is ignored.
+ * into; it is only used for dates. Text around the tables is ignored. An
+ * answer may hold more than one table (a calendar, then some extra ideas):
+ * each run of table lines is read on its own, by its own headings.
  */
 export function parsePlanTable(text: string, month: string): ParsedPlan {
-  const rows = (text || '').split(/\r?\n/).map(cells).filter((c): c is string[] => !!c && !isDivider(c))
-  const headAt = rows.findIndex(r => r.filter(c => HEADINGS.some(([re]) => re.test(c.toLowerCase()))).length >= 2)
+  const blocks: string[][][] = []
+  let open: string[][] | null = null
+  for (const line of (text || '').split(/\r?\n/)) {
+    const c = cells(line)
+    if (!c) { open = null; continue }
+    if (!open) blocks.push((open = []))
+    if (!isDivider(c)) open.push(c)
+  }
+  const out: ParsedPlan = { kind: 'unknown', items: [], skipped: [] }
+  for (const rows of blocks) {
+    const part = parseBlock(rows, month)
+    if (part.kind === 'unknown') continue
+    if (out.kind === 'unknown') out.kind = part.kind
+    out.items.push(...part.items)
+    out.skipped.push(...part.skipped)
+  }
+  return out
+}
+
+function parseBlock(rows: string[][], month: string): ParsedPlan {
+  const headAt = rows.findIndex(r => headingCount(r) >= 2)
   if (headAt < 0) return { kind: 'unknown', items: [], skipped: [] }
 
   const cols: Partial<Record<Col, number>> = {}

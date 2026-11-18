@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parsePlanTable, planDate, contentTypeOf, platformsOf } from './plan-import'
+import { parsePlanTable, planDate, planMonthIn, contentTypeOf, platformsOf } from './plan-import'
 import { cleanPlanItem } from './plan-mcp'
 
 describe('planDate', () => {
@@ -101,5 +101,31 @@ Poster | Guess the dish poll | ഏത് വിഭവം? | easy | Sunday`, '202
 
   it('every item it returns passes the calendar’s own validation', () => {
     for (const it of parsePlanTable(CALENDAR, '2026-12').items) expect(cleanPlanItem(it, '2026-12-01').ok).toBe(true)
+  })
+
+  it('reads every table in the answer: a calendar, then extra ideas', () => {
+    const p = parsePlanTable(`| Date | Platform | Format | Idea | Hook |
+|---|---|---|---|---|
+| 24 Dec | IG/FB | Poster | Christmas wishes | Merry Christmas |
+
+Some extra ideas:
+
+| Format | Idea | Hook |
+| Reel | Guess the dish | Which dish? |`, '2026-12')
+    expect(p.kind).toBe('calendar')
+    expect(p.items.map(i => [i.title, i.date])).toEqual([['Christmas wishes', '2026-12-24'], ['Guess the dish', null]])
+    expect(p.skipped).toEqual([])
+  })
+})
+
+describe('planMonthIn', () => {
+  it('finds the month the dates are in', () => {
+    expect(planMonthIn(CALENDAR)).toBe('2026-12')
+    expect(planMonthIn('| 04/12/2026 | a |\n| 05/12/2026 | b |\n| 01/01/2027 | c |')).toBe('2026-12')
+  })
+  it('falls back to a month named in the text, and to nothing', () => {
+    expect(planMonthIn('Plan for January 2027\n| Date | Idea |\n| 4 | x |')).toBe('2027-01')
+    expect(planMonthIn('| Date | Idea |\n| 4 Dec | x |')).toBeNull()
+    expect(planMonthIn('')).toBeNull()
   })
 })
