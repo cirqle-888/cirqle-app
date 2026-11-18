@@ -295,7 +295,20 @@ export default function PromptStudioClient({
     setAnswer("");
     setTitle("");
   }
-  function openCard(id: string, fill?: ClientCard) {
+  /** The card editor beside (wide screens) or below (narrower) the client list. */
+  const cardEditorRef = useRef<HTMLElement | null>(null);
+  function openCard(id: string, fill?: ClientCard, fromList = false) {
+    if (fromList) {
+      // Below 1024px the list and the card stack, so the card opens under the
+      // whole list, off screen — clicking a client looked like it did nothing.
+      // Bring it into view, but only when it is not already on screen.
+      requestAnimationFrame(() => {
+        const el = cardEditorRef.current;
+        if (!el || el.getBoundingClientRect().top < window.innerHeight * 0.6) return;
+        const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+      });
+    }
     setCardClient(id);
     setCardBase(cards.find((c) => c.client_id === id)?.updated_at ?? null);
     setCardDraft({ ...cardDraftFor(id, cards, clients), ...(fill || {}) });
@@ -358,7 +371,13 @@ export default function PromptStudioClient({
         subtitle={help ? "Pick a client. Fill a few boxes. Make a better prompt." : undefined}
       />
       <main className="prompt-studio mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
-        <style>{`.prompt-studio .studio-button { min-height:44px; padding:10px 14px; border:1px solid var(--border); border-radius:8px; font-size:14px; font-weight:500; } .prompt-studio .studio-button:hover { background:var(--secondary); } .prompt-studio button:disabled { opacity:.45; cursor:not-allowed; } .prompt-studio .field { min-height:44px; } .prompt-studio .primary { background:var(--primary); color:var(--primary-foreground); }`}</style>
+        <style>{`.prompt-studio .studio-button { min-height:44px; padding:10px 14px; border:1px solid var(--border); border-radius:8px; font-size:14px; font-weight:500; } .prompt-studio .studio-button:hover { background:var(--secondary); } .prompt-studio button:disabled { opacity:.45; cursor:not-allowed; } .prompt-studio .field { min-height:44px; } .prompt-studio .primary { background:var(--primary); color:var(--primary-foreground); }` +
+          // `.field` was used for every input, select and textarea on this page
+          // but never defined anywhere, so they rendered with no border or
+          // background — a search box looked like loose text. The selected
+          // client used Tailwind's border-primary, which the 1px border rule
+          // above always out-ranked, so the chosen card never looked chosen.
+          ` .prompt-studio .field { border:1px solid var(--border); border-radius:8px; background:var(--background); color:var(--foreground); padding:8px 12px; font-size:14px; } .prompt-studio .field::placeholder { color:var(--muted-foreground); } .prompt-studio .field:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 3px color-mix(in oklab, var(--primary) 22%, transparent); } .prompt-studio .studio-button.is-selected { border-color:var(--primary); background:color-mix(in oklab, var(--primary) 10%, transparent); }`}</style>
         {!installed && <NotInstalled />}
         <div
           className="flex flex-wrap gap-2"
@@ -978,8 +997,9 @@ export default function PromptStudioClient({
                   return (
                     <button
                       key={c.id}
-                      className={`studio-button block w-full text-left ${cardClient === c.id ? "border-primary" : ""}`}
-                      onClick={() => openCard(c.id)}
+                      className={`studio-button block w-full text-left ${cardClient === c.id ? "is-selected" : ""}`}
+                      aria-pressed={cardClient === c.id}
+                      onClick={() => openCard(c.id, undefined, true)}
                     >
                       <span className="block">{c.name}</span>
                       <span className="text-xs text-muted-foreground">
@@ -998,7 +1018,7 @@ export default function PromptStudioClient({
                 />
               )}
             </section>
-            <section className={panel}>
+            <section ref={cardEditorRef} className={`${panel} scroll-mt-28`}>
               {cardClient ? (
                 <>
                   <div className="flex flex-wrap items-center justify-between gap-2">
