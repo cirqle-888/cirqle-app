@@ -354,6 +354,17 @@
   --bottom-bar-pb: 0.75rem;
   --bottom-safe-pb: 0px;
 }
+/* Native app, keyboard open (lib/mobile/keyboard sets data-keyboard on <html>).
+   The WebView has been shortened to end at the keyboard, so the `fixed
+   bottom-0` nav would sit right on top of it and take 72px from the room left
+   to type in. Hide it and release the space reserved for it; both come back
+   the moment the keyboard closes. */
+html[data-keyboard='open'] [data-mobile-bottom-nav] { display: none; }
+html[data-keyboard='open'] [data-bottom-nav] {
+  --bottom-nav-h: 0px;
+  --bottom-bar-pb: 0.75rem;
+  --bottom-safe-pb: 0px;
+}
 /* md+ hides the bottom nav (`md:hidden`) — back to the plain bottom edge. */
 @media (min-width: 768px) {
   [data-bottom-nav] {

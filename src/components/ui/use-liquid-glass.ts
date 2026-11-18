@@ -13,7 +13,7 @@ import { useEffect, useId, type RefObject } from 'react'
  * pointing the element's backdrop-filter at an SVG filter that blurs,
  * saturates and then displaces the backdrop through that map.
  *
- * Chromium only (Chrome, Edge, Electron, Android WebView): Safari and Firefox
+ * Desktop Chromium only (Chrome, Edge, Electron): phones, Safari and Firefox
  * do not run SVG filters inside backdrop-filter, so there the hook does
  * nothing and the plain frosted glass stays. It also stays off when the
  * person has asked for reduced transparency or more contrast.
@@ -41,6 +41,13 @@ const SVG_NS = 'http://www.w3.org/2000/svg'
 function canRefract(): boolean {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return false
   if (window.matchMedia('(prefers-reduced-transparency: reduce), (prefers-contrast: more)').matches) return false
+  // Phones and tablets get the frosted glass without the edge bending. The
+  // bending is an SVG displacement filter the GPU re-runs over everything
+  // behind the bar on every scrolled frame; under the fixed bottom nav on a
+  // mid-range Android phone that costs frames on the app's busiest gesture,
+  // for an effect that is barely visible at that size.
+  const uaData = (navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData
+  if (uaData?.mobile || /Android/i.test(navigator.userAgent)) return false
   const brands = (navigator as Navigator & { userAgentData?: { brands?: { brand: string }[] } })
     .userAgentData?.brands
   if (brands) return brands.some(b => b.brand === 'Chromium')

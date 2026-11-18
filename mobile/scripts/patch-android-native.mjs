@@ -1,0 +1,125 @@
+// Applies Cirqle's native Android settings on top of the project Capacitor
+// generates. Run from mobile/:  node scripts/patch-android-native.mjs
+//
+// mobile/android/ is generated (`cap add android`) and git-ignored, so nothing
+// edited in there by hand survives a regenerate. Everything the app needs that
+// the stock template does not have lives HERE and is re-applied on every build
+// by scripts/build-android.sh. Idempotent: running it twice changes nothing.
+//
+// What it fixes, and why:
+//
+// 1. KEYBOARD GAP. The template sets no `windowSoftInputMode`, so Android
+//    picks one itself and, for a WebView, picks "pan": it slides the whole
+//    window up to keep the field in view. Capacitor 8 ALSO shrinks the WebView
+//    by the keyboard's height (core SystemBars plugin). Both happen, so the app
+//    ends up pushed too far up with a strip of bare window between it and the
+//    keyboard. `adjustResize` tells Android not to pan; Capacitor's own resize
+//    is then the only thing that moves.
+//
+// 2. WHITE STRIP / WHITE FLASH. That bare window was white in every theme.
+//    The window background now follows day/night (white / the app's dark
+//    #0b0f1a), so anything not yet painted matches the app instead of flashing.
+//
+// 3. STRETCHED COVER. The template's launch theme set a full-screen PNG as
+//    `android:background`, which Android stretches to the screen's shape — a
+//    3:5 image on a 9:20 phone, so the round logo came out as an oval. The
+//    launch screen is now the Android 12 splash: a solid colour, the logo
+//    drawn at its own size, and (Android 12+) a wordmark at the bottom. None of
+//    it is ever scaled out of proportion.
+import { readFile, writeFile, mkdir, copyFile, readdir, stat } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+
+const APP = 'android/app/src/main'
+const RES = join(APP, 'res')
+const OVERLAY = 'native/android/res'
+
+if (!existsSync(join(APP, 'AndroidManifest.xml'))) {
+  console.error('✗ android/ not found — run `npx cap add android` first.')
+  process.exit(1)
+}
+
+const changed = []
+async function write(path, content) {
+  await mkdir(dirname(path), { recursive: true })
+  const before = existsSync(path) ? await readFile(path, 'utf8') : null
+  if (before === content) return
+  await writeFile(path, content)
+  changed.push(path)
+}
+
+// ── 1. Manifest: resize for the keyboard, never pan ────────────────────────
+{
+  const path = join(APP, 'AndroidManifest.xml')
+  let xml = await readFile(path, 'utf8')
+  const activity = /<activity\b[^>]*android:name="\.MainActivity"[^>]*>/s.exec(xml)
+    ?? /<activity\b[^>]*>/s.exec(xml)
+  if (!activity) { console.error('✗ No <activity> in AndroidManifest.xml'); process.exit(1) }
+  let tag = activity[0]
+  if (/android:windowSoftInputMode="[^"]*"/.test(tag)) {
+    tag = tag.replace(/android:windowSoftInputMode="[^"]*"/, 'android:windowSoftInputMode="adjustResize"')
+  } else {
+    tag = tag.replace(/<activity\b/, '<activity\n            android:windowSoftInputMode="adjustResize"')
+  }
+  await write(path, xml.replace(activity[0], tag))
+}
+
+// ── 2. Colours: the window behind the WebView follows day / night ──────────
+const colors = hex => `<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="cirqle_window_background">${hex}</color>
+</resources>
+`
+await write(join(RES, 'values/cirqle_colors.xml'), colors('#FFFFFF'))
+await write(join(RES, 'values-night/cirqle_colors.xml'), colors('#0B0F1A'))
+
+// ── 3. Themes: Android 12 splash, no stretched bitmap anywhere ─────────────
+const styles = branding => `<?xml version="1.0" encoding="utf-8"?>
+<!-- Written by mobile/scripts/patch-android-native.mjs — edit it there. -->
+<resources>
+
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/cirqle_window_background</item>
+    </style>
+
+    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:background">@null</item>
+        <item name="android:windowBackground">@color/cirqle_window_background</item>
+    </style>
+
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/cirqle_window_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/cirqle_splash_icon</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>${branding
+          ? '\n        <item name="android:windowSplashScreenBrandingImage">@drawable/cirqle_splash_branding</item>'
+          : ''}
+    </style>
+</resources>
+`
+await write(join(RES, 'values/styles.xml'), styles(false))
+// The wordmark strip is an Android 12 (API 31) attribute; older versions get
+// the same screen without it.
+await write(join(RES, 'values-v31/styles.xml'), styles(true))
+
+// ── 4. Launch artwork (generated by scripts/generate-splash.mjs) ───────────
+async function copyTree(from, to) {
+  for (const name of await readdir(from)) {
+    const src = join(from, name), dst = join(to, name)
+    if ((await stat(src)).isDirectory()) { await copyTree(src, dst); continue }
+    await mkdir(dirname(dst), { recursive: true })
+    const same = existsSync(dst)
+      && (await readFile(src)).equals(await readFile(dst))
+    if (!same) { await copyFile(src, dst); changed.push(dst) }
+  }
+}
+if (!existsSync(OVERLAY)) {
+  console.error(`✗ ${OVERLAY} missing — run \`node mobile/scripts/generate-splash.mjs\` from the repo root.`)
+  process.exit(1)
+}
+await copyTree(OVERLAY, RES)
+
+console.log(changed.length
+  ? `✓ Native Android settings applied (${changed.length} file${changed.length === 1 ? '' : 's'} updated).`
+  : '✓ Native Android settings already in place.')

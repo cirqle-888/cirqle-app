@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { isNative, capPlugin } from '@/lib/native'
 import { routeForDeepLink } from '@/lib/deep-link'
 import { syncRoute } from '@/lib/mobile/last-route'
+import { trackKeyboard } from '@/lib/mobile/keyboard'
 import { OfflineIndicator } from '@/components/mobile/offline-indicator'
 import { UpdateBanner } from '@/components/mobile/update-banner'
 
@@ -67,7 +68,9 @@ export function MobileShell() {
     // Re-sync the status bar when the theme (.dark class) changes.
     const obs = new MutationObserver(applyStatusBar)
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-    return () => obs.disconnect()
+    // Hide the bottom nav while the keyboard is up (see lib/mobile/keyboard).
+    const stopKeyboard = trackKeyboard()
+    return () => { obs.disconnect(); stopKeyboard() }
   }, [])
 
   // Native app lifecycle: Android hardware back button, cirqle:// deep links,

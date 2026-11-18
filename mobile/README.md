@@ -109,6 +109,36 @@ you change native config (app name, icon, splash, plugins, target URL).
 
 ---
 
+## 4a. Release build (signed APK + AAB)
+
+```bash
+bash mobile/scripts/build-android.sh
+```
+
+One command: syncs the native project, generates icons, applies Cirqle's own
+native settings, stamps the version from `app-version.json`, and builds a
+signed APK and AAB into `mobile/dist/`. Bump `versionName` AND `versionCode`
+in `app-version.json` first — Android refuses to install a build whose
+`versionCode` is not higher than the one on the phone.
+
+`mobile/android/` is generated and git-ignored, so **never fix anything by
+editing it**. Native settings live in two tracked places and are re-applied on
+every build:
+
+- `scripts/patch-android-native.mjs` — keyboard resize mode
+  (`adjustResize`, without which the app is pushed up and a blank strip shows
+  above the keyboard), the window colour, and the launch-screen theme.
+- `native/android/res/` — the launch-screen artwork, drawn by
+  `node mobile/scripts/generate-splash.mjs` (run from the repo root after a
+  brand change).
+
+The launch screen is the Android 12 splash: a solid colour, the logo at its own
+size, and a wordmark strip. Do not go back to a full-screen image as the window
+background — Android stretches it to the screen's shape, which is how the logo
+became an oval.
+
+---
+
 ## 5. Notes & next steps
 
 - **Auth / Supabase:** works as-is since the app loads your real hosted site;

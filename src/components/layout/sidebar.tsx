@@ -738,7 +738,7 @@ export default function Sidebar() {
           hamburger rather than sitting beside it: More opens the same drawer,
           from where a thumb already is. */}
       {(
-        <div ref={bottomNavRef} className="md:hidden fixed bottom-0 left-0 w-full z-50 liquid-glass liquid-glass-bar-bottom pb-safe pt-1 px-2 flex items-center justify-around">
+        <div ref={bottomNavRef} data-mobile-bottom-nav className="md:hidden fixed bottom-0 left-0 w-full z-50 liquid-glass liquid-glass-bar-bottom pb-safe pt-1 px-2 flex items-center justify-around">
           {/* Home is fixed; the shortcuts beside it are the person's own first
               Favorites, which they already curate from ⌘K or the star and which
               only ever contain pages their permissions allow. Someone with no
