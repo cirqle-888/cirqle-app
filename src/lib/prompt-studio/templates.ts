@@ -843,7 +843,7 @@ Hashtags: 8 to 12, local ones first
 Designer needs: photos, footage and facts to get from the client
 AI prompt: one ready-to-paste prompt for an image tool (poster, story, carousel) or a video tool (reel) that makes a first draft: subject, composition, lighting, the card's colours, size, and empty space for the text. End it with "no text in the image, no logo".
 Reel script: reels only: 4 to 6 shots with seconds, on-screen text and sound
-References: 2 or 3 real links you opened that show a similar idea or style. If you have none, write search phrases instead. Never invent a link.
+References: 2 or 3 real examples you opened that show a similar idea or style. Best is the direct link to the picture itself (ending .jpg, .png or .webp), so it previews for the designer; a page link is second best. If you have neither, write search phrases instead. Never invent a link.
 
 For a TREND SLOT write only Date, Day, Platform, Format and "Idea: TREND SLOT".
 

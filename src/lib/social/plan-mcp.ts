@@ -21,7 +21,7 @@ import {
   CONTENT_TYPES, PLATFORMS, sanitizeCaptionHtml, captionHtmlToText, suggestServiceId,
   type ContentType, type Platform,
 } from '@/lib/social/plan'
-import { cleanBriefLinks, type BriefLink } from '@/lib/content-brief'
+import { cleanBriefLinks, cleanImageUrls, type BriefLink } from '@/lib/content-brief'
 
 export const MAX_ITEMS_PER_CALL = 80
 const TITLE_MAX = 200
@@ -41,6 +41,8 @@ export interface PlanItemInput {
   asap?: boolean
   /** Reference links for the designer (examples, a source, a search): http(s) only. */
   links?: Partial<BriefLink>[] | null
+  /** Reference pictures: links that open an image itself. Shown as previews on the item. */
+  images?: string[] | null
 }
 
 export interface CleanPlanItem {
@@ -52,6 +54,9 @@ export interface CleanPlanItem {
   notes: string | null
   post_asap: boolean
   links: BriefLink[]
+  reference_urls: string[]
+  /** The first reference picture, for readers of the older single column. */
+  reference_url: string | null
 }
 
 /** 'YYYY-MM' or any date in the month → 'YYYY-MM-01'; null when it is not a month. */
@@ -96,6 +101,7 @@ export function cleanPlanItem(raw: PlanItemInput, month: string): { ok: true; it
   const platforms = [...new Set((raw.platforms ?? []).map(p => String(p).trim().toLowerCase()).filter(Boolean))]
   const bad = platforms.find(p => !PLATFORMS.includes(p as Platform))
   if (bad) return { ok: false, error: `"${title}": unknown platform "${bad}". Use: ${PLATFORMS.join(', ')}.` }
+  const refs = cleanImageUrls(raw.images)
   return {
     ok: true,
     item: {
@@ -107,6 +113,8 @@ export function cleanPlanItem(raw: PlanItemInput, month: string): { ok: true; it
       notes: (raw.notes ?? '').trim().slice(0, TEXT_MAX) || null,
       post_asap: !!raw.asap,
       links: cleanBriefLinks(raw.links),
+      reference_urls: refs,
+      reference_url: refs[0] ?? null,
     },
   }
 }
@@ -156,7 +164,7 @@ async function serviceResolver(admin: SupabaseClient<any, any, any>) {
 }
 
 /** Columns added by later migrations; an environment without one still saves the rest. */
-const OPTIONAL_COLS = ['service_id', 'post_asap', 'created_by', 'links'] as const
+const OPTIONAL_COLS = ['service_id', 'post_asap', 'created_by', 'links', 'reference_urls', 'reference_url'] as const
 
 export async function addSocialPlanItems(
   admin: SupabaseClient<any, any, any>,

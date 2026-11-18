@@ -374,6 +374,8 @@ export function createCirqleMcpServer() {
         asap: z.boolean().default(false).describe('A trend post: publish as soon as it is approved.'),
         links: z.array(z.object({ label: z.string().default(''), url: z.string() })).max(10).optional()
           .describe('Reference links for the designer: real pages you opened, never invented.'),
+        images: z.array(z.string()).max(8).optional()
+          .describe('Reference pictures: direct image links (ending .jpg, .png, .webp) you opened. Shown as previews.'),
       })).min(1).max(MAX_ITEMS_PER_CALL),
     },
     annotations: writeAnnotations,

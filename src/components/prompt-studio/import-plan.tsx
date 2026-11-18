@@ -16,6 +16,8 @@ import { usePermissions } from '@/contexts/permission-context'
 import { parsePlan, planMonthIn } from '@/lib/social/plan-import'
 import { importPlanItems } from '@/app/(dashboard)/dashboard/social-calendar/actions'
 
+const refCount = (it: { links?: unknown[] | null; images?: unknown[] | null }) => (it.links?.length ?? 0) + (it.images?.length ?? 0)
+
 const KIND_LABEL = { detailed: 'full briefs', calendar: 'calendar', ideas: 'ideas', trends: 'trends', unknown: '' } as const
 
 /** This month, or the next once this one is nearly over: 'YYYY-MM'. */
@@ -174,9 +176,9 @@ function ImportPlanDialog({
                       <span className="w-20 shrink-0 tabular-nums text-muted-foreground">{it.date ? it.date.slice(5) : 'Idea'}</span>
                       <span className="w-16 shrink-0 capitalize text-muted-foreground">{it.content_type}</span>
                       <span className="min-w-0 flex-1 truncate" title={it.title}>{it.title}</span>
-                      {(it.notes || it.links?.length) ? (
+                      {(it.notes || it.links?.length || it.images?.length) ? (
                         <span className="shrink-0 text-xs text-muted-foreground" title={it.notes ?? ''}>
-                          brief{it.links?.length ? ` · ${it.links.length} ref${it.links.length === 1 ? '' : 's'}` : ''}
+                          brief{refCount(it) ? ` · ${refCount(it)} ref${refCount(it) === 1 ? '' : 's'}` : ''}
                         </span>
                       ) : null}
                     </li>

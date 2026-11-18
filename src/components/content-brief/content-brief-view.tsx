@@ -11,7 +11,8 @@ import { Check, Copy, Link2, LayoutTemplate } from 'lucide-react'
 import {
   sanitizeCaptionHtml, captionHtmlToText, canvasToText, canvasImageUrls, platformLabels,
 } from '@/lib/social/plan'
-import { contentTypeLabel, linkDisplay, type ContentBrief } from '@/lib/content-brief'
+import { contentTypeLabel, isImageUrl, linkDisplay, type ContentBrief } from '@/lib/content-brief'
+import { ReferenceGallery } from './reference-gallery'
 import { copyToClipboard } from '@/lib/clipboard'
 
 const SECTION = 'text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 mb-1.5'
@@ -26,7 +27,9 @@ export default function ContentBriefView({ brief, platforms, scheduledDate }: {
   const type = contentTypeLabel(brief.contentType)
   const captionText = captionHtmlToText(brief.caption).trim()
   const boardText = canvasToText(brief.captionCanvas)
-  const images = [...brief.referenceImages, ...canvasImageUrls(brief.captionCanvas)]
+  // A link that opens a picture is shown as a picture; page links stay links.
+  const pageLinks = brief.links.filter(l => !isImageUrl(l.url))
+  const images = [...brief.referenceImages, ...canvasImageUrls(brief.captionCanvas), ...brief.links.filter(l => isImageUrl(l.url)).map(l => l.url)]
     .filter((u, i, a) => a.indexOf(u) === i)
 
   async function copyCaption() {
@@ -75,15 +78,7 @@ export default function ContentBriefView({ brief, platforms, scheduledDate }: {
       {images.length > 0 && (
         <div>
           <p className={SECTION}>Reference images</p>
-          <div className="flex flex-wrap gap-2">
-            {images.map((src, i) => (
-              <a key={i} href={src} target="_blank" rel="noreferrer" title="Open full size"
-                className="block w-24 h-24 rounded-lg overflow-hidden border border-border bg-secondary hover:ring-2 hover:ring-violet-500/40 transition">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={src} alt={`Reference ${i + 1}`} loading="lazy" className="w-full h-full object-cover" />
-              </a>
-            ))}
-          </div>
+          <ReferenceGallery images={images} />
         </div>
       )}
 
@@ -94,11 +89,11 @@ export default function ContentBriefView({ brief, platforms, scheduledDate }: {
         </div>
       )}
 
-      {brief.links.length > 0 && (
+      {pageLinks.length > 0 && (
         <div>
-          <p className={SECTION}>Links</p>
+          <p className={SECTION}>Links and reference searches</p>
           <div className="flex flex-wrap gap-1.5">
-            {brief.links.map((l, i) => (
+            {pageLinks.map((l, i) => (
               <a key={i} href={l.url} target="_blank" rel="noreferrer" title={l.url}
                 className="inline-flex items-center gap-1 max-w-[260px] px-2.5 py-1 rounded-lg text-xs border bg-blue-500/8 border-blue-500/20 text-blue-700 dark:text-blue-300 hover:bg-blue-500/12 transition-colors">
                 <Link2 className="w-3 h-3 shrink-0" /><span className="truncate">{linkDisplay(l)}</span>
