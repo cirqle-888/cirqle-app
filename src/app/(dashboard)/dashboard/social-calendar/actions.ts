@@ -32,6 +32,7 @@ import {
 } from '@/lib/social/plan'
 import { todayISO } from '@/lib/utils/local-date'
 import { normalizeContentBrief, cleanBriefLinks } from '@/lib/content-brief'
+import { addSocialPlanItems, planMonth, type PlanItemInput } from '@/lib/social/plan-mcp'
 
 const REVALIDATE = '/dashboard/social-calendar'
 const MIGRATION_HINT = 'Apply migration 20260716120000_social_calendar.sql first.'
@@ -877,6 +878,28 @@ export async function moveCalendarItem(
 
   revalidatePath(REVALIDATE)
   return { ok: true }
+}
+
+/**
+ * Add a pasted AI plan to a client's calendar in one go: the month's plan is
+ * created if there is none, items already there (same day and title) are
+ * skipped, and nothing is saved if one item is invalid. Items land as PLANNED;
+ * sending them to Requests stays a deliberate step on the calendar.
+ */
+export async function importPlanItems(
+  clientId: string, month: string, items: PlanItemInput[],
+): Promise<ActionResult<{ calendarId: string; added: number; skipped: string[]; createdPlan: boolean }>> {
+  const guard = await requirePermission(PERMS.SOCIAL_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!/^[0-9a-f-]{36}$/i.test(clientId || '')) return { ok: false, error: 'Pick a client.' }
+  const m = planMonth(month)
+  if (!m) return { ok: false, error: 'Pick a month.' }
+  if (!Array.isArray(items)) return { ok: false, error: 'Nothing to add.' }
+
+  const r = await addSocialPlanItems(createAdminClient(), { clientId, month: m, items, createdBy: guard.employeeId })
+  if (!r.ok) return { ok: false, error: r.error }
+  revalidatePath(REVALIDATE)
+  return { ok: true, data: { calendarId: r.calendarId, added: r.added, skipped: r.skipped, createdPlan: r.createdPlan } }
 }
 
 /**

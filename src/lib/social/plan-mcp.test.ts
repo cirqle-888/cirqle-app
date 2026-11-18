@@ -72,7 +72,8 @@ function fakeAdmin(seed: { calendars?: any[]; items?: any[]; missingCols?: strin
       insert: (rows: any) => { pending = Array.isArray(rows) ? rows : [rows]; return q },
       run: () => {
         if (pending) {
-          const bad = (seed.missingCols ?? []).find(c => pending!.some(r => c in r))
+          // Only the items table has columns that arrived in later migrations.
+          const bad = table === 'social_calendar_items' ? (seed.missingCols ?? []).find(c => pending!.some(r => c in r)) : undefined
           if (bad) return { data: null, error: { message: `Could not find the '${bad}' column of '${table}' in the schema cache` } }
           const saved = pending.map(r => ({ id: `${table}-${++n}`, ...r }))
           db[table].push(...saved)
@@ -127,6 +128,23 @@ describe('addSocialPlanItems', () => {
     const r = await addSocialPlanItems(admin, { ...base, items: [{ title: 'Trend post', date: '2026-12-03', asap: true }] })
     expect(r).toMatchObject({ ok: true, added: 1 })
     expect('post_asap' in db.social_calendar_items[0]).toBe(false)
+  })
+
+  it('records who added the items when a signed-in person did', async () => {
+    const { admin, db } = fakeAdmin()
+    await addSocialPlanItems(admin, { ...base, items: [{ title: 'Friday offer', date: '2026-12-04' }], createdBy: 'emp-1' })
+    expect(db.social_calendars[0].created_by).toBe('emp-1')
+    expect(db.social_calendar_items[0].created_by).toBe('emp-1')
+    const anon = fakeAdmin()
+    await addSocialPlanItems(anon.admin, { ...base, items: [{ title: 'Friday offer', date: '2026-12-04' }] })
+    expect('created_by' in anon.db.social_calendar_items[0]).toBe(false)
+  })
+
+  it('drops missing columns whatever order the database reports them in', async () => {
+    const { admin, db } = fakeAdmin({ missingCols: ['created_by', 'service_id'] })
+    const r = await addSocialPlanItems(admin, { ...base, items: [{ title: 'Trend post', date: '2026-12-03' }], createdBy: 'emp-1' })
+    expect(r).toMatchObject({ ok: true, added: 1 })
+    expect(Object.keys(db.social_calendar_items[0])).not.toContain('service_id')
   })
 
   it('refuses an archived plan, an empty call and an oversized call', async () => {

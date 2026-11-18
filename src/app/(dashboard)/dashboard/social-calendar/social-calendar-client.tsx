@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { CopyForAi } from '@/components/prompt-studio/copy-for-ai'
+import { ImportPlanButton } from '@/components/prompt-studio/import-plan'
 import Header from '@/components/layout/header'
 import { SocialTabs } from '@/components/social-hub/social-tabs'
 import { PostingTimeField } from '@/components/social-hub/posting-time-field'
@@ -1097,6 +1098,14 @@ export default function SocialCalendarClient({
         )}
 
         {selected && <CopyForAi clientId={selected.client_id} align="left" />}
+        {selected && canManage && (
+          <ImportPlanButton
+            clientId={selected.client_id}
+            clientName={selected.client?.name}
+            month={selected.month.slice(0, 7)}
+            onDone={() => router.refresh()}
+          />
+        )}
 
         {selected && (
           <div className="flex items-center gap-1.5 ml-auto flex-wrap justify-end">

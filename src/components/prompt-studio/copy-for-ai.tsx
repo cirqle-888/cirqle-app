@@ -62,6 +62,7 @@ export function CopyForAi({
   card: given,
   onEditCard,
   align = 'right',
+  compact = false,
   className = '',
 }: {
   clientId: string
@@ -70,6 +71,8 @@ export function CopyForAi({
   /** Open the card editor in place, instead of following the link to Prompt Studio. */
   onEditCard?: () => void
   align?: 'left' | 'right'
+  /** Short label, for a header row that is already full. */
+  compact?: boolean
   className?: string
 }) {
   const { can } = usePermissions()
@@ -165,10 +168,11 @@ export function CopyForAi({
         onClick={() => setOpen(o => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label="Copy for AI"
         title="Copy this client's details for Codex, Gemini, ChatGPT or Claude"
         className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium transition-colors hover:border-primary/40 ${className}`}
       >
-        <Sparkles className="h-4 w-4 text-violet-500" /> Copy for AI <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+        <Sparkles className="h-4 w-4 text-violet-500" /> {compact ? 'AI' : 'Copy for AI'} <ChevronDown className="h-3.5 w-3.5 opacity-60" />
       </button>
 
       {open && pos && typeof document !== 'undefined' && createPortal(

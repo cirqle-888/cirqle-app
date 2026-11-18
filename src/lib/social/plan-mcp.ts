@@ -151,11 +151,15 @@ async function serviceResolver(admin: SupabaseClient<any, any, any>) {
 }
 
 /** Columns added by later migrations; an environment without one still saves the rest. */
-const OPTIONAL_COLS = ['service_id', 'post_asap'] as const
+const OPTIONAL_COLS = ['service_id', 'post_asap', 'created_by'] as const
 
 export async function addSocialPlanItems(
   admin: SupabaseClient<any, any, any>,
-  p: { clientId: string; month: string; items: PlanItemInput[]; planTitle?: string | null },
+  p: {
+    clientId: string; month: string; items: PlanItemInput[]; planTitle?: string | null
+    /** The employee adding them, when a signed-in person is (the MCP route has none). */
+    createdBy?: string | null
+  },
 ) {
   if (!p.items?.length) return { ok: false as const, error: 'Give at least one item.' }
   if (p.items.length > MAX_ITEMS_PER_CALL) return { ok: false as const, error: `At most ${MAX_ITEMS_PER_CALL} items in one call.` }
@@ -179,6 +183,7 @@ export async function addSocialPlanItems(
   if (!cal) {
     const ins = await admin.from('social_calendars').insert({
       client_id: p.clientId, month: p.month, title: p.planTitle?.trim() || null, status: 'active',
+      ...(p.createdBy ? { created_by: p.createdBy } : {}),
     }).select('id, status').single()
     if (ins.error && ins.error.code === '23505') {
       // Someone created it in the same moment: use theirs.
@@ -209,10 +214,14 @@ export async function addSocialPlanItems(
   const serviceFor = await serviceResolver(admin)
   let rows: Record<string, unknown>[] = fresh.map(it => ({
     calendar_id: calendarId, ...it, status: 'planned', service_id: serviceFor(it.content_type),
+    ...(p.createdBy ? { created_by: p.createdBy } : {}),
   }))
   let res = await admin.from('social_calendar_items').insert(rows).select(ITEM_COLS)
-  for (const col of OPTIONAL_COLS) {
-    if (!res.error || !new RegExp(`'${col}'|\\b${col}\\b`).test(res.error.message ?? '')) continue
+  // Drop whichever optional column the database names, one at a time, in any order.
+  for (let tries = 0; tries < OPTIONAL_COLS.length && res.error; tries++) {
+    const msg = res.error.message ?? ''
+    const col = OPTIONAL_COLS.find(c => c in rows[0] && new RegExp(`'${c}'|\\b${c}\\b`).test(msg))
+    if (!col) break
     rows = rows.map(r => { const c = { ...r }; delete c[col]; return c })
     res = await admin.from('social_calendar_items').insert(rows).select(ITEM_COLS)
   }
