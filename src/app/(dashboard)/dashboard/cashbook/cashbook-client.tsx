@@ -43,6 +43,7 @@ import Link from 'next/link'
 import { formatISODateShort, todayISO } from '@/lib/utils/local-date'
 import { computeMarkup, markupLabel, type MarkupType } from '@/lib/finance/markup'
 import { suggestEntryDescription } from '@/lib/cashbook/describe-entry'
+import { OPEN_STATUSES } from '@/lib/finance/invoice-revenue'
 
 // Allocation modals (253 + 313 lines) only mount when an admin clicks Allocate
 // on an entry. Split off the initial cashbook chunk.
@@ -3263,13 +3264,17 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               firstClientName = unwrap(directInv?.client)?.name || ''
             }
 
-            // Calculate total outstanding balance across all unpaid invoices for this customer
+            // Calculate total outstanding balance across the customer's SENT
+            // invoices. dueInvoices also carries drafts (the month still being
+            // billed), and those are not owed yet — counting them put next
+            // month's work on a payment receipt as "Balance due".
             let customerTotalOutstanding: number | undefined = undefined
             const clientId = receiptEntry.client_id || firstClientId
             if (clientId) {
               const clientInvoices = dueInvoices.filter(i => 
                 (i.client?.id === clientId || i.client_id === clientId) && 
-                i.currency === receiptEntry.currency
+                i.currency === receiptEntry.currency &&
+                OPEN_STATUSES.includes(i.status)
               )
               customerTotalOutstanding = clientInvoices.reduce((sum, inv) => sum + Math.max(0, Number(inv.total_amount) - Number(inv.paid_amount || 0)), 0)
             }
@@ -3293,7 +3298,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
               const partnerId = [...receiptPartnerIds][0]
               const partner = partners.find(bp => bp.id === partnerId)
               const total = dueInvoices
-                .filter(i => i.client?.business_partner_id === partnerId && i.currency === receiptEntry.currency && !['draft', 'reviewed'].includes(i.status))
+                .filter(i => i.client?.business_partner_id === partnerId && i.currency === receiptEntry.currency && OPEN_STATUSES.includes(i.status))
                 .reduce((sum, inv) => sum + Math.max(0, Number(inv.total_amount) - Number(inv.paid_amount || 0)), 0)
               if (partner) { partnerName = partner.name; partnerTotalOutstanding = total }
               if (receiptClientIds.size > 1) {
@@ -3324,7 +3329,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 [...new Set(receiptInvoices.map(r => r.client).filter(Boolean) as string[])].map(name => [
                   name,
                   dueInvoices
-                    .filter(i => i.client?.name === name && i.currency === receiptEntry.currency && !['draft', 'reviewed'].includes(i.status))
+                    .filter(i => i.client?.name === name && i.currency === receiptEntry.currency && OPEN_STATUSES.includes(i.status))
                     .reduce((sum, inv) => sum + Math.max(0, Number(inv.total_amount) - Number(inv.paid_amount || 0)), 0),
                 ]),
               ),
