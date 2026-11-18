@@ -41,8 +41,9 @@ import {
   Maximize2, Minimize2, ZoomIn, ZoomOut, ListPlus, PanelLeftOpen, PanelLeftClose, Columns2, BarChart3,
 } from 'lucide-react'
 import { logFollowup } from "./follow-ups/actions"
-import { recordInvoicePayment, serverResyncInvoiceTasks, getInvoiceDetails, setInvoiceServiceColumn, setClientServiceColumnDefault, previewInvoiceRefresh, applyInvoiceRefresh, addTasksToInvoice } from "./actions"
-import type { MissedTask } from '@/lib/invoices/missed-tasks'
+import { recordInvoicePayment, serverResyncInvoiceTasks, getInvoiceDetails, setInvoiceServiceColumn, setClientServiceColumnDefault, previewInvoiceRefresh, applyInvoiceRefresh, addTasksToInvoice, tasksAlreadyBilled, invoicesCoveringMonths } from "./actions"
+import type { MissedTask, BilledOn, CoveringInvoice } from '@/lib/invoices/missed-tasks'
+import { addsToExisting } from '@/lib/invoices/covering'
 import type { LineRemoval, LineUpdate } from '@/lib/invoices/refresh-diff'
 
 import Combobox from '@/components/ui/combobox'
@@ -328,6 +329,15 @@ function balanceDueInr(inv: Invoice): number {
 function hasActiveAllocations(inv: Invoice): boolean {
   return (inv.cashbook_invoice_allocations || []).some(a => !a.deleted_at)
 }
+/**
+ * The already-billed invoices a Generate row shows, from what the server said.
+ * Every entry is a live invoice — tasksAlreadyBilled has already dropped the
+ * cancelled ones — so a non-empty list is always a real duplicate risk.
+ */
+function genConflictsOf(billed: BilledOn[] | undefined): { id: string; invoice_number: string; status: string }[] {
+  return (billed || []).map(b => ({ id: b.invoice_id, invoice_number: b.invoice_number, status: b.status }))
+}
+
 // `payments` has no receipt_number / bank_account of its own — recordInvoicePayment
 // auto-creates a matching cashbook_entries inflow (same invoice, date, amount) for
 // every direct payment, and THAT row carries the generated receipt number + bank
@@ -701,7 +711,12 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
     taskIds: string[]; default_currency?: string
     tasks?: { id: string; title: string; task_date: string; billing_amount_inr: number; currency: string }[]
     expenses?: { id: string; description: string | null; amount_inr: number; entry_date: string }[]
+    /** A live invoice already covering this client's month — add to it, don't open another. */
+    covering?: CoveringInvoice
   }[]>([])
+  // Why late work is being added to an invoice the client already has. Goes to
+  // each invoice's edit history, so it has to say something true.
+  const [batchReason, setBatchReason] = useState('Work finished after this invoice was sent')
   const [batchExpandedKey, setBatchExpandedKey] = useState<string | null>(null)
   const [batchLoading, setBatchLoading] = useState(false)
   const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set())
@@ -2207,33 +2222,30 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
 
     if (!rawTasks?.length) { setGenTasks([]); setGenLoading(false); return }
 
-    // Check which tasks are already in invoice_items
+    // Which tasks are already billed — asked of the server, not of this
+    // browser's RLS client, which can only see invoices the signed-in user may
+    // read and so reported a clean bill of health for a conflict it could not
+    // see. tasksAlreadyBilled drops cancelled invoices, so every entry below
+    // is a real conflict. A failed check stops the list rather than offering
+    // tasks whose billing status is unknown.
     const taskIds = rawTasks.map((t: any) => t.id)
-    const { data: existingItems } = await supabase
-      .from('invoice_items')
-      .select('task_id, invoice:invoices(id, invoice_number, status)')
-      .in('task_id', taskIds)
-
-    // Build task_id → invoices[] map
-    const taskInvMap: Record<string, { id: string; invoice_number: string; status: string }[]> = {}
-    ;(existingItems || []).forEach((item: any) => {
-      if (item.task_id && item.invoice) {
-        if (!taskInvMap[item.task_id]) taskInvMap[item.task_id] = []
-        taskInvMap[item.task_id].push(item.invoice)
-      }
-    })
+    const billedRes = await tasksAlreadyBilled(taskIds)
+    if (!billedRes.ok) {
+      toastError(billedRes.error || 'Could not check which tasks are already billed')
+      setGenLoading(false)
+      return
+    }
+    const billed = billedRes.data || {}
 
     const enriched = rawTasks.map((t: any) => ({
       ...t,
-      existing_invoices: taskInvMap[t.id] || [],
+      existing_invoices: genConflictsOf(billed[t.id]),
     }))
 
     setGenTasks(enriched)
-    // Auto-select only tasks NOT already in an active invoice
-    const safeIds = enriched
-      .filter((t: any) => t.existing_invoices.length === 0 || t.existing_invoices.every((inv: any) => inv.status === 'cancelled'))
-      .map((t: any) => t.id)
-    setGenSelectedIds(new Set(safeIds))
+    // Auto-select only tasks on no live invoice. The conflicted ones cannot be
+    // ticked at all — see the task list in renderGeneratePanel.
+    setGenSelectedIds(new Set(enriched.filter((t: any) => !t.existing_invoices.length).map((t: any) => t.id)))
     setGenLoading(false)
   }
 
@@ -2242,6 +2254,30 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
     if (!selected.length) { toastError('No tasks selected'); return }
     setSaving(true)
     try {
+      // Ask again immediately before writing. The fetched list can be minutes
+      // old, and the month-end sync, another window or a colleague can have
+      // billed one of these tasks since — the window that let INV-2611-061A
+      // repeat lines that were already on INV-2611-061-2 and -3. Nothing is
+      // created unless every selected task is still unbilled.
+      const recheck = await tasksAlreadyBilled(selected.map(t => t.id))
+      if (!recheck.ok) { toastError(recheck.error || 'Could not check which tasks are already billed'); return }
+      const nowBilled = recheck.data || {}
+      const clash = selected.filter(t => (nowBilled[t.id] || []).length > 0)
+      if (clash.length) {
+        const rechecked = new Set(selected.map(t => t.id))
+        setGenTasks(prev => prev.map(t => rechecked.has(t.id)
+          ? { ...t, existing_invoices: genConflictsOf(nowBilled[t.id]) }
+          : t))
+        setGenSelectedIds(prev => {
+          const n = new Set(prev)
+          clash.forEach(t => n.delete(t.id))
+          return n
+        })
+        const where = [...new Set(clash.flatMap(t => (nowBilled[t.id] || []).map(b => b.invoice_number)))]
+        toastError(`${clash.length} task${clash.length !== 1 ? 's are' : ' is'} already on ${where.join(', ')} — unticked, nothing was created. Open that invoice and use Refresh instead.`)
+        return
+      }
+
       const client = clients.find(c => c.id === genForm.client_id)
       const clientCode = client?.code || 'CLI'
 
@@ -2410,25 +2446,22 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
     }
     if (!doneTasks.length) { setBatchLoading(false); return }
 
-    // Find which ones are already in active invoices
+    // Which ones are already billed — asked of the server rather than of this
+    // browser's RLS client, which sees only the invoices the signed-in user may
+    // read and so called a task unbilled when the conflict sat on an invoice
+    // outside their visibility. Offering such a task here bills it twice.
     const taskIds = doneTasks.map((t: any) => t.id)
-    // Supabase also caps .in() results at 1000 — chunk the taskIds lookup
     const CHUNK = 500
-    const allExistingItems: any[] = []
-    for (let i = 0; i < taskIds.length; i += CHUNK) {
-      const { data } = await supabase
-        .from('invoice_items')
-        .select('task_id, invoice:invoices(id, status)')
-        .in('task_id', taskIds.slice(i, i + CHUNK))
-      if (data) allExistingItems.push(...data)
-    }
-
     const invoicedTaskIds = new Set<string>()
-    ;(allExistingItems || []).forEach((item: any) => {
-      if (item.task_id && item.invoice && item.invoice.status !== 'cancelled') {
-        invoicedTaskIds.add(item.task_id)
+    for (let i = 0; i < taskIds.length; i += CHUNK) {
+      const res = await tasksAlreadyBilled(taskIds.slice(i, i + CHUNK))
+      if (!res.ok) {
+        toastError(res.error || 'Could not check which tasks are already billed')
+        setBatchLoading(false)
+        return
       }
-    })
+      for (const id of Object.keys(res.data || {})) invoicedTaskIds.add(id)
+    }
 
     // Filter to only un-invoiced tasks
     const uninvoiced = doneTasks.filter((t: any) => !invoicedTaskIds.has(t.id))
@@ -2514,21 +2547,70 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
       )
     }
 
+    // Does an invoice already cover this client's month? Until now only an
+    // open DRAFT counted, so a month whose invoice had been sent got a SECOND
+    // invoice — which for a client who pays whenever they like is the ordinary
+    // case. With this the group adds its tasks to the invoice that exists.
+    const covering = await invoicesCoveringMonths(groups.map(g => ({ client_id: g.client_id, month: g.month })))
+    if (covering.ok) {
+      for (const g of groups) g.covering = covering.data?.[`${g.client_id}__${g.month}`]
+    } else {
+      // Not fatal — without it every group simply behaves as it always did.
+      toastError(covering.error || 'Could not check for invoices already covering these months')
+    }
+
     setBatchGroups(groups)
     setBatchSelected(new Set(groups.map(g => g.key)))
     setBatchLoading(false)
   }
 
+  /**
+   * Will this group's tasks go onto an invoice the client already has? The rule
+   * itself lives in lib/invoices/covering so the server action and this screen
+   * cannot disagree about it.
+   */
+  function batchAddsToExisting(g: { covering?: CoveringInvoice; currency: string }): CoveringInvoice | undefined {
+    return addsToExisting(g.covering, g.currency)
+  }
+
   async function runBatchGenerate() {
     const toGenerate = batchGroups.filter(g => batchSelected.has(g.key))
     if (!toGenerate.length) { toastError('No groups selected'); return }
+
+    const reason = batchReason.trim()
+    if (!reason && toGenerate.some(g => batchAddsToExisting(g)?.needsReason)) {
+      toastError('Give a reason — it goes to the edit history of every invoice this changes.')
+      return
+    }
+
     setBatchGenerating(true); setBatchDone(0)
     let doneCount = 0; let errorCount = 0
+    let createdCount = 0; let updatedCount = 0; let addedLines = 0; let expensesLeft = 0
 
     for (const group of toGenerate) {
       try {
         const invCurrency = group.currency || 'INR'
         const billingPeriod = buildBillingPeriod(group.month)
+
+        // An invoice already covers this month and can still take lines: add
+        // them to it rather than opening a second invoice for the same month.
+        // addTasksToInvoice is the duplicate-safe path — it re-checks every
+        // task with service-role reach and logs the reason to the invoice's
+        // edit history — so nothing here writes invoice_items itself.
+        const cover = batchAddsToExisting(group)
+        if (cover) {
+          const res = await addTasksToInvoice(cover.id, group.taskIds, cover.needsReason ? reason : undefined)
+          if (!res.ok) { errorCount++; continue }
+          // Expenses are deliberately NOT swept onto an invoice the client is
+          // already holding: that is a separate charge needing its own look.
+          // The group row says so, and they stay on the next scan.
+          expensesLeft += (group.expenses || []).length
+          addedLines += res.data?.added || 0
+          updatedCount++
+          doneCount++
+          setBatchDone(doneCount)
+          continue
+        }
 
         // One draft per client per billing month — check for an existing draft
         // covering this exact month before creating a new invoice (mirrors the
@@ -2683,6 +2765,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
         const totalAmount = round2(subtotal - discount + tax + prevBalance)
         await supabase.from('invoices').update({ subtotal, total_amount: totalAmount, updated_at: new Date().toISOString() }).eq('id', invId)
 
+        if (createdHere) createdCount++; else updatedCount++
         doneCount++
         setBatchDone(doneCount)
       } catch { errorCount++ }
@@ -2704,10 +2787,15 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
     })))
 
     setBatchGenerating(false)
+    const parts: string[] = []
+    if (createdCount) parts.push(`${createdCount} invoice${createdCount !== 1 ? 's' : ''} created`)
+    if (updatedCount) parts.push(`${updatedCount} existing invoice${updatedCount !== 1 ? 's' : ''} updated${addedLines ? ` (${addedLines} line${addedLines !== 1 ? 's' : ''})` : ''}`)
+    if (!parts.length) parts.push('Nothing to do')
+    if (expensesLeft) parts.push(`${expensesLeft} expense${expensesLeft !== 1 ? 's' : ''} left to add by hand`)
     if (errorCount > 0) {
-      toastError(`${doneCount} invoices created, ${errorCount} failed`)
+      toastError(`${parts.join(' · ')} — ${errorCount} failed`)
     } else {
-      success(`${doneCount} invoice${doneCount !== 1 ? 's' : ''} created successfully`)
+      success(parts.join(' · '))
     }
     // Clear generated groups from list
     await fetchBatchGroups()
@@ -5244,26 +5332,36 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                   Found {genTasks.length} task{genTasks.length !== 1 ? 's' : ''}
                 </span>
                 <div className="flex gap-2 text-xs font-bold text-violet-600 dark:text-violet-400">
-                  <button className="hover:text-violet-500 transition-colors" onClick={() => setGenSelectedIds(new Set(genTasks.map(t => t.id)))}>All</button>
+                  {/* "All" means all BILLABLE — a task already on a live invoice
+                      is never ticked, by this button or by hand. Selecting all
+                      without this filter is how a month got billed twice. */}
+                  <button className="hover:text-violet-500 transition-colors"
+                    onClick={() => setGenSelectedIds(new Set(genTasks.filter(t => !((t as any).existing_invoices || []).length).map(t => t.id)))}>All</button>
                   <span className="text-border">|</span>
                   <button className="hover:text-violet-500 transition-colors" onClick={() => setGenSelectedIds(new Set())}>None</button>
                 </div>
               </div>
               <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                 {genTasks.map(task => {
-                    const existInvs: any[] = (task as any).existing_invoices || []
-                    const activeConflict = existInvs.filter((inv: any) => inv.status !== 'cancelled')
+                    // Every entry the server returned is a live invoice, so the
+                    // list itself is the conflict — no status filter needed.
+                    const activeConflict: any[] = (task as any).existing_invoices || []
                     const hasConflict = activeConflict.length > 0
                     return (
-                  <label key={task.id} className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition shadow-sm
-                    ${hasConflict ? 'bg-amber-500/10 border-amber-500/30' : genSelectedIds.has(task.id) ? 'bg-violet-500/10 border-violet-500/40 shadow-violet-500/5' : 'bg-background border-border/50 hover:border-border/80'}`}>
-                    <input type="checkbox" checked={genSelectedIds.has(task.id)}
+                  <label key={task.id} className={`flex items-start gap-3 p-3 rounded-xl border transition shadow-sm
+                    ${hasConflict ? 'bg-amber-500/10 border-amber-500/30 cursor-not-allowed' : genSelectedIds.has(task.id) ? 'bg-violet-500/10 border-violet-500/40 shadow-violet-500/5 cursor-pointer' : 'bg-background border-border/50 hover:border-border/80 cursor-pointer'}`}>
+                    {/* An already-billed task is not tickable. There is no case
+                        for billing one twice: taking it off the other invoice
+                        removes its line, and the conflict with it. */}
+                    <input type="checkbox" checked={!hasConflict && genSelectedIds.has(task.id)}
+                      disabled={hasConflict}
+                      title={hasConflict ? `Already on ${activeConflict.map((inv: any) => inv.invoice_number).join(', ')}` : undefined}
                       onChange={e => setGenSelectedIds(prev => {
                         const n = new Set(prev)
                         e.target.checked ? n.add(task.id) : n.delete(task.id)
                         return n
                       })}
-                      className="accent-violet-500 mt-1 cursor-pointer w-4 h-4"
+                      className="accent-violet-500 mt-1 w-4 h-4 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
                     />
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-semibold truncate text-foreground">{task.title}</div>
@@ -5289,7 +5387,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                               <AlertTriangle className="w-3 h-3" /> Already in {inv.invoice_number} ({inv.status})
                             </div>
                           ))}
-                          <div className="text-[11px] text-muted-foreground font-medium">Including will create a duplicate line item</div>
+                          <div className="text-[11px] text-muted-foreground font-medium">Locked — billing it again would duplicate that line. Open that invoice and use Refresh.</div>
                         </div>
                       )}
                     </div>
@@ -5349,6 +5447,15 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
     const selectedGroups = visibleGroups.filter(g => batchSelected.has(g.key))
     const totalInvoices  = selectedGroups.length
     const totalAmount    = selectedGroups.reduce((s, g) => s + g.total, 0)
+    // Split the run by what it will actually do, so the button never promises
+    // invoices it is not going to create.
+    const addGroups      = selectedGroups.filter(g => batchAddsToExisting(g))
+    const createCount    = totalInvoices - addGroups.length
+    const needsReason    = addGroups.some(g => batchAddsToExisting(g)!.needsReason)
+    const runLabel       = [
+      createCount ? `Create ${createCount}` : '',
+      addGroups.length ? `Update ${addGroups.length}` : '',
+    ].filter(Boolean).join(' · ') || 'Nothing selected'
 
     const hasFilters = batchFilterClient || batchFilterMonthFrom || batchFilterMonthTo || batchFilterMinAmount
     const clearFilters = () => { setBatchFilterClient(''); setBatchFilterMonthFrom(''); setBatchFilterMonthTo(''); setBatchFilterMinAmount('') }
@@ -5362,7 +5469,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
             <h3 className="font-bold text-base text-foreground tracking-tight flex items-center gap-2">
               <History className="w-4 h-4 text-emerald-500" />Batch Generate
             </h3>
-            <p className="text-[11px] text-muted-foreground font-medium mt-1 leading-tight">Historical scan of un-invoiced done tasks</p>
+            <p className="text-[11px] text-muted-foreground font-medium mt-1 leading-tight">Finds un-invoiced done tasks and puts them on the right invoice</p>
           </div>
           <button onClick={() => { setPanelMode('detail'); setBatchGroups([]) }} aria-label="Close panel" className="p-2 hover:bg-secondary/80 rounded-xl text-muted-foreground hover:text-foreground transition-colors">
             <X className="w-5 h-5" />
@@ -5375,8 +5482,9 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
             <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 shadow-inner">
               <History className="w-8 h-8 text-emerald-500/60" />
             </div>
-            <p className="text-sm font-medium text-muted-foreground max-w-[240px] leading-relaxed">
-              Scans all <strong>Done</strong> tasks without an active invoice, then groups them by client and billing month.
+            <p className="text-sm font-medium text-muted-foreground max-w-[260px] leading-relaxed">
+              Scans all <strong>Done</strong> tasks that are on no live invoice and groups them by client and billing month.
+              A month whose invoice already went out is <strong>added to that invoice</strong> — only a month with no invoice gets a new one.
             </p>
             <button onClick={fetchBatchGroups}
               className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition shadow-sm hover:shadow-emerald-500/25">
@@ -5510,6 +5618,13 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                 const invoiceIssueDate = getInvoiceDateForTaskMonth(group.month)
                 const invoiceYYMM = toSequenceMonth(invoiceIssueDate)
                 const groupTasks = group.tasks || []
+                // Where these tasks will actually go. `addsTo` means an invoice
+                // the client already has takes them; a covering invoice that is
+                // settled or in another currency cannot, so that month gets a
+                // supplementary invoice and the row says so.
+                const addsTo = batchAddsToExisting(group)
+                const blockedCover = !addsTo && group.covering && group.covering.status !== 'draft'
+                  ? group.covering : undefined
                 return (
                   <div key={group.key}
                     className={`rounded-xl border transition shadow-sm ${checked ? 'bg-emerald-500/5 border-emerald-500/40 shadow-emerald-500/5' : 'bg-card border-border/50 hover:border-border/80'}`}>
@@ -5537,10 +5652,31 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                             </>
                           )}
                         </div>
+                        {addsTo && (
+                          <div className="mt-1.5 text-[10px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400 bg-sky-500/10 border border-sky-500/25 rounded-lg px-2 py-1 inline-flex items-center gap-1.5">
+                            <RefreshCw className="w-3 h-3" />
+                            Adds to {addsTo.invoice_number} ({addsTo.status}) — no new invoice
+                          </div>
+                        )}
+                        {addsTo && (group.expenses || []).length > 0 && (
+                          <div className="mt-1 text-[11px] text-muted-foreground font-medium">
+                            {group.expenses!.length} expense{group.expenses!.length > 1 ? 's' : ''} stay behind — add them on {addsTo.invoice_number} if they belong there.
+                          </div>
+                        )}
+                        {blockedCover && (
+                          <div className="mt-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-500/15 border border-amber-500/25 rounded-lg px-2 py-1 inline-flex items-center gap-1.5">
+                            <AlertTriangle className="w-3 h-3" />
+                            {blockedCover.invoice_number} is {blockedCover.status} — this becomes a second invoice for {monthLabel}
+                          </div>
+                        )}
                       </div>
                       <div className="text-right shrink-0">
-                        <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{fmt(group.total + (group.expenses || []).reduce((s, e) => s + e.amount_inr, 0), group.currency as any)}</div>
-                        <div className="text-[11px] font-mono font-medium text-muted-foreground mt-0.5">INV-{invoiceYYMM}-NNN</div>
+                        <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{fmt((addsTo ? group.total : group.total + (group.expenses || []).reduce((s, e) => s + e.amount_inr, 0)), group.currency as any)}</div>
+                        <div className="text-[11px] font-mono font-medium mt-0.5">
+                          {addsTo
+                            ? <span className="text-sky-600 dark:text-sky-400">→ {addsTo.invoice_number}</span>
+                            : <span className="text-muted-foreground">INV-{invoiceYYMM}-NNN</span>}
+                        </div>
                       </div>
                       {/* Expand toggle */}
                       <button
@@ -5623,16 +5759,32 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
 
         {/* ── Footer ───────────────────────────────────────────────────────── */}
         {!batchLoading && batchGroups.length > 0 && (
-          <div className="px-5 py-4 border-t border-border/50 flex items-center justify-between gap-4 bg-card">
-            <div className="text-xs font-medium text-muted-foreground">
-              <span className="font-bold text-foreground text-sm">{totalInvoices}</span> selected
-              {totalInvoices > 0 && <span className="ml-2 font-bold text-emerald-600 dark:text-emerald-400 text-sm">{fmt(totalAmount)}</span>}
+          <div className="px-5 py-4 border-t border-border/50 space-y-3 bg-card">
+            {/* Adding lines to an invoice the client already has is recorded in
+                that invoice's edit history, and the history is only worth
+                keeping if the reason says something true. One reason covers the
+                run; each invoice gets its own log entry. */}
+            {needsReason && (
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Reason for changing {addGroups.length} sent invoice{addGroups.length !== 1 ? 's' : ''}
+                </label>
+                <input type="text" value={batchReason} onChange={e => setBatchReason(e.target.value)}
+                  placeholder="Why is this work being added now?"
+                  className="w-full px-3 py-2 text-sm bg-background border border-border/50 rounded-xl focus:outline-none focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 transition shadow-sm" />
+              </div>
+            )}
+            <div className="flex items-center justify-between gap-4">
+              <div className="text-xs font-medium text-muted-foreground">
+                <span className="font-bold text-foreground text-sm">{totalInvoices}</span> selected
+                {totalInvoices > 0 && <span className="ml-2 font-bold text-emerald-600 dark:text-emerald-400 text-sm">{fmt(totalAmount)}</span>}
+              </div>
+              <button onClick={runBatchGenerate} disabled={batchGenerating || totalInvoices === 0 || (needsReason && !batchReason.trim())}
+                className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl transition shadow-sm hover:shadow-emerald-500/25 disabled:opacity-50 disabled:hover:shadow-none disabled:cursor-not-allowed">
+                <Zap className="w-4 h-4" />
+                {batchGenerating ? `Working… (${batchDone}/${totalInvoices})` : runLabel}
+              </button>
             </div>
-            <button onClick={runBatchGenerate} disabled={batchGenerating || totalInvoices === 0}
-              className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-xl transition shadow-sm hover:shadow-emerald-500/25 disabled:opacity-50 disabled:hover:shadow-none disabled:cursor-not-allowed">
-              <Zap className="w-4 h-4" />
-              {batchGenerating ? `Creating… (${batchDone}/${totalInvoices})` : `Generate ${totalInvoices} Invoice${totalInvoices !== 1 ? 's' : ''}`}
-            </button>
           </div>
         )}
       </div>

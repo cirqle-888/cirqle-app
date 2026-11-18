@@ -17,8 +17,13 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { syncDraftInvoices, syncDraftInvoiceExpenses } from '@/lib/sync/integrity'
 import { syncInvoicePackageLines } from '@/lib/packages/sync-invoice'
 import { planDraftMerge } from '@/lib/invoices/merge-drafts'
+import { ADD_LINES_OPEN, ADD_LINES_WITH_REASON, monthStart, pickCovering } from '@/lib/invoices/covering'
+import type { CoveringRow } from '@/lib/invoices/covering'
 import { round2 as r2 } from '@/lib/calculations/currency'
-import type { MissedTask, InvoiceRefreshPreview } from '@/lib/invoices/missed-tasks'
+import type {
+  MissedTask, InvoiceRefreshPreview,
+  BilledTaskMap, CoveringInvoiceMap,
+} from '@/lib/invoices/missed-tasks'
 import { diffInvoiceAgainstTasks, stripDiffPrices, taskLineTotal, type RefreshLine, type RefreshTask } from '@/lib/invoices/refresh-diff'
 
 interface ActionResult<T = void> {
@@ -271,10 +276,6 @@ export async function getInvoiceDetails(
 // month had no draft at all is therefore never billed anywhere, and the only
 // remedy used to be deleting the invoice and regenerating it. These two
 // actions find such tasks for an invoice's client and add them to it.
-
-/** Statuses an invoice can still take new lines in. Sent ones need a reason. */
-const ADD_LINES_OPEN = ['draft', 'reviewed'] as const
-const ADD_LINES_WITH_REASON = ['sent', 'partial', 'overdue'] as const
 
 /** How far back to look for unbilled work, counted from the invoice's period end. */
 const MISSED_LOOKBACK_MONTHS = 12
@@ -573,6 +574,89 @@ async function recalcInvoiceTotals(admin: ReturnType<typeof createAdminClient>, 
   await admin.from('invoices').update({
     subtotal, tax_amount: tax, total_amount: total, updated_at: new Date().toISOString(),
   }).eq('id', invoiceId)
+}
+
+// ── Duplicate-billing guards for the browser-side generators ─────────────────
+//
+// "Generate from tasks" and "Generate in bulk" run in the browser and write
+// their lines with the user's own RLS client. Both work out which tasks are
+// already billed when they FETCH the list and neither asks again when it
+// WRITES, and that client can only see invoices the user is allowed to read —
+// so a conflict on an invoice outside their visibility came back clean. Those
+// two gaps are how INV-2611-061A came to repeat two lines that were already on
+// INV-2611-061-2 and -3. The actions below hand those screens the same
+// service-role answers the Refresh path enforces, to ask with immediately
+// before they insert their lines.
+
+/**
+ * Which of these tasks already sit on a line of a live (non-cancelled)
+ * invoice, and where. A task absent from the result is billed nowhere.
+ */
+export async function tasksAlreadyBilled(
+  taskIds: string[],
+): Promise<ActionResult<BilledTaskMap>> {
+  const guard = await requireReadPermission(PERMS.BILLING_VIEW_INVOICES)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const ids = [...new Set(taskIds.filter(Boolean))]
+  if (!ids.length) return { ok: true, data: {} }
+
+  const admin = createAdminClient()
+  const out: BilledTaskMap = {}
+  // Chunked: PostgREST caps an IN list, and a year of a busy client's tasks
+  // overflows one — the same 200 the Refresh path uses.
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await admin.from('invoice_items')
+      .select('task_id, invoice:invoices!inner(id, invoice_number, status)')
+      .in('task_id', ids.slice(i, i + 200))
+    if (error) return { ok: false, error: error.message }
+    for (const row of (data || []) as any[]) {
+      const inv = row.invoice
+      if (!row.task_id || !inv || inv.status === 'cancelled') continue
+      const list = (out[row.task_id] ||= [])
+      // Two lines for one task on one invoice is itself the bug being fixed —
+      // name the invoice once.
+      if (!list.some(b => b.invoice_id === inv.id)) {
+        list.push({ invoice_id: inv.id, invoice_number: inv.invoice_number, status: inv.status })
+      }
+    }
+  }
+  return { ok: true, data: out }
+}
+
+/**
+ * The live invoice already covering each client+month asked about, keyed
+ * `${client_id}__${month}`.
+ *
+ * Both generators only ever looked for an existing DRAFT for the month, so a
+ * month whose invoice had already gone out got a SECOND invoice instead of the
+ * late work being added to the one the client is holding. For a client who
+ * pays whenever they like that is the ordinary case, not the rare one. With
+ * this the caller can add to the invoice that exists and leave the numbering
+ * alone.
+ */
+export async function invoicesCoveringMonths(
+  wanted: { client_id: string; month: string }[],
+): Promise<ActionResult<CoveringInvoiceMap>> {
+  const guard = await requireReadPermission(PERMS.BILLING_VIEW_INVOICES)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const clientIds = [...new Set(wanted.map(w => w.client_id).filter(Boolean))]
+  const months = [...new Set(wanted.map(w => w.month).filter(Boolean))]
+  if (!clientIds.length || !months.length) return { ok: true, data: {} }
+
+  // Match on billing_period_start: the one convention the task-done trigger,
+  // Generate and Batch Generate all write, so matching on it is matching on
+  // "the invoice for this month".
+  const admin = createAdminClient()
+  const { data, error } = await admin.from('invoices')
+    .select('id, client_id, invoice_number, status, currency, billing_period_start')
+    .in('client_id', clientIds)
+    .in('billing_period_start', months.map(monthStart))
+    .neq('status', 'cancelled')
+  if (error) return { ok: false, error: error.message }
+
+  return { ok: true, data: pickCovering((data || []) as CoveringRow[], months) }
 }
 
 // ── Service column on the printed invoice ────────────────────────────────────
