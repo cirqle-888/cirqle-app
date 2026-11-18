@@ -13,10 +13,10 @@ import Link from 'next/link'
 import { ClipboardPaste } from 'lucide-react'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { usePermissions } from '@/contexts/permission-context'
-import { parsePlanTable, planMonthIn } from '@/lib/social/plan-import'
+import { parsePlan, planMonthIn } from '@/lib/social/plan-import'
 import { importPlanItems } from '@/app/(dashboard)/dashboard/social-calendar/actions'
 
-const KIND_LABEL = { calendar: 'calendar', ideas: 'ideas', trends: 'trends', unknown: '' } as const
+const KIND_LABEL = { detailed: 'full briefs', calendar: 'calendar', ideas: 'ideas', trends: 'trends', unknown: '' } as const
 
 /** This month, or the next once this one is nearly over: 'YYYY-MM'. */
 function planMonthNow(): string {
@@ -89,7 +89,7 @@ function ImportPlanDialog({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState<{ added: number; skipped: number; calendarId: string } | null>(null)
-  const parsed = useMemo(() => parsePlanTable(text, month), [text, month])
+  const parsed = useMemo(() => parsePlan(text, month), [text, month])
   const n = parsed.items.length
   const undated = parsed.items.filter(it => !it.date).length
 
@@ -139,7 +139,7 @@ function ImportPlanDialog({
                 <input type="month" className="field" value={month} onChange={e => e.target.value && setPicked(e.target.value)} />
               </label>
               <p className="flex-1 text-xs text-muted-foreground">
-                Paste the whole answer. Only the table is read.
+                Paste the whole answer. Only the plan is read.
               </p>
             </div>
             <textarea
@@ -154,8 +154,8 @@ function ImportPlanDialog({
             {text.trim() && !n && (
               <p className="text-sm text-amber-700 dark:text-amber-300">
                 {parsed.skipped.length
-                  ? 'The table was found, but no row could be added. Check the plan month above.'
-                  : 'No table found. Ask the AI to answer as a table and paste it again.'}
+                  ? 'The plan was found, but no post could be added. Check the plan month above.'
+                  : 'No plan found. Ask the AI to answer in the format the prompt gives, and paste it again.'}
               </p>
             )}
             {n > 0 && (
@@ -174,6 +174,11 @@ function ImportPlanDialog({
                       <span className="w-20 shrink-0 tabular-nums text-muted-foreground">{it.date ? it.date.slice(5) : 'Idea'}</span>
                       <span className="w-16 shrink-0 capitalize text-muted-foreground">{it.content_type}</span>
                       <span className="min-w-0 flex-1 truncate" title={it.title}>{it.title}</span>
+                      {(it.notes || it.links?.length) ? (
+                        <span className="shrink-0 text-xs text-muted-foreground" title={it.notes ?? ''}>
+                          brief{it.links?.length ? ` · ${it.links.length} ref${it.links.length === 1 ? '' : 's'}` : ''}
+                        </span>
+                      ) : null}
                     </li>
                   ))}
                 </ul>

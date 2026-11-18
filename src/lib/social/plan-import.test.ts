@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parsePlanTable, planDate, planMonthIn, contentTypeOf, platformsOf } from './plan-import'
+import { parsePlan, parsePlanBlocks, parsePlanTable, planDate, planMonthIn, contentTypeOf, platformsOf } from './plan-import'
 import { cleanPlanItem } from './plan-mcp'
 
 describe('planDate', () => {
@@ -127,5 +127,116 @@ describe('planMonthIn', () => {
     expect(planMonthIn('Plan for January 2027\n| Date | Idea |\n| 4 | x |')).toBe('2027-01')
     expect(planMonthIn('| Date | Idea |\n| 4 Dec | x |')).toBeNull()
     expect(planMonthIn('')).toBeNull()
+  })
+})
+
+const DETAILED = `Here is the plan.
+
+### POST 1
+Date: 2026-12-01
+Day: Tue
+Platform: Instagram, Facebook
+Format: Poster
+Theme: Wedding packages
+Idea: Grand wedding package reminder
+Goal: enquiry; December is wedding season
+Hook: ഒരു ഗ്രാൻഡ് കല്യാണം
+Text on design: ഒരു ഗ്രാൻഡ് കല്യാണം / 1000 guests / Call now
+Visual direction: Red header band, food photo centre,
+logo bottom right. Same grid as last month.
+Caption: Planning a wedding?
+Call us today.
+Hashtags: #kondotty #catering
+Designer needs: package photo
+AI prompt: Top view of a wedding buffet, warm light, empty space on top for text, no text in the image
+Reel script: -
+References: [Buffet layout](https://example.com/buffet); search: wedding catering poster red
+
+### POST 2
+**Date:** 4 Dec
+**Format:** Reel
+**Idea:** Kitchen at 5 am
+**Reel script:**
+1. 0-3s gas on
+2. 3-8s rice goes in
+
+### POST 3
+Date: 2026-12-08
+Format: Story
+Idea: TREND SLOT
+
+### POST 4
+Date: 2 Jan
+Idea: Outside the month
+`
+
+describe('parsePlanBlocks', () => {
+  const p = parsePlanBlocks(DETAILED, '2026-12')
+
+  it('reads one item per post block', () => {
+    expect(p.kind).toBe('detailed')
+    expect(p.items.map(i => [i.date, i.content_type, i.title])).toEqual([
+      ['2026-12-01', 'poster', 'Grand wedding package reminder'],
+      ['2026-12-04', 'reel', 'Kitchen at 5 am'],
+      ['2026-12-08', 'story', 'Trend slot (fill from the daily trend check)'],
+    ])
+    expect(p.skipped).toEqual([{ row: '2 Jan Outside the month', reason: 'That date is outside 2026-12.' }])
+  })
+
+  it('puts the words in the caption and the brief in the notes', () => {
+    const it0 = p.items[0]
+    expect(it0.caption).toBe('Hook: ഒരു ഗ്രാൻഡ് കല്യാണം\n\nText on design:\nഒരു ഗ്രാൻഡ് കല്യാണം / 1000 guests / Call now\n\nCaption:\nPlanning a wedding?\nCall us today.\n\n#kondotty #catering')
+    expect(it0.notes).toContain('Theme: Wedding packages')
+    expect(it0.notes).toContain('Visual direction: Red header band, food photo centre,\nlogo bottom right. Same grid as last month.')
+    expect(it0.notes).toContain('AI prompt (paste into the image or video tool):\nTop view of a wedding buffet')
+    expect(it0.notes).not.toContain('Reel script')
+    expect(it0.platforms).toEqual(['instagram', 'facebook'])
+  })
+
+  it('turns references into links: real ones as they are, phrases as a search', () => {
+    expect(p.items[0].links).toEqual([
+      { label: 'Buffet layout', url: 'https://example.com/buffet' },
+      { label: 'Pinterest: wedding catering poster red', url: 'https://www.pinterest.com/search/pins/?q=wedding%20catering%20poster%20red' },
+    ])
+    expect(p.items[0].notes).toContain('Reference searches: wedding catering poster red')
+  })
+
+  it('keeps a numbered reel script whole, and bold labels work', () => {
+    expect(p.items[1].notes).toBe('Reel script:\n1. 0-3s gas on\n2. 3-8s rice goes in')
+  })
+
+  it('a trend slot is a dated placeholder', () => {
+    expect(p.items[2]).toMatchObject({ caption: null, asap: true })
+  })
+
+  it('finds nothing in a table or in plain text', () => {
+    expect(parsePlanBlocks(CALENDAR, '2026-12').items).toEqual([])
+    expect(parsePlanBlocks('Idea time! Here: nothing.', '2026-12').kind).toBe('unknown')
+  })
+
+  it('every item passes the calendar’s own validation, links included', () => {
+    for (const it of p.items) {
+      const c = cleanPlanItem(it, '2026-12-01')
+      expect(c.ok).toBe(true)
+    }
+    const c = cleanPlanItem(p.items[0], '2026-12-01')
+    expect(c.ok && c.item.links.length).toBe(2)
+  })
+})
+
+describe('parsePlan', () => {
+  it('reads blocks and tables together, keeping the fuller copy of a repeated post', () => {
+    const p = parsePlan(`| Date | Format | Idea |
+|---|---|---|
+| 2026-12-01 | Poster | Grand wedding package reminder |
+| 2026-12-20 | Poster | Only in the table |
+
+${DETAILED}`, '2026-12')
+    expect(p.kind).toBe('detailed')
+    expect(p.items.map(i => i.title)).toEqual(['Grand wedding package reminder', 'Kitchen at 5 am', 'Trend slot (fill from the daily trend check)', 'Only in the table'])
+    expect(p.items[0].notes).toContain('Visual direction')
+  })
+  it('a plain table still reads as before', () => {
+    expect(parsePlan(CALENDAR, '2026-12')).toEqual(parsePlanTable(CALENDAR, '2026-12'))
   })
 })

@@ -133,9 +133,17 @@ describe('Copy for AI', () => {
     for (const j of AI_JOBS.filter(j => j.template)) {
       const out = buildAiBrief(CARD, j.id, { month: 'December 2026' })
       expect(out.startsWith('CLIENT CARD\nBrand: Sea Star'), j.id).toBe(true)
-      expect(out, j.id).toContain('You are a social media planner')
+      expect(out, j.id).toMatch(/You are a (social media planner|senior creative director)/)
       expect(out, j.id).not.toMatch(/\{\{|undefined/)
     }
+  })
+
+  it('the monthly calendar asks for a full brief per post that the importer can read', () => {
+    const out = buildAiBrief(CARD, 'calendar', { month: 'December 2026' })
+    for (const label of ['Date:', 'Idea:', 'Text on design:', 'Visual direction:', 'Caption:', 'AI prompt:', 'Reel script:', 'References:']) expect(out).toContain(`\n${label}`)
+    expect(out).toContain('FEED LOOK: As the card says')
+    expect(out).toContain('DETAIL: Full brief for every post')
+    expect(out).toContain('Never invent a link')
   })
 
   it('fills the month, the plan type and the format', () => {

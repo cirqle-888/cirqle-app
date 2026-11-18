@@ -14,9 +14,9 @@
  */
 
 import { CONTENT_TYPES, PLATFORMS, type ContentType, type Platform } from '@/lib/social/plan'
-import type { PlanItemInput } from '@/lib/social/plan-mcp'
+import { itemKey, type PlanItemInput } from '@/lib/social/plan-mcp'
 
-export type PlanTableKind = 'calendar' | 'ideas' | 'trends' | 'unknown'
+export type PlanTableKind = 'detailed' | 'calendar' | 'ideas' | 'trends' | 'unknown'
 
 export interface ParsedPlan {
   kind: PlanTableKind
@@ -223,4 +223,150 @@ function parseBlock(rows: string[][], month: string): ParsedPlan {
     })
   }
   return { kind, items, skipped }
+}
+
+// ── Detailed plans: one block of "Label: value" lines per post ──────────────
+
+type BlockKey = 'date' | 'day' | 'platform' | 'format' | 'theme' | 'idea' | 'goal' | 'hook' | 'designText' | 'visual'
+  | 'caption' | 'hashtags' | 'needs' | 'prompt' | 'script' | 'refs' | 'trend' | 'postby' | 'effort' | 'bestday'
+
+/** The labels the detailed calendar asks for, and the near-misses an AI writes instead. */
+const BLOCK_LABELS: Record<string, BlockKey> = {
+  date: 'date', day: 'day', platform: 'platform', platforms: 'platform', channel: 'platform',
+  format: 'format', type: 'format', theme: 'theme', pillar: 'theme',
+  idea: 'idea', concept: 'idea', 'post idea': 'idea', title: 'idea',
+  goal: 'goal', objective: 'goal', why: 'goal', 'why now': 'goal', 'why it fits': 'goal',
+  hook: 'hook',
+  'text on design': 'designText', 'text on the design': 'designText', 'design text': 'designText', 'on design text': 'designText', 'text on poster': 'designText', 'on screen text': 'designText',
+  'visual direction': 'visual', visual: 'visual', 'design direction': 'visual', 'art direction': 'visual', visuals: 'visual',
+  caption: 'caption', hashtags: 'hashtags', tags: 'hashtags',
+  'designer needs': 'needs', needs: 'needs', 'what the designer needs': 'needs', 'assets needed': 'needs',
+  'ai prompt': 'prompt', 'design prompt': 'prompt', 'image prompt': 'prompt', 'video prompt': 'prompt', prompt: 'prompt',
+  'reel script': 'script', script: 'script', 'shot list': 'script',
+  references: 'refs', reference: 'refs', refs: 'refs', inspiration: 'refs', source: 'refs', 'source link': 'refs',
+  trend: 'trend', 'post by': 'postby', effort: 'effort', 'best day': 'bestday',
+}
+
+const LABEL_LINE = /^\s*(?:[-*•]\s*)?(?:\*\*|__)?([A-Za-z][A-Za-z '-]{1,30}?)(?:\*\*|__)?\s*[:：](?:\*\*|__)?\s*(.*)$/
+const BREAK_LINE = /^\s*(#{1,6}\s.*|[-=_*]{3,}|(?:\*\*)?post\s*#?\d*(?:\*\*)?[:.]?)\s*$/i
+const NOTHING = /^(-|–|—|n\/?a|none|nil|not needed|not applicable)\.?$/i
+
+/** "[Label](https://…)", "Label: https://…" or a bare link → a reference link; anything else is a search phrase. */
+function references(raw: string): { links: { label: string; url: string }[]; searches: string[] } {
+  const links: { label: string; url: string }[] = []
+  const searches: string[] = []
+  for (const piece of raw.split(/\n|;|\s\|\s/).map(x => x.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean)) {
+    const md = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/.exec(piece)
+    const href = md?.[2] ?? url(piece)
+    if (href) {
+      const label = (md?.[1] ?? piece.replace(href, '').replace(/[\s:,\-–()<>]+$/g, '').replace(/^[\s:,\-–()<>]+/g, '')).trim()
+      links.push({ label: label.slice(0, 60), url: href.replace(/[.,]+$/, '') })
+    } else {
+      const phrase = piece.replace(/^search(?: for| phrase)?s?\s*[:\-]?\s*/i, '').replace(/^["“'‘]+|["”'’.]+$/g, '').trim()
+      if (phrase && !NOTHING.test(phrase)) searches.push(phrase)
+    }
+  }
+  return { links, searches }
+}
+
+/** A search phrase the designer can open in one click. */
+const pinterest = (phrase: string) => ({
+  label: `Pinterest: ${phrase}`.slice(0, 60),
+  url: `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(phrase)}`,
+})
+
+/**
+ * Read a detailed plan: one block per post, each a run of "Label: value" lines
+ * (Date, Platform, Format, Idea, Hook, Text on design, Visual direction,
+ * Caption, Hashtags, Designer needs, AI prompt, Reel script, References).
+ * A value may run over several lines. Blocks without an idea are ignored.
+ */
+export function parsePlanBlocks(text: string, month: string): ParsedPlan {
+  const blocks: Partial<Record<BlockKey, string>>[] = []
+  let cur: Partial<Record<BlockKey, string>> | null = null
+  let key: BlockKey | null = null
+  const close = () => { if (cur && Object.keys(cur).length) blocks.push(cur); cur = null; key = null }
+  for (const line of (text || '').replace(/```[a-z]*/gi, '').split(/\r?\n/)) {
+    if (BREAK_LINE.test(line)) { close(); continue }
+    if (cells(line) && /^\s*\|/.test(line)) { key = null; continue }
+    const m = LABEL_LINE.exec(line)
+    const k = m ? BLOCK_LABELS[m[1].toLowerCase().replace(/[-']/g, ' ').replace(/\s+/g, ' ').trim()] : undefined
+    if (m && k) {
+      // A second Date, or a second Idea, starts the next post even without a heading.
+      if (cur && cur[k] !== undefined && (k === 'date' || k === 'idea' || k === 'trend')) close()
+      cur = cur ?? {}
+      cur[k] = m[2].trim()
+      key = k
+    } else if (cur && key && line.trim()) {
+      cur[key] = `${cur[key] ?? ''}\n${line.trim()}`.trim()
+    }
+  }
+  close()
+
+  const items: PlanItemInput[] = []
+  const skipped: ParsedPlan['skipped'] = []
+  for (const b of blocks) {
+    const v = (k: BlockKey) => { const x = (b[k] ?? '').replace(/\*\*|__/g, '').trim(); return NOTHING.test(x) ? '' : x }
+    const one = (k: BlockKey) => clean(v(k))
+    if (Object.keys(b).length < 2) continue
+    const slot = isTrendSlot(`${one('idea')} ${one('theme')}`)
+    const title = slot ? 'Trend slot (fill from the daily trend check)' : one('idea') || one('trend') || one('theme')
+    if (!title) continue
+    const row = `${one('date')} ${title}`.trim()
+    let date: string | null = null
+    if (b.date !== undefined && one('date')) {
+      const d = planDate(one('date'), month)
+      if (d.outside) { skipped.push({ row, reason: `That date is outside ${month}.` }); continue }
+      if (!d.date) { skipped.push({ row, reason: 'Could not read the date.' }); continue }
+      date = d.date
+    }
+    const refs = references(v('refs'))
+    const copy = [
+      one('hook') && (v('designText') || v('caption') ? `Hook: ${one('hook')}` : one('hook')),
+      v('designText') && `Text on design:\n${v('designText')}`,
+      v('caption') && `Caption:\n${v('caption')}`,
+      one('hashtags'),
+    ].filter(Boolean).join('\n\n')
+    const notes = [
+      one('trend') && one('idea') ? `Trend: ${one('trend')}` : '',
+      one('theme') && one('theme') !== title && !slot ? `Theme: ${one('theme')}` : '',
+      v('goal') && `Goal: ${v('goal')}`,
+      v('visual') && `Visual direction: ${v('visual')}`,
+      v('needs') && `Designer needs: ${v('needs')}`,
+      v('script') && `Reel script:\n${v('script')}`,
+      v('prompt') && `AI prompt (paste into the image or video tool):\n${v('prompt')}`,
+      refs.searches.length ? `Reference searches: ${refs.searches.join('; ')}` : '',
+      one('postby') && `Post by: ${one('postby')}`,
+      one('effort') && `Effort: ${one('effort')}`,
+      one('bestday') && `Best day: ${one('bestday')}`,
+    ].filter(Boolean).join('\n\n')
+    items.push({
+      title,
+      date,
+      content_type: contentTypeOf(one('format')),
+      platforms: platformsOf(one('platform')),
+      caption: slot ? null : copy || null,
+      notes: notes || null,
+      asap: slot || !!one('trend'),
+      links: [...refs.links, ...refs.searches.slice(0, 3).map(pinterest)].slice(0, 10),
+    })
+  }
+  return { kind: items.length || skipped.length ? 'detailed' : 'unknown', items, skipped }
+}
+
+/**
+ * Read whatever the AI answered: detailed post blocks, tables, or both. An
+ * item named twice (an overview table, then its full brief) is kept once, in
+ * its fuller form.
+ */
+export function parsePlan(text: string, month: string): ParsedPlan {
+  const blocks = parsePlanBlocks(text, month)
+  const table = parsePlanTable(text, month)
+  const seen = new Set(blocks.items.map(i => itemKey(i.date, i.title)))
+  const extra = table.items.filter(i => !seen.has(itemKey(i.date, i.title)))
+  return {
+    kind: blocks.kind !== 'unknown' ? 'detailed' : table.kind,
+    items: [...blocks.items, ...extra],
+    skipped: [...blocks.skipped, ...table.skipped],
+  }
 }
