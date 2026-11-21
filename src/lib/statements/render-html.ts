@@ -104,7 +104,7 @@ export function renderStatementHtml(
       <td style="padding:7px 8px;font-size:10px;font-family:ui-monospace,monospace;color:#64748b;white-space:nowrap">${esc(r.ref)}</td>
       <td style="padding:7px 8px;font-size:10px;color:#0f172a">${esc(r.description)}</td>
       <td style="padding:7px 8px;font-size:10px;text-align:right;color:#0f172a;white-space:nowrap">${r.debit ? money(r.debit) : ''}</td>
-      <td style="padding:7px 8px;font-size:10px;text-align:right;color:#047857;white-space:nowrap">${r.credit ? money(r.credit) : ''}</td>
+      <td style="padding:7px 8px;font-size:10px;text-align:right;color:${r.kind === 'writeoff' ? '#64748b;font-style:italic' : '#047857'};white-space:nowrap">${r.credit ? money(r.credit) : ''}</td>
       <td style="padding:7px 8px;font-size:10px;text-align:right;font-weight:600;color:#0f172a;white-space:nowrap">${money(r.balance)}</td>
     </tr>${r.kind === 'invoice' ? itemRowsFor(r.invoiceId) : ''}`).join('')
 
@@ -193,7 +193,7 @@ ${decor.bgTop('absolute')}${decor.bgBottom('absolute')}${decor.cornerSvg('absolu
     <tfoot><tr>
       <td colspan="3" style="padding:9px 8px;font-size:10px;font-weight:700;text-align:right;border-top:1.5px solid ${NAVY}">Period totals</td>
       <td style="padding:9px 8px;font-size:10px;font-weight:700;text-align:right;border-top:1.5px solid ${NAVY}">${money(statement.totalBilled)}</td>
-      <td style="padding:9px 8px;font-size:10px;font-weight:700;text-align:right;color:#047857;border-top:1.5px solid ${NAVY}">${money(statement.totalReceived)}</td>
+      <td style="padding:9px 8px;font-size:10px;font-weight:700;text-align:right;color:#047857;border-top:1.5px solid ${NAVY}">${money(statement.totalReceived)}${statement.totalWrittenOff > 0 ? `<div style="font-size:9px;font-weight:400;font-style:italic;color:#64748b">+ ${money(statement.totalWrittenOff)} written off</div>` : ''}</td>
       <td style="padding:9px 8px;font-size:11px;font-weight:800;text-align:right;border-top:1.5px solid ${NAVY}">${money(statement.closingBalance)}</td>
     </tr></tfoot>
   </table>`}

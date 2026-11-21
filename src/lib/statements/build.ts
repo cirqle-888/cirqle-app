@@ -51,7 +51,12 @@ export interface StatementCredit {
   method?: string | null
 }
 
-export type LedgerKind = 'invoice' | 'credit'
+/**
+ * 'writeoff' is the balancing line for a bad debt: the invoice stays on the
+ * statement as billed, and this line takes off what was never paid, so the
+ * history is honest and the balance does not ask for money that was given up.
+ */
+export type LedgerKind = 'invoice' | 'credit' | 'writeoff'
 
 export interface LedgerRow {
   kind: LedgerKind
@@ -85,7 +90,10 @@ export interface StatementResult {
   closingBalance: number
   rows: LedgerRow[]
   totalBilled: number
+  /** Money actually received. Write-offs are not in it. */
   totalReceived: number
+  /** Unpaid balances of bad-debt invoices, taken off the account. */
+  totalWrittenOff: number
   /** Unpaid balance per bucket, as of `to`. Only invoices still owing appear. */
   aging: AgingBucket[]
   /** Sum of the aging buckets — the part of the closing balance that is due. */
@@ -198,10 +206,29 @@ export function buildStatement(input: BuildStatementInput): StatementResult {
 
   const invDate = (i: StatementInvoice) => i.issue_date || ''
 
+  // A cancelled invoice was never a charge: it is left off the statement
+  // entirely (a replacement invoice, if any, carries the work). Counting it
+  // put phantom balances on 13 clients while the aging table, which already
+  // skipped it, said ₹0 — the same function contradicting itself.
+  const charged = input.invoices.filter(i => i.status !== 'cancelled')
+
+  // A bad debt WAS billed, then given up. It stays as an invoice, followed by
+  // a write-off of whatever was never received on it, so it nets to zero.
+  // There is no write-off date in the data, so the line sits on the invoice's
+  // own date, straight after it.
+  const allReceived = new Map<string, number>()
+  for (const c of credits) {
+    allReceived.set(c.invoiceId, round2((allReceived.get(c.invoiceId) || 0) + creditNative(c)))
+  }
+  const writeOffOf = (inv: StatementInvoice): number =>
+    inv.status === 'bad_debt'
+      ? Math.max(0, round2(Number(inv.total_amount || 0) - (allReceived.get(inv.id) || 0)))
+      : 0
+
   let opening = 0
-  for (const inv of input.invoices) {
+  for (const inv of charged) {
     const d = invDate(inv)
-    if (d && d < from) opening += Number(inv.total_amount || 0)
+    if (d && d < from) opening += Number(inv.total_amount || 0) - writeOffOf(inv)
   }
   for (const c of credits) {
     if (c.date < from) opening -= creditNative(c)
@@ -209,7 +236,7 @@ export function buildStatement(input: BuildStatementInput): StatementResult {
   opening = round2(opening)
 
   const rows: LedgerRow[] = []
-  for (const inv of input.invoices) {
+  for (const inv of charged) {
     const d = invDate(inv)
     if (!d || d < from || d > to) continue
     rows.push({
@@ -222,6 +249,19 @@ export function buildStatement(input: BuildStatementInput): StatementResult {
       balance: 0,
       invoiceId: inv.id,
     })
+    const writeOff = writeOffOf(inv)
+    if (writeOff > 0) {
+      rows.push({
+        kind: 'writeoff',
+        date: d,
+        ref: inv.invoice_number || '—',
+        description: 'Written off (bad debt)',
+        debit: 0,
+        credit: writeOff,
+        balance: 0,
+        invoiceId: inv.id,
+      })
+    }
   }
   for (const c of credits) {
     if (c.date < from || c.date > to) continue
@@ -238,20 +278,22 @@ export function buildStatement(input: BuildStatementInput): StatementResult {
     })
   }
 
-  // Oldest first; on the same day an invoice is raised before it is paid.
+  // Oldest first; on the same day an invoice is raised, then written off,
+  // then paid. The sort is stable, so a write-off stays after its invoice.
+  const order: Record<LedgerKind, number> = { invoice: 0, writeoff: 1, credit: 2 }
   rows.sort((a, b) =>
-    a.date === b.date
-      ? (a.kind === b.kind ? 0 : a.kind === 'invoice' ? -1 : 1)
-      : a.date.localeCompare(b.date))
+    a.date === b.date ? order[a.kind] - order[b.kind] : a.date.localeCompare(b.date))
 
   let running = opening
   let totalBilled = 0
   let totalReceived = 0
+  let totalWrittenOff = 0
   for (const r of rows) {
     running = round2(running + r.debit - r.credit)
     r.balance = running
     totalBilled += r.debit
-    totalReceived += r.credit
+    if (r.kind === 'writeoff') totalWrittenOff += r.credit
+    else totalReceived += r.credit
   }
 
   // ── Aging ─────────────────────────────────────────────────────────────────
@@ -306,6 +348,7 @@ export function buildStatement(input: BuildStatementInput): StatementResult {
     rows,
     totalBilled: round2(totalBilled),
     totalReceived: round2(totalReceived),
+    totalWrittenOff: round2(totalWrittenOff),
     aging: buckets,
     totalOutstanding,
     invoiceCount: rows.filter(r => r.kind === 'invoice').length,

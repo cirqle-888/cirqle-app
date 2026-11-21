@@ -219,6 +219,7 @@ function StatementsInner({
       `Opening balance: ${money(statement.openingBalance)}`,
       `Invoiced: ${money(statement.totalBilled)}`,
       `Received: ${money(statement.totalReceived)}`,
+      ...(statement.totalWrittenOff > 0 ? [`Written off: ${money(statement.totalWrittenOff)}`] : []),
       `*Balance due: ${money(statement.closingBalance)}*`,
     ]
     if (statement.totalOutstanding > 0) {
@@ -459,7 +460,10 @@ function StatementsInner({
                             </td>
                             <td className="px-4 py-2">{r.description}</td>
                             <td className="px-4 py-2 text-right tabular-nums">{r.debit ? money(r.debit) : ''}</td>
-                            <td className="px-4 py-2 text-right tabular-nums text-emerald-600 dark:text-emerald-400">{r.credit ? money(r.credit) : ''}</td>
+                            <td className={cn('px-4 py-2 text-right tabular-nums',
+                              r.kind === 'writeoff' ? 'text-muted-foreground italic' : 'text-emerald-600 dark:text-emerald-400')}>
+                              {r.credit ? money(r.credit) : ''}
+                            </td>
                             <td className="px-4 py-2 text-right tabular-nums font-medium">{money(r.balance)}</td>
                           </tr>
                           {isOpen && (
@@ -512,7 +516,14 @@ function StatementsInner({
                     <tr className="border-t-2 border-border/60 font-semibold">
                       <td colSpan={3} className="px-4 py-2.5 text-right text-xs uppercase tracking-wider text-muted-foreground">Closing balance</td>
                       <td className="px-4 py-2.5 text-right tabular-nums">{money(statement!.totalBilled)}</td>
-                      <td className="px-4 py-2.5 text-right tabular-nums text-emerald-600 dark:text-emerald-400">{money(statement!.totalReceived)}</td>
+                      <td className="px-4 py-2.5 text-right tabular-nums text-emerald-600 dark:text-emerald-400">
+                        {money(statement!.totalReceived)}
+                        {statement!.totalWrittenOff > 0 && (
+                          <div className="text-[11px] font-normal italic text-muted-foreground">
+                            + {money(statement!.totalWrittenOff)} written off
+                          </div>
+                        )}
+                      </td>
                       <td className="px-4 py-2.5 text-right tabular-nums text-base">{money(statement!.closingBalance)}</td>
                     </tr>
                   </tfoot>

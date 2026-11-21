@@ -239,3 +239,77 @@ describe('buildStatement — ageing is measured as of today, not the period end'
     expect(Object.fromEntries(s.aging.map(b => [b.label, b.amount]))['0–30 days']).toBe(100)
   })
 })
+
+describe('buildStatement — cancelled and written-off invoices in the ledger', () => {
+  // Bismi Biriyani, Nov 2026: two one-line invoices were cancelled and replaced
+  // by one 2-line invoice for the same ₹900. The statement used to close at
+  // ₹900 while its own aging table said ₹0.
+  const bismi = {
+    invoices: [
+      inv({ id: '061',   invoice_number: 'INV-2611-061',   issue_date: '2026-11-01', status: 'paid',      total_amount: 1200, total_amount_inr: 1200 }),
+      inv({ id: '061-2', invoice_number: 'INV-2611-061-2', issue_date: '2026-11-01', status: 'cancelled', total_amount: 600,  total_amount_inr: 600 }),
+      inv({ id: '061-3', invoice_number: 'INV-2611-061-3', issue_date: '2026-11-01', status: 'cancelled', total_amount: 300,  total_amount_inr: 300 }),
+      inv({ id: '061A',  invoice_number: 'INV-2611-061A',  issue_date: '2026-11-01', status: 'paid',      total_amount: 900,  total_amount_inr: 900 }),
+    ],
+    credits: [
+      cr({ invoiceId: '061',  date: '2026-11-02', amountInr: 1200 }),
+      cr({ invoiceId: '061A', date: '2026-11-02', amountInr: 900 }),
+    ],
+    currency: 'INR' as const,
+  }
+
+  it('leaves a cancelled invoice off the statement altogether', () => {
+    const s = buildStatement({ ...bismi, from: '2026-11-01', to: '2026-11-30', asOf: '2026-11-21' })
+    expect(s.rows.map(r => r.ref)).not.toContain('INV-2611-061-2')
+    expect(s.rows.map(r => r.ref)).not.toContain('INV-2611-061-3')
+    expect(s.invoiceCount).toBe(2)
+    expect(s.totalBilled).toBe(2100)
+    expect(s.closingBalance).toBe(0)
+    expect(s.closingBalance).toBe(s.totalOutstanding)
+  })
+
+  it('keeps a cancelled invoice out of a later opening balance too', () => {
+    const s = buildStatement({ ...bismi, from: '2026-12-01', to: '2026-12-31', asOf: '2026-12-31' })
+    expect(s.openingBalance).toBe(0)
+  })
+
+  it('shows a bad debt as billed, then written off, netting to zero', () => {
+    const s = buildStatement({
+      invoices: [inv({ id: 'bd', invoice_number: 'INV-BD', issue_date: '2026-06-10', status: 'bad_debt', total_amount: 1000, total_amount_inr: 1000 })],
+      credits: [], from: '2026-06-01', to: '2026-06-30', currency: 'INR', asOf: '2026-06-30',
+    })
+    expect(s.rows.map(r => [r.kind, r.debit, r.credit, r.balance])).toEqual([
+      ['invoice', 1000, 0, 1000],
+      ['writeoff', 0, 1000, 0],
+    ])
+    expect(s.totalBilled).toBe(1000)
+    expect(s.totalReceived).toBe(0)
+    expect(s.totalWrittenOff).toBe(1000)
+    expect(s.closingBalance).toBe(0)
+  })
+
+  it('writes off only what was never paid on a part-paid bad debt', () => {
+    const s = buildStatement({
+      invoices: [inv({ id: 'bd', issue_date: '2026-06-10', status: 'bad_debt', total_amount: 1000, total_amount_inr: 1000, paid_amount: 300, paid_amount_inr: 300 })],
+      credits: [cr({ invoiceId: 'bd', date: '2026-06-20', amountInr: 300 })],
+      from: '2026-06-01', to: '2026-06-30', currency: 'INR', asOf: '2026-06-30',
+    })
+    expect(s.totalReceived).toBe(300)
+    expect(s.totalWrittenOff).toBe(700)
+    expect(s.closingBalance).toBe(0)
+    expect(s.discrepancies).toEqual([])
+  })
+
+  it('carries a bad debt into a later opening balance as zero', () => {
+    const s = buildStatement({
+      invoices: [
+        inv({ id: 'bd', issue_date: '2026-05-10', status: 'bad_debt', total_amount: 800, total_amount_inr: 800 }),
+        inv({ id: 'ok', issue_date: '2026-06-10', status: 'sent', total_amount: 100, total_amount_inr: 100 }),
+      ],
+      credits: [], from: '2026-06-01', to: '2026-06-30', currency: 'INR', asOf: '2026-06-30',
+    })
+    expect(s.openingBalance).toBe(0)
+    expect(s.closingBalance).toBe(100)
+    expect(s.closingBalance).toBe(s.totalOutstanding)
+  })
+})
