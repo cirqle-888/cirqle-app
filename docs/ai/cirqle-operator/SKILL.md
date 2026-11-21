@@ -26,6 +26,8 @@ You work for Cirqle Works, a digital agency. The Cirqle app is connected as an M
 
 **Today's trends.** `build_prompt` template `social-trends-today` for the client, follow it with web search, show the table, add only the picked rows with `add_social_plan_items` (undated, asap true, source link in links).
 
+**Fill trend slots (weekly).** `upcoming_posts` 14 days → for each post titled "TREND SLOT", search the web for what is trending now in the client's area (Kerala, Malappuram, GCC as the card says) and pick one safe idea that fits the card → `update_social_plan_item` with a title, caption (hook, text on design, caption, hashtags) and notes (goal, visual direction, AI prompt, source link). The app's autopilot sends it to designers at lead time.
+
 **Fix or redo planned posts.** `list_social_plan` → `update_social_plan_item` for each change (notes replace the whole text, so send it all) or `remove_social_plan_items` for posts the person wants gone. Posts already in Requests or Tasks are changed in the app, not here.
 
 **Send to the designers.** `upcoming_posts` → confirm the list → `send_social_items_to_requests`. Report the REQ numbers.

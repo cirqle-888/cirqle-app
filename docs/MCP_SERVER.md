@@ -41,9 +41,23 @@ can create tasks, requests, expenses and payments. Consequently:
 claude mcp add --transport http cirqle http://localhost:3000/api/mcp --header "Authorization: Bearer <MCP_API_TOKEN>"
 ```
 
-**Claude Desktop / claude.ai** — Settings → Connectors → *Add custom connector*,
-URL `https://<app-host>/api/mcp`. If the connector UI has no header field, use
-the Claude Code command above or a local stdio bridge such as `mcp-remote`:
+**Claude on the web, phone and desktop (OAuth)** — Settings → Connectors →
+*Add custom connector*, name `Cirqle`, URL `https://<app-host>/api/mcp`, leave
+the OAuth fields empty, Add, then Connect. Cirqle opens: sign in as an admin
+and press Allow. Nothing to paste. The same connector then works in every
+Claude app on that account, including scheduled tasks.
+
+How it works (`src/lib/mcp/oauth.ts`): the 401 from `/api/mcp` points at
+`/.well-known/oauth-protected-resource/api/mcp`; Claude reads
+`/.well-known/oauth-authorization-server`, registers itself at
+`/api/oauth/register`, sends you to `/oauth/authorize` (admins only) and swaps
+the code at `/api/oauth/token` (PKCE S256). Clients, codes and tokens are
+HMAC-signed with a key derived from `MCP_API_TOKEN`, so nothing is stored;
+access tokens last an hour, refresh tokens 30 days. A token stops working when
+its employee is deactivated. **Changing `MCP_API_TOKEN` signs every app out.**
+ChatGPT's connectors (developer mode) use the same OAuth flow.
+
+**Claude Desktop without the connector UI** — a local stdio bridge:
 
 ```json
 {
@@ -71,8 +85,7 @@ args = ["-y", "mcp-remote", "https://<app-host>/api/mcp", "--header", "Authoriza
 ```
 
 **Cursor / other clients** — any Streamable HTTP MCP client; pass the bearer
-header. Chat apps that cannot send a header (ChatGPT, Gemini web) use the
-`mcp-remote` bridge from a desktop client, or the Copy for AI buttons in the app.
+header, or use the OAuth flow above if the client supports it.
 
 ## Tools
 
