@@ -26,15 +26,15 @@ export const AUTOPILOT_SWITCHES = [
     defaultOn: true,
   },
   {
-    key: 'autopilot_requests_to_tasks',
-    label: 'Turn requests into tasks',
-    hint: 'When a request is approved, create its task with the client’s usual service and price and the designer who does this client’s work. Requests the app cannot match stay for a person.',
+    key: 'autopilot_assign_requests',
+    label: 'Give requests to the right designer',
+    hint: 'New requests with nobody assigned go to the person who usually does that client\u2019s work (from the last four months of tasks), so they show in that person\u2019s My Work; the task is created when they start, as now. Requests with no clear designer stay for a person. Runs in the morning and the evening.',
     defaultOn: true,
   },
   {
     key: 'autopilot_billing',
-    label: 'Month-end draft invoices and payment reminders',
-    hint: 'On the last day of the month, add finished unbilled work to draft invoices; daily, prepare a payment reminder message for each overdue invoice, ready to send from the Follow-ups page.',
+    label: 'Month-end billing check',
+    hint: 'On the last two days of the month and the first three of the next: the month\u2019s draft invoices ready to send, finished work on no invoice, and work delivered over a week ago but not marked done (it cannot bill until it is). Draft invoices are already made by themselves when tasks are done; nothing is sent to clients.',
     defaultOn: true,
   },
 ] as const

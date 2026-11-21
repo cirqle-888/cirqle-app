@@ -9,6 +9,8 @@ import type { Admin } from '@/lib/mcp/shared'
 import type { AutopilotKey } from './switches'
 import { draftNextMonth, sendDuePosts } from './social'
 import { payCheckJob } from './pay-check'
+import { assignWaitingRequests } from './assign'
+import { billingCheckJob } from './billing'
 
 export async function loadAutopilotSettings(admin: Admin): Promise<Record<string, string>> {
   const { data } = await admin.from('company_settings').select('key, value').like('key', 'autopilot_%')
@@ -19,7 +21,10 @@ type Job = { key: AutopilotKey; name: string; run: (admin: Admin, today: string)
 
 const JOBS: Job[] = [
   { key: 'autopilot_send_planned_posts', name: 'sendPosts', run: sendDuePosts },
+  // Right after sending: today's new requests reach a designer's My Work this morning.
+  { key: 'autopilot_assign_requests', name: 'assignRequests', run: (admin, today) => assignWaitingRequests(admin, today) },
   { key: 'autopilot_contribution_check', name: 'payCheck', run: payCheckJob },
+  { key: 'autopilot_billing', name: 'billing', run: billingCheckJob },
   { key: 'autopilot_monthly_drafts', name: 'monthDraft', run: (admin, today) => draftNextMonth(admin, today) },
 ]
 
