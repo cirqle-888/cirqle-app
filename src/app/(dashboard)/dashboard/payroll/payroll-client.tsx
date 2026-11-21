@@ -425,6 +425,10 @@ export default function PayrollClient({
     return out
   }, [empList, commissionByEmpMonth, monthKey])
 
+  /** A payslip's commission from live scores for ITS month (not the viewed one). */
+  const commissionFor = (record: { employee_id: string; month: number; year: number }) =>
+    Math.round(commissionByEmpMonth[record.employee_id]?.[`${record.year}-${String(record.month).padStart(2, '0')}`] || 0)
+
   const monthPayroll    = useMemo(() => payroll.filter(r => r.month === viewMonth && r.year === viewYear), [payroll, viewMonth, viewYear])
 
   const filteredRecords = useMemo(() => {
@@ -585,8 +589,10 @@ export default function PayrollClient({
     const record    = payroll.find(r => r.id === id)
     const emp       = empList.find(e => e.id === record?.employee_id)
     const monthName = record ? MONTHS[record.month - 1] : ''
-    // Show the live (up-to-date) net amount in the confirmation
-    const liveCommission = record ? (monthCommissions[record.employee_id] || 0) : 0
+    // Show the live (up-to-date) net amount in the confirmation — from the
+    // payslip's OWN month. monthCommissions is the month shown at the top, so
+    // a Records-tab row from Apr 2026 showed November's ₹171.
+    const liveCommission = record ? commissionFor(record) : 0
     const liveNet = record ? Math.max(0, (record.base_salary || 0) + liveCommission + storedExtras(record) - (record.advances_deducted || 0) - (record.other_deductions || 0)) : 0
     const displayNet = liveNet || record?.net_salary || 0
     // Full consequences up front: marking paid also writes the salary expense
@@ -607,7 +613,7 @@ export default function PayrollClient({
       bankPicker:   true,
       secondary: {
         label: 'Already paid outside the app — close it',
-        hint:  'Marks it paid on the last day of its month. Nothing is added to the Cash Book.',
+        hint:  `Keeps the saved ₹${savedNet.toLocaleString('en-IN')} and marks it paid on the last day of its month. Nothing is added to the Cash Book.`,
         onClick: () => closeWithoutPayment(id),
       },
     })
@@ -628,7 +634,7 @@ export default function PayrollClient({
     setConfirmModal(null)
     const record = payroll.find(r => r.id === id)
     if (!record) return
-    const liveCommission = monthCommissions[record.employee_id] || 0
+    const liveCommission = commissionFor(record)
     const liveNet = Math.max(0, (record.base_salary || 0) + liveCommission + storedExtras(record) - (record.advances_deducted || 0) - (record.other_deductions || 0))
     const finalNet = liveNet || record.net_salary || 0
     const emp = empList.find(e => e.id === record.employee_id)

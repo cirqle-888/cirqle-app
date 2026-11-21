@@ -570,10 +570,14 @@ export async function markPayrollPaid(
 // ─── Close without payment ───────────────────────────────────────────────────
 
 /**
- * Close a payslip that was already paid outside the app: it becomes Paid with
- * its live figures saved, and NOTHING is written to the Cash Book (Mark Paid
- * would add a salary outflow dated today — a fake payment for an old month).
- * Undo works the same as for a normal payment.
+ * Close a payslip that was already paid outside the app: it becomes Paid AS
+ * SAVED, and NOTHING is written to the Cash Book (Mark Paid would add a salary
+ * outflow dated today — a fake payment for an old month).
+ *
+ * The saved figures are kept, not recomputed: the payslip is the record of
+ * what was paid by hand. Recomputing would rewrite hand-entered 2023–2024
+ * payslips (₹9,030 and the like) from contribution scores that may not exist
+ * for those months. Undo works the same as for a normal payment.
  */
 export async function closePayrollWithoutPayment(
   id: string,
@@ -583,26 +587,25 @@ export async function closePayrollWithoutPayment(
 
   const admin = createAdminClient()
   const { data: rec } = await admin.from('payroll')
-    .select('employee_id, month, year, status, base_salary, bonus, ownership_earned, advances_deducted, other_deductions, employee:employees(cqid)')
+    .select('employee_id, month, year, status, net_salary, adjustment_earned, employee:employees(cqid)')
     .eq('id', id).maybeSingle()
   if (!rec) return { ok: false, error: 'Payroll record not found' }
-  const r = rec as unknown as { employee_id: string; month: number; year: number; status: string; employee: { cqid: string } | null }
+  const r = rec as unknown as {
+    employee_id: string; month: number; year: number; status: string
+    net_salary: number | null; adjustment_earned: number | null; employee: { cqid: string } | null
+  }
   if (r.status === 'paid') return { ok: false, error: 'Already paid' }
-
-  const live = await liveFigures(admin, rec as Parameters<typeof liveFigures>[1])
-  if ('error' in live) return { ok: false, error: live.error }
 
   const updates: Record<string, unknown> = {
     status: 'paid',
     paid_date: closedPaidDate(r.month, r.year, todayISO()),
-    commission_earned: live.commission, ownership_earned: live.ownership,
-    adjustment_earned: live.adjustment, net_salary: live.net,
   }
-  const { error } = await admin.from('payroll').update(updates).eq('id', id)
+  // Only a still-pending row: a payment landing at the same moment wins.
+  const { error } = await admin.from('payroll').update(updates).eq('id', id).eq('status', 'pending')
   if (error) return { ok: false, error: error.message }
 
   // Same as a real payment: the corrections this payslip carried are discharged.
-  if (live.adjustment !== 0) {
+  if ((Number(r.adjustment_earned) || 0) !== 0) {
     await settleAdjustments(admin, r.employee_id, r.month, r.year).catch(() => ({ settled: 0 }))
   }
 
@@ -612,7 +615,7 @@ export async function closePayrollWithoutPayment(
     entityType: 'payroll',
     entityId:   id,
     action:     'marked_paid',
-    detail:     { month: r.month, year: r.year, net: live.net, cqid: r.employee?.cqid, outside_app: true, cashbook: false },
+    detail:     { month: r.month, year: r.year, net: Number(r.net_salary) || 0, cqid: r.employee?.cqid, outside_app: true, cashbook: false },
   })
 
   revalidatePath(REVALIDATE)
