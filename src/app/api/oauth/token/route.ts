@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server'
 import { exchange } from '@/lib/mcp/oauth'
+import { createAdminClient } from '@/lib/supabase/server'
 import { oauthJson, oauthPreflight } from '@/lib/mcp/oauth-http'
 
 /**
@@ -23,8 +24,11 @@ export async function POST(req: NextRequest) {
   }
   const r = exchange(form, Math.floor(Date.now() / 1000))
   if (!r.ok) return oauthJson({ error: r.error, error_description: r.description }, r.error === 'server_error' ? 500 : r.error === 'invalid_client' ? 401 : 400)
-  const { sub: _sub, ...body } = r.body
-  void _sub
+  // A person who has left Cirqle gets no new tokens, even with a valid refresh token.
+  const { sub, ...body } = r.body
+  const { data: emp } = await createAdminClient().from('employees').select('id')
+    .eq('id', sub).eq('is_active', true).eq('is_archived', false).maybeSingle()
+  if (!emp) return oauthJson({ error: 'invalid_grant', error_description: 'This Cirqle account is no longer active.' }, 400)
   return oauthJson(body)
 }
 
