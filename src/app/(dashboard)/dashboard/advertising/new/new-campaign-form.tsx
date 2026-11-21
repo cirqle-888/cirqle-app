@@ -17,6 +17,7 @@ import Link from 'next/link'
 import { PLATFORMS, CAMPAIGN_TYPES, STATUSES } from '@/lib/advertising/types'
 import { createAdProject } from '../actions'
 import BudgetFields, { emptyBudget, resolveBudget, type BudgetValue } from '../budget-fields'
+import { pageLabel, pagesFor, type CampaignPageOption } from '@/lib/advertising/campaign-page'
 
 interface ServiceRow { id: string; name: string; pricing_type: string | null; default_price: number | null }
 interface Props {
@@ -25,11 +26,13 @@ interface Props {
   servicePricing: { client_id: string; service_id: string; price: number }[]
   /** Preselected client — set when the form is opened from a client's Marketing Hub. */
   initialClientId?: string
+  /** Connected Pages / IG accounts; filtered to the chosen owner. */
+  pages?: CampaignPageOption[]
 }
 
 const inrFmt = (v: number) => `₹${Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 
-export default function NewCampaignForm({ clients, services, servicePricing, initialClientId }: Props) {
+export default function NewCampaignForm({ clients, services, servicePricing, initialClientId, pages = [] }: Props) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -44,6 +47,8 @@ export default function NewCampaignForm({ clients, services, servicePricing, ini
   const [endDate, setEndDate] = useState('')
   const [objective, setObjective] = useState('')
   const [budget, setBudget] = useState<BudgetValue>(emptyBudget())
+  const [pageAccountId, setPageAccountId] = useState('')
+  const pageChoices = pagesFor(pages, clientId || null)
 
   // Smart Router prefill.
   useEffect(() => {
@@ -114,6 +119,7 @@ export default function NewCampaignForm({ clients, services, servicePricing, ini
       objective: objective || null,
       startDate: startDate || null,
       endDate: endDate || null,
+      pageAccountId: pageChoices.some(p => p.id === pageAccountId) ? pageAccountId : null,
     })
     setBusy(false)
     if (res.ok && res.data) router.push(`/dashboard/advertising/${res.data.id}`)
@@ -149,7 +155,7 @@ export default function NewCampaignForm({ clients, services, servicePricing, ini
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Client</label>
-              <select value={clientId} onChange={e => { setClientId(e.target.value); applyServiceCharge(serviceId, e.target.value) }} className={field}>
+              <select value={clientId} onChange={e => { setClientId(e.target.value); setPageAccountId(''); applyServiceCharge(serviceId, e.target.value) }} className={field}>
                 <option value="">Internal — Cirqle (company campaign)</option>
                 {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
@@ -177,6 +183,18 @@ export default function NewCampaignForm({ clients, services, servicePricing, ini
               <select value={status} onChange={e => setStatus(e.target.value)} className={field}>
                 {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
               </select>
+            </div>
+            <div className="col-span-2">
+              <label className={labelCls}>{clientId ? 'Page advertised' : 'Cirqle page advertised'}</label>
+              <select value={pageAccountId} onChange={e => setPageAccountId(e.target.value)} className={field}>
+                <option value="">{pageChoices.length ? '— Not set —' : 'No connected pages'}</option>
+                {pageChoices.map(p => <option key={p.id} value={p.id}>{pageLabel(p)}</option>)}
+              </select>
+              {!clientId && (
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  Tells Cirqle&apos;s own pages apart (e.g. Cirqle Works, Cirqle Flyers). A page shows here once it is marked as Cirqle&apos;s in Asset Assignment.
+                </p>
+              )}
             </div>
             <div className="col-span-2">
               <label className={labelCls}>Advertising service</label>

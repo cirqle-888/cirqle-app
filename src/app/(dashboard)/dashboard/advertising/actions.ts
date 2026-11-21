@@ -96,6 +96,24 @@ export interface CreateAdProjectInput {
   startDate?: string | null
   endDate?: string | null
   requestId?: string | null
+  /** The Page / IG account advertised (social_accounts.id) — tells Cirqle's own pages apart. */
+  pageAccountId?: string | null
+}
+
+/**
+ * May this campaign name this page? Company campaigns: only Cirqle's own
+ * accounts. Client campaigns: only that client's. Null always allowed.
+ */
+async function checkPageOwner(
+  admin: SupabaseClient, pageAccountId: string | null | undefined, clientId: string | null,
+): Promise<string | null> {
+  if (!pageAccountId) return null
+  const { data } = await admin.from('social_accounts').select('client_id, owner_type').eq('id', pageAccountId).maybeSingle()
+  if (!data) return 'That page is not connected.'
+  const ok = clientId
+    ? (data.owner_type ?? 'client') === 'client' && data.client_id === clientId
+    : data.owner_type === 'cirqle'
+  return ok ? null : clientId ? "That page isn't one of this client's." : "That page isn't one of Cirqle's own."
 }
 
 export async function createAdProject(
@@ -108,6 +126,8 @@ export async function createAdProject(
   if (!name) return { ok: false, error: 'Campaign name is required.' }
 
   const admin = createAdminClient()
+  const pageError = await checkPageOwner(admin, input.pageAccountId, input.clientId || null)
+  if (pageError) return { ok: false, error: pageError }
   const projectRow = {
     client_id:            input.clientId || null,
     request_id:           input.requestId || null,
@@ -141,6 +161,11 @@ export async function createAdProject(
   // service/requests migration; ad_budget_amount etc. already saved regardless).
   if (input.serviceId) {
     try { await admin.from('ad_projects').update({ service_id: input.serviceId }).eq('id', id) } catch { /* not migrated */ }
+  }
+  // The advertised page (best-effort — column added by 20261121200000).
+  if (input.pageAccountId) {
+    await admin.from('ad_projects').update({ page_account_id: input.pageAccountId }).eq('id', id)
+      .then(null, () => { /* not migrated */ })
   }
   await logAdEvent(admin, id, 'created', guard.employeeId, {
     campaign_name: name, request_id: input.requestId || null,
@@ -215,6 +240,8 @@ export interface UpdateAdProjectInput {
   startDate?: string | null
   endDate?: string | null
   notes?: string | null
+  /** The advertised Page / IG account; null clears it. */
+  pageAccountId?: string | null
 }
 
 export async function updateAdProject(id: string, patch: UpdateAdProjectInput): Promise<ActionResult> {
@@ -240,9 +267,20 @@ export async function updateAdProject(id: string, patch: UpdateAdProjectInput): 
   if (patch.startDate !== undefined)        upd.start_date = patch.startDate
   if (patch.endDate !== undefined)          upd.end_date = patch.endDate
   if (patch.notes !== undefined)            upd.notes = patch.notes
+  if (patch.pageAccountId !== undefined) {
+    const { data: owner } = await admin.from('ad_projects').select('client_id').eq('id', id).maybeSingle()
+    const pageError = await checkPageOwner(admin, patch.pageAccountId, owner?.client_id ?? null)
+    if (pageError) return { ok: false, error: pageError }
+    upd.page_account_id = patch.pageAccountId || null
+  }
 
   const { error } = await admin.from('ad_projects').update(upd).eq('id', id)
-  if (error) return { ok: false, error: error.message }
+  if (error) {
+    if (patch.pageAccountId !== undefined && /page_account_id/.test(error.message)) {
+      return { ok: false, error: 'Campaign pages are not set up in the database yet (migration 20261121200000).' }
+    }
+    return { ok: false, error: error.message }
+  }
 
   const typeChanged = patch.campaignType !== undefined && (before?.campaign_type ?? null) !== patch.campaignType
   if (typeChanged) {

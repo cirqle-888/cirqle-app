@@ -9,6 +9,7 @@
 
 import { createAdminClient } from '@/lib/supabase/server'
 import { getBenchmarksForProjects, type BenchmarkResult } from '@/lib/advertising/ai/benchmarks'
+import { attachPages } from '@/lib/advertising/campaign-page'
 import type { AttentionData } from './advertising-client'
 
 export interface AdvertisingData {
@@ -100,7 +101,8 @@ export async function loadAdvertisingData(opts: {
   const [projectsRes, clients, ledgerRes, pendingRequests] =
     await Promise.all([projectsP, clientsP, ledgerP, pendingRequestsP])
 
-  const projects: any[] = projectsRes.rows
+  // The advertised page (tells Cirqle's own pages apart on company campaigns).
+  const projects: any[] = await attachPages(admin, projectsRes.rows)
   const migrated = projectsRes.migrated
   const ledger: any[] = ledgerRes.rows
   const walletSupported = ledgerRes.supported

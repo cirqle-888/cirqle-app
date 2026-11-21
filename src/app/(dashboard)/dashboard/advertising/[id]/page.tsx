@@ -6,6 +6,7 @@ import { PERMS } from '@/lib/permissions/keys'
 import { getWalletSummary, getCompanyWalletSummary } from '@/lib/advertising/wallet'
 import { getBenchmarksWithSource } from '@/lib/advertising/ai/benchmarks'
 import { loadClientReportPreferences } from '@/lib/reporting/preferences'
+import { attachPages, loadPageOptions, pagesFor } from '@/lib/advertising/campaign-page'
 import ProjectDetailClient from './project-detail-client'
 
 export const dynamic = 'force-dynamic'
@@ -82,8 +83,14 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   // terms on the project row, task billing amounts, invoices and rate cards
   // never reach the browser. Stripping here (not at render) keeps them out of
   // the RSC payload entirely.
-  const safeProject = viewBilling ? project : {
-    ...project, service_charge_type: null, service_charge_value: null, tax_percent: null,
+  // The advertised page (company campaigns: which of Cirqle's own pages) and
+  // the pages it may be changed to. Best-effort before the column exists.
+  const [[withPage], pageOptions] = await Promise.all([
+    attachPages(admin, [project]),
+    loadPageOptions(admin),
+  ])
+  const safeProject = viewBilling ? withPage : {
+    ...withPage, service_charge_type: null, service_charge_value: null, tax_percent: null,
   }
   // Same benchmark tiers the report uses, so page and report grade health
   // identically. Best-effort: health simply goes ungraded on benchmarks
@@ -129,6 +136,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       clientCampaigns={clientCampaigns}
       reportPreferences={reportPrefs.byClient}
       reportPreferencesSupported={reportPrefs.supported}
+      pages={pagesFor(pageOptions, project.client_id ?? null)}
       perms={perms}
     />
   )
