@@ -37,9 +37,14 @@ export async function buildPayCheck(admin: Admin, today: string, period: CheckPe
   const wideFrom = addDays(period.from, -TASK_WINDOW.after - 7)
   const wideTo = addDays(period.to, TASK_WINDOW.before + 1)
 
+  // salary_day came with the payroll screens; without it everyone is paid on the 1st.
+  const readEmployees = async () => {
+    const r = await admin.from('employees').select('id, name, phone, salary_day, is_active, is_archived')
+    return r.error && /salary_day/.test(r.error.message) ? admin.from('employees').select('id, name, phone, is_active, is_archived') : r
+  }
   const [clientsRes, empRes, settingsRes, tasksRes] = await Promise.all([
     fetchAll(admin.from('clients').select('id, name')),
-    admin.from('employees').select('id, name, phone, salary_day, is_active, is_archived'),
+    readEmployees(),
     admin.from('company_settings').select('key, value').in('key', [LISTENER_KEYS.groups]),
     fetchAll(admin.from('tasks').select('id, task_number, title, client_id, task_date, status')
       .is('deleted_at', null).gte('task_date', wideFrom).lte('task_date', wideTo)),
