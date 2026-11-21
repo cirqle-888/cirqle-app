@@ -11,6 +11,7 @@ import { draftNextMonth, sendDuePosts } from './social'
 import { payCheckJob } from './pay-check'
 import { assignWaitingRequests } from './assign'
 import { billingCheckJob } from './billing'
+import { markPostedJob } from './posted'
 
 export async function loadAutopilotSettings(admin: Admin): Promise<Record<string, string>> {
   const { data } = await admin.from('company_settings').select('key, value').like('key', 'autopilot_%')
@@ -23,6 +24,8 @@ const JOBS: Job[] = [
   { key: 'autopilot_send_planned_posts', name: 'sendPosts', run: sendDuePosts },
   // Right after sending: today's new requests reach a designer's My Work this morning.
   { key: 'autopilot_assign_requests', name: 'assignRequests', run: (admin, today) => assignWaitingRequests(admin, today) },
+  // Before the pay and billing checks, so the tasks it makes are already counted there.
+  { key: 'autopilot_mark_posted', name: 'markPosted', run: markPostedJob },
   { key: 'autopilot_contribution_check', name: 'payCheck', run: payCheckJob },
   { key: 'autopilot_billing', name: 'billing', run: billingCheckJob },
   { key: 'autopilot_monthly_drafts', name: 'monthDraft', run: (admin, today) => draftNextMonth(admin, today) },

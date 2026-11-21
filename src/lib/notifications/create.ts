@@ -51,6 +51,8 @@ export type NotificationType =
   | 'autopilot_pay_check'
   | 'autopilot_requests_assigned'
   | 'autopilot_billing'
+  | 'autopilot_posted_done'
+  | 'autopilot_posted_missing'
   /** A request was given to this person (autopilot or a manager). */
   | 'request_assigned'
   /** Something shared from WhatsApp was filed in the Requests inbox. */

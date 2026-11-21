@@ -43,6 +43,7 @@ export type NotificationKind =
 const INFORMATIONAL_TYPES: ReadonlySet<string> = new Set([
   'recurring_tasks_generated',
   'autopilot_posts_sent',
+  'autopilot_posted_done',
   'recurring_expenses_posted',
   'social_post_published',
   'approval_decided',

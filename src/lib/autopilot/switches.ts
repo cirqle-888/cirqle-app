@@ -37,6 +37,12 @@ export const AUTOPILOT_SWITCHES = [
     hint: 'On the last two days of the month and the first three of the next: the month\u2019s draft invoices ready to send, finished work on no invoice, and work delivered over a week ago but not marked done (it cannot bill until it is). Draft invoices are already made by themselves when tasks are done; nothing is sent to clients.',
     defaultOn: true,
   },
+  {
+    key: 'autopilot_mark_posted',
+    label: 'Close posts that are live',
+    hint: 'Every morning, planned posts that went to Requests and are now live on the client\u2019s connected Instagram or Facebook (same kind of post, from a day before to three days after its date) are marked done: the task is made if there is none (priced from the Pricing Matrix, the request\u2019s designer assigned) and goes on the draft invoice as usual. Requests left open after their task was finished are closed too. Past-date posts with nothing live are listed for you.',
+    defaultOn: true,
+  },
 ] as const
 
 export type AutopilotKey = (typeof AUTOPILOT_SWITCHES)[number]['key']

@@ -28,7 +28,13 @@ const ACTOR = 'Autopilot'
 
 // ── 1. Send due posts ────────────────────────────────────────────────────────
 
-export async function sendDuePosts(admin: Admin, today: string) {
+/**
+ * `runKey` 'pm' is the evening pass (WhatsApp reports cron): a post whose
+ * trend slot was filled after the morning run still reaches the designers on
+ * its own day, instead of dropping out once its date has passed.
+ */
+export async function sendDuePosts(admin: Admin, today: string, opts: { runKey?: 'pm' } = {}) {
+  const runSuffix = opts.runKey ? `:${opts.runKey}` : ''
   const lead = await leadDays(admin)
   const horizon = addDays(today, Math.max(0, Math.round(lead)) + 1)
   const { data: cals, error: calErr } = await admin.from('social_calendars')
@@ -64,7 +70,7 @@ export async function sendDuePosts(admin: Admin, today: string) {
       title: `Autopilot sent ${sent.length} planned post${sent.length === 1 ? '' : 's'} to designers`,
       message: sent.length > 6 ? `${list} · and ${sent.length - 6} more` : list,
       link: '/dashboard/requests',
-      sourceKey: `autopilot_sent:${today}`,
+      sourceKey: `autopilot_sent:${today}${runSuffix}`,
     })
   }
   if (emptyTrendSlots.length) {
@@ -75,7 +81,7 @@ export async function sendDuePosts(admin: Admin, today: string) {
       message: emptyTrendSlots.slice(0, 6).map(t => `${clientOf(t.calendar_id)} ${t.scheduled_date}`).join(' · ') +
         '. Fill each with today’s trend idea (Prompt Studio or the AI connector); the autopilot sends it the next morning.',
       link: `/dashboard/social-calendar?calendar=${first.calendar_id}`,
-      sourceKey: `autopilot_trend_slots:${today}`,
+      sourceKey: `autopilot_trend_slots:${today}${runSuffix}`,
     })
   }
   return { ok: true as const, sent, skipped, emptyTrendSlots: emptyTrendSlots.map(t => t.id) }

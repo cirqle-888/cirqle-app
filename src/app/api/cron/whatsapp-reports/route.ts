@@ -7,6 +7,7 @@ import { todayISO } from '@/lib/utils/local-date'
 import { autopilotOn } from '@/lib/autopilot/switches'
 import { loadAutopilotSettings } from '@/lib/autopilot/run'
 import { assignWaitingRequests } from '@/lib/autopilot/assign'
+import { sendDuePosts } from '@/lib/autopilot/social'
 
 /**
  * WhatsApp daily reports (19:30 IST).
@@ -19,9 +20,10 @@ import { assignWaitingRequests } from '@/lib/autopilot/assign'
  * admins a one-line summary of the week.
  * Rules: lib/whatsapp-listener/insights.ts. Nothing is sent to WhatsApp.
  *
- * It also runs the autopilot's evening pass of "give requests to the right
- * designer" (lib/autopilot/assign.ts), first because it is quick, so the
- * day's WhatsApp requests do not wait for the morning run.
+ * It also runs the autopilot's evening passes, first because they are quick:
+ * "send planned posts to designers" (a trend slot filled during the day still
+ * goes out on its date) and "give requests to the right designer"
+ * (lib/autopilot/assign.ts), so the day's requests do not wait for the morning.
  *
  * Safe to re-run: each chat remembers the last message it has read, and each
  * alert carries an idempotency key.
@@ -45,6 +47,10 @@ export async function GET(req: NextRequest) {
   const admin = createAdminClient()
   try {
     const autopilot = await loadAutopilotSettings(admin).catch(() => ({} as Record<string, string>))
+    // Sent before assigning, so the evening's new requests get a designer too.
+    const sentPm = autopilotOn(autopilot, 'autopilot_send_planned_posts')
+      ? await sendDuePosts(admin, todayISO(), { runKey: 'pm' }).then(r => (r.ok ? { sent: r.sent.length } : r)).catch(e => ({ ok: false, error: String(e) }))
+      : 'off'
     const assigned = autopilotOn(autopilot, 'autopilot_assign_requests')
       ? await assignWaitingRequests(admin, todayISO(), { runKey: 'pm' }).catch(e => ({ ok: false, error: String(e) }))
       : 'off'
@@ -57,8 +63,8 @@ export async function GET(req: NextRequest) {
     const flyers = await alertFlyerDeadlines(admin, ctx).catch(() => 0)
     const weekly = await sendWeeklyDigest(admin, ctx).catch(() => false)
     const ok = run.failed === 0
-    await logCronRun(admin, 'whatsapp-reports', ok, { ...run, waiting, flyers, approved, weekly, assigned }, ok ? undefined : run.errors.join(' | '))
-    return NextResponse.json({ ok, ...run, waiting, flyers, approved, weekly, assigned })
+    await logCronRun(admin, 'whatsapp-reports', ok, { ...run, waiting, flyers, approved, weekly, assigned, sentPm }, ok ? undefined : run.errors.join(' | '))
+    return NextResponse.json({ ok, ...run, waiting, flyers, approved, weekly, assigned, sentPm })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'failed'
     await logCronRun(admin, 'whatsapp-reports', false, undefined, message)
