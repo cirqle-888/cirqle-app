@@ -28,7 +28,7 @@ export const AUTOPILOT_SWITCHES = [
   {
     key: 'autopilot_assign_requests',
     label: 'Give requests to the right designer',
-    hint: 'New requests with nobody assigned go to the person who usually does that client\u2019s work (from the last four months of tasks), so they show in that person\u2019s My Work; the task is created when they start, as now. Requests with no clear designer stay for a person. Runs in the morning and the evening.',
+    hint: 'New requests (last 14 days) with nobody assigned go to the person who usually does that client\u2019s work (from the last four months of tasks), so they show in that person\u2019s My Work; the task is created when they start, as now. Requests with no clear designer stay for a person. Runs in the morning and the evening.',
     defaultOn: true,
   },
   {

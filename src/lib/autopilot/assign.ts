@@ -16,13 +16,15 @@ import { addDays } from './social-rules'
 import { HISTORY_DAYS, pickAssignee, type AssignHistoryRow } from './assign-rules'
 
 const WAITING = ['submitted', 'under_review', 'approved']
+/** Older requests that nobody picked up are a person's call (stale, done elsewhere): never handed out in bulk. */
+export const RECENT_DAYS = 14
 const refLabel = (n: number | null | undefined) => `REQ-${String(n ?? 0).padStart(4, '0')}`
 
 export async function assignWaitingRequests(admin: Admin, today: string, opts: { runKey?: string } = {}) {
   // `kind` arrived with a later migration; without it every row is a plain request.
   const read = (cols: string) => admin.from('task_requests').select(cols)
     .in('status', WAITING).is('assigned_employee_id', null).is('promoted_task_id', null).is('archived_at', null)
-    .not('client_id', 'is', null).limit(300)
+    .not('client_id', 'is', null).gte('created_at', `${addDays(today, -RECENT_DAYS)}T00:00:00+05:30`).limit(300)
   let { data: reqs, error } = await read('id, ref_no, title, client_id, service_id, due_date, kind, client:clients(name)')
   if (error && /kind/.test(error.message)) ({ data: reqs, error } = await read('id, ref_no, title, client_id, service_id, due_date, client:clients(name)'))
   if (error) return { ok: false as const, error: `requests: ${error.message}` }
