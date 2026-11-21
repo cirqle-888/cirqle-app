@@ -3,6 +3,10 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { logCronRun } from '@/lib/cron/log'
 import { alertFlyerDeadlines, finishApprovedFlyers } from '@/lib/whatsapp-listener/flyer-desk-run'
 import { alertUnanswered, loadListenerContext, sendWeeklyDigest, updateAllReports } from '@/lib/whatsapp-listener/insights-run'
+import { todayISO } from '@/lib/utils/local-date'
+import { autopilotOn } from '@/lib/autopilot/switches'
+import { loadAutopilotSettings } from '@/lib/autopilot/run'
+import { assignWaitingRequests } from '@/lib/autopilot/assign'
 
 /**
  * WhatsApp daily reports (19:30 IST).
@@ -14,6 +18,10 @@ import { alertUnanswered, loadListenerContext, sendWeeklyDigest, updateAllReport
  * by tomorrow that have no finished design, and on Mondays sends the
  * admins a one-line summary of the week.
  * Rules: lib/whatsapp-listener/insights.ts. Nothing is sent to WhatsApp.
+ *
+ * It also runs the autopilot's evening pass of "give requests to the right
+ * designer" (lib/autopilot/assign.ts), first because it is quick, so the
+ * day's WhatsApp requests do not wait for the morning run.
  *
  * Safe to re-run: each chat remembers the last message it has read, and each
  * alert carries an idempotency key.
@@ -36,7 +44,11 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminClient()
   try {
-    const run = await updateAllReports(admin, { budgetMs: 240_000 })
+    const autopilot = await loadAutopilotSettings(admin).catch(() => ({} as Record<string, string>))
+    const assigned = autopilotOn(autopilot, 'autopilot_assign_requests')
+      ? await assignWaitingRequests(admin, todayISO(), { runKey: 'pm' }).catch(e => ({ ok: false, error: String(e) }))
+      : 'off'
+    const run = await updateAllReports(admin, { budgetMs: 230_000 })
     // End-of-day nudges. Neither may fail the run: the reports are already stored.
     const ctx = await loadListenerContext(admin)
     const waiting = await alertUnanswered(admin, ctx).catch(() => 0)
@@ -45,8 +57,8 @@ export async function GET(req: NextRequest) {
     const flyers = await alertFlyerDeadlines(admin, ctx).catch(() => 0)
     const weekly = await sendWeeklyDigest(admin, ctx).catch(() => false)
     const ok = run.failed === 0
-    await logCronRun(admin, 'whatsapp-reports', ok, { ...run, waiting, flyers, approved, weekly }, ok ? undefined : run.errors.join(' | '))
-    return NextResponse.json({ ok, ...run, waiting, flyers, approved, weekly })
+    await logCronRun(admin, 'whatsapp-reports', ok, { ...run, waiting, flyers, approved, weekly, assigned }, ok ? undefined : run.errors.join(' | '))
+    return NextResponse.json({ ok, ...run, waiting, flyers, approved, weekly, assigned })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'failed'
     await logCronRun(admin, 'whatsapp-reports', false, undefined, message)

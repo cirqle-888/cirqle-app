@@ -20,11 +20,20 @@ describe('MCP route authentication', () => {
   })
 
   it('rejects an empty bearer value', () => {
-    expect(src).toMatch(/got\.length > 0 && got === token/)
+    expect(src).toMatch(/if \(!got\) return false/)
+  })
+
+  it('accepts an OAuth token only for an active, not archived employee', () => {
+    expect(src).toContain('accessTokenSubject(got')
+    expect(src).toMatch(/\.eq\('is_active', true\)\.eq\('is_archived', false\)/)
+  })
+
+  it('points a refused caller at the OAuth metadata', () => {
+    expect(src).toContain('resource_metadata=')
   })
 
   it('guards every exported HTTP method', () => {
-    const handlers = src.match(/export async function (POST|GET)\(req: NextRequest\) \{\n\s+if \(!authorized\(req\)\) return unauthorized\(\)/g) || []
+    const handlers = src.match(/export async function (POST|GET)\(req: NextRequest\) \{\n\s+if \(!\(await authorized\(req\)\)\) return unauthorized\(req\)/g) || []
     expect(handlers).toHaveLength(2)
     expect(src).toContain('export const DELETE = GET')
   })

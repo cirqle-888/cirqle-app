@@ -918,6 +918,17 @@ export default function SocialCalendarClient({
     router.refresh()
   }
 
+  /** A Draft plan (the autopilot's AI drafts) goes live: from now on its posts reach designers at lead time. */
+  async function activatePlan() {
+    if (!selected) return
+    setBusy('activate')
+    const res = await updateSocialCalendar(selected.id, { status: 'active' })
+    setBusy(null)
+    if (!res.ok) { toast.toastError('Could not update the plan', res.error); return }
+    toast.success('Plan is Active', 'Its posts go to designers by themselves when their deadline comes.')
+    router.refresh()
+  }
+
   async function removePlan() {
     if (!selected) return
     setBusy('delete-plan')
@@ -1191,6 +1202,15 @@ export default function SocialCalendarClient({
             {selected.title && <span className="text-xs text-muted-foreground">· {selected.title}</span>}
             {selected.status === 'archived' && (
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border">Archived</span>
+            )}
+            {selected.status === 'draft' && (
+              <span className="inline-flex items-center gap-2 text-[11px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                Draft: nothing goes to designers until it is Active
+                <button type="button" onClick={activatePlan} disabled={busy === 'activate'}
+                  className="font-semibold underline underline-offset-2 disabled:opacity-50">
+                  {busy === 'activate' ? 'Saving…' : 'Mark Active'}
+                </button>
+              </span>
             )}
             <div className="flex flex-wrap items-center gap-1.5 ml-auto">
               {(Object.keys(progressCounts) as ItemProgress[])

@@ -1,12 +1,18 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { createAdminClient } from '@/lib/supabase/server'
-import { findClient } from '@/lib/ai/request-capture'
+import {
+  limitSchema, isoDate, CLIENT_COLS, TASK_COLS, INVOICE_COLS, REQUEST_COLS,
+  inr, result, fail, resolveClient, flatten,
+} from './shared'
+import { registerAutomationTools } from './tools-automation'
 import {
   createRequest, createRequestFromText, duplicateTask, createTask, createExpense, recordPayment,
 } from '@/lib/shortcut/actions'
 import { planMonth, listSocialPlan, addSocialPlanItems, MAX_ITEMS_PER_CALL } from '@/lib/social/plan-mcp'
 import { CONTENT_TYPES, PLATFORMS } from '@/lib/social/plan'
+import { OPEN_STATUSES as OPEN_INVOICE_STATUSES, outstandingAmount } from '@/lib/finance/invoice-revenue'
+import { OPEN_REQUEST_STATUSES } from './ops-actions'
 
 /**
  * Cirqle MCP server — lets an AI client (Claude Desktop, Claude Code, claude.ai
@@ -25,52 +31,8 @@ import { CONTENT_TYPES, PLATFORMS } from '@/lib/social/plan'
  * raw rows as `structuredContent`, so an agent can either quote or compute.
  */
 
-type Admin = ReturnType<typeof createAdminClient>
-
-const MAX_LIMIT = 100
-const limitSchema = z.number().int().min(1).max(MAX_LIMIT).default(25).describe(`Max rows (1–${MAX_LIMIT}).`)
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD').describe('YYYY-MM-DD')
-
-const CLIENT_COLS = 'id, code, name, contact_name, email, phone, country, region, default_currency, billing_cycle, is_active, created_at'
-const TASK_COLS = 'id, task_number, title, status, task_date, quantity, currency, billing_amount, billing_amount_inr, billing_mode, is_billable, client:clients(name), service:services!tasks_service_id_fkey(name)'
-const INVOICE_COLS = 'id, invoice_number, status, issue_date, due_date, currency, subtotal, tax_amount, total_amount, total_amount_inr, paid_amount, paid_amount_inr, client:clients(name)'
-const REQUEST_COLS = 'id, ref_no, title, status, client_status, priority, source, due_date, created_at, submitter_name, client:clients(name), service:services!task_requests_service_id_fkey(name)'
-
-const inr = (n: unknown) => `₹${Number(n ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
-
-/** Uniform tool result: summary text + structured rows. */
-function result(text: string, data: unknown) {
-  return {
-    content: [{ type: 'text' as const, text }],
-    structuredContent: (data && typeof data === 'object' && !Array.isArray(data)) ? data as Record<string, unknown> : { rows: data },
-  }
-}
-
-function fail(message: string) {
-  return { content: [{ type: 'text' as const, text: message }], isError: true }
-}
-
-/** Resolve a client by name fragment or UUID; null when nothing matches. */
-async function resolveClient(admin: Admin, ref: string | undefined) {
-  const q = (ref || '').trim()
-  if (!q) return null
-  if (/^[0-9a-f-]{36}$/i.test(q)) {
-    const { data } = await admin.from('clients').select('id, name, code').eq('id', q).maybeSingle()
-    return data
-  }
-  return findClient(admin, q)
-}
-
-function flatten<T extends Record<string, any>>(rows: T[] | null) {
-  return (rows || []).map((r) => ({
-    ...r,
-    client: r.client?.name ?? null,
-    service: r.service?.name ?? null,
-  }))
-}
-
 export function createCirqleMcpServer() {
-  const server = new McpServer({ name: 'cirqle', version: '0.1.0' })
+  const server = new McpServer({ name: 'cirqle', version: '0.2.0' })
   const admin = createAdminClient()
 
   // ── Discovery ────────────────────────────────────────────────────────────
@@ -145,11 +107,11 @@ export function createCirqleMcpServer() {
     if (!c) return fail(`No client matches "${client}".`)
     const [detail, invoices, tasks, requests] = await Promise.all([
       admin.from('clients').select(CLIENT_COLS).eq('id', c.id).single(),
-      admin.from('invoices').select(INVOICE_COLS).eq('client_id', c.id).not('status', 'in', '("paid","cancelled")').order('issue_date'),
+      admin.from('invoices').select(INVOICE_COLS).eq('client_id', c.id).in('status', OPEN_INVOICE_STATUSES).order('issue_date'),
       admin.from('tasks').select(TASK_COLS).eq('client_id', c.id).is('deleted_at', null).order('task_date', { ascending: false }).limit(20),
-      admin.from('task_requests').select(REQUEST_COLS).eq('client_id', c.id).is('archived_at', null).not('status', 'in', '("closed","promoted","rejected")').order('created_at', { ascending: false }).limit(20),
+      admin.from('task_requests').select(REQUEST_COLS).eq('client_id', c.id).is('archived_at', null).in('status', OPEN_REQUEST_STATUSES).order('created_at', { ascending: false }).limit(20),
     ])
-    const outstanding = (invoices.data || []).reduce((s, i) => s + Number(i.total_amount_inr ?? i.total_amount ?? 0) - Number(i.paid_amount_inr ?? i.paid_amount ?? 0), 0)
+    const outstanding = (invoices.data || []).reduce((s, i) => s + outstandingAmount(i), 0)
     const out = {
       client: detail.data,
       outstanding_inr: outstanding,
@@ -167,7 +129,7 @@ export function createCirqleMcpServer() {
     description: 'Tasks (billable work items) filtered by client, status and date range. Newest first.',
     inputSchema: {
       client: z.string().optional().describe('Client name (fuzzy) or id.'),
-      status: z.string().optional().describe('e.g. pending, in_progress, completed, cancelled'),
+      status: z.string().optional().describe('pending, in_progress, delivered, done, invoiced or cancelled'),
       from: isoDate.optional().describe('task_date >= this'),
       to: isoDate.optional().describe('task_date <= this'),
       limit: limitSchema,
@@ -211,7 +173,7 @@ export function createCirqleMcpServer() {
 
   server.registerTool('list_invoices', {
     title: 'List invoices',
-    description: 'Invoices filtered by client and status. `outstanding_only` keeps anything not paid/cancelled and reports the amount due.',
+    description: 'Invoices filtered by client and status. `outstanding_only` keeps invoices sent to the client and not yet settled (sent, partial, overdue) and reports the amount due; drafts are not owed yet.',
     inputSchema: {
       client: z.string().optional().describe('Client name (fuzzy) or id.'),
       status: z.string().optional().describe('e.g. draft, sent, partial, paid, overdue, cancelled'),
@@ -229,14 +191,14 @@ export function createCirqleMcpServer() {
       q = q.eq('client_id', c.id)
     }
     if (status) q = q.eq('status', status)
-    if (outstanding_only) q = q.not('status', 'in', '("paid","cancelled")')
+    if (outstanding_only) q = q.in('status', OPEN_INVOICE_STATUSES)
     if (from) q = q.gte('issue_date', from)
     if (to) q = q.lte('issue_date', to)
     const { data, error } = await q
     if (error) return fail(error.message)
     const rows = flatten(data).map((i) => ({
       ...i,
-      due_inr: Number(i.total_amount_inr ?? i.total_amount ?? 0) - Number(i.paid_amount_inr ?? i.paid_amount ?? 0),
+      due_inr: outstandingAmount(i),
     }))
     const due = rows.reduce((s, i) => s + i.due_inr, 0)
     return result(`${rows.length} invoices, ${inr(due)} due.`, { invoices: rows, total_due_inr: due })
@@ -264,7 +226,7 @@ export function createCirqleMcpServer() {
     title: 'List requests',
     description: 'The Requests inbox (work asked for by clients/staff that is not yet a task). Open requests by default.',
     inputSchema: {
-      status: z.string().optional().describe('Filter to one status; omit for all open (not closed/promoted/rejected).'),
+      status: z.string().optional().describe('Filter to one status (submitted, in_progress, waiting_for_content, revision_requested, delivered, completed, cancelled…); omit for all open requests.'),
       client: z.string().optional().describe('Client name (fuzzy) or id.'),
       limit: limitSchema,
     },
@@ -272,7 +234,7 @@ export function createCirqleMcpServer() {
   }, async ({ status, client, limit }) => {
     let q = admin.from('task_requests').select(`${REQUEST_COLS}, description`).is('archived_at', null).order('created_at', { ascending: false }).limit(limit)
     if (status) q = q.eq('status', status)
-    else q = q.not('status', 'in', '("closed","promoted","rejected")')
+    else q = q.in('status', OPEN_REQUEST_STATUSES)
     if (client) {
       const c = await resolveClient(admin, client)
       if (!c) return fail(`No client matches "${client}".`)
@@ -450,6 +412,8 @@ export function createCirqleMcpServer() {
   }, async ({ client, amount, date, bank_account }) =>
     fromAction(await recordPayment(admin, { client, amount, date, bankAccount: bank_account }),
       (r) => `Recorded ${inr(r.amount)} from ${r.client}; applied to ${(r.appliedTo as string[]).join(', ') || 'nothing'}.${r.note ? ` ${r.note}` : ''}`))
+
+  registerAutomationTools(server, admin)
 
   return server
 }
