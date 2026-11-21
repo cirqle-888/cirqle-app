@@ -27,16 +27,22 @@ export async function callGroqJSON(
 export async function callGroqText(
   systemPrompt: string,
   userText: string,
-  opts?: { model?: string; maxTokens?: number; temperature?: number },
+  opts?: GroqOpts,
 ): Promise<string> {
   return (await groqContent(systemPrompt, userText, opts)).trim()
+}
+
+interface GroqOpts {
+  model?: string; maxTokens?: number; temperature?: number
+  /** Reasoning models only: how much hidden thinking to spend (low keeps long answers inside the token limit). */
+  reasoningEffort?: 'low' | 'medium' | 'high'
 }
 
 /** One chat completion: the reply text with any leaked <think> block removed. */
 async function groqContent(
   systemPrompt: string,
   userText: string,
-  opts?: { model?: string; maxTokens?: number; temperature?: number },
+  opts?: GroqOpts,
 ): Promise<string> {
   const key = process.env.GROQ_API_KEY
   if (!key) throw new Error('AI parsing is not configured (set GROQ_API_KEY).')
@@ -64,11 +70,13 @@ async function groqContent(
   // enforces that strictly server-side and a leaked <think> block fails the
   // validation with a hard 400. Instead: prompt-instruct JSON-only output and
   // parse leniently below. Soft failure (empty object) beats a hard error.
+  let sendEffort = isReasoning && !!opts?.reasoningEffort
   const buildBody = (withReasoningFormat: boolean) => JSON.stringify({
     model,
     temperature: opts?.temperature ?? 0,
     max_tokens: maxTokens,
     ...(withReasoningFormat ? { reasoning_format: 'hidden' } : {}),
+    ...(sendEffort ? { reasoning_effort: opts?.reasoningEffort } : {}),
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userText },
@@ -88,11 +96,14 @@ async function groqContent(
   for (let attempt = 0; attempt < 3; attempt++) {
     res = await post(buildBody(sentReasoningFormat))
     // Self-heal if our reasoning-model guess was wrong for this model id.
-    if (res.status === 400 && sentReasoningFormat) {
+    if (res.status === 400 && (sentReasoningFormat || sendEffort)) {
       const peek = await res.clone().text().catch(() => '')
-      if (/reasoning_format/i.test(peek)) {
-        sentReasoningFormat = false
-        res = await post(buildBody(false))
+      const dropFormat = sentReasoningFormat && /reasoning_format/i.test(peek)
+      const dropEffort = sendEffort && /reasoning_effort/i.test(peek)
+      if (dropFormat || dropEffort) {
+        if (dropFormat) sentReasoningFormat = false
+        if (dropEffort) sendEffort = false
+        res = await post(buildBody(sentReasoningFormat))
       }
     }
     if (res.ok || res.status !== 429) break

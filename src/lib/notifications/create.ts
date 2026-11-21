@@ -42,6 +42,11 @@ export type NotificationType =
   | 'invoice_unsent'
   | 'client_quiet'
   | 'owner_weekly_check'
+  // Autopilot (lib/autopilot)
+  | 'autopilot_posts_sent'
+  | 'autopilot_trend_slots'
+  | 'autopilot_draft_ready'
+  | 'autopilot_draft_failed'
   /** Something shared from WhatsApp was filed in the Requests inbox. */
   | 'whatsapp_request'
   | 'whatsapp_capture_failed'

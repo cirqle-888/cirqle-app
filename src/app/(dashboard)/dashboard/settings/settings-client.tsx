@@ -45,6 +45,7 @@ import { buildInvoiceShareText } from '@/lib/invoices/share'
 import { buildReminderText } from '@/lib/followups/grouping'
 import { todayISO } from '@/lib/utils/local-date'
 import { OWNER_ALERT_SWITCHES, ownerAlertOn } from '@/lib/owner-alerts/switches'
+import { AUTOPILOT_SWITCHES, autopilotOn } from '@/lib/autopilot/switches'
 import { LISTENER_KEYS, LISTENER_SERVER_KEYS, aiFilterOn, listenerEnabled, listenerHealth } from '@/lib/whatsapp-listener/rules'
 import WhatsAppListenerMap from '@/components/settings/whatsapp-listener-map'
 
@@ -1708,6 +1709,42 @@ export default function SettingsClient(props: Props) {
                 </div>
                 {OWNER_ALERT_SWITCHES.map(({ key, label, hint }) => {
                   const on = ownerAlertOn(companySettings, key)
+                  return (
+                    <div key={key}>
+                      <label className="block text-xs font-medium text-foreground mb-0.5">{label}</label>
+                      <p className="text-[11px] text-muted-foreground/60 mb-1.5">{hint}</p>
+                      <div className="flex gap-1.5">
+                        {([
+                          { val: 'on', lbl: 'On' },
+                          { val: 'off', lbl: 'Off' },
+                        ] as const).map(({ val, lbl }) => (
+                          <button
+                            key={val}
+                            type="button"
+                            onClick={() => setCompanySettings(p => ({ ...p, [key]: val }))}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                              (on ? 'on' : 'off') === val
+                                ? 'bg-primary/20 border-primary/50 text-primary'
+                                : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
+                            }`}
+                          >{lbl}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Automations — jobs that do work by themselves (lib/autopilot/switches.ts) */}
+              <div className="space-y-4 border-t border-border pt-5">
+                <div>
+                  <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Automations</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Daily jobs that do the routine work themselves at 7 am and tell admins what they did. Turn one off to do that job by hand again.
+                  </p>
+                </div>
+                {AUTOPILOT_SWITCHES.map(({ key, label, hint }) => {
+                  const on = autopilotOn(companySettings, key)
                   return (
                     <div key={key}>
                       <label className="block text-xs font-medium text-foreground mb-0.5">{label}</label>

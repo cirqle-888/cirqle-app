@@ -149,7 +149,7 @@ export async function removePlanItems(admin: Admin, itemIds: string[]) {
 }
 
 /** The designer's lead time from company settings (days before the post date). */
-async function leadDays(admin: Admin): Promise<number> {
+export async function leadDays(admin: Admin): Promise<number> {
   try {
     const { data } = await admin.from('company_settings').select('value').eq('key', 'social_lead_days').maybeSingle()
     return Math.max(0, Math.min(60, parseInt((data as any)?.value ?? '0', 10) || 0))
@@ -217,7 +217,8 @@ const refLabel = (n: number | null | undefined) => `REQ-${String(n ?? 0).padStar
  * "Send to Requests" does: one request per item, carrying its brief, the
  * designer's deadline (post date minus the lead time) and its service.
  */
-export async function sendPlanItemsToRequests(admin: Admin, itemIds: string[]) {
+export async function sendPlanItemsToRequests(admin: Admin, itemIds: string[], opts: { actorLabel?: string } = {}) {
+  const actor = opts.actorLabel || 'AI connector'
   const ids = [...new Set(itemIds)].slice(0, MAX_SEND_PER_CALL)
   const read = await selectItems(admin, ids)
   if (!read.rows) return { ok: false as const, error: read.error || 'Could not read the items.' }
@@ -246,7 +247,7 @@ export async function sendPlanItemsToRequests(admin: Admin, itemIds: string[]) {
       .update({ request_id: created.id, status: 'requested', updated_at: new Date().toISOString() })
       .eq('id', item.id).is('request_id', null).eq('status', 'planned').select('id')
     if (linkErr || !claimed?.length) {
-      await setRequestStatus(admin, created.id, 'cancelled', { type: 'system', label: 'AI connector (rolled back)' })
+      await setRequestStatus(admin, created.id, 'cancelled', { type: 'system', label: `${actor} (rolled back)` })
       skipped.push({ id: item.id, title: item.title, reason: 'it was sent at the same moment from somewhere else' })
       continue
     }

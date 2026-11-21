@@ -27,6 +27,7 @@ const CRON_LABELS: Record<string, string> = {
   'recurring-tasks': 'Recurring Tasks',
   'payroll-draft': 'Payroll Auto-Draft',
   'business-alerts': 'Business Alerts',
+  autopilot: 'Autopilot',
   'cleanup-product-images': 'Image Cleanup',
 }
 
