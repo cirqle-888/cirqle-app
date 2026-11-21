@@ -56,8 +56,10 @@ describe('prompt with the client card', () => {
 
   it('puts the card, the post and the prompt together for a fresh chat', () => {
     const out = postPromptWithCard(card, brief)
-    expect(out.indexOf('CLIENT CARD')).toBeLessThan(out.indexOf('POST'))
-    expect(out.indexOf('POST')).toBeLessThan(out.indexOf('AI PROMPT'))
+    const at = (block: string) => out.indexOf(`\n\n${block}\n`)
+    expect(at('CLIENT CARD')).toBeGreaterThan(0)
+    expect(at('CLIENT CARD')).toBeLessThan(at('POST'))
+    expect(at('POST')).toBeLessThan(at('AI PROMPT'))
     expect(out).toContain('Brand: Sea Star Catering & Events')
     expect(out).toContain('Never show: Non-Indian looking people, blonde hair')
     expect(out).toContain('Format: Poster for Instagram and Facebook')
