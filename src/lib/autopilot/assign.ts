@@ -62,7 +62,7 @@ export async function assignWaitingRequests(admin: Admin, today: string, opts: {
     const person = empName.get(pick.employeeId) || 'Someone'
     await logRequestActivity(admin, {
       requestId: r.id, actorType: 'system', actorLabel: 'Autopilot', action: 'assigned', visibility: 'internal',
-      detail: { employee_id: pick.employeeId, employee_name: person, reason: `does ${Math.round(pick.share * 100)}% of ${client}'s recent work` },
+      detail: { employee_id: pick.employeeId, employee_name: person, reason: `does ${pick.sharePct}% of ${client}'s recent work` },
     })
     await createNotification({
       employeeId: pick.employeeId,

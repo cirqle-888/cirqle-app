@@ -7,7 +7,7 @@ const req = { id: 'r', client_id: 'sea', service_id: 'poster' }
 
 describe('who gets a new request', () => {
   it('picks the person who clearly does this client’s work', () => {
-    expect(pickAssignee(req, [h('rahul'), h('rahul'), h('anu', 'reel')], active)).toEqual({ employeeId: 'rahul', share: 0.86, jobs: 2 })
+    expect(pickAssignee(req, [h('rahul'), h('rahul'), h('anu', 'reel')], active)).toEqual({ employeeId: 'rahul', sharePct: 86, jobs: 2 })
   })
   it('weighs the same service above other work for the client', () => {
     const r = pickAssignee(req, [h('anu', 'reel'), h('anu', 'reel'), h('anu', 'reel'), h('rahul'), h('rahul')], active)

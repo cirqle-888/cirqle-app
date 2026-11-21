@@ -60,6 +60,16 @@ const nextConfig: NextConfig = {
       },
     ]
   },
+  // OAuth discovery for the MCP endpoint (lib/mcp/oauth.ts). AI apps look for
+  // these exact paths; the handlers live under /api/oauth/metadata.
+  async rewrites() {
+    return [
+      { source: '/.well-known/oauth-protected-resource', destination: '/api/oauth/metadata/protected-resource' },
+      { source: '/.well-known/oauth-protected-resource/api/mcp', destination: '/api/oauth/metadata/protected-resource' },
+      { source: '/.well-known/oauth-authorization-server', destination: '/api/oauth/metadata/authorization-server' },
+      { source: '/.well-known/oauth-authorization-server/api/mcp', destination: '/api/oauth/metadata/authorization-server' },
+    ]
+  },
   async redirects() {
     return [
       {
