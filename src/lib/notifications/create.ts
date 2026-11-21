@@ -47,6 +47,8 @@ export type NotificationType =
   | 'autopilot_trend_slots'
   | 'autopilot_draft_ready'
   | 'autopilot_draft_failed'
+  | 'autopilot_pay_due'
+  | 'autopilot_pay_check'
   /** Something shared from WhatsApp was filed in the Requests inbox. */
   | 'whatsapp_request'
   | 'whatsapp_capture_failed'

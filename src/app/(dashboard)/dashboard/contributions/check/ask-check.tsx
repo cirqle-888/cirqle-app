@@ -9,7 +9,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { Check, ClipboardCheck, Inbox, Link2, Loader2, Send } from 'lucide-react'
+import { Check, ClipboardCheck, Inbox, Link2, Loader2, Send, ShieldCheck } from 'lucide-react'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import AppSelect from '@/components/ui/app-select'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -41,6 +41,11 @@ export function AskCheckBar({ canAsk, employees, defaultEmployeeId, taskIds, myE
       <Link href="/dashboard/contributions/check" title="Contribution checks sent to you or by you" className={PILL}>
         <Inbox className="w-3.5 h-3.5 shrink-0" /> Checks
       </Link>
+      {canAsk && (
+        <Link href="/dashboard/contributions/autocheck" title="Finished work with nobody credited, designs sent with no task, and pay due: checked against WhatsApp and Instagram" className={PILL}>
+          <ShieldCheck className="w-3.5 h-3.5 shrink-0" /> Auto check
+        </Link>
+      )}
       {open && (
         <AskCheckDialog
           employees={employees.filter(e => e.id !== myEmployeeId)}
