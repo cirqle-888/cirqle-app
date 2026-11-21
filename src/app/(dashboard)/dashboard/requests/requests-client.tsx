@@ -1663,7 +1663,10 @@ export default function RequestsClient({
               </BoardDropZone>
             )
             return (
-              <BoardDropZone key={col.key} id={col.key} enabled={canBoardDrag} className="w-64 shrink-0 bg-secondary/40 border border-border rounded-2xl">
+              <BoardDropZone key={col.key} id={col.key} enabled={canBoardDrag}
+                // Stretch to the tallest column while dragging is on, so a drop
+                // in the empty space under a short column still lands in it.
+                className={`w-64 shrink-0 bg-secondary/40 border border-border rounded-2xl${canBoardDrag ? ' self-stretch' : ''}`}>
                 <div className="px-3 py-2.5 border-b border-border/60">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs font-bold truncate">{col.label}</p>
