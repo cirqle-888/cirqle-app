@@ -18,7 +18,7 @@ import { callGroqText } from '@/lib/ai/groq'
 import { parsePlan } from '@/lib/social/plan-import'
 import { addSocialPlanItems, cleanPlanItem } from '@/lib/social/plan-mcp'
 import type { PlanItemInput } from '@/lib/social/plan-mcp'
-import { notifyAdmins } from '@/lib/notifications/create'
+import { createNotification, notifyAdmins } from '@/lib/notifications/create'
 import {
   addDays, answerBudget, automatedRunNote, draftsDue, estimateTokens, monthHalves, monthLabel,
   monthStart, nextMonthStart, pickDraftCandidates, pickDuePosts, type DraftCandidateRow, type PlanItemRow,
@@ -220,12 +220,21 @@ export async function draftNextMonth(admin: Admin, today: string, opts: { force?
     })
     return { ok: false as const, error: `${next.name}: ${r.error}` }
   }
-  await notifyAdmins({
+  const ready = {
     type: 'autopilot_draft_ready',
     title: `AI draft ready: ${next.name}, ${monthLabel(month)} (${r.added} posts)`,
-    message: 'Review it, fix what needs fixing, then mark the plan Active. Active plans go to designers by themselves at lead time.',
+    message: 'Review it, fix what needs fixing, then press Mark Active. Active plans go to designers by themselves at lead time.',
     link: `/dashboard/social-calendar?calendar=${r.calendarId}`,
     sourceKey: `autopilot_draft:${next.clientId}:${month}`,
-  })
+  }
+  await notifyAdmins(ready)
+  // The person who made this month's plan is the client's planner: they review the draft.
+  // Same type and key as the admins' row, so a planner who is also an admin gets one, not two.
+  try {
+    const { data: cur } = await admin.from('social_calendars').select('created_by')
+      .eq('client_id', next.clientId).eq('month', monthStart(today)).maybeSingle()
+    const planner = (cur as any)?.created_by as string | null | undefined
+    if (planner) await createNotification({ ...ready, employeeId: planner })
+  } catch { /* created_by is optional */ }
   return { ok: true as const, drafted: { client: next.name, month, posts: r.added, calendarId: r.calendarId } }
 }
