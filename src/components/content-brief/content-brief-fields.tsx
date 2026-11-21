@@ -91,12 +91,17 @@ export interface ContentBriefFieldsProps {
   titleSuggestions?: string[]
   /** Reports upload problems to the page's toast. */
   onError?: (title: string, detail?: string) => void
+  /** The client: "Copy AI prompt" puts its Prompt Studio card above the prompt. */
+  clientId?: string | null
+  /** Platforms and post date, for the post details in "Copy AI prompt". */
+  platforms?: string[] | null
+  date?: string | null
 }
 
 export default function ContentBriefFields({
   title, onTitleChange, value, onChange, disabled = false, contentTypeRequired = false,
   showContentType = true, typeSide, children, titlePlaceholder = 'e.g. Onam offer poster', autoFocusTitle, onError,
-  smartTitle = false, titleSuggestions,
+  smartTitle = false, titleSuggestions, clientId, platforms, date,
 }: ContentBriefFieldsProps) {
   const set = (patch: Partial<ContentBriefDraft>) => onChange({ ...value, ...patch })
   const [copyTab, setCopyTab] = useState<'text' | 'canvas'>(value.captionCanvas?.blocks?.length && !value.caption ? 'canvas' : 'text')
@@ -255,7 +260,8 @@ export default function ContentBriefFields({
         open={isOpen('notes', !!value.notes.trim())} onToggle={() => toggle('notes', !!value.notes.trim())}>
         {(value.notes.trim() || title.trim()) && (
           <div className="flex justify-end mb-1.5">
-            <CopyAiPromptButton brief={{ title, contentType: value.contentType, caption: value.caption, notes: value.notes }} />
+            <CopyAiPromptButton clientId={clientId}
+              brief={{ title, contentType: value.contentType, caption: value.caption, notes: value.notes, platforms, date }} />
           </div>
         )}
         <textarea rows={3} value={value.notes} disabled={disabled}

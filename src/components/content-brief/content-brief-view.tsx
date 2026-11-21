@@ -18,8 +18,10 @@ import CopyAiPromptButton from './copy-ai-prompt'
 
 const SECTION = 'text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 mb-1.5'
 
-export default function ContentBriefView({ brief, platforms, scheduledDate, title }: {
+export default function ContentBriefView({ brief, platforms, scheduledDate, title, clientId }: {
   brief: ContentBrief
+  /** The client: "Copy AI prompt" puts its Prompt Studio card above the prompt. */
+  clientId?: string | null
   /** The request's title: used by "Copy AI prompt" when the notes carry no prompt. */
   title?: string | null
   /** From a calendar push (task_requests.social_meta) — shown as context. */
@@ -51,8 +53,8 @@ export default function ContentBriefView({ brief, platforms, scheduledDate, titl
           {platforms?.length ? <span className="text-[11px] px-2 py-0.5 rounded-md bg-secondary border border-border text-muted-foreground">{platformLabels(platforms)}</span> : null}
           {scheduledDate && <span className="text-[11px] px-2 py-0.5 rounded-md bg-secondary border border-border text-muted-foreground">Publishes {new Date(scheduledDate + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>}
           {!nothing && (
-            <CopyAiPromptButton className="ml-auto"
-              brief={{ title, contentType: brief.contentType, caption: brief.caption, notes: brief.notes, platforms }} />
+            <CopyAiPromptButton className="ml-auto" clientId={clientId}
+              brief={{ title, contentType: brief.contentType, caption: brief.caption, notes: brief.notes, platforms, date: scheduledDate }} />
           )}
         </div>
       )}

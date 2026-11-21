@@ -45,6 +45,9 @@ export const CLIENT_CARD_FIELDS: PromptField[] = [
     help: 'One pattern: every post looks alike. Same family: same colours and type, the layout changes. Mixed: each post can look different.' },
   { key: 'history',    label: 'Existing designs',    type: 'textarea', placeholder: 'Red header band on every poster, bold Malayalam headline, food photo in the centre, logo bottom right; playful captions with 2-3 emoji',
     help: 'How their posts look and sound today, and what to keep. "Fill with AI" can write this from their page.' },
+  { key: 'audienceByService', label: 'Audience by service', type: 'textarea',
+    placeholder: 'Weddings: local Malayali families and couples, Kerala wedding wear\nCorporate events: company teams in smart office wear\nBirthday parties: families with children, bright casual wear',
+    help: 'One line for each service or offer: who it is for, and how the people in those posts should look (age, clothes, setting). Every AI prompt for this client then shows the right people for the post.' },
 ]
 
 /** Fields that can be pre-filled from the clients table when a card is first opened. */
@@ -64,7 +67,7 @@ export interface CardGroup {
 
 /** How the card editor lays the fields out. Every field is in exactly one group. */
 export const CARD_GROUPS: CardGroup[] = [
-  { id: 'basics', name: 'Basics',       keys: ['brand', 'business', 'location', 'audience', 'language', 'contact', 'links'] },
+  { id: 'basics', name: 'Basics',       keys: ['brand', 'business', 'location', 'audience', 'audienceByService', 'language', 'contact', 'links'] },
   { id: 'brand',  name: 'Brand look',   keys: ['logo', 'colors', 'colorUse', 'feedStyle', 'look', 'history'] },
   { id: 'social', name: 'Social media', keys: ['platforms', 'postsPerWeek', 'goal', 'gulf'] },
   { id: 'more',   name: 'More details', keys: ['offer', 'mustShow', 'neverShow', 'worked', 'competitors', 'lengthSize', 'tools'], advanced: true },

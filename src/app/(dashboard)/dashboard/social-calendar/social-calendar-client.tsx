@@ -1846,6 +1846,9 @@ export default function SocialCalendarClient({
                 disabled={editingFrozen}
                 showContentType={false}
                 titlePlaceholder="e.g. Diwali teaser reel"
+                clientId={selected?.client_id ?? null}
+                platforms={itemForm.platforms}
+                date={itemForm.scheduledDate ?? null}
                 onError={(t, d) => toast.toastError(t, d)}
                 typeSide={
                 <div>

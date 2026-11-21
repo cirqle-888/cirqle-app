@@ -112,3 +112,13 @@ describe('the new card fields', () => {
     expect(out).toContain('Existing designs: Red band on top')
   })
 })
+
+describe('Audience by service', () => {
+  it('is asked for, read back and printed on the card', () => {
+    expect(cardFillPrompt({ name: 'Sea Star' })).toContain('Audience by service: <each service or offer')
+    const got = parseCardAnswer('Audience by service: Weddings: local families; Office parties: colleagues in office wear')
+    expect(got.card.audienceByService).toBe('Weddings: local families; Office parties: colleagues in office wear')
+    expect(CARD_GROUPS.find(g => g.id === 'basics')?.keys).toContain('audienceByService')
+    expect(renderClientCard({ brand: 'X', audienceByService: 'Weddings: families\nParties: friends' })).toContain('Audience by service: Weddings: families; Parties: friends')
+  })
+})
