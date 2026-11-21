@@ -8,7 +8,7 @@ import Header from '@/components/layout/header'
 import { createClient, safeFetchAll } from '@/lib/supabase/client'
 import { isMissingPricedSource } from '@/lib/supabase/priced'
 import {
-  bulkGeneratePayroll, createPayrollRecord, markPayrollPaid, markPayrollUnpaid,
+  bulkGeneratePayroll, createPayrollRecord, markPayrollPaid, markPayrollUnpaid, closePayrollWithoutPayment,
   toggleRevealSalary, createSalaryAdvance, createCreditEntry, refreshPayrollRecord, recalculatePayrollForMonth,
   convertCredit,
 } from './actions'
@@ -284,6 +284,8 @@ export default function PayrollClient({
     title: string; body: string; confirmLabel: string; onConfirm: () => void
     /** Shows the "Paid from" account picker (Mark Paid only). */
     bankPicker?: boolean
+    /** A quieter second choice under the buttons (Mark Paid: close without a Cash Book entry). */
+    secondary?: { label: string; hint: string; onClick: () => void }
   } | null>(null)
   // Preselected to the default account; kept across payments in one sitting,
   // so paying five people from Kotak is five clicks, not ten.
@@ -603,7 +605,23 @@ export default function PayrollClient({
       confirmLabel: 'Mark Paid',
       onConfirm:    () => markPaid(id),
       bankPicker:   true,
+      secondary: {
+        label: 'Already paid outside the app — close it',
+        hint:  'Marks it paid on the last day of its month. Nothing is added to the Cash Book.',
+        onClick: () => closeWithoutPayment(id),
+      },
     })
+  }
+
+  async function closeWithoutPayment(id: string) {
+    setConfirmModal(null)
+    const result = await closePayrollWithoutPayment(id)
+    if (result.ok && result.data) {
+      setPayroll(p => p.map(r => r.id === id ? { ...r, ...result.data!.updates } : r))
+      toastSuccess('Payslip closed', 'Marked paid. No Cash Book entry was made.')
+    } else {
+      toastError('Not closed', result.error)
+    }
   }
 
   async function markPaid(id: string) {
@@ -2825,6 +2843,15 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 {confirmModal.confirmLabel}
               </button>
             </div>
+            {confirmModal.secondary && (
+              <div className="mt-4 pt-3 border-t border-foreground/10 text-center">
+                <button onClick={confirmModal.secondary.onClick}
+                  className="text-xs font-medium text-muted-foreground hover:text-foreground underline underline-offset-2 transition-colors">
+                  {confirmModal.secondary.label}
+                </button>
+                <p className="mt-1 text-[11px] text-muted-foreground/80 leading-snug">{confirmModal.secondary.hint}</p>
+              </div>
+            )}
           </div>
         </div>
       )}

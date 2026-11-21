@@ -26,6 +26,7 @@ import { settleAdjustments, unsettleAdjustments, loadAdjustmentPlacement } from 
 import { computeMonthlyOwnership } from '@/lib/ownership/engine'
 import { retryWithoutScope, withoutScope } from '@/lib/finance/classify'
 import { todayISO } from '@/lib/utils/local-date'
+import { closedPaidDate } from '@/lib/payroll/close'
 
 const REVALIDATE = '/dashboard/payroll'
 
@@ -561,6 +562,58 @@ export async function markPayrollPaid(
       })
     }
   }
+
+  revalidatePath(REVALIDATE)
+  return { ok: true, data: { updates } }
+}
+
+// ─── Close without payment ───────────────────────────────────────────────────
+
+/**
+ * Close a payslip that was already paid outside the app: it becomes Paid with
+ * its live figures saved, and NOTHING is written to the Cash Book (Mark Paid
+ * would add a salary outflow dated today — a fake payment for an old month).
+ * Undo works the same as for a normal payment.
+ */
+export async function closePayrollWithoutPayment(
+  id: string,
+): Promise<ActionResult<{ updates: Record<string, unknown> }>> {
+  const guard = await requirePermission(PERMS.PAYROLL_MARK_PAID)
+  if (!guard.ok) return { ok: false, error: guard.error }
+
+  const admin = createAdminClient()
+  const { data: rec } = await admin.from('payroll')
+    .select('employee_id, month, year, status, base_salary, bonus, ownership_earned, advances_deducted, other_deductions, employee:employees(cqid)')
+    .eq('id', id).maybeSingle()
+  if (!rec) return { ok: false, error: 'Payroll record not found' }
+  const r = rec as unknown as { employee_id: string; month: number; year: number; status: string; employee: { cqid: string } | null }
+  if (r.status === 'paid') return { ok: false, error: 'Already paid' }
+
+  const live = await liveFigures(admin, rec as Parameters<typeof liveFigures>[1])
+  if ('error' in live) return { ok: false, error: live.error }
+
+  const updates: Record<string, unknown> = {
+    status: 'paid',
+    paid_date: closedPaidDate(r.month, r.year, todayISO()),
+    commission_earned: live.commission, ownership_earned: live.ownership,
+    adjustment_earned: live.adjustment, net_salary: live.net,
+  }
+  const { error } = await admin.from('payroll').update(updates).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+
+  // Same as a real payment: the corrections this payslip carried are discharged.
+  if (live.adjustment !== 0) {
+    await settleAdjustments(admin, r.employee_id, r.month, r.year).catch(() => ({ settled: 0 }))
+  }
+
+  void logActivity({
+    actorId:    guard.employeeId,
+    subjectId:  r.employee_id,
+    entityType: 'payroll',
+    entityId:   id,
+    action:     'marked_paid',
+    detail:     { month: r.month, year: r.year, net: live.net, cqid: r.employee?.cqid, outside_app: true, cashbook: false },
+  })
 
   revalidatePath(REVALIDATE)
   return { ok: true, data: { updates } }
