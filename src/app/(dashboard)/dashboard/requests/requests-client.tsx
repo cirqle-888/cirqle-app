@@ -2134,6 +2134,7 @@ export default function RequestsClient({
                 <ContentBriefView
                   brief={asContentBrief(open.content_brief)!}
                   title={open.title}
+                  clientId={open.client?.id ?? open.client_id ?? null}
                   platforms={open.social_meta?.platforms}
                   scheduledDate={open.social_meta?.scheduled_date}
                 />
@@ -2390,6 +2391,7 @@ export default function RequestsClient({
                 value={newForm.brief}
                 onChange={brief => setNewForm(f => ({ ...f, brief }))}
                 titlePlaceholder="e.g. Onam campaign poster set"
+                clientId={newForm.clientId || null}
                 smartTitle
                 titleSuggestions={requestTitles}
                 onError={(t, d) => toastError(t, d)}

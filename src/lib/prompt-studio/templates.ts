@@ -841,7 +841,7 @@ Visual direction: layout, photo or footage, colours, text style and where the lo
 Caption: ready to post, in the card's language, ending with a call to action
 Hashtags: 8 to 12, local ones first
 Designer needs: photos, footage and facts to get from the client
-AI prompt: one ready-to-paste prompt for an image tool (poster, story, carousel) or a video tool (reel) that makes a first draft: subject, composition, lighting, the card's colours, size, and empty space for the text. End it with "no text in the image, no logo".
+AI prompt: one ready-to-paste prompt for an image tool (poster, story, carousel) or a video tool (reel) that makes a first draft: subject, the people (who fit this post's audience; use the card's Audience by service line when it has one: age, clothes, setting), composition, lighting, the card's colours, size, and empty space for the text. End it with "no text in the image, no logo".
 Reel script: reels only: 4 to 6 shots with seconds, on-screen text and sound
 References: 2 or 3 real examples you opened that show a similar idea or style. Best is the direct link to the picture itself (ending .jpg, .png or .webp), so it previews for the designer; a page link is second best. If you have neither, write search phrases instead. Never invent a link.
 

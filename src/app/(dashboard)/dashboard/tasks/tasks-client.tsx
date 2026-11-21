@@ -5925,6 +5925,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                   <ContentBriefView
                     brief={asContentBrief(requestBrief.data.content_brief)!}
                     title={requestBrief.data.title}
+                    clientId={requestBrief.data.client?.id ?? null}
                     platforms={requestBrief.data.social_meta?.platforms}
                     scheduledDate={requestBrief.data.social_meta?.scheduled_date}
                   />

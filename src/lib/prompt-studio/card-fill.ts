@@ -18,6 +18,7 @@ const HINTS: Record<string, string> = {
   offer: 'a current package or offer with its price, only if a post shows it',
   contact: 'phone numbers in the order the page shows them, then the address',
   audience: 'who their posts speak to',
+  audienceByService: 'each service or offer they post about, who it is for, and how the people in those posts look and dress, separated by semicolons, like "Weddings: local families and couples in Kerala wedding wear; Office parties: colleagues in smart office wear"',
   language: 'the language of their posts',
   look: 'the look and feel in one line',
   colors: 'main colours with hex codes, read from the logo and recent posts',
