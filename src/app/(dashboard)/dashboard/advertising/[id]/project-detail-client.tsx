@@ -52,10 +52,13 @@ import { generateForecast } from '@/lib/advertising/ai/forecasting'
 import { assessCampaignHealth, healthLabel } from '@/lib/reporting/campaign-health'
 import { resultDefinitionFor, resultCount, costPerSelectedResult, type ResultDefinition } from '@/lib/reporting/result-type'
 import { syncFreshness } from '@/lib/advertising/freshness'
+import { pageLabel, type CampaignPageOption } from '@/lib/advertising/campaign-page'
 
 type Project = AdProjectRow & { 
   client?: { id: string; name: string; code: string } | null,
   archived_at?: string | null
+  page_account_id?: string | null
+  page?: { id: string; name: string; username: string | null; platform: string } | null
 }
 
 export interface CampaignAllocation {
@@ -94,6 +97,8 @@ interface Props {
   reportPreferencesSupported?: boolean
   /** Platform-side status (may lag) and Ads Manager deep link; null = not linked. */
   platform?: { provider: string | null; status: string | null; statusSeenAt: string | null; adsManagerUrl: string | null } | null
+  /** Pages this campaign may name (Cirqle's own for a company campaign). */
+  pages?: CampaignPageOption[]
   perms: { edit: boolean; manageBudget: boolean; enterMetrics: boolean; approveMetrics: boolean; viewFinancials: boolean; viewBilling: boolean }
 }
 
@@ -113,7 +118,7 @@ const LEGACY_TAB: Record<string, Tab> = {
   reports: 'reports',
 }
 
-export default function ProjectDetailClient({ project, metrics, tasks, notes, invoice, services, servicePricing, allocations = [], wallet = null, allocSupported = false, benchmarks = null, platform = null, clientCampaigns = [], reportPreferences = {}, reportPreferencesSupported = false, perms }: Props) {
+export default function ProjectDetailClient({ project, metrics, tasks, notes, invoice, services, servicePricing, allocations = [], wallet = null, allocSupported = false, benchmarks = null, platform = null, clientCampaigns = [], reportPreferences = {}, reportPreferencesSupported = false, pages = [], perms }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -244,7 +249,8 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
               <DiscussButton entityType="project" entityId={project.id} variant="icon" label="Discuss this campaign" panelTitle={project.campaign_name} />
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {adRefLabel(project.id)} · {project.client?.name || 'No client'} · {PLATFORM_LABEL[project.platform] || project.platform}
+              {adRefLabel(project.id)} · {project.client?.name || (project.page ? 'Cirqle' : 'No client')}
+              {project.page ? ` · ${pageLabel(project.page)}` : ''} · {PLATFORM_LABEL[project.platform] || project.platform}
               {project.campaign_type ? ` · ${CAMPAIGN_TYPE_LABEL[project.campaign_type] || project.campaign_type}` : ''}
             </p>
             {/* The campaign in one line: objective result, cost, dates, freshness. */}
@@ -366,7 +372,7 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
           <OverviewTab
             project={project} agg={agg} remaining={remaining} health={health} result={result}
             allocations={allocations} wallet={wallet} allocSupported={allocSupported}
-            campaignTask={tasks[0] ?? null} invoice={invoice} perms={perms}
+            campaignTask={tasks[0] ?? null} invoice={invoice} pages={pages} perms={perms}
           />
           {/* Activity = notes + the full event timeline (formerly two tabs). */}
           <section id="activity" aria-labelledby="activity-heading" className="space-y-3 border-t border-border pt-4">
@@ -414,7 +420,7 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
 
 // ─── Overview ────────────────────────────────────────────────────────────────
 
-function OverviewTab({ project, agg, remaining, health, result, allocations = [], wallet = null, allocSupported = false, campaignTask = null, invoice = null, perms }: {
+function OverviewTab({ project, agg, remaining, health, result, allocations = [], wallet = null, allocSupported = false, campaignTask = null, invoice = null, pages = [], perms }: {
   project: Project
   agg: ReturnType<typeof aggregateMetrics>
   remaining: number | null
@@ -425,6 +431,7 @@ function OverviewTab({ project, agg, remaining, health, result, allocations = []
   allocSupported?: boolean
   campaignTask?: Props['tasks'][number] | null
   invoice?: Props['invoice']
+  pages?: CampaignPageOption[]
   perms: Props['perms']
 }) {
   const router = useRouter()
@@ -447,6 +454,21 @@ function OverviewTab({ project, agg, remaining, health, result, allocations = []
     setSavingObjective(false)
     if (res.ok) router.refresh()
     else { setObjective(previous); setObjectiveError(res.error ?? 'Could not save the objective.') }
+  }
+
+  const [pageId, setPageId] = useState(project.page_account_id ?? '')
+  const [savingPage, setSavingPage] = useState(false)
+  const [pageError, setPageError] = useState<string | null>(null)
+
+  // Which page this campaign advertises — for a company campaign, which of
+  // Cirqle's own pages (Cirqle Works, Cirqle Flyers). Saves on change.
+  async function savePage(next: string) {
+    const previous = pageId
+    setPageId(next); setSavingPage(true); setPageError(null)
+    const res = await updateAdProject(project.id, { pageAccountId: next || null })
+    setSavingPage(false)
+    if (res.ok) router.refresh()
+    else { setPageId(previous); setPageError(res.error ?? 'Could not save the page.') }
   }
 
   async function saveDates() {
@@ -547,6 +569,30 @@ function OverviewTab({ project, agg, remaining, health, result, allocations = []
             {savingObjective && <Loader2 className="h-3 w-3 animate-spin" />}
           </label>
           {objectiveError && <span role="alert" className="text-red-500">{objectiveError}</span>}
+          {(pages.length > 0 || project.page) && (
+            <label className="inline-flex items-center gap-1.5" title="The Facebook Page or Instagram account this campaign advertises">
+              <span>Page</span>
+              {perms.edit ? (
+                <select
+                  value={pageId}
+                  onChange={e => void savePage(e.target.value)}
+                  disabled={savingPage}
+                  aria-label="Page advertised"
+                  className="max-w-[14rem] rounded border border-border bg-background px-1.5 py-0.5 text-xs text-foreground disabled:opacity-50"
+                >
+                  <option value="">Not set</option>
+                  {project.page && !pages.some(p => p.id === project.page!.id) && (
+                    <option value={project.page.id}>{pageLabel(project.page)}</option>
+                  )}
+                  {pages.map(p => <option key={p.id} value={p.id}>{pageLabel(p)}</option>)}
+                </select>
+              ) : (
+                <span className="text-foreground">{project.page ? pageLabel(project.page) : 'Not set'}</span>
+              )}
+              {savingPage && <Loader2 className="h-3 w-3 animate-spin" />}
+            </label>
+          )}
+          {pageError && <span role="alert" className="text-red-500">{pageError}</span>}
           {editingDates ? (
             <div className="flex items-center gap-1.5">
               <input type="date" value={startDateInput} onChange={e => setStartDateInput(e.target.value)}

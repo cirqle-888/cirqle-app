@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
+import { loadPageOptions } from '@/lib/advertising/campaign-page'
 import NewCampaignForm from './new-campaign-form'
 
 export const dynamic = 'force-dynamic'
@@ -20,13 +21,15 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
     || hasPermission(me, PERMS.ADVERTISING_MANAGE_BUDGET)
 
   const admin = createAdminClient()
-  const [clientsRes, servicesRes, pricingRes] = await Promise.all([
+  const [clientsRes, servicesRes, pricingRes, pages] = await Promise.all([
     admin.from('clients').select('id, name, code').order('name'),
     admin.from('services').select('id, name, pricing_type, default_price').eq('is_active', true).order('display_order').order('name'),
     // Per-client rate overrides (e.g. a custom % for a given client).
     viewBilling
       ? admin.from('client_service_pricing').select('client_id, service_id, price').not('price', 'is', null)
       : Promise.resolve({ data: [] as { client_id: string; service_id: string; price: number }[] }),
+    // Pages a campaign can advertise (Cirqle's own for company campaigns).
+    loadPageOptions(admin),
   ])
 
   // ?client= preselects the client (the Marketing Hub's "New campaign").
@@ -42,6 +45,7 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
         ? (servicesRes.data || [])
         : (servicesRes.data || []).map(s => ({ ...s, default_price: null }))}
       servicePricing={pricingRes.data || []}
+      pages={pages}
     />
   )
 }
