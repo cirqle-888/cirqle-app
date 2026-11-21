@@ -98,6 +98,24 @@ export interface CreateAdProjectInput {
   requestId?: string | null
   /** The Page / IG account advertised (social_accounts.id) — tells Cirqle's own pages apart. */
   pageAccountId?: string | null
+  /** Company campaigns: which Cirqle brand it promotes (null = default). The page's brand wins. */
+  brandId?: string | null
+}
+
+/**
+ * The brand a company campaign should carry: its page's brand when the page
+ * has one, otherwise what was picked. Client campaigns never carry a brand.
+ */
+async function resolveCampaignBrand(
+  admin: SupabaseClient, clientId: string | null, pageAccountId: string | null | undefined, picked: string | null | undefined,
+): Promise<string | null> {
+  if (clientId) return null
+  if (pageAccountId) {
+    const { data } = await admin.from('social_accounts').select('brand_id').eq('id', pageAccountId).maybeSingle()
+      .then(r => r, () => ({ data: null }))
+    if (data?.brand_id) return data.brand_id as string
+  }
+  return picked || null
 }
 
 /**
@@ -165,6 +183,12 @@ export async function createAdProject(
   // The advertised page (best-effort — column added by 20261121200000).
   if (input.pageAccountId) {
     await admin.from('ad_projects').update({ page_account_id: input.pageAccountId }).eq('id', id)
+      .then(null, () => { /* not migrated */ })
+  }
+  // The Cirqle brand of a company campaign (best-effort — 20261122100000).
+  const brandId = await resolveCampaignBrand(admin, input.clientId || null, input.pageAccountId, input.brandId)
+  if (brandId) {
+    await admin.from('ad_projects').update({ brand_id: brandId }).eq('id', id)
       .then(null, () => { /* not migrated */ })
   }
   await logAdEvent(admin, id, 'created', guard.employeeId, {
@@ -242,6 +266,8 @@ export interface UpdateAdProjectInput {
   notes?: string | null
   /** The advertised Page / IG account; null clears it. */
   pageAccountId?: string | null
+  /** Company campaigns: the Cirqle brand (null = default). */
+  brandId?: string | null
 }
 
 export async function updateAdProject(id: string, patch: UpdateAdProjectInput): Promise<ActionResult> {
@@ -267,17 +293,30 @@ export async function updateAdProject(id: string, patch: UpdateAdProjectInput): 
   if (patch.startDate !== undefined)        upd.start_date = patch.startDate
   if (patch.endDate !== undefined)          upd.end_date = patch.endDate
   if (patch.notes !== undefined)            upd.notes = patch.notes
-  if (patch.pageAccountId !== undefined) {
-    const { data: owner } = await admin.from('ad_projects').select('client_id').eq('id', id).maybeSingle()
-    const pageError = await checkPageOwner(admin, patch.pageAccountId, owner?.client_id ?? null)
-    if (pageError) return { ok: false, error: pageError }
-    upd.page_account_id = patch.pageAccountId || null
+  if (patch.pageAccountId !== undefined || patch.brandId !== undefined) {
+    const { data: owner } = await admin.from('ad_projects').select('client_id, page_account_id').eq('id', id).maybeSingle()
+    const clientId = owner?.client_id ?? null
+    if (patch.pageAccountId !== undefined) {
+      const pageError = await checkPageOwner(admin, patch.pageAccountId, clientId)
+      if (pageError) return { ok: false, error: pageError }
+      upd.page_account_id = patch.pageAccountId || null
+    }
+    // A company campaign's brand follows its page; picking a brand directly
+    // only sticks while the page has none.
+    if (!clientId) {
+      const page = patch.pageAccountId !== undefined ? patch.pageAccountId : owner?.page_account_id
+      const brand = await resolveCampaignBrand(admin, null, page, patch.brandId !== undefined ? patch.brandId : undefined)
+      if (brand !== null || patch.brandId !== undefined) upd.brand_id = brand
+    }
   }
 
   const { error } = await admin.from('ad_projects').update(upd).eq('id', id)
   if (error) {
     if (patch.pageAccountId !== undefined && /page_account_id/.test(error.message)) {
       return { ok: false, error: 'Campaign pages are not set up in the database yet (migration 20261121200000).' }
+    }
+    if (/brand_id/.test(error.message)) {
+      return { ok: false, error: 'Brands are not set up in the database yet (migration 20261122100000).' }
     }
     return { ok: false, error: error.message }
   }

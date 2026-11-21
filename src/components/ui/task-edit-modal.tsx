@@ -4,6 +4,8 @@ import { useState, useEffect, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import { X, Trash2, BarChart2, Clock } from 'lucide-react'
 import { serverSaveTask, serverDeleteTask, fetchClientPackages } from '@/app/(dashboard)/dashboard/tasks/actions'
+import { setTaskBrand } from '@/app/(dashboard)/dashboard/cirqle-accounts/actions'
+import { BrandSelect } from '@/components/brands/brand-select'
 import { buildServiceOptions } from '@/lib/tasks/service-options'
 import { ModalOverlay } from './modal-overlay'
 import AppSelect from './app-select'
@@ -94,6 +96,10 @@ export function TaskEditModal({
     no_charge_reason: (task.no_charge_reason as string | null) ?? null,
     package_counts_as_service_id: (task.package_counts_as_service_id as string | null) ?? null,
   })
+  // Internal work's Cirqle brand. Only sent when changed: a list that loaded
+  // tasks without brand_id must not wipe a brand by saving something else.
+  const [brandId, setBrandId] = useState<string>(((task as { brand_id?: string | null }).brand_id) ?? '')
+  const [brandTouched, setBrandTouched] = useState(false)
 
   // ── Committed services pinned in the picker ────────────────────────────────
   // Same treatment as the Add Task form: what the client has actually
@@ -233,6 +239,17 @@ export function TaskEditModal({
       return
     }
 
+    // Internal work's brand (a client task is cleared server-side).
+    if (brandTouched && !form.client_id) {
+      const b = await setTaskBrand(task.id, brandId || null)
+      if (!b.ok) {
+        setSaving(false)
+        onSaved(res.data)
+        setSaveError(`Task saved, but the brand was not: ${b.error}`)
+        return
+      }
+    }
+
     // The referral saves AFTER the task, against the task's saved date — so a
     // job moved to another month pays in the month it now belongs to. If this
     // half fails, the task stays saved and the modal stays open to say why.
@@ -360,6 +377,15 @@ export function TaskEditModal({
                   />
                 </div>
               </div>
+
+              {!form.client_id && (
+                <BrandSelect
+                  value={brandId}
+                  onChange={id => { setBrandId(id); setBrandTouched(true) }}
+                  label="Cirqle brand"
+                  hint="Internal work — which of our brands it is for."
+                />
+              )}
 
               {/* Task Date + Status */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

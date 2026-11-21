@@ -17,7 +17,7 @@ import Link from 'next/link'
 import { PLATFORMS, CAMPAIGN_TYPES, STATUSES } from '@/lib/advertising/types'
 import { createAdProject } from '../actions'
 import BudgetFields, { emptyBudget, resolveBudget, type BudgetValue } from '../budget-fields'
-import { pageLabel, pagesFor, type CampaignPageOption } from '@/lib/advertising/campaign-page'
+import { pageLabel, pagesFor, pagesForBrand, type CampaignPageOption } from '@/lib/advertising/campaign-page'
 
 interface ServiceRow { id: string; name: string; pricing_type: string | null; default_price: number | null }
 interface Props {
@@ -28,11 +28,14 @@ interface Props {
   initialClientId?: string
   /** Connected Pages / IG accounts; filtered to the chosen owner. */
   pages?: CampaignPageOption[]
+  /** Cirqle's own brands, for company campaigns. */
+  brands?: { id: string; name: string; isDefault: boolean }[]
+  initialBrandId?: string
 }
 
 const inrFmt = (v: number) => `₹${Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
 
-export default function NewCampaignForm({ clients, services, servicePricing, initialClientId, pages = [] }: Props) {
+export default function NewCampaignForm({ clients, services, servicePricing, initialClientId, pages = [], brands = [], initialBrandId }: Props) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -48,7 +51,12 @@ export default function NewCampaignForm({ clients, services, servicePricing, ini
   const [objective, setObjective] = useState('')
   const [budget, setBudget] = useState<BudgetValue>(emptyBudget())
   const [pageAccountId, setPageAccountId] = useState('')
-  const pageChoices = pagesFor(pages, clientId || null)
+  const defaultBrandId = brands.find(b => b.isDefault)?.id ?? null
+  const [brandId, setBrandId] = useState(initialBrandId ?? '')
+  // Company campaigns with several brands: pages of the chosen brand only.
+  const pageChoices = !clientId && brands.length > 1
+    ? pagesForBrand(pages, brandId || null, defaultBrandId)
+    : pagesFor(pages, clientId || null)
 
   // Smart Router prefill.
   useEffect(() => {
@@ -120,6 +128,7 @@ export default function NewCampaignForm({ clients, services, servicePricing, ini
       startDate: startDate || null,
       endDate: endDate || null,
       pageAccountId: pageChoices.some(p => p.id === pageAccountId) ? pageAccountId : null,
+      brandId: clientId ? null : (brandId && brandId !== defaultBrandId ? brandId : null),
     })
     setBusy(false)
     if (res.ok && res.data) router.push(`/dashboard/advertising/${res.data.id}`)
@@ -184,6 +193,15 @@ export default function NewCampaignForm({ clients, services, servicePricing, ini
                 {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
               </select>
             </div>
+            {!clientId && brands.length > 1 && (
+              <div className="col-span-2">
+                <label className={labelCls}>Cirqle brand</label>
+                <select value={brandId && brandId !== defaultBrandId ? brandId : ''} onChange={e => { setBrandId(e.target.value); setPageAccountId('') }} className={field}>
+                  {brands.map(b => <option key={b.id} value={b.isDefault ? '' : b.id}>{b.name}</option>)}
+                </select>
+                <p className="mt-1 text-[10px] text-muted-foreground">Which of Cirqle&apos;s brands this campaign promotes. Its spend counts toward that brand.</p>
+              </div>
+            )}
             <div className="col-span-2">
               <label className={labelCls}>{clientId ? 'Page advertised' : 'Cirqle page advertised'}</label>
               <select value={pageAccountId} onChange={e => setPageAccountId(e.target.value)} className={field}>

@@ -6,7 +6,8 @@ import { PERMS } from '@/lib/permissions/keys'
 import { getWalletSummary, getCompanyWalletSummary } from '@/lib/advertising/wallet'
 import { getBenchmarksWithSource } from '@/lib/advertising/ai/benchmarks'
 import { loadClientReportPreferences } from '@/lib/reporting/preferences'
-import { attachPages, loadPageOptions, pagesFor } from '@/lib/advertising/campaign-page'
+import { attachPages, loadPageOptions, pagesFor, pagesForBrand } from '@/lib/advertising/campaign-page'
+import { loadBrands } from '@/lib/brands/load'
 import ProjectDetailClient from './project-detail-client'
 
 export const dynamic = 'force-dynamic'
@@ -85,10 +86,15 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
   // the RSC payload entirely.
   // The advertised page (company campaigns: which of Cirqle's own pages) and
   // the pages it may be changed to. Best-effort before the column exists.
-  const [[withPage], pageOptions] = await Promise.all([
+  const [[withPage], pageOptions, brands] = await Promise.all([
     attachPages(admin, [project]),
     loadPageOptions(admin),
+    loadBrands(admin, { activeOnly: true }),
   ])
+  // Company campaigns: Cirqle's brands, and the pages of this one's brand.
+  const defaultBrandId = brands.find(b => b.is_default)?.id ?? null
+  const campaignBrandId = (project as any).brand_id ?? null
+  const brandOptions = project.client_id ? [] : brands.map(b => ({ id: b.id, name: b.name, isDefault: b.is_default }))
   const safeProject = viewBilling ? withPage : {
     ...withPage, service_charge_type: null, service_charge_value: null, tax_percent: null,
   }
@@ -136,7 +142,10 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
       clientCampaigns={clientCampaigns}
       reportPreferences={reportPrefs.byClient}
       reportPreferencesSupported={reportPrefs.supported}
-      pages={pagesFor(pageOptions, project.client_id ?? null)}
+      pages={project.client_id || brands.length < 2
+        ? pagesFor(pageOptions, project.client_id ?? null)
+        : pagesForBrand(pageOptions, campaignBrandId, defaultBrandId)}
+      brands={brandOptions}
       perms={perms}
     />
   )

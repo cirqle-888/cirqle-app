@@ -59,6 +59,7 @@ type Project = AdProjectRow & {
   archived_at?: string | null
   page_account_id?: string | null
   page?: { id: string; name: string; username: string | null; platform: string } | null
+  brand_id?: string | null
 }
 
 export interface CampaignAllocation {
@@ -99,6 +100,8 @@ interface Props {
   platform?: { provider: string | null; status: string | null; statusSeenAt: string | null; adsManagerUrl: string | null } | null
   /** Pages this campaign may name (Cirqle's own for a company campaign). */
   pages?: CampaignPageOption[]
+  /** Company campaigns: Cirqle's brands ([] for client campaigns). */
+  brands?: { id: string; name: string; isDefault: boolean }[]
   perms: { edit: boolean; manageBudget: boolean; enterMetrics: boolean; approveMetrics: boolean; viewFinancials: boolean; viewBilling: boolean }
 }
 
@@ -118,7 +121,7 @@ const LEGACY_TAB: Record<string, Tab> = {
   reports: 'reports',
 }
 
-export default function ProjectDetailClient({ project, metrics, tasks, notes, invoice, services, servicePricing, allocations = [], wallet = null, allocSupported = false, benchmarks = null, platform = null, clientCampaigns = [], reportPreferences = {}, reportPreferencesSupported = false, pages = [], perms }: Props) {
+export default function ProjectDetailClient({ project, metrics, tasks, notes, invoice, services, servicePricing, allocations = [], wallet = null, allocSupported = false, benchmarks = null, platform = null, clientCampaigns = [], reportPreferences = {}, reportPreferencesSupported = false, pages = [], brands = [], perms }: Props) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -249,7 +252,9 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
               <DiscussButton entityType="project" entityId={project.id} variant="icon" label="Discuss this campaign" panelTitle={project.campaign_name} />
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {adRefLabel(project.id)} · {project.client?.name || (project.page ? 'Cirqle' : 'No client')}
+              {adRefLabel(project.id)} · {project.client?.name || (brands.length > 0
+                ? (brands.find(b => b.id === project.brand_id) ?? brands.find(b => b.isDefault))?.name ?? 'Cirqle'
+                : project.page ? 'Cirqle' : 'No client')}
               {project.page ? ` · ${pageLabel(project.page)}` : ''} · {PLATFORM_LABEL[project.platform] || project.platform}
               {project.campaign_type ? ` · ${CAMPAIGN_TYPE_LABEL[project.campaign_type] || project.campaign_type}` : ''}
             </p>
@@ -372,7 +377,7 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
           <OverviewTab
             project={project} agg={agg} remaining={remaining} health={health} result={result}
             allocations={allocations} wallet={wallet} allocSupported={allocSupported}
-            campaignTask={tasks[0] ?? null} invoice={invoice} pages={pages} perms={perms}
+            campaignTask={tasks[0] ?? null} invoice={invoice} pages={pages} brands={brands} perms={perms}
           />
           {/* Activity = notes + the full event timeline (formerly two tabs). */}
           <section id="activity" aria-labelledby="activity-heading" className="space-y-3 border-t border-border pt-4">
@@ -420,7 +425,7 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
 
 // ─── Overview ────────────────────────────────────────────────────────────────
 
-function OverviewTab({ project, agg, remaining, health, result, allocations = [], wallet = null, allocSupported = false, campaignTask = null, invoice = null, pages = [], perms }: {
+function OverviewTab({ project, agg, remaining, health, result, allocations = [], wallet = null, allocSupported = false, campaignTask = null, invoice = null, pages = [], brands = [], perms }: {
   project: Project
   agg: ReturnType<typeof aggregateMetrics>
   remaining: number | null
@@ -432,6 +437,7 @@ function OverviewTab({ project, agg, remaining, health, result, allocations = []
   campaignTask?: Props['tasks'][number] | null
   invoice?: Props['invoice']
   pages?: CampaignPageOption[]
+  brands?: Props['brands']
   perms: Props['perms']
 }) {
   const router = useRouter()
@@ -469,6 +475,21 @@ function OverviewTab({ project, agg, remaining, health, result, allocations = []
     setSavingPage(false)
     if (res.ok) router.refresh()
     else { setPageId(previous); setPageError(res.error ?? 'Could not save the page.') }
+  }
+
+  const defaultBrandId = brands.find(b => b.isDefault)?.id ?? ''
+  const [brandSel, setBrandSel] = useState(project.brand_id && project.brand_id !== defaultBrandId ? project.brand_id : '')
+  const [savingBrand, setSavingBrand] = useState(false)
+
+  // Company campaigns: which Cirqle brand it promotes. Clears the page, since
+  // a page belongs to one brand and the list below follows the brand.
+  async function saveBrand(next: string) {
+    const previous = brandSel
+    setBrandSel(next); setSavingBrand(true); setPageError(null)
+    const res = await updateAdProject(project.id, { brandId: next || null, ...(project.page_account_id ? { pageAccountId: null } : {}) })
+    setSavingBrand(false)
+    if (res.ok) { setPageId(''); router.refresh() }
+    else { setBrandSel(previous); setPageError(res.error ?? 'Could not save the brand.') }
   }
 
   async function saveDates() {
@@ -569,6 +590,25 @@ function OverviewTab({ project, agg, remaining, health, result, allocations = []
             {savingObjective && <Loader2 className="h-3 w-3 animate-spin" />}
           </label>
           {objectiveError && <span role="alert" className="text-red-500">{objectiveError}</span>}
+          {brands.length > 1 && (
+            <label className="inline-flex items-center gap-1.5" title="Which of Cirqle's brands this campaign promotes">
+              <span>Brand</span>
+              {perms.edit ? (
+                <select
+                  value={brandSel}
+                  onChange={e => void saveBrand(e.target.value)}
+                  disabled={savingBrand}
+                  aria-label="Cirqle brand"
+                  className="max-w-[12rem] rounded border border-border bg-background px-1.5 py-0.5 text-xs text-foreground disabled:opacity-50"
+                >
+                  {brands.map(b => <option key={b.id} value={b.isDefault ? '' : b.id}>{b.name}</option>)}
+                </select>
+              ) : (
+                <span className="text-foreground">{(brands.find(b => b.id === brandSel) ?? brands.find(b => b.isDefault))?.name}</span>
+              )}
+              {savingBrand && <Loader2 className="h-3 w-3 animate-spin" />}
+            </label>
+          )}
           {(pages.length > 0 || project.page) && (
             <label className="inline-flex items-center gap-1.5" title="The Facebook Page or Instagram account this campaign advertises">
               <span>Page</span>

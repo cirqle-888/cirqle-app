@@ -18,6 +18,8 @@ export interface CampaignPageOption {
   platform: 'facebook_page' | 'instagram' | string
   clientId: string | null
   ownerType: string | null
+  /** The Cirqle brand of a Cirqle-owned account (NULL = default brand). */
+  brandId?: string | null
 }
 
 /** "Cirqle Flyers · Facebook" / "@cirqle_flyers · Instagram". */
@@ -38,17 +40,30 @@ export function pagesFor(options: CampaignPageOption[], clientId: string | null)
 
 /** Every connected page/account, for the pickers. Empty if unreadable. */
 export async function loadPageOptions(admin: SupabaseClient): Promise<CampaignPageOption[]> {
+  const read = (cols: string) => admin.from('social_accounts').select(cols).order('name')
   try {
-    const { data, error } = await admin
-      .from('social_accounts')
-      .select('id, name, username, platform, client_id, owner_type')
-      .order('name')
+    // brand_id arrives with migration 20261122100000; without it, read the rest.
+    let { data, error } = await read('id, name, username, platform, client_id, owner_type, brand_id')
+    if (error) ({ data, error } = await read('id, name, username, platform, client_id, owner_type'))
     if (error) return []
     return (data ?? []).map((r: any) => ({
       id: r.id, name: r.name, username: r.username ?? null, platform: r.platform,
-      clientId: r.client_id ?? null, ownerType: r.owner_type ?? null,
+      clientId: r.client_id ?? null, ownerType: r.owner_type ?? null, brandId: r.brand_id ?? null,
     }))
   } catch { return [] }
+}
+
+/**
+ * Company campaigns: the pages of one brand. A page with no brand belongs to
+ * the default brand, so `defaultBrandId` decides where those fall.
+ */
+export function pagesForBrand(
+  options: CampaignPageOption[], brandId: string | null, defaultBrandId: string | null,
+): CampaignPageOption[] {
+  const cirqle = pagesFor(options, null)
+  if (!brandId && !defaultBrandId) return cirqle
+  const want = brandId || defaultBrandId
+  return cirqle.filter(o => (o.brandId || defaultBrandId) === want)
 }
 
 /**
