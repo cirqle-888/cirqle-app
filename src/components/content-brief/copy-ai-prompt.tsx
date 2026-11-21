@@ -5,24 +5,27 @@ import Link from 'next/link'
 import { Check, Sparkles } from 'lucide-react'
 import { usePermissions } from '@/contexts/permission-context'
 import { copyToClipboard } from '@/lib/clipboard'
+import { copyImage } from '@/lib/copy-image'
 import { aiPromptForBrief, postPromptWithCard, type BriefForPrompt } from '@/lib/content-brief-prompt'
 import { renderClientCard } from '@/lib/prompt-studio/render'
 import { loadClientCard } from '@/app/(dashboard)/dashboard/prompt-studio/actions'
 
 /** How long a loaded card is reused before it is fetched again (an edit in Prompt Studio shows up after this). */
 const FRESH_MS = 60_000
-/** clientId → the card as printed in prompts ('' = no card), shared by every button on the page. */
-const cards = new Map<string, { at: number; text: Promise<string> }>()
+interface LoadedCard { text: string; logo: string }
+const NO_CARD: LoadedCard = { text: '', logo: '' }
+/** clientId → the card as printed in prompts ('' = no card) and its logo link, shared by every button on the page. */
+const cards = new Map<string, { at: number; card: Promise<LoadedCard> }>()
 
-function cardText(clientId: string): Promise<string> {
+function loadCard(clientId: string): Promise<LoadedCard> {
   const hit = cards.get(clientId)
-  if (hit && Date.now() - hit.at < FRESH_MS) return hit.text
-  const text = loadClientCard(clientId).then(
-    r => (r.ok ? renderClientCard(r.data?.card ?? null) : ''),
-    () => '',
+  if (hit && Date.now() - hit.at < FRESH_MS) return hit.card
+  const card = loadClientCard(clientId).then(
+    (r): LoadedCard => (r.ok ? { text: renderClientCard(r.data?.card ?? null), logo: (r.data?.card?.logo ?? '').trim() } : NO_CARD),
+    () => NO_CARD,
   )
-  cards.set(clientId, { at: Date.now(), text })
-  return text
+  cards.set(clientId, { at: Date.now(), card })
+  return card
 }
 
 /**
@@ -43,28 +46,39 @@ export default function CopyAiPromptButton({ brief, clientId, className = '' }: 
 }) {
   const { can } = usePermissions()
   const useCard = !!clientId && can('prompt_studio.view')
-  const [card, setCard] = useState<{ id: string; text: string } | null>(null)
-  const [copied, setCopied] = useState<'full' | 'prompt' | null>(null)
+  const [card, setCard] = useState<({ id: string } & LoadedCard) | null>(null)
+  const [copied, setCopied] = useState<'full' | 'prompt' | 'logo' | 'logo-link' | null>(null)
+  const [logoFailed, setLogoFailed] = useState(false)
 
   useEffect(() => {
     if (!useCard || !clientId) return
     let live = true
-    void cardText(clientId).then(text => { if (live) setCard({ id: clientId, text }) })
+    void loadCard(clientId).then(c => { if (live) setCard({ id: clientId, ...c }) })
     return () => { live = false }
   }, [useCard, clientId])
 
   const { text: prompt, fromNotes } = aiPromptForBrief(brief)
   if (!prompt.trim()) return null
   const cardFor = useCard && card?.id === clientId ? card.text : null
+  const logo = useCard && card?.id === clientId ? card.logo : ''
+  const logoIsLink = /^https?:\/\/\S+$/i.test(logo)
   const hasCard = !!cardFor
   const noCard = cardFor === ''
 
   async function copy(kind: 'full' | 'prompt') {
     let text = prompt
-    if (kind === 'full' && useCard && clientId) text = postPromptWithCard(cardFor ?? (await cardText(clientId)), brief)
+    if (kind === 'full' && useCard && clientId) text = postPromptWithCard(cardFor ?? (await loadCard(clientId)).text, brief)
     if (!(await copyToClipboard(text))) return
     setCopied(kind)
     setTimeout(() => setCopied(null), 1600)
+  }
+
+  /** The logo picture on the clipboard, to paste into the AI chat after the prompt. If the link cannot be read as a picture, the link is copied instead. */
+  async function copyLogo() {
+    setLogoFailed(false)
+    if (await copyImage(logo)) { setCopied('logo'); setTimeout(() => setCopied(null), 1600); return }
+    if (await copyToClipboard(logo)) { setCopied('logo-link'); setTimeout(() => setCopied(null), 1600); return }
+    setLogoFailed(true)
   }
 
   const pill = 'inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-violet-500/30 bg-violet-500/10 text-[11px] font-medium text-violet-700 dark:text-violet-300 hover:bg-violet-500/15 transition-colors'
@@ -76,6 +90,20 @@ export default function CopyAiPromptButton({ brief, clientId, className = '' }: 
           title="This client has no Client Card yet, so the copy has the prompt only. Add the card so every prompt carries the brand."
           className="text-[10px] text-amber-600 dark:text-amber-400 hover:underline">
           No client card: add one
+        </Link>
+      )}
+      {logoIsLink && (
+        <button type="button" onClick={() => void copyLogo()}
+          title="Copies the logo picture: paste it into the AI chat after the prompt. If this link cannot be read as a picture, the link is copied instead."
+          className="text-[10px] text-muted-foreground hover:text-foreground transition-colors">
+          {copied === 'logo' ? 'Logo copied' : copied === 'logo-link' ? 'Logo link copied' : logoFailed ? 'Could not copy' : 'Copy logo'}
+        </button>
+      )}
+      {hasCard && !logo && (
+        <Link href={`/dashboard/prompt-studio?client=${clientId}&tab=cards`}
+          title="The card has no logo yet. Add the logo link or upload the file on the card."
+          className="text-[10px] text-amber-600 dark:text-amber-400 hover:underline">
+          No logo: add one
         </Link>
       )}
       {hasCard && (

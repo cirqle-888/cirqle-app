@@ -18,6 +18,7 @@ import Link from 'next/link'
 import { Check, ChevronDown, Sparkles } from 'lucide-react'
 import { usePermissions } from '@/contexts/permission-context'
 import { copyToClipboard } from '@/lib/clipboard'
+import { copyImage } from '@/lib/copy-image'
 import { AI_JOBS, buildAiBrief, planMonthLabel, socialGaps, type AiJob } from '@/lib/prompt-studio/ai-brief'
 import { COLOR_USE_OPTIONS, swatches } from '@/lib/prompt-studio/colors'
 import { isDirectImageLink } from '@/lib/prompt-studio/render'
@@ -27,36 +28,6 @@ import { loadClientCard } from '@/app/(dashboard)/dashboard/prompt-studio/action
 const PANEL_W = 288
 const MARGIN = 8
 const isLink = (v: string | undefined) => /^https?:\/\/\S+$/i.test((v ?? '').trim())
-
-/**
- * Put the logo itself on the clipboard, to paste into the AI tool after the
- * prompt. Clipboards take PNG, so anything else is redrawn as one. Works for
- * logos uploaded here and any image link that allows it; a page link (a Drive
- * preview, say) cannot be read, and the caller says so.
- */
-async function copyImage(url: string): Promise<boolean> {
-  try {
-    if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) return false
-    const res = await fetch(url, { mode: 'cors' })
-    if (!res.ok) return false
-    let blob = await res.blob()
-    if (!blob.type.startsWith('image/')) return false
-    if (blob.type !== 'image/png') {
-      const bitmap = await createImageBitmap(blob)
-      const canvas = document.createElement('canvas')
-      canvas.width = bitmap.width
-      canvas.height = bitmap.height
-      canvas.getContext('2d')?.drawImage(bitmap, 0, 0)
-      const png = await new Promise<Blob | null>(done => canvas.toBlob(done, 'image/png'))
-      if (!png) return false
-      blob = png
-    }
-    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-    return true
-  } catch {
-    return false
-  }
-}
 
 export function CopyForAi({
   clientId,
