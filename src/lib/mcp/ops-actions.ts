@@ -34,7 +34,11 @@ export function statusChangeProblem(from: string, to: string): string | null {
   return null
 }
 
-export async function setTaskStatus(admin: Admin, taskNumber: number | string, to: string) {
+export async function setTaskStatus(
+  admin: Admin, taskNumber: number | string, to: string,
+  /** Who moved it, for the activity log. Defaults to the AI connector. */
+  by: { actorId?: string | null; via?: string } = {},
+) {
   const num = parseTaskNumber(taskNumber)
   if (isNaN(num)) return { ok: false as const, error: 'A numeric task number is required.' }
   const { data: task, error } = await admin.from('tasks')
@@ -52,7 +56,7 @@ export async function setTaskStatus(admin: Admin, taskNumber: number | string, t
   if (!moved?.length) return { ok: false as const, error: `#${num} changed in the app meanwhile. Nothing was saved.` }
 
   // The Tasks page's follow-ups, in the same order. Each is best-effort after the save.
-  void logActivity({ actorId: null, entityType: 'task', entityId: t.id, action: 'status_changed', detail: { title: t.title, from, to, via: 'AI connector' } })
+  void logActivity({ actorId: by.actorId ?? null, entityType: 'task', entityId: t.id, action: 'status_changed', detail: { title: t.title, from, to, via: by.via ?? 'AI connector' } })
   try { await syncDraftInvoices(t.id) } catch { /* the nightly integrity check catches up */ }
   try {
     await resyncDerivedForSource(admin as never, { clientId: t.client_id, serviceId: t.service_id, taskDate: t.task_date, billingMode: t.billing_mode }, `task ${t.title} → ${to}`, null)

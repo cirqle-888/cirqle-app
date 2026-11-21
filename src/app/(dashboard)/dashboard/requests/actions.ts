@@ -19,6 +19,8 @@ import {
   setRequestStatus, logRequestActivity, requestStatusFromTask, type RequestStatus,
 } from '@/lib/requests/core'
 import { notifyRequesterStatus } from '@/lib/requests/notify'
+import { setTaskStatus } from '@/lib/mcp/ops-actions'
+import type { BoardTaskStatus } from '@/lib/requests/board-move'
 import { normalizeTaskTitle } from '@/lib/utils/title-case'
 import { aiParse, findClient, findService, normalizeDate } from '@/lib/ai/request-capture'
 import {
@@ -355,6 +357,43 @@ export async function markRequestPromoted(
 
   revalidatePath(REVALIDATE)
   return { ok: true }
+}
+
+/**
+ * Board drag on a request that already has a task: move the TASK. The task
+ * owns the status once it exists, so this runs the same follow-ups a status
+ * change on the Tasks page runs (draft invoices, derived billing, analytics),
+ * and the request follows through syncRequestStatusFromTask. The timeline
+ * records that a manager moved it on the board, so it reads apart from the
+ * designer's own changes.
+ */
+export async function moveRequestTaskOnBoard(
+  requestId: string, to: BoardTaskStatus,
+): Promise<ActionResult<{ requestStatus: RequestStatus | null }>> {
+  if (!['in_progress', 'delivered', 'done', 'cancelled'].includes(to)) {
+    return { ok: false, error: 'That move is not allowed from the board.' }
+  }
+  const guard = await requirePermission(PERMS.REQUESTS_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const admin = createAdminClient()
+  const { data: req, error } = await admin.from('task_requests')
+    .select('id, promoted_task:tasks!task_requests_promoted_task_id_fkey(task_number)')
+    .eq('id', requestId).maybeSingle()
+  if (error) return { ok: false, error: error.message }
+  const linked = (req as { promoted_task?: { task_number: number | null } | null } | null)?.promoted_task
+  const taskNumber = linked?.task_number
+  if (taskNumber == null) return { ok: false, error: 'This request has no task yet. Refresh the page.' }
+
+  const res = await setTaskStatus(admin as never, taskNumber, to, { actorId: guard.employeeId, via: 'Requests board' })
+  if (!res.ok) return { ok: false, error: res.error }
+
+  await logRequestActivity(admin, {
+    requestId, actorType: 'admin', actorId: guard.employeeId, actorLabel: 'Cirqle',
+    action: 'board_moved', visibility: 'internal',
+    detail: { task_number: taskNumber, from: res.from, to },
+  })
+  revalidatePath(REVALIDATE)
+  return { ok: true, data: { requestStatus: requestStatusFromTask(to) } }
 }
 
 /**

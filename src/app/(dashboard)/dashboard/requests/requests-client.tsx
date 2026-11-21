@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  DndContext, closestCenter, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent,
+  DndContext, DragOverlay, closestCenter, pointerWithin, MouseSensor, TouchSensor, useSensor, useSensors,
+  useDraggable, useDroppable, type DragEndEvent,
 } from '@dnd-kit/core'
+import { planBoardMove, type BoardColumn, type BoardTaskStatus } from '@/lib/requests/board-move'
 import {
   SortableContext, verticalListSortingStrategy,
   useSortable, arrayMove,
@@ -46,7 +48,7 @@ import {
   postExternalUpdate, updateInternalNotes, markRevisionAddressed, postRequestNote,
   assignRequestEmployee, createManualRequest, searchTasksForLink, linkRequestToTask,
   reorderStaffPriority, bulkSetRequestStatus, bulkAssignRequestEmployee,
-  updateRequestTitle,
+  updateRequestTitle, moveRequestTaskOnBoard,
 } from './actions'
 import { DiscussButton } from '@/components/chat/discuss-button'
 import { CampaignCard } from '@/components/campaigns/campaign-card'
@@ -179,6 +181,7 @@ function activityText(a: any): string {
     case 'promoted':              return `Promoted → Task #${d.task_number ?? ''}`
     case 'internal_note_updated': return 'Internal notes updated'
     case 'assigned':              return `Assigned to ${d.employee_name || 'an employee'}`
+    case 'board_moved':           return `Moved on the board — Task #${d.task_number ?? ''} → ${TASK_STATUS_WORD[d.to] || d.to}`
     case 'unassigned':            return 'Assignment cleared'
     default:                      return String(a.action).replace(/_/g, ' ')
   }
@@ -304,6 +307,35 @@ function UpdatePill({ label }: { label: string }) {
     <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 border border-amber-500/25 dark:text-amber-300 shrink-0 whitespace-nowrap">
       <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />{label}
     </span>
+  )
+}
+
+const TASK_STATUS_WORD: Record<string, string> = {
+  in_progress: 'On Going', delivered: 'Under Review', done: 'Completed', cancelled: 'Cancelled',
+}
+
+/** A status column on the board that a card can be dropped into. */
+function BoardDropZone({ id, enabled, className, title, children }: {
+  id: string; enabled: boolean; className: string; title?: string; children: React.ReactNode
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id, disabled: !enabled })
+  return (
+    <div ref={setNodeRef} title={title}
+      className={`${className}${isOver ? ' ring-2 ring-violet-500/50 bg-violet-500/5' : ''}`}>
+      {children}
+    </div>
+  )
+}
+
+/** A card a manager can drag to another status column. Taps still open it. */
+function BoardDragCard({ id, enabled, children }: { id: string; enabled: boolean; children: React.ReactNode }) {
+  const { setNodeRef, listeners, isDragging } = useDraggable({ id, disabled: !enabled })
+  return (
+    <div ref={setNodeRef} {...(enabled ? listeners : {})}
+      className={enabled ? 'touch-manipulation' : undefined}
+      style={{ opacity: isDragging ? 0.35 : undefined }}>
+      {children}
+    </div>
   )
 }
 
@@ -506,6 +538,9 @@ export default function RequestsClient({
   const [bulkAssignEmpId, setBulkAssignEmpId] = useState<string>('')
   /** Confirmation shown BEFORE a bulk action writes anything. */
   const [bulkConfirm, setBulkConfirm] = useState<{ verb: string; run: () => void } | null>(null)
+  // Board drag-and-drop (managers, status board only).
+  const [boardDragId, setBoardDragId] = useState<string | null>(null)
+  const [boardConfirm, setBoardConfirm] = useState<{ message: string; run: () => void } | null>(null)
   /** Result of the last bulk run — kept so a partial failure can be retried. */
   const [bulkReport, setBulkReport] = useState<BulkReport | null>(null)
   /** The action to re-run against the failed ids only. */
@@ -1034,6 +1069,56 @@ export default function RequestsClient({
     void reorderStaffPriority(newOrder.map(r => r.id))
   }
 
+  // ── Board drag-and-drop ────────────────────────────────────────────────
+  // The rules live in lib/requests/board-move (tested); this only carries
+  // out the move it returns, through the same actions the panel buttons use.
+  const canBoardDrag = view === 'board' && boardBy === 'status' && perms.manage && !busy
+
+  async function doBoardTaskMove(r: (typeof requests)[number], to: BoardTaskStatus) {
+    setBusy(true)
+    const res = await moveRequestTaskOnBoard(r.id, to)
+    setBusy(false)
+    if (!res.ok) { toastError('Could not move it', res.error); return }
+    const reqStatus = res.data?.requestStatus
+    setRequests(prev => prev.map(x => x.id !== r.id ? x : {
+      ...x,
+      ...(reqStatus ? { status: reqStatus } : {}),
+      promoted_task: x.promoted_task ? { ...x.promoted_task, status: to } : x.promoted_task,
+    }))
+    success(`Task #${r.promoted_task?.task_number ?? ''} → ${TASK_STATUS_WORD[to] || to}`)
+    router.refresh()
+  }
+
+  function handleBoardDrop(event: DragEndEvent) {
+    setBoardDragId(null)
+    const target = event.over?.id as BoardColumn | undefined
+    if (!target) return
+    const r = requests.find(x => x.id === event.active.id)
+    if (!r) return
+    const move = planBoardMove(
+      { status: r.status, hasTask: !!r.promoted_task_id, hasAssignee: !!r.assigned_employee_id },
+      target,
+    )
+    switch (move.kind) {
+      case 'none': return
+      case 'blocked': toastError("Can't move it there", move.reason); return
+      case 'start-task':
+        if (!perms.start) { toastError("Can't start it", 'You do not have permission to start tasks.'); return }
+        router.push(`/dashboard/tasks?fromRequest=${r.id}`)
+        return
+      case 'request-status': {
+        const run = () => { void doStatus(r, move.to) }
+        if (move.confirm) setBoardConfirm({ message: move.confirm, run }); else run()
+        return
+      }
+      case 'task-status': {
+        const run = () => { void doBoardTaskMove(r, move.to) }
+        if (move.confirm) setBoardConfirm({ message: move.confirm, run }); else run()
+        return
+      }
+    }
+  }
+
   function applyManualRank(id: string, targetPos: number) {
     const n = Math.max(1, Math.min(rows.length, Math.round(targetPos)))
     const currentIndex = rows.findIndex(r => r.id === id)
@@ -1551,6 +1636,15 @@ export default function RequestsClient({
 
       {/* ── Board view ── */}
       {view === 'board' && (
+        <DndContext sensors={dndSensors} collisionDetection={pointerWithin}
+          onDragStart={e => setBoardDragId(String(e.active.id))}
+          onDragCancel={() => setBoardDragId(null)}
+          onDragEnd={handleBoardDrop}>
+        {canBoardDrag && (
+          <p className="text-[11px] text-muted-foreground -mt-1 mb-2">
+            Drag a card to another column to move it. Once a request has a task, the move changes the task.
+          </p>
+        )}
         <div className="flex gap-3 overflow-x-auto pb-4 items-start">
           {boardCols.map(col => {
             const pending = col.rows.filter(r => PENDING_STATUSES.includes(r.status)).length
@@ -1561,15 +1655,15 @@ export default function RequestsClient({
             // (the pipeline still reads left-to-right) without costing 16rem
             // of width to say "Empty".
             if (col.rows.length === 0) return (
-              <div key={col.key}
+              <BoardDropZone key={col.key} id={col.key} enabled={canBoardDrag}
                 title={`${col.label} — no requests`}
                 className="w-11 shrink-0 self-stretch min-h-[140px] bg-secondary/25 border border-border/50 rounded-2xl py-3 flex flex-col items-center gap-2">
                 <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-secondary border border-border text-muted-foreground/70">0</span>
                 <p className="text-[10px] font-bold text-muted-foreground/60 tracking-wide [writing-mode:vertical-rl]">{col.label}</p>
-              </div>
+              </BoardDropZone>
             )
             return (
-              <div key={col.key} className="w-64 shrink-0 bg-secondary/40 border border-border rounded-2xl">
+              <BoardDropZone key={col.key} id={col.key} enabled={canBoardDrag} className="w-64 shrink-0 bg-secondary/40 border border-border rounded-2xl">
                 <div className="px-3 py-2.5 border-b border-border/60">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs font-bold truncate">{col.label}</p>
@@ -1591,7 +1685,8 @@ export default function RequestsClient({
                 <div className="p-2 space-y-2 max-h-[60dvh] overflow-y-auto">
                   {col.rows.length === 0 && <p className="text-[11px] text-muted-foreground/50 text-center py-4">Empty</p>}
                   {col.rows.map(r => (
-                    <button key={r.id} onClick={() => openRequest(r)}
+                    <BoardDragCard key={r.id} id={r.id} enabled={canBoardDrag}>
+                    <button onClick={() => openRequest(r)}
                       className="w-full text-left bg-card border border-border rounded-xl p-2.5 hover:border-violet-500/40 transition-colors">
                       <div className="flex items-center gap-1.5">
                         <span className="text-[10px] font-mono text-muted-foreground shrink-0">{refLabel(r.ref_no)}</span>
@@ -1612,12 +1707,37 @@ export default function RequestsClient({
                         {r.due_date && <span className="text-[10px] text-muted-foreground">due {fmtDate(r.due_date)}</span>}
                       </div>
                     </button>
+                    </BoardDragCard>
                   ))}
                 </div>
-              </div>
+              </BoardDropZone>
             )
           })}
         </div>
+        <DragOverlay>
+          {boardDragId && (() => {
+            const r = requests.find(x => x.id === boardDragId)
+            if (!r) return null
+            return (
+              <div className="w-60 bg-card border border-violet-500/50 rounded-xl p-2.5 shadow-2xl cursor-grabbing">
+                <span className="text-[10px] font-mono text-muted-foreground">{refLabel(r.ref_no)}</span>
+                <p className="text-xs font-semibold leading-snug mt-0.5 line-clamp-2">{r.title}</p>
+              </div>
+            )
+          })()}
+        </DragOverlay>
+        </DndContext>
+      )}
+
+      {boardConfirm && (
+        <ConfirmDialog
+          title={boardConfirm.message}
+          body="This changes the status for everyone, including what the client sees."
+          confirmLabel="Yes, move it"
+          danger
+          onConfirm={() => { const run = boardConfirm.run; setBoardConfirm(null); run() }}
+          onCancel={() => setBoardConfirm(null)}
+        />
       )}
 
       {/* ── List view ── */}
