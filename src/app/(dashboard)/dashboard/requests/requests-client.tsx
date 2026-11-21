@@ -2010,6 +2010,7 @@ export default function RequestsClient({
               {asContentBrief(open.content_brief) ? (
                 <ContentBriefView
                   brief={asContentBrief(open.content_brief)!}
+                  title={open.title}
                   platforms={open.social_meta?.platforms}
                   scheduledDate={open.social_meta?.scheduled_date}
                 />

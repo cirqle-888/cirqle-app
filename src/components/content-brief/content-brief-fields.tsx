@@ -19,6 +19,7 @@ import { ChevronDown, Clipboard, Link2, Loader2, Plus, Trash2, Upload } from 'lu
 import AppSelect from '@/components/ui/app-select'
 import RichTextEditor, { readImageFromClipboard } from './rich-text-editor'
 import { ReferenceGallery } from './reference-gallery'
+import CopyAiPromptButton from './copy-ai-prompt'
 import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
 import CaptionCanvasEditor from '@/app/(dashboard)/dashboard/social-calendar/caption-canvas'
 import { getBriefImageUploadUrl } from '@/app/(dashboard)/dashboard/content-brief-actions'
@@ -252,6 +253,11 @@ export default function ContentBriefFields({
       {/* ── Notes for designer ── */}
       <Fold label="Notes for designer" summary={value.notes.trim() ? '✓' : ''}
         open={isOpen('notes', !!value.notes.trim())} onToggle={() => toggle('notes', !!value.notes.trim())}>
+        {(value.notes.trim() || title.trim()) && (
+          <div className="flex justify-end mb-1.5">
+            <CopyAiPromptButton brief={{ title, contentType: value.contentType, caption: value.caption, notes: value.notes }} />
+          </div>
+        )}
         <textarea rows={3} value={value.notes} disabled={disabled}
           onChange={e => set({ notes: e.target.value })}
           placeholder="Sizes, colours, what to highlight, what to avoid…"

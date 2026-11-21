@@ -5924,6 +5924,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                   {/* Shared Content Brief — the same view as the Requests inbox. */}
                   <ContentBriefView
                     brief={asContentBrief(requestBrief.data.content_brief)!}
+                    title={requestBrief.data.title}
                     platforms={requestBrief.data.social_meta?.platforms}
                     scheduledDate={requestBrief.data.social_meta?.scheduled_date}
                   />

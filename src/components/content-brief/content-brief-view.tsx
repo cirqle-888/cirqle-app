@@ -14,11 +14,14 @@ import {
 import { contentTypeLabel, isImageUrl, linkDisplay, type ContentBrief } from '@/lib/content-brief'
 import { ReferenceGallery } from './reference-gallery'
 import { copyToClipboard } from '@/lib/clipboard'
+import CopyAiPromptButton from './copy-ai-prompt'
 
 const SECTION = 'text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 mb-1.5'
 
-export default function ContentBriefView({ brief, platforms, scheduledDate }: {
+export default function ContentBriefView({ brief, platforms, scheduledDate, title }: {
   brief: ContentBrief
+  /** The request's title: used by "Copy AI prompt" when the notes carry no prompt. */
+  title?: string | null
   /** From a calendar push (task_requests.social_meta) — shown as context. */
   platforms?: string[] | null
   scheduledDate?: string | null
@@ -42,11 +45,15 @@ export default function ContentBriefView({ brief, platforms, scheduledDate }: {
 
   return (
     <div className="space-y-4">
-      {(type || platforms?.length || scheduledDate) && (
+      {(type || platforms?.length || scheduledDate || !nothing) && (
         <div className="flex items-center gap-1.5 flex-wrap">
           {type && <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20">{type}</span>}
           {platforms?.length ? <span className="text-[11px] px-2 py-0.5 rounded-md bg-secondary border border-border text-muted-foreground">{platformLabels(platforms)}</span> : null}
           {scheduledDate && <span className="text-[11px] px-2 py-0.5 rounded-md bg-secondary border border-border text-muted-foreground">Publishes {new Date(scheduledDate + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>}
+          {!nothing && (
+            <CopyAiPromptButton className="ml-auto"
+              brief={{ title, contentType: brief.contentType, caption: brief.caption, notes: brief.notes, platforms }} />
+          )}
         </div>
       )}
 
