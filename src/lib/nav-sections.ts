@@ -15,7 +15,7 @@ import {
   BadgePercent, CalendarRange, HardHat, Repeat, Package as PackageIcon,
   Share2, UserPlus, Gauge, ShieldCheck, MapPin, Target,
   Scale, Receipt, Images, Wand2,
-  Calculator, CreditCard, Landmark,
+  Calculator, CreditCard, Landmark, ShoppingBag,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -171,6 +171,9 @@ export const navSections: NavSection[] = [
       { label: 'Prompt Studio', href: '/dashboard/prompt-studio', icon: Wand2, requiredPerm: 'prompt_studio.view', keywords: ['prompt', 'ai video', 'veo', 'kling', 'script', 'voiceover', 'music', 'client card', 'template', 'film', 'series', 'product video', 'reel'] },
       { label: 'Advertising',      href: '/dashboard/advertising',     icon: Megaphone, requiredPerm: 'advertising.view', keywords: ['campaigns', 'ads', 'marketing'] },
       { label: 'Leads',            href: '/dashboard/leads',           icon: UserPlus, requiredPerm: 'leads.view', keywords: ['crm', 'meta leads', 'lead ads', 'prospects', 'enquiries'] },
+      // Retail orders for Cirqle's own product brands (Memoura gifts). Buyers
+      // are the public, not clients, so this is its own list, not a client view.
+      { label: 'Orders',           href: '/dashboard/orders',          icon: ShoppingBag, requiredPerm: 'orders.view', keywords: ['memoura', 'gifts', 'shop', 'customers', 'dispatch', 'courier', 'tracking', 'advance', 'balance', 'retail'] },
       // Publishes straight to cirqle.work — the site reads this content from a
       // separate Supabase project, so nothing here touches business data.
       { label: 'Portfolio',        href: '/dashboard/portfolio',       icon: Images, requiredPerm: 'portfolio.view', keywords: ['website', 'work', 'gallery', 'creatives', 'showcase', 'cirqle.work', 'case studies', 'brands', 'social media posts', 'upload work'] },
