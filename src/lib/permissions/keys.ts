@@ -194,6 +194,11 @@ export const PERMS = {
   /** Create/edit/assign leads, change status, configure automation rules. */
   LEADS_MANAGE: 'leads.manage',
 
+  // Shop orders — retail orders for Cirqle's own product brands (Memoura).
+  // Buyers are the public, not clients; the rows hold their name, phone and address.
+  ORDERS_VIEW:   'orders.view',
+  ORDERS_MANAGE: 'orders.manage',
+
   // Field Marketing — door-to-door territory map + visits (migration 20260821120000)
   /** Open the Field Marketing module: territory map, place list, visit history. */
   FIELD_VIEW:   'field.view',
@@ -468,6 +473,8 @@ export const CRITICAL_PERMS: ReadonlySet<string> = new Set<string>([
   PERMS.PROFIT_SHARING_VIEW,
   PERMS.PROFIT_SHARING_MANAGE,
   PERMS.PROFIT_SHARING_APPROVE,
+  // Shop buyers' names, phones and home addresses, and what they paid.
+  PERMS.ORDERS_VIEW,
   // Personal data (names are private by design; full profiles include them)
   PERMS.EMPLOYEES_REVEAL_NAMES,
   PERMS.EMPLOYEES_VIEW_FULL,
