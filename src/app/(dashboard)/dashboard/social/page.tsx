@@ -1,3 +1,4 @@
+import { getBrandFilter, inBrand } from '@/lib/brands/filter'
 import { redirect } from 'next/navigation'
 import { createAdminClient, columnExists } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
@@ -136,9 +137,12 @@ export default async function SocialHubPage({
     }
   })
 
+  // Brand workspace / switcher: only the brand's clients' pages.
+  const brandFilter = await getBrandFilter()
+
   return (
     <SocialClient
-      accounts={accounts}
+      accounts={brandFilter ? (accounts as any[]).filter(a => inBrand(brandFilter, { clientId: a.client_id })) : accounts}
       clients={(clientsRes.data ?? []) as { id: string; name: string }[]}
       canConnect={canConnect}
       canViewInsights={canViewInsights}

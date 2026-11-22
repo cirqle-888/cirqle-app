@@ -171,6 +171,7 @@ function WorkspaceEditor({ workspace, employees, showMembers, createOwnerId, onC
   const [members, setMembers] = useState<Set<string>>(new Set(workspace?.memberIds ?? []))
   const brandOptions = useBrandOptions()
   const [brandId, setBrandId] = useState<string>(workspace?.brandId ?? '')
+  const [restrictMembers, setRestrictMembers] = useState<boolean>(workspace?.restrictMembers ?? false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -195,6 +196,7 @@ function WorkspaceEditor({ workspace, employees, showMembers, createOwnerId, onC
       defaultLandingHref: landing,
       memberIds: Array.from(members),
       brandId: brandId || null,
+      restrictMembers: !!brandId && restrictMembers,
     }
     const res = workspace
       ? await updateWorkspace(workspace.id, payload)
@@ -300,9 +302,21 @@ function WorkspaceEditor({ workspace, employees, showMembers, createOwnerId, onC
                     {brandOptions.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                   </select>
                   <span className="mt-1 block text-[10px] text-muted-foreground">
-                    In this workspace Tasks and Clients show only this brand (under Memoura, Tasks become Orders).
-                    Members assigned here always work in it. A view, not a permission — to block other brands,
-                    switch on &ldquo;Restrict to assigned services&rdquo; for their role and put them on the brand.
+                    In this workspace Tasks, Clients, Invoices, Requests, Social, Leads, Advertising and Cash Book show
+                    only this brand (under Memoura, Tasks become Orders). Members assigned here always work in it.
+                  </span>
+                </label>
+              )}
+
+              {brandId && showMembers && (
+                <label className="flex items-start gap-2 rounded-lg border border-border p-2.5 text-xs">
+                  <input type="checkbox" className="mt-0.5" checked={restrictMembers} onChange={e => setRestrictMembers(e.target.checked)} />
+                  <span>
+                    <span className="font-medium">Restrict members to this brand</span>
+                    <span className="mt-0.5 block text-[10px] text-muted-foreground">
+                      Members (not admins) can&rsquo;t see other brands anywhere: clients, services, tasks, contributions,
+                      search and the lists above are confined to this brand, and they can&rsquo;t switch brand.
+                    </span>
                   </span>
                 </label>
               )}

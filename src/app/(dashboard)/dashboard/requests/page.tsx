@@ -1,3 +1,4 @@
+import { getBrandFilter, inBrand } from '@/lib/brands/filter'
 import { redirect } from 'next/navigation'
 import { withDraftFlag } from '@/lib/clients/draft'
 import { createAdminClient } from '@/lib/supabase/server'
@@ -96,12 +97,20 @@ export default async function RequestsPage({
     activity: isAdmin || !!me?.permissions?.has('requests.activity.view'),
   }
 
+  // Brand workspace / switcher: requests on the brand's services, or from its clients.
+  const brandFilter = await getBrandFilter()
+  if (brandFilter) {
+    requests = requests.filter(r => r.service_id
+      ? inBrand(brandFilter, { serviceId: r.service_id })
+      : inBrand(brandFilter, { clientId: r.client_id }))
+  }
+
   return (
     <RequestsClient
       migrated={migrated}
       initialRequests={requests}
       perms={perms}
-      clients={clientsRes.data || []}
+      clients={brandFilter ? (clientsRes.data || []).filter((c: any) => brandFilter.clientIds.has(c.id)) : (clientsRes.data || [])}
       employees={employeesRes.data || []}
       services={servicesRes.data || []}
       servicePricing={pricingRows}

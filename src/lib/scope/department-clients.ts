@@ -27,6 +27,7 @@ import { PERMS } from '@/lib/permissions/keys'
 import { clientDepartmentIds } from '@/lib/clients/department-filter'
 import type { createAdminClient } from '@/lib/supabase/admin'
 import { brandCategoryIdsForEmployee } from '@/lib/brands/staff'
+import { confinedScope } from '@/lib/brands/restriction'
 
 type Admin = ReturnType<typeof createAdminClient>
 
@@ -101,8 +102,11 @@ export async function loadDepartmentClientScope(
   admin: Admin,
   me: CurrentUser | null,
 ): Promise<DepartmentClientScope> {
-  if (isDepartmentUnrestricted(me) || !me?.employeeId) return UNRESTRICTED
-  const departmentIds = await employeeDepartmentIds(admin, me.employeeId)
+  // A restricted brand workspace confines its members to the brand's
+  // departments, even where their role alone would see everything.
+  const confined = await confinedScope(admin, me)
+  if (!confined && (isDepartmentUnrestricted(me) || !me?.employeeId)) return UNRESTRICTED
+  const departmentIds = confined ? confined.categoryIds : await employeeDepartmentIds(admin, me!.employeeId!)
   if (!departmentIds || departmentIds.size === 0) return UNRESTRICTED
 
   const [clients, services, pricing] = await Promise.all([

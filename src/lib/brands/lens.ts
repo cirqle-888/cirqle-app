@@ -22,6 +22,7 @@ import type { Brand } from './brands'
 import { loadBrandGraph, type BrandGraph } from './scope'
 import { loadBrands } from './load'
 import { loadCurrentUser } from '@/lib/permissions/check'
+import { confinedBrandIds } from './restriction'
 
 export const BRAND_LENS_COOKIE = 'cq_brand'
 
@@ -53,7 +54,14 @@ export async function workspaceBrandId(admin: SupabaseClient): Promise<string | 
 
 /** The active lens, or null for "All brands" (also when the brand is gone). */
 export async function resolveBrandLens(admin: SupabaseClient): Promise<BrandLens | null> {
-  const id = (await workspaceBrandId(admin)) ?? (await readBrandLensId())
+  // Confined members can't look anywhere else: their workspace's brand if it
+  // is one of theirs, otherwise their first brand. The cookie is ignored.
+  const me = await loadCurrentUser().catch(() => null)
+  const confined = await confinedBrandIds(admin, me)
+  const fromWorkspace = await workspaceBrandId(admin)
+  const id = confined.length
+    ? (fromWorkspace && confined.includes(fromWorkspace) ? fromWorkspace : confined[0])
+    : fromWorkspace ?? (await readBrandLensId())
   if (!id) return null
   const brands = await loadBrands(admin)
   const brand = brands.find(b => b.id === id && b.is_active)

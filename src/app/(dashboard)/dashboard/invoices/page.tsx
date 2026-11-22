@@ -1,3 +1,4 @@
+import { getBrandFilter, inBrand } from '@/lib/brands/filter'
 import { createAdminClient } from '@/lib/supabase/server'
 import { withDraftFlag } from '@/lib/clients/draft'
 import { loadCurrentUser } from '@/lib/permissions/check'
@@ -122,12 +123,15 @@ export default async function InvoicesPage() {
     serviceNames,
   )
 
+  // Brand workspace / switcher: only that brand's clients' invoices.
+  const brandFilter = await getBrandFilter()
+
   return (
     <>
     {canSeePricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
     <InvoicesClient
-      initialInvoices={initialInvoices}
-      clients={((clientsRes.data || []) as any[]).filter(c => !c.is_draft)}
+      initialInvoices={brandFilter ? (initialInvoices as any[]).filter(i => inBrand(brandFilter, { clientId: i.client_id })) : initialInvoices}
+      clients={((clientsRes.data || []) as any[]).filter(c => !c.is_draft && (!brandFilter || brandFilter.clientIds.has(c.id)))}
       draftClientIds={((clientsRes.data || []) as any[]).filter(c => c.is_draft).map(c => c.id as string)}
       partners={await partnersP}
       bankAccounts={bankRes.data || []}
