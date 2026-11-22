@@ -14,12 +14,17 @@ export async function loadBrands(
   admin: SupabaseClient,
   opts: { activeOnly?: boolean } = {},
 ): Promise<Brand[]> {
-  try {
-    let q = admin.from('brands').select(BRAND_COLS)
+  const read = (cols: string) => {
+    let q = admin.from('brands').select(cols)
     if (opts.activeOnly) q = q.eq('is_active', true)
-    const { data, error } = await q
+    return q
+  }
+  try {
+    // task_label arrives with 20261122120000; without it, read the rest.
+    let { data, error } = await read(`${BRAND_COLS}, task_label`)
+    if (error) ({ data, error } = await read(BRAND_COLS))
     if (error) return []
-    return sortBrands((data ?? []) as Brand[])
+    return sortBrands((data ?? []) as unknown as Brand[])
   } catch { return [] }
 }
 

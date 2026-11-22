@@ -12,6 +12,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { addDaysISO, monthStartISO, monthEndISO, todayISO } from '@/lib/utils/local-date'
 import { brandKey, type Brand } from './brands'
 import { computeBrandPnl, type BrandPnlRow } from './pnl'
+import { brandOfTask, loadBrandGraph } from './scope'
 
 export type BrandPeriod = '30d' | 'month' | 'last-month' | 'year'
 
@@ -58,6 +59,8 @@ export interface BrandTask {
   title: string
   status: string
   task_date: string | null
+  /** The client for client work (a Memoura order's customer); null = internal. */
+  clientName: string | null
 }
 
 export interface BrandSummary {
@@ -96,6 +99,7 @@ export async function loadBrandSummaries(
   if (!brands.length) return []
   const { from, to, withMoney } = opts
   const key = (id: string | null | undefined) => brandKey(id, brands)
+  const graph = await loadBrandGraph(admin, brands)
 
   // ── Accounts (Cirqle-owned only) ─────────────────────────────────────────
   const accounts = await safe(admin.from('social_accounts')
@@ -134,17 +138,18 @@ export async function loadBrandSummaries(
     for (const m of metrics) spendByCampaign.set(m.project_id, (spendByCampaign.get(m.project_id) || 0) + Number(m.spend || 0))
   }
 
-  // ── Internal work ────────────────────────────────────────────────────────
-  const internalTasks = await safe(admin.from('tasks')
-    .select('id, task_number, title, status, task_date, brand_id')
-    .is('client_id', null).is('deleted_at', null)
+  // ── Open work: internal tasks AND client work (a Memoura order is a client
+  //    task on a Memoura service) — each counted under its own brand.
+  const openTasks = await safe(admin.from('tasks')
+    .select('id, task_number, title, status, task_date, brand_id, client_id, service_id, client:clients(name)')
+    .is('deleted_at', null)
     .not('status', 'in', `(${OPEN_TASK_EXCLUDED.map(s => `"${s}"`).join(',')})`)
-    .order('task_date', { ascending: false }).limit(500) as unknown as PromiseLike<Rows<any>>)
+    .order('task_date', { ascending: false }).limit(2000) as unknown as PromiseLike<Rows<any>>)
 
-  // ── Services each brand sells ────────────────────────────────────────────
+  // ── Services each brand sells (own override, else its department's) ──────
   const services = await safe(admin.from('services')
-    .select('id, name, brand_id, is_active').eq('is_active', true).order('name') as unknown as PromiseLike<Rows<any>>)
-  const serviceBrand = new Map<string, string | null>(services.map(s => [s.id, s.brand_id ?? null]))
+    .select('id, name, is_active').eq('is_active', true).order('name') as unknown as PromiseLike<Rows<any>>)
+  const serviceBrand = new Map<string, string | null>([...graph.serviceBrand])
 
   // ── Money (gated) ────────────────────────────────────────────────────────
   let pnlRows: BrandPnlRow[] = []
@@ -204,10 +209,11 @@ export async function loadBrandSummaries(
         spendInclGstInr: withMoney ? Math.round((spendByCampaign.get(c.id) || 0) * 1.18 * 100) / 100 : null,
       })),
       activeCampaigns: myCampaigns.filter(c => c.status === 'active' && !c.archived_at).length,
-      openTasks: internalTasks.filter(t => key(t.brand_id) === brand.id).map(t => ({
+      openTasks: openTasks.filter(t => brandOfTask(graph, t) === brand.id).map(t => ({
         id: t.id, task_number: t.task_number ?? null, title: t.title, status: t.status, task_date: t.task_date ?? null,
+        clientName: (Array.isArray(t.client) ? t.client[0]?.name : t.client?.name) ?? null,
       })),
-      services: services.filter(s => key(s.brand_id) === brand.id).map(s => ({ id: s.id, name: s.name })),
+      services: services.filter(s => (graph.serviceBrand.get(s.id) ?? key(null)) === brand.id).map(s => ({ id: s.id, name: s.name })),
       pnl: withMoney ? pnlRows.find(r => r.brandId === brand.id) ?? null : null,
     }
   })

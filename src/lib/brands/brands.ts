@@ -23,6 +23,14 @@ export interface Brand {
   is_active: boolean
   show_on_invoices: boolean
   display_order: number
+  /** What the brand calls a task ("Order" for Memoura). NULL = "Task". */
+  task_label?: string | null
+}
+
+/** "Task" / "Order" — singular and plural, for headings and buttons. */
+export function taskNoun(brand: Pick<Brand, 'task_label'> | null | undefined): { one: string; many: string } {
+  const one = (brand?.task_label || 'Task').trim() || 'Task'
+  return { one, many: /s$/i.test(one) ? one : `${one}s` }
 }
 
 /** The brand unbranded rows belong to. Falls back to the first brand. */

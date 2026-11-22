@@ -6,10 +6,11 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft, Loader2, Plus, Save } from 'lucide-react'
 import Header from '@/components/layout/header'
 import type { Brand } from '@/lib/brands/brands'
-import { createBrand, updateBrand, setServiceBrand, type BrandInput } from '../actions'
+import { createBrand, updateBrand, setServiceBrand, setDepartmentBrand, setBrandMembers, type BrandInput } from '../actions'
 import { BrandMark } from '../brand-ui'
 
-interface ServiceRow { id: string; name: string; category: string | null; brand_id: string | null }
+interface ServiceRow { id: string; name: string; category: string | null; category_id?: string | null; brand_id: string | null }
+interface DepartmentRow { id: string; name: string; brand_id: string | null }
 
 const field = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30'
 const labelCls = 'block text-[11px] font-medium text-muted-foreground mb-1'
@@ -24,6 +25,7 @@ const toInput = (b?: Brand): BrandInput => ({
   isActive: b?.is_active ?? true,
   showOnInvoices: b?.show_on_invoices ?? false,
   displayOrder: b?.display_order ?? 0,
+  taskLabel: b?.task_label ?? '',
 })
 
 function BrandForm({ brand, onSaved }: { brand?: Brand; onSaved: () => void }) {
@@ -72,7 +74,11 @@ function BrandForm({ brand, onSaved }: { brand?: Brand; onSaved: () => void }) {
           <label className={labelCls} htmlFor={`${brand?.id ?? 'new'}-web`}>Website</label>
           <input id={`${brand?.id ?? 'new'}-web`} value={v.website ?? ''} onChange={e => set({ website: e.target.value })} className={field} placeholder="memoura.gifts" />
         </div>
-        <div className="sm:col-span-2">
+        <div>
+          <label className={labelCls} htmlFor={`${brand?.id ?? 'new'}-noun`}>Its work is called</label>
+          <input id={`${brand?.id ?? 'new'}-noun`} value={v.taskLabel ?? ''} onChange={e => set({ taskLabel: e.target.value })} className={field} placeholder="Task (e.g. Order for a shop)" />
+        </div>
+        <div>
           <label className={labelCls} htmlFor={`${brand?.id ?? 'new'}-logo`}>Logo URL</label>
           <input id={`${brand?.id ?? 'new'}-logo`} value={v.logoUrl ?? ''} onChange={e => set({ logoUrl: e.target.value })} className={field} placeholder="https://… (square PNG works best)" />
         </div>
@@ -113,7 +119,64 @@ function BrandForm({ brand, onSaved }: { brand?: Brand; onSaved: () => void }) {
   )
 }
 
-export default function ManageBrandsClient({ brands, services, migrated }: { brands: Brand[]; services: ServiceRow[]; migrated: boolean }) {
+function TeamPicker({ brand, employees, members, onSaved }: {
+  brand: Brand
+  employees: { id: string; cqid: string | null }[]
+  members: { employee_id: string; brand_id: string }[]
+  onSaved: () => void
+}) {
+  const initial = useMemo(() => new Set(members.filter(m => m.brand_id === brand.id).map(m => m.employee_id)), [members, brand.id])
+  const [picked, setPicked] = useState<Set<string>>(initial)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const dirty = picked.size !== initial.size || [...picked].some(id => !initial.has(id))
+
+  async function save() {
+    setBusy(true); setMsg(null)
+    const res = await setBrandMembers(brand.id, [...picked])
+    setBusy(false)
+    if (!res.ok) { setMsg({ ok: false, text: res.error ?? 'Could not save.' }); return }
+    setMsg({ ok: true, text: 'Saved' }); onSaved()
+  }
+
+  return (
+    <div className="px-4 py-3 border-t border-border/60 space-y-2">
+      <p className="text-xs font-semibold">{brand.name}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {employees.map(e => {
+          const on = picked.has(e.id)
+          return (
+            <button key={e.id} type="button" aria-pressed={on}
+              onClick={() => setPicked(prev => { const n = new Set(prev); if (on) n.delete(e.id); else n.add(e.id); return n })}
+              className={`rounded-full border px-2.5 py-1 text-xs tabular-nums ${on ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+              {e.cqid ?? '—'}
+            </button>
+          )
+        })}
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        {msg && <span role={msg.ok ? 'status' : 'alert'} className={`text-xs ${msg.ok ? 'text-emerald-600' : 'text-red-500'}`}>{msg.text}</span>}
+        <button type="button" onClick={() => void save()} disabled={busy || !dirty}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1 text-xs font-medium hover:bg-secondary disabled:opacity-50">
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save team
+        </button>
+      </div>
+    </div>
+  )
+}
+
+export default function ManageBrandsClient({
+  brands, services, migrated, departments = [], departmentsMigrated = false, employees = [], members = [], staffMigrated = false,
+}: {
+  brands: Brand[]
+  services: ServiceRow[]
+  migrated: boolean
+  departments?: DepartmentRow[]
+  departmentsMigrated?: boolean
+  employees?: { id: string; cqid: string | null }[]
+  members?: { employee_id: string; brand_id: string }[]
+  staffMigrated?: boolean
+}) {
   const router = useRouter()
   const [, startTransition] = useTransition()
   const refresh = () => startTransition(() => router.refresh())
@@ -132,10 +195,24 @@ export default function ManageBrandsClient({ brands, services, migrated }: { bra
     return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   }, [services, q])
 
-  async function moveService(id: string, brandId: string) {
-    setSavingSvc(id); setSvcError(null)
-    const res = await setServiceBrand(id, brandId && brandId !== def?.id ? brandId : null)
+  // A service's brand is its department's unless it has its own override.
+  const deptBrand = (categoryId: string | null | undefined) =>
+    departments.find(d => d.id === categoryId)?.brand_id ?? def?.id ?? ''
+
+  async function moveService(s: ServiceRow, brandId: string) {
+    setSavingSvc(s.id); setSvcError(null)
+    // Back to its department's brand = no override.
+    const res = await setServiceBrand(s.id, brandId === deptBrand(s.category_id) ? null : brandId)
     setSavingSvc(null)
+    if (!res.ok) setSvcError(res.error ?? 'Could not save.')
+    else refresh()
+  }
+
+  const [savingDept, setSavingDept] = useState<string | null>(null)
+  async function moveDepartment(id: string, brandId: string) {
+    setSavingDept(id); setSvcError(null)
+    const res = await setDepartmentBrand(id, brandId && brandId !== def?.id ? brandId : null)
+    setSavingDept(null)
     if (!res.ok) setSvcError(res.error ?? 'Could not save.')
     else refresh()
   }
@@ -159,11 +236,53 @@ export default function ManageBrandsClient({ brands, services, migrated }: { bra
               <BrandForm onSaved={refresh} />
             </section>
 
+            {departmentsMigrated && (
+              <section className="rounded-xl border border-border bg-card overflow-hidden" aria-labelledby="dept-heading">
+                <div className="px-4 py-3 border-b border-border/60 space-y-1">
+                  <h2 id="dept-heading" className="text-sm font-semibold">Departments of each brand</h2>
+                  <p className="text-[11px] text-muted-foreground">
+                    A brand owns departments, like a department owns services. Its services, clients and the people assigned to
+                    those departments all follow. New departments are added under Settings → Departments.
+                  </p>
+                </div>
+                {departments.map(d => (
+                  <div key={d.id} className="flex items-center gap-3 px-4 py-2 border-t border-border/60 first:border-t-0">
+                    <p className="text-sm flex-1 min-w-0 truncate">{d.name}</p>
+                    <select
+                      value={d.brand_id ?? def?.id ?? ''}
+                      onChange={e => void moveDepartment(d.id, e.target.value)}
+                      disabled={savingDept === d.id}
+                      aria-label={`Brand of the ${d.name} department`}
+                      className="rounded-lg border border-border bg-background px-2 py-1 text-xs disabled:opacity-50"
+                    >
+                      {brands.filter(b => b.is_active || b.id === d.brand_id).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                    {savingDept === d.id && <Loader2 className="h-3 w-3 animate-spin" />}
+                  </div>
+                ))}
+              </section>
+            )}
+
+            {staffMigrated && employees.length > 0 && (
+              <section className="rounded-xl border border-border bg-card overflow-hidden" aria-labelledby="team-heading">
+                <div className="px-4 py-3 space-y-1">
+                  <h2 id="team-heading" className="text-sm font-semibold">People on each brand</h2>
+                  <p className="text-[11px] text-muted-foreground">
+                    Someone on a brand counts as being in every one of its departments. With &ldquo;Restrict to assigned
+                    services&rdquo; on their role, they then see only that brand&rsquo;s clients, services and work.
+                  </p>
+                </div>
+                {brands.filter(b => b.is_active).map(b => (
+                  <TeamPicker key={b.id} brand={b} employees={employees} members={members} onSaved={refresh} />
+                ))}
+              </section>
+            )}
+
             <section className="rounded-xl border border-border bg-card overflow-hidden" aria-labelledby="svc-heading">
               <div className="px-4 py-3 border-b border-border/60 space-y-2">
                 <h2 id="svc-heading" className="text-sm font-semibold">Which brand sells each service</h2>
                 <p className="text-[11px] text-muted-foreground">
-                  Client work on a service counts as that brand&rsquo;s revenue. Anything left on {def?.name ?? 'the default brand'} stays there.
+                  A service follows its department&rsquo;s brand; change one here only for an exception. Client work on a service counts as that brand&rsquo;s revenue.
                 </p>
                 <input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter services…" className={field} aria-label="Filter services" />
                 {svcError && <p role="alert" className="text-xs text-red-500">{svcError}</p>}
@@ -175,8 +294,8 @@ export default function ManageBrandsClient({ brands, services, migrated }: { bra
                     <div key={s.id} className="flex items-center gap-3 px-4 py-2 border-t border-border/60">
                       <p className="text-sm flex-1 min-w-0 truncate">{s.name}</p>
                       <select
-                        value={s.brand_id ?? def?.id ?? ''}
-                        onChange={e => void moveService(s.id, e.target.value)}
+                        value={s.brand_id ?? deptBrand(s.category_id)}
+                        onChange={e => void moveService(s, e.target.value)}
                         disabled={savingSvc === s.id}
                         aria-label={`Brand that sells ${s.name}`}
                         className="rounded-lg border border-border bg-background px-2 py-1 text-xs disabled:opacity-50"

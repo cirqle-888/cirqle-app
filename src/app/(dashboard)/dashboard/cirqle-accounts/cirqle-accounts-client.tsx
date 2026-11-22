@@ -16,7 +16,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { ASSET_KIND_LABEL, type AssetRow } from '@/lib/assets/registry'
 import { Megaphone, ClipboardList, Building2, ShieldCheck, Settings2, ChevronRight, Loader2 } from 'lucide-react'
 import { PlatformIcon } from '@/components/social-hub/platform-icon'
-import type { Brand } from '@/lib/brands/brands'
+import { taskNoun, type Brand } from '@/lib/brands/brands'
 import { BRAND_PERIODS, type BrandPeriod, type BrandSummary } from '@/lib/brands/dashboard'
 import { setAccountBrand } from './actions'
 import { BrandMark, compact, inr } from './brand-ui'
@@ -129,7 +129,7 @@ export default function CirqleAccountsClient({ assets, brands, summaries, accoun
                         ['Reach', compact(s.reach)],
                         ['Leads', compact(s.leads)],
                         ['Campaigns', `${s.activeCampaigns}/${s.campaigns.length}`],
-                        ['Open tasks', String(s.openTasks.length)],
+                        [`Open ${taskNoun(s.brand).many.toLowerCase()}`, String(s.openTasks.length)],
                         ['Accounts', String(s.accounts.length)],
                       ] as const).map(([label, value]) => (
                         <div key={label} className="rounded-lg bg-secondary/50 px-1.5 py-1.5">

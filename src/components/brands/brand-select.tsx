@@ -13,7 +13,7 @@
 import { useEffect, useState } from 'react'
 import { listBrandOptions } from '@/app/(dashboard)/dashboard/cirqle-accounts/actions'
 
-export interface BrandOption { id: string; name: string; color: string | null; isDefault: boolean }
+export interface BrandOption { id: string; name: string; color: string | null; isDefault: boolean; taskLabel?: string | null }
 
 let cache: Promise<BrandOption[]> | null = null
 function loadOptions(): Promise<BrandOption[]> {

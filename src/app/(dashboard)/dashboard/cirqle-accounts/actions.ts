@@ -13,6 +13,7 @@
  */
 
 import { revalidatePath, revalidateTag } from 'next/cache'
+import { cookies } from 'next/headers'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { loadCurrentUser, requirePermission, requireAnyPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
@@ -20,6 +21,8 @@ import { logActivity } from '@/lib/activity/log'
 import { COMPANY_SETTINGS_TAG } from '@/lib/settings/company-settings'
 import { BRAND_INVOICE_KEY, normalizeHex, slugify, type BrandInvoiceIdentity } from '@/lib/brands/brands'
 import { loadBrands } from '@/lib/brands/load'
+import { BRAND_LENS_COOKIE } from '@/lib/brands/lens'
+import { loadBrandGraph } from '@/lib/brands/scope'
 
 interface ActionResult<T = void> { ok: boolean; error?: string; data?: T }
 
@@ -36,6 +39,8 @@ export interface BrandInput {
   isActive?: boolean
   showOnInvoices?: boolean
   displayOrder?: number
+  /** What the brand calls a task ("Order"). Empty = "Task". */
+  taskLabel?: string | null
 }
 
 const clean = (v: string | null | undefined) => {
@@ -54,15 +59,78 @@ function rowFrom(input: BrandInput) {
     ...(input.isActive !== undefined ? { is_active: input.isActive } : {}),
     ...(input.showOnInvoices !== undefined ? { show_on_invoices: input.showOnInvoices } : {}),
     ...(input.displayOrder !== undefined ? { display_order: Math.trunc(input.displayOrder) } : {}),
+    ...(input.taskLabel !== undefined ? { task_label: clean(input.taskLabel) } : {}),
   }
 }
 
 /** Brands for pickers (tasks, cash book, campaigns). Any signed-in user. */
-export async function listBrandOptions(): Promise<ActionResult<{ id: string; name: string; color: string | null; isDefault: boolean }[]>> {
+export async function listBrandOptions(): Promise<ActionResult<{ id: string; name: string; color: string | null; isDefault: boolean; taskLabel: string | null }[]>> {
   const me = await loadCurrentUser().catch(() => null)
   if (!me) return { ok: false, error: 'Not signed in.' }
   const brands = await loadBrands(createAdminClient(), { activeOnly: true })
-  return { ok: true, data: brands.map(b => ({ id: b.id, name: b.name, color: b.color, isDefault: b.is_default })) }
+  return { ok: true, data: brands.map(b => ({ id: b.id, name: b.name, color: b.color, isDefault: b.is_default, taskLabel: b.task_label ?? null })) }
+}
+
+/**
+ * Look at one brand ("Memoura only") or all of them (null). Only ever narrows
+ * what pages show — it is a view, not a permission — so any signed-in user may
+ * set it. Remembered per browser for a year.
+ */
+export async function setBrandLens(brandId: string | null): Promise<ActionResult> {
+  const me = await loadCurrentUser().catch(() => null)
+  if (!me) return { ok: false, error: 'Not signed in.' }
+  const jar = await cookies()
+  if (!brandId) {
+    jar.delete(BRAND_LENS_COOKIE)
+  } else {
+    const brands = await loadBrands(createAdminClient(), { activeOnly: true })
+    if (!brands.some(b => b.id === brandId)) return { ok: false, error: 'Brand not found.' }
+    jar.set(BRAND_LENS_COOKIE, brandId, { path: '/', maxAge: 60 * 60 * 24 * 365, sameSite: 'lax' })
+  }
+  revalidatePath('/dashboard', 'layout')
+  return { ok: true }
+}
+
+/** Assign staff to a brand as a whole (every department of it). Replaces the set. */
+export async function setBrandMembers(brandId: string, employeeIds: string[]): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.SETTINGS_MANAGE_COMPANY)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const admin = createAdminClient()
+  if (!(await loadBrands(admin)).some(b => b.id === brandId)) return { ok: false, error: 'Brand not found.' }
+  const wanted = [...new Set(employeeIds.filter(Boolean))]
+
+  const { data: current, error: readErr } = await admin.from('employee_brands').select('employee_id').eq('brand_id', brandId)
+  if (readErr) return { ok: false, error: /employee_brands/.test(readErr.message) ? 'Brand staff are not set up in the database yet (migration 20261122120000).' : readErr.message }
+  const have = new Set((current ?? []).map((r: { employee_id: string }) => r.employee_id))
+  const add = wanted.filter(id => !have.has(id))
+  const remove = [...have].filter(id => !wanted.includes(id))
+  if (add.length) {
+    const { error } = await admin.from('employee_brands').insert(add.map(employee_id => ({ employee_id, brand_id: brandId })))
+    if (error) return { ok: false, error: error.message }
+  }
+  if (remove.length) {
+    const { error } = await admin.from('employee_brands').delete().eq('brand_id', brandId).in('employee_id', remove)
+    if (error) return { ok: false, error: error.message }
+  }
+  void logActivity({ actorId: guard.employeeId, entityType: 'setting', action: 'changed', detail: { label: 'Brand staff', added: add.length, removed: remove.length } })
+  revalidateAll()
+  return { ok: true }
+}
+
+/** Which brand a department belongs to (null = default). Moves its services and clients with it. */
+export async function setDepartmentBrand(categoryId: string, brandId: string | null): Promise<ActionResult> {
+  const guard = await requirePermission(PERMS.SETTINGS_MANAGE_COMPANY)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  const admin = createAdminClient()
+  if (brandId && !(await loadBrands(admin)).some(b => b.id === brandId)) return { ok: false, error: 'Brand not found.' }
+  const { data: cat } = await admin.from('service_categories').select('name').eq('id', categoryId).maybeSingle()
+  if (!cat) return { ok: false, error: 'Department not found.' }
+  const { error } = await admin.from('service_categories').update({ brand_id: brandId }).eq('id', categoryId)
+  if (error) return { ok: false, error: /brand_id/.test(error.message) ? 'Brand departments are not set up in the database yet (migration 20261122120000).' : error.message }
+  void logActivity({ actorId: guard.employeeId, entityType: 'setting', action: 'changed', detail: { label: `Brand of department ${cat.name}` } })
+  await syncInvoiceIdentity(admin)
+  revalidateAll()
+  return { ok: true }
 }
 
 export async function createBrand(input: BrandInput): Promise<ActionResult<{ id: string; slug: string }>> {
@@ -186,10 +254,13 @@ export async function setTaskBrand(taskId: string, brandId: string | null): Prom
  */
 async function syncInvoiceIdentity(admin: ReturnType<typeof createAdminClient>): Promise<void> {
   try {
-    const brands = (await loadBrands(admin, { activeOnly: true })).filter(b => b.show_on_invoices && !b.is_default)
-    const { data: services } = await admin.from('services').select('id, name, brand_id').not('brand_id', 'is', null)
+    const all = await loadBrands(admin)
+    const brands = all.filter(b => b.is_active && b.show_on_invoices && !b.is_default)
+    // A service's brand: its own override, else its department's (lib/brands/scope).
+    const graph = await loadBrandGraph(admin, all)
+    const { data: services } = await admin.from('services').select('id, name')
     const identities: BrandInvoiceIdentity[] = brands.map(b => {
-      const mine = (services ?? []).filter((s: { brand_id: string }) => s.brand_id === b.id) as { id: string; name: string }[]
+      const mine = ((services ?? []) as { id: string; name: string }[]).filter(s => graph.serviceBrand.get(s.id) === b.id)
       return {
         name: b.name, tagline: b.tagline, logoUrl: b.logo_url, whatsapp: b.whatsapp_number,
         serviceIds: mine.map(s => s.id),

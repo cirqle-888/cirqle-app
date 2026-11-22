@@ -89,6 +89,8 @@ interface Props {
    * picker entirely rather than offering a field that silently will not save.
    */
   canSetDepartment?: boolean
+  /** The sidebar brand lens, when one is active — the list is already narrowed. */
+  brandName?: string | null
 }
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
@@ -96,7 +98,7 @@ const inr = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`
 const draftCreatorName = (c: { draft_creator?: ClientRow['draft_creator'] }) =>
   (Array.isArray(c.draft_creator) ? c.draft_creator[0]?.name : c.draft_creator?.name) || null
 
-export default function ClientsClient({ clients: initialClients, stats, departments = [], clientDepartments = {}, showAmounts, canCreate, canEdit, canPricingMatrix = false, canApproveDraft = false, canSetDepartment = false }: Props) {
+export default function ClientsClient({ clients: initialClients, stats, departments = [], clientDepartments = {}, showAmounts, canCreate, canEdit, canPricingMatrix = false, canApproveDraft = false, canSetDepartment = false, brandName = null }: Props) {
   const router = useRouter()
   const toast = useToast()
   const { ds } = usePrivacy()
@@ -270,8 +272,8 @@ export default function ClientsClient({ clients: initialClients, stats, departme
   return (
     <>
       <Header
-        title="Clients"
-        subtitle={`${totals.count} active client${totals.count === 1 ? '' : 's'}`}
+        title={brandName ? `Clients · ${brandName}` : 'Clients'}
+        subtitle={`${totals.count} active client${totals.count === 1 ? '' : 's'}${brandName ? ` of ${brandName} — switch to “All brands” in the sidebar to see everyone` : ''}`}
         actions={
           <>
             <Link href="/dashboard/clients/ranking"

@@ -23,6 +23,7 @@
 import { PERMS } from '@/lib/permissions/keys'
 import { hasPermission, type CurrentUser } from '@/lib/permissions/check'
 import type { createAdminClient } from '@/lib/supabase/admin'
+import { brandCategoryIdsForEmployee } from '@/lib/brands/staff'
 
 type Admin = ReturnType<typeof createAdminClient>
 
@@ -105,10 +106,12 @@ async function fetchAssignedServiceIds(admin: Admin, employeeId: string): Promis
   )
 
   // Pre-migration or a genuinely empty category set: nothing to add, and the
-  // direct assignments above still stand.
-  const categoryIds = cats.error
-    ? []
-    : (cats.data || []).map((r: { category_id: string }) => r.category_id)
+  // direct assignments above still stand. A BRAND assignment counts as every
+  // department of that brand (lib/brands/staff.ts).
+  const categoryIds = [...new Set([
+    ...(cats.error ? [] : (cats.data || []).map((r: { category_id: string }) => r.category_id)),
+    ...await brandCategoryIdsForEmployee(admin, employeeId),
+  ])]
 
   if (categoryIds.length > 0) {
     const { data, error } = await admin

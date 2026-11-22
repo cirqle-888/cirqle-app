@@ -26,6 +26,7 @@ import { hasPermission, type CurrentUser } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { clientDepartmentIds } from '@/lib/clients/department-filter'
 import type { createAdminClient } from '@/lib/supabase/admin'
+import { brandCategoryIdsForEmployee } from '@/lib/brands/staff'
 
 type Admin = ReturnType<typeof createAdminClient>
 
@@ -84,6 +85,8 @@ async function employeeDepartmentIds(admin: Admin, employeeId: string): Promise<
   ])
   if (cats.error || direct.error) return null
   const ids = new Set<string>((cats.data || []).map((r: { category_id: string }) => r.category_id))
+  // A brand assignment is every department of that brand.
+  for (const c of await brandCategoryIdsForEmployee(admin, employeeId)) ids.add(c)
   const serviceIds = (direct.data || []).map((r: { service_id: string }) => r.service_id)
   if (serviceIds.length) {
     const { data, error } = await admin.from('services').select('category_id').in('id', serviceIds)
