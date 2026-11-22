@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useBrandOptions } from '@/components/brands/brand-select'
 import * as Icons from 'lucide-react'
 import { Plus, Trash2, X, Check, Lock } from 'lucide-react'
 import { navSections } from '@/lib/nav-sections'
@@ -168,6 +169,8 @@ function WorkspaceEditor({ workspace, employees, showMembers, createOwnerId, onC
   const [restrictWidgets, setRestrictWidgets] = useState(!!workspace?.dashboardWidgetKeys)
   const [landing, setLanding] = useState(workspace?.defaultLandingHref ?? '/dashboard')
   const [members, setMembers] = useState<Set<string>>(new Set(workspace?.memberIds ?? []))
+  const brandOptions = useBrandOptions()
+  const [brandId, setBrandId] = useState<string>(workspace?.brandId ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -191,6 +194,7 @@ function WorkspaceEditor({ workspace, employees, showMembers, createOwnerId, onC
       dashboardWidgetKeys: restrictWidgets ? Array.from(widgets) : null,
       defaultLandingHref: landing,
       memberIds: Array.from(members),
+      brandId: brandId || null,
     }
     const res = workspace
       ? await updateWorkspace(workspace.id, payload)
@@ -286,6 +290,22 @@ function WorkspaceEditor({ workspace, employees, showMembers, createOwnerId, onC
                   </div>
                 )}
               </div>
+
+              {brandOptions.length > 1 && (
+                <label className="block">
+                  <span className="mb-1 block text-xs text-muted-foreground">Brand</span>
+                  <select value={brandId} onChange={e => setBrandId(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm outline-none">
+                    <option value="">All brands</option>
+                    {brandOptions.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                  <span className="mt-1 block text-[10px] text-muted-foreground">
+                    In this workspace Tasks and Clients show only this brand (under Memoura, Tasks become Orders).
+                    Members assigned here always work in it. A view, not a permission — to block other brands,
+                    switch on &ldquo;Restrict to assigned services&rdquo; for their role and put them on the brand.
+                  </span>
+                </label>
+              )}
 
               <label className="block">
                 <span className="mb-1 block text-xs text-muted-foreground">Default landing page</span>

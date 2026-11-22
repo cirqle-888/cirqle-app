@@ -2,8 +2,14 @@
  * The brand lens — "show me only Memoura" (server-only).
  *
  * One platform, two ways to look at it: "All brands" (the default, everything
- * together) or one brand at a time. The choice is a cookie set from the
- * sidebar switcher and read by the pages that honour it (Tasks, Clients).
+ * together) or one brand at a time. Two sources, first wins:
+ *
+ *   1. the viewer's current WORKSPACE, when it belongs to a brand — a
+ *      "Memoura" workspace is a complete Memoura view, and its members live
+ *      in it (Settings → Workspaces);
+ *   2. otherwise the sidebar Brand switcher's cookie.
+ *
+ * Read by the pages that honour it (Tasks, Clients).
  *
  * A lens only ever NARROWS what a page shows. It is not a permission: what a
  * person may see is still decided by their role and department scope, so
@@ -15,6 +21,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Brand } from './brands'
 import { loadBrandGraph, type BrandGraph } from './scope'
 import { loadBrands } from './load'
+import { loadCurrentUser } from '@/lib/permissions/check'
 
 export const BRAND_LENS_COOKIE = 'cq_brand'
 
@@ -30,9 +37,23 @@ export interface BrandLens {
   graph: BrandGraph
 }
 
+/** The brand of the viewer's current workspace, if it has one. Best-effort. */
+export async function workspaceBrandId(admin: SupabaseClient): Promise<string | null> {
+  try {
+    const me = await loadCurrentUser().catch(() => null)
+    if (!me?.employeeId) return null
+    const { data: emp } = await admin.from('employees').select('current_workspace_id').eq('id', me.employeeId).maybeSingle()
+    const wsId = (emp as { current_workspace_id?: string | null } | null)?.current_workspace_id
+    if (!wsId) return null
+    const { data: ws, error } = await admin.from('workspaces').select('brand_id').eq('id', wsId).maybeSingle()
+    if (error) return null                              // column not migrated
+    return (ws as { brand_id?: string | null } | null)?.brand_id ?? null
+  } catch { return null }
+}
+
 /** The active lens, or null for "All brands" (also when the brand is gone). */
 export async function resolveBrandLens(admin: SupabaseClient): Promise<BrandLens | null> {
-  const id = await readBrandLensId()
+  const id = (await workspaceBrandId(admin)) ?? (await readBrandLensId())
   if (!id) return null
   const brands = await loadBrands(admin)
   const brand = brands.find(b => b.id === id && b.is_active)

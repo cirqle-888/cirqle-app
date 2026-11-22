@@ -15,6 +15,7 @@ import { useRouter } from 'next/navigation'
 import { Check, ChevronsUpDown, Layers, Loader2, Settings2 } from 'lucide-react'
 import { useBrandOptions } from './brand-select'
 import { setBrandLens } from '@/app/(dashboard)/dashboard/cirqle-accounts/actions'
+import { useWorkspace } from '@/contexts/workspace-context'
 
 const COOKIE = 'cq_brand'
 
@@ -27,6 +28,10 @@ function readCookie(): string | null {
 export function BrandSwitcher({ isCollapsed }: { isCollapsed: boolean }) {
   const options = useBrandOptions()
   const router = useRouter()
+  // A workspace that belongs to a brand decides the brand; the switcher shows
+  // it and stays put until you leave that workspace.
+  const { current: workspace } = useWorkspace()
+  const lockedTo = workspace.brandId ?? null
   const [current, setCurrent] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -41,7 +46,7 @@ export function BrandSwitcher({ isCollapsed }: { isCollapsed: boolean }) {
   }, [open])
 
   if (options.length < 2) return null
-  const active = options.find(o => o.id === current) ?? null
+  const active = options.find(o => o.id === (lockedTo ?? current)) ?? null
 
   async function pick(id: string | null) {
     setOpen(false); setBusy(true)
@@ -60,8 +65,9 @@ export function BrandSwitcher({ isCollapsed }: { isCollapsed: boolean }) {
     <div ref={ref} className={`relative px-3 pb-2 ${isCollapsed ? 'px-2' : ''}`}>
       <button
         type="button"
-        onClick={() => setOpen(o => !o)}
-        title={isCollapsed ? (active ? `Brand: ${active.name}` : 'All brands') : undefined}
+        onClick={() => { if (!lockedTo) setOpen(o => !o) }}
+        aria-disabled={!!lockedTo}
+        title={lockedTo ? `Brand set by the ${workspace.name} workspace` : isCollapsed ? (active ? `Brand: ${active.name}` : 'All brands') : undefined}
         aria-haspopup="listbox"
         aria-expanded={open}
         className={`flex w-full items-center gap-2 rounded-lg border transition-colors hover:bg-sidebar-accent ${
@@ -72,15 +78,15 @@ export function BrandSwitcher({ isCollapsed }: { isCollapsed: boolean }) {
         {!isCollapsed && (
           <>
             <span className="min-w-0 flex-1 text-left">
-              <span className="block text-[10px] uppercase tracking-wide text-muted-foreground leading-none">Brand</span>
+              <span className="block text-[10px] uppercase tracking-wide text-muted-foreground leading-none">{lockedTo ? 'Brand · by workspace' : 'Brand'}</span>
               <span className="block truncate text-sm font-medium text-sidebar-foreground">{active ? active.name : 'All brands'}</span>
             </span>
-            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            {!lockedTo && <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
           </>
         )}
       </button>
 
-      {open && (
+      {open && !lockedTo && (
         <div role="listbox" aria-label="Brand"
           className={`absolute top-full z-30 mt-1 w-64 overflow-hidden rounded-xl border border-border bg-popover shadow-xl ${isCollapsed ? 'left-2' : 'left-3 right-3 w-auto'}`}>
           <div className="max-h-72 overflow-y-auto p-1">
