@@ -66,7 +66,8 @@ export interface ShopOrder {
  * An order stores the name and price it was sold at, so editing this list
  * never rewrites an old order.
  */
-export const MEMOURA_GIFTS: readonly Required<Pick<OrderItem, 'id' | 'name' | 'meta' | 'price'>>[] = [
+export interface ShopGift { id: string; name: string; meta: string; price: number }
+export const MEMOURA_GIFTS: readonly ShopGift[] = [
   { id: 'polaroid', name: 'Mini polaroid pack', meta: '20 pieces', price: 199 },
   { id: 'song', name: 'Song frame', meta: 'A5', price: 249 },
   { id: 'strip', name: 'Photo strip frame', meta: '4 photos', price: 299 },
