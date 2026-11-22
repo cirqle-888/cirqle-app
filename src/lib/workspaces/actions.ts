@@ -28,6 +28,10 @@ export interface Workspace {
   /** Set = a PERSONAL workspace, designed and editable by that employee alone. */
   ownerEmployeeId: string | null
   memberIds: string[]
+  /** The Cirqle brand this workspace shows (Tasks, Clients narrowed to it). null = all brands. */
+  brandId: string | null
+  /** With a brand: confine non-admin members to it everywhere (lib/brands/restriction). */
+  restrictMembers: boolean
 }
 
 /** Enough for real use, low enough that the switcher stays a list, not a search problem. */
@@ -59,6 +63,9 @@ function mapWorkspace(r: any, memberIds: string[] = []): Workspace {
     // Tolerant read: pre-migration rows simply have no owner column.
     ownerEmployeeId: r.owner_employee_id ?? null,
     memberIds,
+    // Tolerant read: pre-migration rows have no brand column.
+    brandId: r.brand_id ?? null,
+    restrictMembers: r.restrict_members === true,
   }
 }
 
@@ -125,6 +132,8 @@ export async function createWorkspace(input: {
   dashboardWidgetKeys: string[] | null
   defaultLandingHref: string
   memberIds: string[]
+  brandId?: string | null
+  restrictMembers?: boolean
 }): Promise<Result<{ id: string }>> {
   const auth = await requireUser()
   if (!auth.ok) return auth
@@ -155,6 +164,11 @@ export async function createWorkspace(input: {
     default_landing_href: input.defaultLandingHref || '/dashboard',
     created_by: auth.me.employeeId,
     ...(manager ? {} : { owner_employee_id: auth.me.employeeId }),
+    // Only written when chosen, so creation works before 20261122140000.
+    ...(input.brandId ? { brand_id: input.brandId } : {}),
+    // Confinement is a manager's decision about other people, and only means
+    // something with a brand.
+    ...(manager && input.brandId && input.restrictMembers ? { restrict_members: true } : {}),
   }).select('id').single()
   if (error) {
     // Pre-migration: the owner column doesn't exist yet, so personal creation
@@ -185,6 +199,8 @@ export async function updateWorkspace(id: string, input: {
   dashboardWidgetKeys?: string[] | null
   defaultLandingHref?: string
   memberIds?: string[]
+  brandId?: string | null
+  restrictMembers?: boolean
 }): Promise<Result<null>> {
   const auth = await requireUser()
   if (!auth.ok) return auth
@@ -215,6 +231,14 @@ export async function updateWorkspace(id: string, input: {
   if (input.sidebarModuleHrefs !== undefined) upd.sidebar_module_hrefs = input.sidebarModuleHrefs?.length ? input.sidebarModuleHrefs : null
   if (input.dashboardWidgetKeys !== undefined) upd.dashboard_widget_keys = input.dashboardWidgetKeys?.length ? input.dashboardWidgetKeys : null
   if (input.defaultLandingHref !== undefined) upd.default_landing_href = input.defaultLandingHref
+  // Written when the column exists (select('*') returns it) or a brand was
+  // picked — so editing works the same before 20261122140000.
+  if (input.brandId !== undefined && ('brand_id' in existing || input.brandId)) upd.brand_id = input.brandId || null
+  // Only managers confine people; a personal workspace never confines anyone.
+  if (input.restrictMembers !== undefined && 'restrict_members' in existing) {
+    const brandAfter = input.brandId !== undefined ? input.brandId : existing.brand_id
+    upd.restrict_members = canManage(auth.me) && owner === null && !!brandAfter && input.restrictMembers
+  }
 
   const { error } = await admin.from('workspaces').update(upd).eq('id', id)
   if (error) return { ok: false, error: error.message }

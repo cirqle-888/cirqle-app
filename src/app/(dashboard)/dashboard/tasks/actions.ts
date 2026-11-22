@@ -974,6 +974,14 @@ export async function serverSaveTask(
 
   if (error) return { ok: false, error: error.message }
 
+  // A Cirqle brand belongs to internal work only: a task given a client sheds
+  // it (client work takes its brand from the service). Best-effort — the
+  // column arrives with migration 20261122100000.
+  if (input.clientId) {
+    await admin.from('tasks').update({ brand_id: null }).eq('id', input.taskId).not('brand_id', 'is', null)
+      .then(null, () => { /* not migrated */ })
+  }
+
   void logActivity({
     actorId:    guard.employeeId,
     entityType: 'task',

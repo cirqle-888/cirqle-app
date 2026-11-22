@@ -30,6 +30,7 @@ import { usePermissions } from '@/contexts/permission-context'
 import { displayEmployee } from '@/lib/utils/employee-display'
 import AppSelect from '@/components/ui/app-select'
 import TagPicker from '@/components/ui/tag-picker'
+import { BrandSelect } from '@/components/brands/brand-select'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
 import { computeEqualSplit } from '@/lib/finance/splits'
 import type { Currency } from '@/types'
@@ -399,6 +400,8 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     // (feeds the Company P&L), '' = leave untriaged (client money, tag later).
     // When a client is tagged the entry is 'client'-scoped regardless.
     scope: '' as '' | 'company',
+    // Company entries only: which of Cirqle's brands ('' = default / shared).
+    brand_id: '',
     // Free-form spend tags (e.g. "Photoshop", "Design") for ad-hoc reporting.
     tags: [] as string[],
     // Employees sharing this expense — split equally on save.
@@ -517,6 +520,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       partner_filter_id: '',
       fully_paid:      false,
       scope:           entry.scope === 'company' ? 'company' : '',
+      brand_id:        ((entry as { brand_id?: string | null }).brand_id) ?? '',
       tags:            (entry.tags ?? []).map(t => t.tag.name),
       // Splits aren't carried over on duplicate — a copied entry needs the
       // split re-decided (recomputing from the same employee set still works
@@ -560,6 +564,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       partner_filter_id: '',
       fully_paid:      false,
       scope:           entry.scope === 'company' ? 'company' : '',
+      brand_id:        ((entry as { brand_id?: string | null }).brand_id) ?? '',
       tags:            (entry.tags ?? []).map(t => t.tag.name),
       splitEmployeeIds: (entry.employee_splits ?? []).map(s => s.employee_id),
       markupType:      (entry.markup_type as MarkupType) ?? 'none',
@@ -624,6 +629,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         ad_account_id: form.type === 'outflow' ? form.ad_account_id || null : null,
         client_id:       savedClientId,
         scope:           savedScope,
+        brand_id:        !savedClientId && savedScope === 'company' ? (form.brand_id || null) : null,
         tags:            form.tags,
         employee_split_ids: form.type === 'outflow' ? form.splitEmployeeIds : [],
         // Cushion only rides on a client-tagged expense — an untagged or
@@ -673,7 +679,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         ))
         setShowForm(false)
         setFormEditingId(null)
-        setForm({ ad_account_id: '', type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', partner_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [], markupType: 'none', markupValue: '' })
+        setForm({ ad_account_id: '', type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', partner_filter_id: '', fully_paid: false, scope: '', brand_id: '', tags: [], splitEmployeeIds: [], markupType: 'none', markupValue: '' })
         setDescTouched(false)
       }
       setSaving(false)
@@ -739,6 +745,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         ad_account_id: form.type === 'outflow' ? form.ad_account_id || null : null,
         client_id: insertClientId,
         scope: insertClientId ? 'client' : (form.scope || null),
+        brand_id: !insertClientId && form.scope === 'company' ? (form.brand_id || null) : null,
         tags: form.tags,
         employee_split_ids: form.type === 'outflow' ? form.splitEmployeeIds : [],
         ...(canSeeMarkup ? {
@@ -776,7 +783,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
       setEntries(prev => [...[...allInserted].reverse(), ...prev])
       setShowForm(false)
       setRecurringMonths(0)
-      setForm({ ad_account_id: '', type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', partner_filter_id: '', fully_paid: false, scope: '', tags: [], splitEmployeeIds: [], markupType: 'none', markupValue: '' })
+      setForm({ ad_account_id: '', type: 'inflow', category_id: invoiceCategoryId, bank_account_id: defaultBankAccountId, amount: '', currency: 'INR', rate: '', amountInr: '', rateSource: 'settings', entry_date: todayISO(), description: '', reference: '', allocations: [], client_filter_id: '', partner_filter_id: '', fully_paid: false, scope: '', brand_id: '', tags: [], splitEmployeeIds: [], markupType: 'none', markupValue: '' })
       setDescTouched(false)
       // The entry saved but the DB rejected the split (over-allocation, or an
       // invoice that was settled from another tab meanwhile). Say so — the
@@ -3027,6 +3034,15 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                   <p className="text-[10px] text-muted-foreground mt-1">
                     Company entries feed the Company P&L. “Tag later” keeps it in the triage queue until a client is linked.
                   </p>
+                  {form.scope === 'company' && (
+                    <BrandSelect
+                      className="mt-3"
+                      value={form.brand_id}
+                      onChange={id => setForm(p => ({ ...p, brand_id: id }))}
+                      label="Cirqle brand"
+                      hint="Tag a cost or income that belongs to one brand (e.g. Memoura packaging). Leave shared costs on the default. Don’t tag ad wallet top-ups — campaign spend is counted from Meta."
+                    />
+                  )}
                 </div>
               )}
 

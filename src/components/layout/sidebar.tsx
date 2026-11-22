@@ -29,6 +29,7 @@ import { navSections, isNavItemVisible, resolveActiveHref } from '@/lib/nav-sect
 import { useWorkspace } from '@/contexts/workspace-context'
 import { useRequestsBadge } from '@/contexts/requests-badge-context'
 import { WorkspaceSwitcher } from '@/components/layout/workspace-switcher'
+import { BrandSwitcher } from '@/components/brands/brand-switcher'
 import { EmployeeAvatar } from '@/components/ui/employee-avatar'
 import { FavoritesSection } from '@/components/layout/favorites-section'
 import { FavoriteToggle } from '@/components/ui/favorite-toggle'
@@ -394,6 +395,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
       </div>
 
       <WorkspaceSwitcher isCollapsed={isCollapsed} />
+      <BrandSwitcher isCollapsed={isCollapsed} />
 
       {/* Nav */}
       {/* Nav — the scrolling region, and three things it needs to stay one.

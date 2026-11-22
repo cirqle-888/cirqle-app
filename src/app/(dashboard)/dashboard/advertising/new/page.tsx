@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { loadPageOptions } from '@/lib/advertising/campaign-page'
+import { loadBrands } from '@/lib/brands/load'
 import NewCampaignForm from './new-campaign-form'
 
 export const dynamic = 'force-dynamic'
@@ -21,7 +22,7 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
     || hasPermission(me, PERMS.ADVERTISING_MANAGE_BUDGET)
 
   const admin = createAdminClient()
-  const [clientsRes, servicesRes, pricingRes, pages] = await Promise.all([
+  const [clientsRes, servicesRes, pricingRes, pages, brands] = await Promise.all([
     admin.from('clients').select('id, name, code').order('name'),
     admin.from('services').select('id, name, pricing_type, default_price').eq('is_active', true).order('display_order').order('name'),
     // Per-client rate overrides (e.g. a custom % for a given client).
@@ -30,12 +31,16 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
       : Promise.resolve({ data: [] as { client_id: string; service_id: string; price: number }[] }),
     // Pages a campaign can advertise (Cirqle's own for company campaigns).
     loadPageOptions(admin),
+    loadBrands(admin, { activeOnly: true }),
   ])
 
   // ?client= preselects the client (the Marketing Hub's "New campaign").
   const sp = await searchParams
   const wanted = typeof sp.client === 'string' ? sp.client : undefined
   const initialClientId = wanted && (clientsRes.data || []).some(c => c.id === wanted) ? wanted : undefined
+  // ?brand= preselects one of Cirqle's brands (a brand page's "Campaign").
+  const wantedBrand = typeof sp.brand === 'string' ? sp.brand : undefined
+  const initialBrandId = wantedBrand && brands.some(b => b.id === wantedBrand) ? wantedBrand : undefined
 
   return (
     <NewCampaignForm
@@ -46,6 +51,8 @@ export default async function NewCampaignPage({ searchParams }: { searchParams: 
         : (servicesRes.data || []).map(s => ({ ...s, default_price: null }))}
       servicePricing={pricingRes.data || []}
       pages={pages}
+      brands={brands.map(b => ({ id: b.id, name: b.name, isDefault: b.is_default }))}
+      initialBrandId={initialClientId ? undefined : initialBrandId}
     />
   )
 }

@@ -10,6 +10,8 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { getBenchmarksForProjects, type BenchmarkResult } from '@/lib/advertising/ai/benchmarks'
 import { attachPages } from '@/lib/advertising/campaign-page'
+import { loadBrands } from '@/lib/brands/load'
+import { brandOf } from '@/lib/brands/brands'
 import type { AttentionData } from './advertising-client'
 
 export interface AdvertisingData {
@@ -103,6 +105,15 @@ export async function loadAdvertisingData(opts: {
 
   // The advertised page (tells Cirqle's own pages apart on company campaigns).
   const projects: any[] = await attachPages(admin, projectsRes.rows)
+  // Company campaigns name their Cirqle brand (NULL = the default brand).
+  const brands = await loadBrands(admin)
+  if (brands.length) {
+    for (const p of projects) {
+      if (p.client_id) continue
+      const b = brandOf(p.brand_id ?? null, brands)
+      p.brand = b ? { id: b.id, name: b.name, color: b.color } : null
+    }
+  }
   const migrated = projectsRes.migrated
   const ledger: any[] = ledgerRes.rows
   const walletSupported = ledgerRes.supported

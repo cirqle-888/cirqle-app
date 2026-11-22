@@ -9,6 +9,8 @@ import {
   scopeClientList, scopeServiceList, scopeRowsByService,
 } from '@/lib/scope/service-scope'
 import ClientsClient from './clients-client'
+import { resolveBrandLens } from '@/lib/brands/lens'
+import { categoriesOfBrand, clientBrandMap, servicesOfBrand } from '@/lib/brands/scope'
 
 export const dynamic = 'force-dynamic'
 
@@ -135,12 +137,33 @@ export default async function ClientsPage() {
     if (!list.includes(dept)) list.push(dept)
   }
 
+  // Brand lens (sidebar "Brand: Cirqle Flyers"): only that brand's clients —
+  // filed under one of its departments, or buying / having work on one of its
+  // services. Runs after the visibility rules, so it can only narrow.
+  const lens = await resolveBrandLens(supabase)
+  let lensClients = visibleClients
+  let lensServices = scopeServiceList((servicesRes.data || []) as any[], scope)
+  let lensDepartments = departments
+  if (lens) {
+    const brandsOf = clientBrandMap(lens.graph, {
+      clients: (clientsRes.data || []) as any[],
+      pricing: (pricingRes.data || []) as any[],
+      tasks: (tasksRes.data || []) as any[],
+    })
+    lensClients = visibleClients.filter((c: any) => brandsOf.get(c.id)?.has(lens.brand.id))
+    const svc = servicesOfBrand(lens.graph, lens.brand.id)
+    lensServices = lensServices.filter((x: any) => svc.has(x.id))
+    const depts = categoriesOfBrand(lens.graph, lens.brand.id)
+    lensDepartments = departments.filter((d: any) => depts.has(d.id))
+  }
+
   return (
     <ClientsClient
-      clients={visibleClients}
+      clients={lensClients}
       stats={stats}
-      services={scopeServiceList((servicesRes.data || []) as any[], scope)}
-      departments={departments}
+      services={lensServices}
+      departments={lensDepartments}
+      brandName={lens?.brand.name ?? null}
       clientDepartments={clientDepartments}
       canSetDepartment={hasDeptOverride}
       showAmounts={showAmounts}

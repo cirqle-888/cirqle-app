@@ -14,6 +14,8 @@ import { getPendingPricing } from '@/lib/pricing/pending'
 import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
 import { composeRequestDescription, sanitizeCaptionCanvas } from '@/lib/social/plan'
 import TasksClient from './tasks-client'
+import { resolveBrandLens } from '@/lib/brands/lens'
+import { brandOfTask, categoriesOfBrand, servicesOfBrand } from '@/lib/brands/scope'
 import { toISODate } from '@/lib/utils/local-date'
 
 export const dynamic = 'force-dynamic'
@@ -573,6 +575,31 @@ export default async function TasksPage({
       ? allServices.filter(s => myServiceIds.includes(s.id))
       : allServices
 
+  // ── Brand lens (sidebar "Brand: Memoura") ─────────────────────────────────
+  // Narrows the already-scoped list to one brand's work: client work by its
+  // service's brand, internal work by its own brand. A view, not a permission —
+  // it runs after every visibility rule above and can only remove rows.
+  const lens = await resolveBrandLens(supabase)
+  let lensTasks = initialTasks as any[]
+  let lensTrash = initialTrash as any[]
+  let lensServices = scopedServices
+  let lensDepartments = departments
+  if (lens) {
+    let internalBrand = new Map<string, string>()
+    try {
+      const { data } = await supabase.from('tasks').select('id, brand_id').is('client_id', null).not('brand_id', 'is', null)
+      internalBrand = new Map(((data || []) as { id: string; brand_id: string }[]).map(r => [r.id, r.brand_id]))
+    } catch { /* brand column not migrated — internal work counts as the default brand */ }
+    const inLens = (t: any) => brandOfTask(lens.graph, { ...t, brand_id: t.brand_id ?? internalBrand.get(t.id) ?? null }) === lens.brand.id
+    lensTasks = lensTasks.filter(inLens)
+    lensTrash = lensTrash.filter(inLens)
+    const brandServices = servicesOfBrand(lens.graph, lens.brand.id)
+    const used = new Set(lensTasks.map(t => t.service_id).filter(Boolean))
+    lensServices = scopedServices.filter(s => brandServices.has(s.id) || used.has(s.id))
+    const brandDepts = categoriesOfBrand(lens.graph, lens.brand.id)
+    lensDepartments = departments.filter(d => brandDepts.has(d.id))
+  }
+
   // ── Departments, for the admin-only Department filter ─────────────────────
   // A department is a service category (Settings → Departments), and a task's
   // department is its service's category — the same derivation the department
@@ -596,11 +623,12 @@ export default async function TasksPage({
       initialDateRange={initialDateRange}
       dbTaskTotal={dbCountRes.count ?? undefined}
       fullHistory={fullHistory}
-      initialTasks={initialTasks}
-      initialTrash={initialTrash}
+      initialTasks={lensTasks}
+      initialTrash={lensTrash}
       clients={(clientsRes.data || []) as unknown as { id: string; name: string; code: string; is_draft?: boolean | null }[]}
-      services={scopedServices}
-      departments={departments}
+      services={lensServices}
+      departments={lensDepartments}
+      brandLens={lens ? { id: lens.brand.id, name: lens.brand.name, color: lens.brand.color, taskLabel: lens.brand.task_label ?? null } : null}
       packages={(packagesRes.data || []) as any[]}
       packageItems={(packageItemsRes.data || []) as any[]}
       clientPricings={(clientPricingsRes.data || []) as any[]}

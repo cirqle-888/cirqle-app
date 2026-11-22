@@ -3,65 +3,64 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { loadAllAssets } from '@/lib/assets/registry'
+import { loadBrands } from '@/lib/brands/load'
+import { loadBrandSummaries, resolveBrandPeriod } from '@/lib/brands/dashboard'
 import CirqleAccountsClient from './cirqle-accounts-client'
-import { toISODate } from '@/lib/utils/local-date'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * Cirqle Accounts — the agency's OWN marketing, deliberately separate.
+ * Cirqle Brands — the agency's OWN brands and marketing, deliberately separate.
  *
  * Everything here is excluded from client reports, client dashboards, client
  * leads and client billing by the same ownership rule that drives every other
- * surface (@/lib/assets/ownership). This page is the one place those assets
- * are meant to be seen.
+ * surface (@/lib/assets/ownership). Brands (Cirqle Works, Cirqle Flyers,
+ * Memoura, …) split that own marketing and money by brand.
  */
-export default async function CirqleAccountsPage() {
+export default async function CirqleAccountsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const me = await loadCurrentUser().catch(() => null)
   const isAdmin = me?.isAdmin ?? false
   if (!(isAdmin || hasPermission(me, PERMS.ASSETS_VIEW_CIRQLE))) redirect('/dashboard')
 
-  const admin = createAdminClient()
-  const { assets } = await loadAllAssets(admin)
-  const mine = assets.filter(a => a.ownerType === 'cirqle')
-
-  // 30-day rollup for Cirqle's own social accounts only. Same shape as the
-  // Social Hub's rollup, scoped by ownership rather than by client.
-  const socialIds = mine
-    .filter(a => a.kind === 'facebook_page' || a.kind === 'instagram')
-    .map(a => a.id)
-
-  let reach = 0, views = 0, interactions = 0
-  if (socialIds.length) {
-    try {
-      const since =toISODate( new Date(Date.now() - 30 * 86_400_000))
-      const { data } = await admin
-        .from('social_account_insights_daily')
-        .select('reach, views, total_interactions')
-        .in('account_id', socialIds)
-        .gte('metric_date', since)
-      for (const r of (data ?? []) as Record<string, number | null>[]) {
-        reach += Number(r.reach ?? 0)
-        views += Number(r.views ?? 0)
-        interactions += Number(r.total_interactions ?? 0)
-      }
-    } catch { /* insights not migrated — show zeros rather than failing */ }
+  const sp = await searchParams
+  const { period, from, to } = resolveBrandPeriod(typeof sp.period === 'string' ? sp.period : null)
+  const perms = {
+    money: isAdmin || hasPermission(me, PERMS.REPORTS_VIEW_COMPANY_FINANCIALS),
+    manage: isAdmin || hasPermission(me, PERMS.SETTINGS_MANAGE_COMPANY),
+    assign: isAdmin || hasPermission(me, PERMS.ASSETS_ASSIGN),
   }
 
-  // Leads captured by Cirqle's own forms/pages.
+  const admin = createAdminClient()
+  const [{ assets }, brands] = await Promise.all([loadAllAssets(admin), loadBrands(admin)])
+  const mine = assets.filter(a => a.ownerType === 'cirqle')
+  const summaries = await loadBrandSummaries(admin, brands.filter(b => b.is_active), { from, to, withMoney: perms.money })
+
+  // Brand of each Cirqle-owned social account, for the per-account picker.
+  let accountBrand: Record<string, string | null> = {}
+  if (brands.length) {
+    try {
+      const { data } = await admin.from('social_accounts').select('id, brand_id').eq('owner_type', 'cirqle')
+      accountBrand = Object.fromEntries((data ?? []).map((r: { id: string; brand_id: string | null }) => [r.id, r.brand_id]))
+    } catch { /* column not migrated */ }
+  }
+
+  // Leads captured by Cirqle's own forms/pages (all time, for the header).
   let leads = 0
   try {
-    const { count } = await admin
-      .from('leads').select('*', { count: 'exact', head: true }).eq('owner_type', 'cirqle')
+    const { count } = await admin.from('leads').select('*', { count: 'exact', head: true }).eq('owner_type', 'cirqle')
     leads = count ?? 0
   } catch { /* pre-migration */ }
-
-  const followers = mine.reduce((s, a) => s + Number(a.followers ?? 0), 0)
 
   return (
     <CirqleAccountsClient
       assets={mine}
-      stats={{ reach, views, interactions, leads, followers }}
+      brands={brands}
+      summaries={summaries}
+      accountBrand={accountBrand}
+      period={period}
+      range={{ from, to }}
+      totalLeads={leads}
+      perms={perms}
     />
   )
 }

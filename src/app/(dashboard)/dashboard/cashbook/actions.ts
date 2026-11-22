@@ -54,6 +54,8 @@ export interface CashbookEntryPayload {
   scope?: FinanceScope | null
   // Free-form spend tags (e.g. "Photoshop", "Design") for ad-hoc reporting.
   tags?: string[]
+  // Which of Cirqle's brands a COMPANY entry belongs to (null = default/shared).
+  brand_id?: string | null
   // Employees sharing this expense — split equally (see computeEqualSplit).
   employee_split_ids?: string[]
   // Rebill cushion for a client-tagged expense. Carried on the ENTRY so the
@@ -434,6 +436,8 @@ export interface CashbookEntryUpdate {
   client_id?: string | null
   scope?: FinanceScope | null
   tags?: string[]
+  /** Which of Cirqle's brands a company entry belongs to (null = default/shared). */
+  brand_id?: string | null
   employee_split_ids?: string[]
   markup_type?: MarkupType
   markup_value?: number

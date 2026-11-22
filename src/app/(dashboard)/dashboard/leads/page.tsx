@@ -1,3 +1,4 @@
+import { getBrandFilter, inBrand } from '@/lib/brands/filter'
 import { redirect } from 'next/navigation'
 import { createAdminClient, columnExists } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
@@ -84,10 +85,14 @@ export default async function LeadsPage({
     sourceCounts[row.source] = (sourceCounts[row.source] || 0) + 1
   }
 
+  // Brand workspace / switcher: only the brand's clients' leads.
+  const brandFilter = await getBrandFilter()
+  const inScope = (clientId: string | null | undefined) => !brandFilter || inBrand(brandFilter, { clientId: clientId ?? null })
+
   return (
     <LeadsClient
-      leads={(leadsRes.data || []) as never[]}
-      clients={(clientsRes.data || []) as never[]}
+      leads={((leadsRes.data || []) as any[]).filter(l => inScope(l.client_id)) as never[]}
+      clients={((clientsRes.data || []) as any[]).filter(c => !brandFilter || brandFilter.clientIds.has(c.id)) as never[]}
       employees={(employeesRes.data || []) as never[]}
       rules={(rulesRes.data || []) as never[]}
       statusCounts30d={statusCounts}

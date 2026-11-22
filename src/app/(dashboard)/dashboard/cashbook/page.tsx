@@ -1,3 +1,4 @@
+import { getBrandFilter, inBrand } from '@/lib/brands/filter'
 import { createAdminClient, columnExists } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { financialVisibility, stripCashbookList } from '@/lib/permissions/strip'
@@ -161,16 +162,23 @@ export default async function CashBookPage() {
   // Return / Reverse needs migration 20261016100000; until then it is not offered.
   const reversalsAvailable = await columnExists(supabase, 'cashbook_entries', 'reversal_of')
 
+  // Brand workspace / switcher: the brand's clients' money and Cirqle's own
+  // entries tagged with the brand (untagged company entries count as the
+  // default brand's — they are shared costs).
+  const brandFilter = await getBrandFilter()
+
   return (
     <CashBookClient
-      initialEntries={initialEntries}
+      initialEntries={brandFilter
+        ? (initialEntries as any[]).filter(e => inBrand(brandFilter, { clientId: e.client_id, brandId: e.brand_id }))
+        : initialEntries}
       adAccounts={adAccounts || []}
       categories={categoriesRes.data || []}
       bankAccounts={bankAccountsRes.data || []}
       exchangeRates={exchangeRatesRes.data || []}
       dueInvoices={(dueInvoicesRes.data || []) as any[]}
       employees={(employeesRes.data || []) as any[]}
-      clients={(clientsRes.data || []) as any[]}
+      clients={((clientsRes.data || []) as any[]).filter(c => !brandFilter || brandFilter.clientIds.has(c.id))}
       partners={await partnersP}
       outstandingCredits={(creditsRes.data || []) as any[]}
       pendingPayrolls={(pendingPayrollsRes.data || []) as any[]}

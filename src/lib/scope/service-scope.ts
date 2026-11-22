@@ -23,6 +23,8 @@
 import { PERMS } from '@/lib/permissions/keys'
 import { hasPermission, type CurrentUser } from '@/lib/permissions/check'
 import type { createAdminClient } from '@/lib/supabase/admin'
+import { brandCategoryIdsForEmployee } from '@/lib/brands/staff'
+import { confinedScope } from '@/lib/brands/restriction'
 
 type Admin = ReturnType<typeof createAdminClient>
 
@@ -105,10 +107,12 @@ async function fetchAssignedServiceIds(admin: Admin, employeeId: string): Promis
   )
 
   // Pre-migration or a genuinely empty category set: nothing to add, and the
-  // direct assignments above still stand.
-  const categoryIds = cats.error
-    ? []
-    : (cats.data || []).map((r: { category_id: string }) => r.category_id)
+  // direct assignments above still stand. A BRAND assignment counts as every
+  // department of that brand (lib/brands/staff.ts).
+  const categoryIds = [...new Set([
+    ...(cats.error ? [] : (cats.data || []).map((r: { category_id: string }) => r.category_id)),
+    ...await brandCategoryIdsForEmployee(admin, employeeId),
+  ])]
 
   if (categoryIds.length > 0) {
     const { data, error } = await admin
@@ -146,10 +150,17 @@ export async function loadServiceScope(
   let mode = resolveServiceScopeMode(me, module)
   const employeeId = me?.employeeId ?? null
 
+  // A member of a restricted brand workspace is confined to that brand's
+  // services, whatever their role says (admins never are — see restriction.ts).
+  const confined = await confinedScope(admin, me)
+  if (confined) mode = 'services'
+
   const [assigned, narrowing, commitments] = await Promise.all([
-    mode === 'services' && employeeId
-      ? fetchAssignedServiceIds(admin, employeeId)
-      : Promise.resolve<string[] | null>([]),
+    confined
+      ? Promise.resolve<string[] | null>([...confined.serviceIds])
+      : mode === 'services' && employeeId
+        ? fetchAssignedServiceIds(admin, employeeId)
+        : Promise.resolve<string[] | null>([]),
     fetchClientNarrowingEnabled(admin),
     // Paginated: a plain select is capped at 1000 rows by PostgREST, and this
     // table is already at ~800. Silently truncating here would drop the

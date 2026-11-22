@@ -20,6 +20,7 @@ import type { AgreementBreakdown } from '@/lib/packages/invoice-breakdown'
 import type { Currency } from '@/types'
 import { unitPriceOf } from './line-math'
 import { showServiceColumn } from './service-column'
+import { BRAND_INVOICE_KEY, brandForInvoice, parseBrandIdentities } from '@/lib/brands/brands'
 
 function escapeHtml(unsafe: string | null | undefined, keepNewlines = false): string {
   if (!unsafe) return ''
@@ -315,9 +316,17 @@ export function buildInvoiceParts(
     logoUrl: resolveLogoUrl(companySettings.logo_url_light || companySettings.logo_url || ''),
     footerText: companySettings.invoice_footer_text || 'Thank you for your Business!',
   }
+  // One of Cirqle's brands (Cirqle Flyers, Memoura, …) when EVERY line is a
+  // service that brand sells and it is set to print on invoices. Its logo and
+  // WhatsApp replace the company's; the seller — name, bank, totals — never
+  // changes, so the document stays Cirqle's. Cached by the brand actions.
+  const brand = brandForInvoice(inv.items || [], parseBrandIdentities(companySettings[BRAND_INVOICE_KEY]))
+  if (brand?.logoUrl) co.logoUrl = brand.logoUrl
+  if (brand?.whatsapp) co.phone = brand.whatsapp
+
   const showLogo       = companySettings.invoice_show_logo        !== 'false'
   const showName       = companySettings.invoice_show_company_name !== 'false'
-  const showTagline    = companySettings.invoice_show_tagline     !== 'false'
+  const showTagline    = !!brand || companySettings.invoice_show_tagline !== 'false'
   const showPayInfo    = companySettings.invoice_show_payment_info !== 'false'
   const showContact    = companySettings.invoice_show_phone       !== 'false'
   const showQr         = companySettings.invoice_show_qr          !== 'false'
@@ -609,6 +618,12 @@ export function buildInvoiceParts(
     } else {
       taglineL1 = rawTagline
     }
+  }
+  // A brand's document: its line, then its name in bold — "Offer flyers for
+  // supermarkets & shops / Cirqle Flyers" beside the company name.
+  if (brand) {
+    taglineL1 = escapeHtml(brand.tagline || 'A Cirqle brand')
+    taglineL2 = escapeHtml(brand.name)
   }
 
   // Inline icons — rendered as <img> with data-URI SVGs so html2canvas rasterises

@@ -89,6 +89,8 @@ type ProjectRow = AdProjectRow & {
   client?: { id: string; name: string; code: string } | null
   /** The advertised page (company campaigns: which Cirqle page). */
   page?: { id: string; name: string; username: string | null; platform: string } | null
+  /** Company campaigns: the Cirqle brand it promotes. */
+  brand?: { id: string; name: string; color: string | null } | null
 }
 
 /** Server-loaded inputs for the Needs-attention queue (page.tsx). */
@@ -381,7 +383,8 @@ export default function AdvertisingClient({
   const q = search.trim().toLowerCase()
   const cardMatches = (c: CardData) => {
     if (q && !c.p.campaign_name.toLowerCase().includes(q) && !(c.p.client?.name ?? '').toLowerCase().includes(q)
-      && !(c.p.page ? pageLabel(c.p.page).toLowerCase().includes(q) : false)) return false
+      && !(c.p.page ? pageLabel(c.p.page).toLowerCase().includes(q) : false)
+      && !(c.p.brand?.name ?? '').toLowerCase().includes(q)) return false
     if (fStatus && c.p.status !== fStatus) return false
     if (fPlatform && c.p.platform !== fPlatform) return false
     if (fClient && c.p.client?.id !== fClient) return false
@@ -1106,7 +1109,7 @@ export function CampaignCard({ card, walletOn, showBilling }: { card: CardData; 
         <div className="min-w-0">
           <div className="font-semibold truncate leading-tight">{p.campaign_name}</div>
           <div className="text-xs text-muted-foreground mt-0.5 truncate">
-            {p.client?.name || (p.page ? 'Cirqle' : 'No client')}
+            {p.client?.name || p.brand?.name || (p.page ? 'Cirqle' : 'No client')}
             {p.page ? ` · ${pageLabel(p.page)}` : ''}
             {' · '}
             {PLATFORM_LABEL[p.platform] || p.platform}

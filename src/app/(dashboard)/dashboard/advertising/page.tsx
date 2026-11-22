@@ -1,3 +1,4 @@
+import { getBrandFilter, inBrand } from '@/lib/brands/filter'
 import { redirect } from 'next/navigation'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
@@ -39,15 +40,22 @@ export default async function AdvertisingPage() {
     viewBilling,
   }
 
+  // Brand workspace / switcher: the brand's clients' campaigns and Cirqle's
+  // own campaigns for the brand.
+  const brandFilter = await getBrandFilter()
+  const projects = brandFilter
+    ? data.projects.filter((p: any) => inBrand(brandFilter, { clientId: p.client_id, brandId: p.brand?.id ?? p.brand_id ?? null }))
+    : data.projects
+
   return (
     <AdvertisingClient
       migrated={data.migrated}
-      initialProjects={data.projects}
+      initialProjects={projects}
       metricsByProject={data.metricsByProject}
       benchmarksByProject={data.benchmarksByProject}
       attention={data.attention}
       pendingRequests={data.pendingRequests}
-      clients={data.clients}
+      clients={brandFilter ? data.clients.filter(c => brandFilter.clientIds.has(c.id)) : data.clients}
       walletSupported={data.walletSupported}
       ledger={data.ledger}
       fundCandidates={data.fundCandidates}

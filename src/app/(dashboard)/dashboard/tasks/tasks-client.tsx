@@ -109,6 +109,9 @@ import { Button } from '@/components/ui/button'
 import { usePrivacy } from "@/contexts/privacy-context"
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
 import { daysFromTodayISO, todayISO } from '@/lib/utils/local-date'
+import { BrandSelect } from '@/components/brands/brand-select'
+import { taskNoun } from '@/lib/brands/brands'
+import { setTaskBrand } from '@/app/(dashboard)/dashboard/cirqle-accounts/actions'
 
 // Heavy modals — only mount when opened. Bundle is split off the tasks route
 // chunk so the initial page download stays leaner. ssr:false because modals
@@ -302,6 +305,9 @@ interface Props {
     contribEdit?: boolean
     contribEarnings?: boolean
   }
+  /** The sidebar brand lens ("Memoura only"); the list arrives already
+   *  narrowed — this only names it, and defaults new internal work to it. */
+  brandLens?: { id: string; name: string; color: string | null; taskLabel: string | null } | null
 }
 
 // Task-driven status flow: New(pending) → In Progress → Delivered → Completed(done) → Cancelled.
@@ -363,6 +369,8 @@ const EMPTY_FORM = {
   derived_percent: '',                                                           // string for input; parsed on save
   derived_min: '',                                                               // optional floor (INR), Advanced
   derived_max: '',                                                               // optional ceiling (INR), Advanced
+  // ── Cirqle brand — internal work only ('' = the default brand) ──
+  brand_id: '',
 }
 
 type TaskForm = typeof EMPTY_FORM
@@ -455,7 +463,7 @@ function SortablePanelRow({ id, label, onUp, onDown, isFirst, isLast }: {
   )
 }
 
-export default function TasksClient({ promotionRequest, promotionSocialItem, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', focusTaskMissing = false, initialClient = '', initialService = '', initialDateRange = null, dbTaskTotal, fullHistory = false, initialTasks, initialTrash, clients, services: initialServices, departments = [], clientPricings: initialClientPricings, packages = [], packageItems = [], employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags }: Props) {
+export default function TasksClient({ promotionRequest, promotionSocialItem, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', focusTaskMissing = false, initialClient = '', initialService = '', initialDateRange = null, dbTaskTotal, fullHistory = false, initialTasks, initialTrash, clients, services: initialServices, departments = [], clientPricings: initialClientPricings, packages = [], packageItems = [], employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags, brandLens = null }: Props) {
   // Coming back from a record lands where the list was left, not at the top.
   // See lib/lists/scroll-restore for the rules.
   useScrollRestore('tasks')
@@ -779,7 +787,9 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
   const [tablePageSize, setTablePageSize] = useState(50)
   const [mobileLimit, setMobileLimit] = useState(50)
   const [showMobileFilters, setShowMobileFilters] = useState(false)
-  const [form, setForm] = useState<TaskForm>(EMPTY_FORM)
+  const [form, setForm] = useState<TaskForm>(() => ({ ...EMPTY_FORM, brand_id: brandLens?.id ?? '' }))
+  // What this view calls its work: "Orders" under Memoura, "Tasks" otherwise.
+  const workNoun = taskNoun(brandLens ? { task_label: brandLens.taskLabel } : null)
   const [previewTaskNumber, setPreviewTaskNumber] = useState<number | null>(null)
 
   // ── Request promotion (?fromRequest=…) — open Add Task prefilled (design §5).
@@ -1485,6 +1495,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
       derived_percent: '',
       derived_min: '',
       derived_max: '',
+      brand_id: '',
     })
     setQuickSet(null)
   }
@@ -1857,6 +1868,12 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
 
       // Log task created (fire-and-forget server action — doesn't block UI)
       void logTaskCreated(data.id, data.title, data.task_number ?? null)
+
+      // Internal work for one of Cirqle's brands. Set server-side after the
+      // insert ('' = the default brand, which is what NULL already means).
+      if ((!form.client_id || form.client_id === INTERNAL_CLIENT) && form.brand_id) {
+        void setTaskBrand(data.id, form.brand_id).catch(() => {})
+      }
 
       // A back-dated task lands in a month the dashboard has cached. This
       // insert happens in the BROWSER, where `revalidateTag` does not exist,
@@ -2566,7 +2583,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
     <div>
       <Header
         ref={headerRef}
-        title="Tasks"
+        title={brandLens ? `${workNoun.many} · ${brandLens.name}` : 'Tasks'}
         subtitle={
           showTrash
             ? `${trashDbCount ?? trash.length} item${(trashDbCount ?? trash.length) !== 1 ? 's' : ''} in Trash`
@@ -2613,7 +2630,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                 {/* Add Task — requires tasks.create permission */}
                 {can('tasks.create') && (
                   <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 gradient-bg text-white text-sm font-medium px-4 py-2 rounded-lg hover:opacity-90 transition-opacity">
-                    <Plus className="w-4 h-4" /> Add Task
+                    <Plus className="w-4 h-4" /> Add {workNoun.one}
                   </button>
                 )}
               </>
@@ -5073,6 +5090,16 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
                   />
                 </div>
               </div>
+
+              {/* Internal work: which of Cirqle's brands it is for. */}
+              {(!form.client_id || form.client_id === INTERNAL_CLIENT) && (
+                <BrandSelect
+                  value={form.brand_id}
+                  onChange={id => setForm(p => ({ ...p, brand_id: id }))}
+                  label="Cirqle brand"
+                  hint="Which of our brands this internal work is for."
+                />
+              )}
 
               {/* ── Optional: adopt something already queued for this client ──
                   Renders only when there IS something to pick, so a client
