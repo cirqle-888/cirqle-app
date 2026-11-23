@@ -18,6 +18,10 @@
  *              → stays open (a reply is not the finished work), with a line on
  *              its timeline saying when Cirqle replied.
  *
+ * A request is only ever archived once, and never against a person's decision:
+ * one that has changed status before (for example it was unarchived), or that
+ * carries a "keep" note, is held. Held requests still get the reply line.
+ *
  * Archived requests are in the Archived tab and can be brought back there.
  * Nothing here sends anything to WhatsApp. The database side: request-sync-run.ts.
  */
@@ -37,6 +41,8 @@ export interface SyncRequest {
   messages: readonly SyncMessage[]
   /** A "Cirqle replied" line is already on its timeline. */
   replyNoted: boolean
+  /** A person has already decided about it (it changed status before, or has a keep note): never archive. */
+  held?: boolean
 }
 
 export type SyncAction =
@@ -50,7 +56,7 @@ export type SyncAction =
  */
 export function syncAction(req: SyncRequest, cirqleSentAtMs: readonly number[]): SyncAction {
   if (!req.messages.length) return { action: 'none' }
-  if (req.messages.every(m => m.fromCirqle)) return { action: 'archive', why: 'own' }
+  if (req.messages.every(m => m.fromCirqle)) return req.held ? { action: 'none' } : { action: 'archive', why: 'own' }
 
   // Only the client's own messages count: a Cirqle line folded into the request is not what needs answering.
   const last = Math.max(...req.messages.filter(m => !m.fromCirqle).map(m => m.sentAtMs))
@@ -58,7 +64,7 @@ export function syncAction(req: SyncRequest, cirqleSentAtMs: readonly number[]):
   if (!replies.length) return { action: 'none' }
   const repliedAtMs = Math.min(...replies)
 
-  if (req.messages.every(m => isLateMessage(m.sentAtMs, m.arrivedAtMs))) return { action: 'archive', why: 'answered', repliedAtMs }
+  if (!req.held && req.messages.every(m => isLateMessage(m.sentAtMs, m.arrivedAtMs))) return { action: 'archive', why: 'answered', repliedAtMs }
   return req.replyNoted ? { action: 'none' } : { action: 'note-reply', repliedAtMs }
 }
 

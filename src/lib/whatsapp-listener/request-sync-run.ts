@@ -65,10 +65,12 @@ export async function syncWhatsAppRequests(
   if (!open.length) return out
 
   const chatIds = [...new Set(open.map(id => byRequest.get(id)!.chatId))]
-  const [{ data: log }, { data: noted }, cirqle] = await Promise.all([
+  const [{ data: log }, { data: noted }, { data: decided }, cirqle] = await Promise.all([
     admin.from(CHAT_LOG_TABLE).select('message_id, chat_id, sent_at, created_at, sender_phone, from_cirqle')
       .in('chat_id', chatIds).gte('sent_at', since).limit(10000),
     admin.from('request_activity').select('request_id').eq('action', REPLY_ACTION).in('request_id', open),
+    // A status change (it was unarchived, say) or a keep note means a person has decided: hands off.
+    admin.from('request_activity').select('request_id, action, detail').in('action', ['status_changed', 'note']).in('request_id', open),
     cirqlePhoneKeys(admin, settings),
   ])
   const rows = (log || []) as LogRow[]
@@ -83,6 +85,8 @@ export async function syncWhatsAppRequests(
     cirqleTimes.set(r.chat_id, list)
   }
   const replyNoted = new Set(((noted || []) as { request_id: string }[]).map(n => n.request_id))
+  const held = new Set(((decided || []) as { request_id: string; action: string; detail: { keep?: boolean } | null }[])
+    .filter(d => d.action === 'status_changed' || d.detail?.keep === true).map(d => d.request_id))
 
   for (const id of open) {
     const { chatId, messageIds } = byRequest.get(id)!
@@ -94,7 +98,7 @@ export async function syncWhatsAppRequests(
     // A message missing from the chat log cannot be judged: leave the request alone.
     if (messages.length !== messageIds.length) continue
     out.checked++
-    const action = syncAction({ messages, replyNoted: replyNoted.has(id) }, cirqleTimes.get(chatId) ?? [])
+    const action = syncAction({ messages, replyNoted: replyNoted.has(id), held: held.has(id) }, cirqleTimes.get(chatId) ?? [])
     if (action.action === 'none') continue
     const note = syncNote(action, sentLabel)
     if (action.action === 'note-reply') {

@@ -36,6 +36,12 @@ describe('keeping WhatsApp requests in step with the chat', () => {
     expect(syncAction({ messages: [live(T), live(T + 2 * H, true)], replyNoted: false }, [T + 2 * H])).toEqual({ action: 'note-reply', repliedAtMs: T + 2 * H })
   })
 
+  it('never archives a request a person has already decided about, but still notes the reply', () => {
+    expect(syncAction({ messages: [late(T)], replyNoted: false, held: true }, [T + H])).toEqual({ action: 'note-reply', repliedAtMs: T + H })
+    expect(syncAction({ messages: [late(T)], replyNoted: true, held: true }, [T + H])).toEqual({ action: 'none' })
+    expect(syncAction({ messages: [live(T, true)], replyNoted: false, held: true }, [])).toEqual({ action: 'none' })
+  })
+
   it('writes a line that says why', () => {
     const when = () => '21 Nov, 17:30'
     expect(syncNote({ action: 'archive', why: 'own' }, when)).toContain('sent from a Cirqle number')

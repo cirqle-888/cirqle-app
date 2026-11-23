@@ -88,6 +88,8 @@ Rules: `lib/whatsapp-listener/request-sync.ts`. They only touch a request nobody
 | Photos sent together that started more than one request | Folded into the first of them |
 
 Each one gets a line on its timeline saying why, and can be brought back from the **Archived** tab.
+A request is archived this way at most once: after it is unarchived, or once it carries a "keep" note,
+the listener leaves its status alone.
 A late request that is filed says when it was really sent, and takes no due date from words like "tomorrow".
 "A few minutes" is measured by WhatsApp's send time, so days of messages arriving together after the
 listener was off are not glued into one request.
