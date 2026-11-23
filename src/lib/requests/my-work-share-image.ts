@@ -5,10 +5,10 @@
  */
 import { CARD_WIDTH } from './my-work-share'
 
-export async function renderPendingCard(html: string): Promise<Blob> {
+export async function renderPendingCard(html: string, width: number = CARD_WIDTH): Promise<Blob> {
   const iframe = document.createElement('iframe')
   iframe.setAttribute('aria-hidden', 'true')
-  iframe.style.cssText = `position:fixed;top:-99999px;left:-99999px;width:${CARD_WIDTH}px;height:10px;border:0;`
+  iframe.style.cssText = `position:fixed;top:-99999px;left:-99999px;width:${width}px;height:10px;border:0;`
   document.body.appendChild(iframe)
   try {
     const doc = iframe.contentDocument

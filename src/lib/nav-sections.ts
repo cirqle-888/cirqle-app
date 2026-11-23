@@ -238,6 +238,8 @@ export const navSections: NavSection[] = [
       // unbilled client expenses that nobody could see.
       { label: 'Billing Reconciliation', href: '/dashboard/reports/reconcile', icon: Scale, requiredAnyPerm: ['reports.view_client_financials', 'reports.view'], keywords: ['unbilled', 'uninvoiced', 'drift', 'missing invoice', 'reconcile'] },
       // ── Specialist reports — every report lives HERE, not scattered ──
+      // What one department delivered for each client this month, to share with that team. Counts only.
+      { label: 'Team Work Report', href: '/dashboard/reports/team-work', icon: Users2, requiredAnyPerm: ['requests.manage', 'reports.view'], keywords: ['monthly', 'social media', 'department', 'delivered', 'done', 'motivate', 'team', 'whatsapp', 'per client', 'output'] },
       { label: 'Company Operations',   href: '/dashboard/reports/company-ops', icon: Building2, requiredAnyPerm: ['reports.view_company_financials', 'reports.view'], keywords: ['P&L', 'burn rate', 'runway'] },
       { label: 'Client Profitability', href: '/dashboard/reports/client-profitability', icon: TrendingUp, requiredAnyPerm: ['reports.view_client_financials', 'reports.view'], keywords: ['margin', 'finance engine'] },
       { label: 'Client Analytics',     href: '/dashboard/client-analytics', icon: TrendingUp, requiredAnyPerm: ['reports.view_client_financials', 'reports.view'], keywords: ['per client', 'trend', 'compare', 'month', 'week', 'quarter', 'year', 'growth', 'chart', 'graph', 'how is this client doing'] },
