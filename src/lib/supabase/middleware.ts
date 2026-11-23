@@ -308,10 +308,14 @@ export async function updateSession(request: NextRequest) {
                   || pathname.startsWith('/feed/')     // client feed approval — tokenized, no login
                   || pathname.startsWith('/start/')    // client hub — single link to all that client's intake apps
                   || pathname.startsWith('/careers')   // public job application form — no login
+                  || pathname.startsWith('/api/shop/')   // The Memoura website's public price list (gifts that are on, banner,
+                                                         // sizes, delivery charges). Read-only, nothing personal; the static
+                                                         // site has no session, and a redirect to /login would fail its CORS.
                   || pathname.startsWith('/api/health') // Uptime monitoring — must answer without a session, or the
                                                          // monitor only ever sees the 307 to /login and reports "up"
                                                          // while the database is unreachable. Returns booleans only.
                   || pathname.startsWith('/api/shortcut') // iOS Shortcuts API — its own bearer-token auth
+                  || pathname.startsWith('/api/ad-library') // Cirqle Ad Saver Chrome extension — its own per-person connect key (hashed), checked in the route
                   || pathname.startsWith('/api/mcp')      // MCP server — its own MCP_API_TOKEN bearer auth, fail-closed in the route (no Supabase session).
                   || pathname.startsWith('/api/oauth/')   // MCP OAuth: client registration and the token endpoint. Called by AI apps'
                                                          // servers with no session; the codes they redeem were approved on

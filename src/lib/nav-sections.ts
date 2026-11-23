@@ -15,7 +15,7 @@ import {
   BadgePercent, CalendarRange, HardHat, Repeat, Package as PackageIcon,
   Share2, UserPlus, Gauge, ShieldCheck, MapPin, Target,
   Scale, Receipt, Images, Wand2,
-  Calculator, CreditCard, Landmark, ShoppingBag,
+  Calculator, CreditCard, Landmark, ShoppingBag, Store, Bookmark,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -170,10 +170,14 @@ export const navSections: NavSection[] = [
       { label: 'Social',           href: '/dashboard/social-calendar', icon: Share2, requiredPerm: 'social.view', keywords: ['content', 'planner', 'posts', 'instagram', 'facebook', 'calendar', 'publish', 'schedule', 'comments', 'inbox', 'reply', 'feed', 'grid', 'insights', 'reach', 'to post', 'caption', 'hashtags', 'stories', 'reels'] },
       { label: 'Prompt Studio', href: '/dashboard/prompt-studio', icon: Wand2, requiredPerm: 'prompt_studio.view', keywords: ['prompt', 'ai video', 'veo', 'kling', 'script', 'voiceover', 'music', 'client card', 'template', 'film', 'series', 'product video', 'reel'] },
       { label: 'Advertising',      href: '/dashboard/advertising',     icon: Megaphone, requiredPerm: 'advertising.view', keywords: ['campaigns', 'ads', 'marketing'] },
+      // Swipe file of ads saved from the Facebook Ad Library with the Cirqle Ad Saver Chrome extension.
+      { label: 'Ad Library',       href: '/dashboard/ad-library',      icon: Bookmark, requiredPerm: 'advertising.view', keywords: ['swipe file', 'competitor ads', 'facebook ad library', 'meta ads library', 'inspiration', 'saved ads', 'chrome extension', 'ad spy', 'creatives'] },
       { label: 'Leads',            href: '/dashboard/leads',           icon: UserPlus, requiredPerm: 'leads.view', keywords: ['crm', 'meta leads', 'lead ads', 'prospects', 'enquiries'] },
       // Retail orders for Cirqle's own product brands (Memoura gifts). Buyers
       // are the public, not clients, so this is its own list, not a client view.
       { label: 'Orders',           href: '/dashboard/orders',          icon: ShoppingBag, requiredPerm: 'orders.view', keywords: ['memoura', 'gifts', 'shop', 'customers', 'dispatch', 'courier', 'tracking', 'advance', 'balance', 'retail'] },
+      // What the Memoura website sells and announces: gifts on/off, banner, prices, delivery.
+      { label: 'Shop',             href: '/dashboard/shop',            icon: Store, requiredPerm: 'orders.view', keywords: ['memoura', 'gifts', 'products', 'catalogue', 'banner', 'offer', 'prices', 'delivery charge', 'website', 'highlight', 'print sizes'] },
       // Publishes straight to cirqle.work — the site reads this content from a
       // separate Supabase project, so nothing here touches business data.
       { label: 'Portfolio',        href: '/dashboard/portfolio',       icon: Images, requiredPerm: 'portfolio.view', keywords: ['website', 'work', 'gallery', 'creatives', 'showcase', 'cirqle.work', 'case studies', 'brands', 'social media posts', 'upload work'] },
