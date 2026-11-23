@@ -1,7 +1,7 @@
 import { createHmac } from 'crypto'
 import { describe, expect, it, vi } from 'vitest'
 import {
-  addSeen, appendedDescription, decide, isAcknowledgement, isCapturableType, listenerEnabled, parseEnvelope,
+  addSeen, appendChange, appendedDescription, decide, isLateMessage, isAcknowledgement, isCapturableType, listenerEnabled, parseEnvelope,
   parseGroupList, parseGroupNames, parseNumberList, parseNumberRows, parseSeen, phoneMatchKey, serializeGroupList, serializeNumberList, verifySignature, MAX_SEEN, type ListenerMessage,
   aiFilterOn, isBadSessionStatus, listenerHealth, parseSessionStatus, shouldWriteHeard, LISTENER_SERVER_KEYS, SILENT_AFTER_HOURS,
 } from './rules'
@@ -165,6 +165,26 @@ describe('decision', () => {
     expect(decide({ ...base, looksLikeRequest: false })).toEqual({ action: 'ignore', reason: 'not-a-request' })
   })
 
+  it('never files or appends a late message Cirqle has already answered, whatever it carries', () => {
+    expect(decide({ ...base, answered: true })).toEqual({ action: 'ignore', reason: 'answered' })
+    expect(decide({ ...base, answered: true, hasRecentRequest: true })).toEqual({ action: 'ignore', reason: 'answered' })
+    expect(decide({ ...base, answered: true, message: msg({ type: 'image', body: '' }) })).toEqual({ action: 'ignore', reason: 'answered' })
+  })
+
+  it('knows a message that arrived hours after it was sent', () => {
+    const sent = Date.parse('2026-11-21T10:00:00Z')
+    expect(isLateMessage(sent, sent + 2 * 3_600_000)).toBe(false)
+    expect(isLateMessage(sent, sent + 4 * 3_600_000)).toBe(true)
+    expect(isLateMessage(null, sent)).toBe(false)
+  })
+
+  it('adds a follow-up to the request as it stands, numbering links on and never repeating one', () => {
+    const now = { description: 'From WhatsApp\n\nFirst', extraLinks: [{ label: 'WhatsApp photo 1', url: 'u1' }, { label: 'WhatsApp photo 2', url: 'u2' }] }
+    const out = appendChange(now, { text: 'Second', links: [{ label: 'WhatsApp photo 1', url: 'u3' }, { label: 'WhatsApp voice note 2', url: 'u4' }, { label: 'WhatsApp photo 9', url: 'u2' }] })
+    expect(out.description).toBe('From WhatsApp\n\nFirst\n\n— later —\nSecond')
+    expect(out.extraLinks.map(l => `${l.label}=${l.url}`)).toEqual(['WhatsApp photo 1=u1', 'WhatsApp photo 2=u2', 'WhatsApp photo 3=u3', 'WhatsApp voice note 4=u4'])
+  })
+
   it('files when it looks like a request or the AI could not tell', () => {
     expect(decide(base)).toEqual({ action: 'file' })
     expect(decide({ ...base, looksLikeRequest: null })).toEqual({ action: 'file' })
@@ -191,6 +211,10 @@ describe('handling a message', () => {
       isStaffPhone: vi.fn(async () => false),
       isDuplicate: vi.fn(async () => false),
       recentRequest: vi.fn(async () => null),
+      answeredSince: vi.fn(async () => false),
+      mergeDuplicate: vi.fn(async () => null as string | null),
+      // The test envelope's message was sent at 1794300000 (seconds): one minute before "now".
+      now: () => 1794300060_000,
       looksLikeRequest: vi.fn(async () => true as boolean | null),
       transcribe: vi.fn(async () => 'Weekend offer list, 12 items'),
       readImage: vi.fn(async () => null),
@@ -267,12 +291,49 @@ describe('handling a message', () => {
     expect(await handleListenerMessage(photo, d)).toEqual({ result: 'appended', ref: 'REQ-0080' })
     expect(d.file).not.toHaveBeenCalled()
     expect(d.notify).not.toHaveBeenCalled()
-    const change = d.append.mock.calls[0][1] as { description: string; extraLinks: { label: string }[] }
-    expect(change.description).toContain('Need Friday offer flyer\n\n— later —\n')
-    expect(change.description).toContain('price list')
-    expect(change.description.match(/From WhatsApp/g)).toHaveLength(1)
-    expect(change.extraLinks.map(l => l.label)).toEqual(['WhatsApp photo 1', 'WhatsApp photo 2'])
+    const addition = d.append.mock.calls[0][1] as { text: string; links: { label: string; url: string }[] }
+    expect(addition.text).toContain('price list')
+    expect(addition.text).not.toContain('From WhatsApp')
+    expect(addition.links).toEqual([{ label: 'WhatsApp photo 1', url: 'https://store.example/original' }])
+    expect(d.recentRequest).toHaveBeenCalledWith(GROUP, '919876543210@c.us', 1794300000_000)
     expect(d.logMessage).toHaveBeenCalledWith('req-1', expect.objectContaining({ id: 'P2' }), expect.any(String))
+  })
+
+  it('keeps a late message Cirqle already answered out of the inbox, and looks nothing else up', async () => {
+    const d = deps({ now: () => 1794300000_000 + 26 * 3_600_000, answeredSince: vi.fn(async () => true) })
+    expect(await handleListenerMessage(msg(), d)).toEqual({ result: 'ignored', reason: 'answered' })
+    expect(d.answeredSince).toHaveBeenCalledWith(GROUP, 1794300000_000)
+    for (const f of [d.recentRequest, d.looksLikeRequest, d.parse, d.file, d.append]) expect(f).not.toHaveBeenCalled()
+  })
+
+  it('files a late message nobody answered, saying when it was sent and guessing no due date', async () => {
+    const d = deps({ now: () => 1794300000_000 + 26 * 3_600_000, parse: vi.fn(async () => ({ title: 'Offer for tomorrow', dueDate: '2026-11-12' })) })
+    expect(await handleListenerMessage(msg(), d)).toEqual({ result: 'filed', ref: 'REQ-0080' })
+    const filed = d.file.mock.calls[0][0] as { notes: string; dueDate?: string }
+    expect(filed.dueDate).toBeUndefined()
+    expect(filed.notes).toMatch(/Sent \d{2} Nov, \d{2}:\d{2}\. It reached Cirqle App late/)
+  })
+
+  it('does not ask about answers for a message that arrived live, and keeps its due date', async () => {
+    const d = deps({ parse: vi.fn(async () => ({ title: 'Friday flyer', dueDate: '2026-11-13' })) })
+    await handleListenerMessage(msg(), d)
+    expect(d.answeredSince).not.toHaveBeenCalled()
+    expect((d.file.mock.calls[0][0] as { dueDate?: string }).dueDate).toBe('2026-11-13')
+  })
+
+  it('does not title a request with what the AI heard in a voice note', async () => {
+    const d = deps({ transcribe: vi.fn(async () => 'Hello, I am the Chief of the Police Department.'), parse: vi.fn(async () => ({ title: 'Hello, I Am the Chief of the Police Department.' })) })
+    await handleListenerMessage(msg({ id: 'V2', type: 'voice', body: '', media: { mimetype: 'audio/ogg', data: Buffer.from('ogg').toString('base64') } }), d)
+    const filed = d.file.mock.calls[0][0] as { title: string; notes: string }
+    expect(filed.title).toBe('WhatsApp voice note — listen and add details')
+    expect(filed.notes).toContain('Chief of the Police Department')
+  })
+
+  it('folds a request into the earlier one from the same burst, without a second alert', async () => {
+    const d = deps({ mergeDuplicate: vi.fn(async () => 'REQ-0079') })
+    expect(await handleListenerMessage(msg(), d)).toEqual({ result: 'appended', ref: 'REQ-0079' })
+    expect(d.mergeDuplicate).toHaveBeenCalledWith('req-1', expect.objectContaining({ id: 'MSG1' }))
+    expect(d.notify).not.toHaveBeenCalled()
   })
 
   it('reports a failure instead of pretending', async () => {
@@ -287,6 +348,9 @@ describe('handling a message', () => {
       isStaffPhone: vi.fn(async () => { throw new Error('x') }),
       isDuplicate: vi.fn(async () => { throw new Error('x') }),
       recentRequest: vi.fn(async () => { throw new Error('x') }),
+      answeredSince: vi.fn(async () => { throw new Error('x') }),
+      mergeDuplicate: vi.fn(async () => { throw new Error('x') }),
+      now: () => 1794300000_000 + 26 * 3_600_000,
       looksLikeRequest: vi.fn(async () => { throw new Error('x') }),
       parse: vi.fn(async () => { throw new Error('x') }),
     })

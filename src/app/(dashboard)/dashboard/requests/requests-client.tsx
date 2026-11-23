@@ -178,6 +178,7 @@ function activityText(a: any): string {
     case 'field_changed':         return `Changed ${d.field || 'a field'}${d.field === 'remarks' ? '' : ` (${d.from ?? '—'} → ${d.to ?? '—'})`}`
     case 'revision_requested':    return `Revision requested${d.message ? ` — “${d.message}”` : ''}`
     case 'note':                  return d.message || 'Update posted'
+    case 'whatsapp_reply':        return d.message || 'Cirqle replied in the WhatsApp chat'
     case 'promoted':              return `Promoted → Task #${d.task_number ?? ''}`
     case 'internal_note_updated': return 'Internal notes updated'
     case 'assigned':              return `Assigned to ${d.employee_name || 'an employee'}`

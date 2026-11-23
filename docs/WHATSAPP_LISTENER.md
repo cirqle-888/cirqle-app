@@ -64,13 +64,33 @@ A message in a listed chat arrives at Cirqle App within seconds and is handled l
 | Sent from a Cirqle number: listed under **Cirqle numbers** in Settings (shared lines, personal numbers used for work, freelancers), or an active employee's saved phone. Numbers match on their last 9 digits | Ignored |
 | Sticker, video, document, poll, call, deleted message | Ignored |
 | "ok", "thanks", an emoji, a greeting | Ignored |
-| Text that follows the same person's request from the last 10 minutes | Added to that request |
+| Arrived more than 3 hours after it was sent (the listener was off and is catching up), and Cirqle has written in that chat since | Kept in the chat view, not filed |
+| Text that follows the same person's request, sent within 10 minutes of it | Added to that request |
 | Other text | AI decides if it is a request. Yes or unsure: filed. No: ignored |
 | Voice note or photo | Always captured: filed, or added to that person's recent request |
 
 A filed request is marked new in **Requests**, admins get a notification, the client comes from the
 allow-list, and the voice note or photo is kept and linked. Voice notes are written out by AI; the same
 caution as the share shortcut applies (Malayalam accuracy untested, always check against the recording).
+A request made from a voice note alone is titled "WhatsApp voice note — listen and add details": what the
+AI heard is in the request to be checked, but it is never used as the title.
+
+### Kept in step with the chat (23 Nov 2026)
+
+Rules: `lib/whatsapp-listener/request-sync.ts`. They only touch a request nobody has acted on in Cirqle App
+(still New, no task), whenever someone from Cirqle writes in that chat and again in the evening job.
+
+| Request | What happens |
+|---|---|
+| Every message in it came from a Cirqle number (for example a number added to the list later) | Archived |
+| It arrived late and Cirqle had already written in the chat after it | Archived |
+| It arrived live and Cirqle has replied in the chat | Stays open; its timeline says when Cirqle replied |
+| Photos sent together that started more than one request | Folded into the first of them |
+
+Each one gets a line on its timeline saying why, and can be brought back from the **Archived** tab.
+A late request that is filed says when it was really sent, and takes no due date from words like "tomorrow".
+"A few minutes" is measured by WhatsApp's send time, so days of messages arriving together after the
+listener was off are not glued into one request.
 
 Known gaps: a request written as a PDF or video is ignored; a text request the AI wrongly judges as chatter
 is lost from the inbox (it is still in WhatsApp); two different requests from one person inside 10 minutes

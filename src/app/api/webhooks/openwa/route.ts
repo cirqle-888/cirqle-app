@@ -3,6 +3,7 @@ import { after, NextRequest, NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createAdminClient } from '@/lib/supabase/server'
 import { createRequest } from '@/lib/shortcut/actions'
+import { logRequestActivity, setRequestStatus } from '@/lib/requests/core'
 import { aiParse } from '@/lib/ai/request-capture'
 import { callGroqJSON } from '@/lib/ai/groq'
 import { transcribeAudio, translateAudio } from '@/lib/ai/transcribe'
@@ -18,8 +19,9 @@ import { departmentMembers, loadListenerContext } from '@/lib/whatsapp-listener/
 import { isApproval } from '@/lib/whatsapp-listener/flyer-desk'
 import { finishApprovedFlyers } from '@/lib/whatsapp-listener/flyer-desk-run'
 import { CHAT_LOG_TABLE, chatLogRow, chatMedia, isChatEvent, isMissingTable } from '@/lib/whatsapp-listener/chat-log'
+import { cirqlePhoneKeys, syncWhatsAppRequests, MESSAGE_ACTION } from '@/lib/whatsapp-listener/request-sync-run'
 import {
-  addSeen, aiFilterOn, isBadSessionStatus, isStaleStatus, listenerEnabled, parseEnvelope, parseGroupList, parseNumberList, parseSeen,
+  addSeen, aiFilterOn, appendChange, isBadSessionStatus, isStaleStatus, listenerEnabled, parseEnvelope, parseGroupList, parseSeen,
   parseSessionStatus, phoneMatchKey, shouldWriteHeard, verifySignature,
   BURST_MINUTES, LISTENER_KEYS, type ListenerMessage,
 } from '@/lib/whatsapp-listener/rules'
@@ -46,7 +48,7 @@ export const maxDuration = 60
 
 const BUCKET = 'chat-attachments'
 const LINK_SECONDS = 365 * 24 * 60 * 60
-const ACTION = 'whatsapp_message'
+const ACTION = MESSAGE_ACTION
 
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status })
 
@@ -62,9 +64,100 @@ async function loadSettings(admin: SupabaseClient): Promise<Record<string, strin
 async function isCirqleNumber(admin: SupabaseClient, settings: Record<string, string>, phone: string): Promise<boolean> {
   const key = phoneMatchKey(phone)
   if (!key) return false
-  if (parseNumberList(settings[LISTENER_KEYS.staffNumbers]).numbers.has(key)) return true
-  const { data } = await admin.from('employees').select('phone').eq('is_active', true)
-  return (data || []).some((e: { phone: string | null }) => phoneMatchKey(e.phone) === key)
+  return (await cirqleKeysOnce(admin, settings)).has(key)
+}
+
+/** One message asks "is this Cirqle?" several times: the numbers are read once per delivery. */
+const keysBySettings = new WeakMap<Record<string, string>, Promise<Set<string>>>()
+function cirqleKeysOnce(admin: SupabaseClient, settings: Record<string, string>): Promise<Set<string>> {
+  let keys = keysBySettings.get(settings)
+  if (!keys) { keys = cirqlePhoneKeys(admin, settings); keysBySettings.set(settings, keys) }
+  return keys
+}
+
+type Links = { label: string; url: string }[]
+const untouched = (r: { status?: unknown; archived_at?: unknown; promoted_task_id?: unknown } | null | undefined) =>
+  !!r && r.status === 'submitted' && !r.archived_at && !r.promoted_task_id
+
+/**
+ * Adds a follow-up to a request as it stands NOW. Several messages from one burst are handled at
+ * the same moment, each in its own invocation: writing back a description read earlier would let
+ * the last one erase the others. So the write only lands if the row is unchanged since it was
+ * read (its updated_at), and is retried on a fresh read when it is not.
+ */
+async function appendToRequest(admin: SupabaseClient, requestId: string, addition: { text: string; links: Links }): Promise<boolean> {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { data: row } = await admin.from('task_requests').select('description, extra_links, updated_at').eq('id', requestId).maybeSingle()
+    if (!row) return false
+    const change = appendChange(
+      { description: row.description as string | null, extraLinks: Array.isArray(row.extra_links) ? (row.extra_links as Links) : [] },
+      addition,
+    )
+    const now = new Date().toISOString()
+    const { data: done, error } = await admin.from('task_requests').update({
+      description: change.description,
+      extra_links: change.extraLinks,
+      last_external_activity_at: now, // re-flags it as new for staff
+      updated_at: now,
+    }).eq('id', requestId).eq('updated_at', row.updated_at as string).select('id')
+    if (error) return false
+    if (done?.length) return true
+    await new Promise(r => setTimeout(r, 40 + Math.random() * 160))
+  }
+  return false
+}
+
+/** The burst window around a message's own send time, as ISO bounds. */
+function burstWindow(sentAtMs: number | null): { from: string; to: string } {
+  const at = sentAtMs ?? Date.now()
+  return { from: new Date(at - BURST_MINUTES * 60_000).toISOString(), to: new Date(at + BURST_MINUTES * 60_000).toISOString() }
+}
+
+/**
+ * Requests already holding a message from this sender in this chat that was SENT within the burst
+ * window of `sentAtMs`. By send time, not arrival: when the gateway catches up after being off,
+ * days of messages arrive in the same minute and must not be glued into one request.
+ */
+async function burstRequestIds(admin: SupabaseClient, chatId: string, senderId: string, sentAtMs: number | null): Promise<string[]> {
+  const w = burstWindow(sentAtMs)
+  const { data } = await admin.from(CHAT_LOG_TABLE).select('request_id')
+    .eq('chat_id', chatId).eq('sender_id', senderId).not('request_id', 'is', null)
+    .gte('sent_at', w.from).lte('sent_at', w.to).order('sent_at', { ascending: false }).limit(50)
+  return [...new Set(((data || []) as { request_id: string }[]).map(r => r.request_id))]
+}
+
+/**
+ * Photos sent together reach us at the same instant, and each can file its own request before
+ * the others are visible. After filing, the newer request folds itself into the oldest one of the
+ * same burst: its text and links move across, its messages are re-pointed, and it is archived.
+ * The oldest never moves, so two requests cannot fold into each other.
+ */
+async function mergeIntoEarlier(admin: SupabaseClient, requestId: string, m: ListenerMessage): Promise<string | null> {
+  // Give the other deliveries of the burst a moment to record their own requests.
+  await new Promise(r => setTimeout(r, 900))
+  const ids = (await burstRequestIds(admin, m.chatId, m.senderId, m.sentAtMs)).filter(id => id !== requestId)
+  if (!ids.length) return null
+  const { data } = await admin.from('task_requests')
+    .select('id, ref_no, description, extra_links, status, archived_at, promoted_task_id').in('id', [...ids, requestId])
+  const rows = (data || []) as { id: string; ref_no: number | null; description: string | null; extra_links: unknown; status: string; archived_at: string | null; promoted_task_id: string | null }[]
+  const mine = rows.find(r => r.id === requestId)
+  if (!mine || mine.ref_no == null) return null
+  const earlier = rows.filter(r => r.id !== requestId && untouched(r) && r.ref_no != null && r.ref_no < (mine.ref_no as number))
+    .sort((a, b) => (a.ref_no as number) - (b.ref_no as number))[0]
+  if (!earlier) return null
+
+  const text = (mine.description || '').split('\n').slice(1).join('\n') // drop the "From WhatsApp" line
+  const ok = await appendToRequest(admin, earlier.id, { text, links: Array.isArray(mine.extra_links) ? (mine.extra_links as Links) : [] })
+  if (!ok) return null
+  const ref = `REQ-${String(earlier.ref_no).padStart(4, '0')}`
+  await admin.from('request_activity').update({ request_id: earlier.id }).eq('request_id', requestId).eq('action', ACTION)
+  await admin.from(CHAT_LOG_TABLE).update({ request_id: earlier.id }).eq('request_id', requestId).then(() => {}, () => {})
+  await logRequestActivity(admin, {
+    requestId, actorType: 'system', actorLabel: 'WhatsApp listener', action: 'note', visibility: 'internal',
+    detail: { message: `Archived by the WhatsApp listener: sent together with ${ref}, so it was added to that request.` },
+  })
+  await setRequestStatus(admin, requestId, 'archived', { type: 'system', label: 'WhatsApp listener' })
+  return ref
 }
 
 /**
@@ -159,24 +252,33 @@ function buildDeps(
       return !!data?.length
     },
 
-    recentRequest: async (chatId, senderId): Promise<RecentRequest | null> => {
-      const since = new Date(Date.now() - BURST_MINUTES * 60_000).toISOString()
-      const { data: act } = await admin.from('request_activity').select('request_id')
-        .eq('action', ACTION).eq('detail->>chatId', chatId).eq('detail->>senderId', senderId)
-        .gte('created_at', since).order('created_at', { ascending: false }).limit(1)
-      const requestId = act?.[0]?.request_id as string | undefined
-      if (!requestId) return null
+    recentRequest: async (chatId, senderId, sentAtMs): Promise<RecentRequest | null> => {
+      const ids = await burstRequestIds(admin, chatId, senderId, sentAtMs)
+      if (!ids.length) return null
       // Only while nobody has picked it up: once staff act on it, a new message starts a new request.
-      const { data: req } = await admin.from('task_requests')
-        .select('id, ref_no, description, extra_links, status, archived_at')
-        .eq('id', requestId).maybeSingle()
-      if (!req || req.status !== 'submitted' || req.archived_at) return null
+      const { data } = await admin.from('task_requests')
+        .select('id, ref_no, description, extra_links, status, archived_at, promoted_task_id').in('id', ids)
+      const req = ((data || []) as { id: string; ref_no: number | null; description: string | null; extra_links: unknown; status: string; archived_at: string | null; promoted_task_id: string | null }[])
+        .filter(untouched).sort((a, b) => (a.ref_no ?? 0) - (b.ref_no ?? 0))[0]
+      if (!req) return null
       return {
-        id: req.id as string,
+        id: req.id,
         ref: `REQ-${String(req.ref_no ?? 0).padStart(4, '0')}`,
-        description: (req.description as string | null) ?? null,
-        extraLinks: Array.isArray(req.extra_links) ? (req.extra_links as { label: string; url: string }[]) : [],
+        description: req.description ?? null,
+        extraLinks: Array.isArray(req.extra_links) ? (req.extra_links as Links) : [],
       }
+    },
+
+    answeredSince: async (chatId, sentAtMs) => {
+      const { data } = await admin.from(CHAT_LOG_TABLE).select('from_cirqle, sender_phone')
+        .eq('chat_id', chatId).gt('sent_at', new Date(sentAtMs).toISOString()).limit(500)
+      const rows = (data || []) as { from_cirqle: boolean; sender_phone: string | null }[]
+      if (rows.some(r => r.from_cirqle)) return true
+      // A number added to the Cirqle list after its messages were stored still counts.
+      const phones = rows.map(r => phoneMatchKey(r.sender_phone)).filter(Boolean)
+      if (!phones.length) return false
+      const cirqle = await cirqleKeysOnce(admin, settings)
+      return phones.some(p => cirqle.has(p))
     },
 
     looksLikeRequest: async text => {
@@ -215,16 +317,8 @@ function buildDeps(
 
     file: r => createRequest(admin, { ...r, unviewed: true }),
 
-    append: async (requestId, change) => {
-      const now = new Date().toISOString()
-      const { error } = await admin.from('task_requests').update({
-        description: change.description,
-        extra_links: change.extraLinks,
-        last_external_activity_at: now, // re-flags it as new for staff
-        updated_at: now,
-      }).eq('id', requestId)
-      return !error
-    },
+    append: (requestId, addition) => appendToRequest(admin, requestId, addition),
+    mergeDuplicate: (requestId, m) => mergeIntoEarlier(admin, requestId, m),
 
     logMessage: async (requestId, m: ListenerMessage, summary) => {
       await admin.from('request_activity').insert({
@@ -233,7 +327,10 @@ function buildDeps(
         actor_label: m.senderName || 'WhatsApp',
         action: ACTION,
         visibility: 'internal',
-        detail: { message: summary, messageId: m.id, chatId: m.chatId, senderId: m.senderId, type: m.type },
+        detail: {
+          message: summary, messageId: m.id, chatId: m.chatId, senderId: m.senderId, type: m.type,
+          ...(m.sentAtMs ? { sentAt: new Date(m.sentAtMs).toISOString() } : {}),
+        },
       })
       // Lets the chat view show which request a message became. Harmless before the chat-log migration.
       await admin.from(CHAT_LOG_TABLE).update({ request_id: requestId }).eq('message_id', m.id).then(() => {}, () => {})
@@ -370,9 +467,17 @@ export async function POST(req: NextRequest) {
         console.warn('[whatsapp-listener] chat log failed:', err)
         return null
       })
+      const deps = buildDeps(admin, settings, keptMediaPath, mediaText)
+      // Cirqle wrote in a client's chat: the requests waiting there are brought up to date
+      // (lib/whatsapp-listener/request-sync.ts). An internal Cirqle group has no client and no requests.
+      const fromCirqle = message.fromMe || message.event === 'message.sent'
+        || (message.senderPhone ? await deps.isStaffPhone(message.senderPhone).catch(() => false) : false)
+      if (fromCirqle && deps.enabled && deps.groups.get(message.chatId)) {
+        await syncWhatsAppRequests(admin, settings, { chatIds: [message.chatId] })
+          .catch(err => console.warn('[whatsapp-listener] requests not brought up to date:', err))
+      }
       // A message the listener number sent is part of the conversation, never a request.
       if (message.event !== 'message.received') return
-      const deps = buildDeps(admin, settings, keptMediaPath, mediaText)
       await raiseSignals(message, deps, mediaText).catch(err => console.warn('[whatsapp-listener] payment/enquiry check failed:', err))
       // The client's "ok" after a design: the flyer takes its offer title and its task is closed.
       if (deps.enabled && deps.groups.has(message.chatId) && message.type === 'text' && isApproval(message.body)

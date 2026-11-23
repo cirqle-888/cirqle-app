@@ -7,13 +7,18 @@
  * Outcomes: the message is ignored (with a reason), appended to the same
  * person's recent request, or filed as a new request. It never sends
  * anything back to WhatsApp.
+ *
+ * Two things keep the inbox honest when the gateway was off and is catching up
+ * (rules.ts, LATE_AFTER_HOURS): a late message Cirqle has already answered in
+ * the chat is not filed at all, and one that is filed says when it was really
+ * sent and takes no due date from words like "tomorrow".
  */
 
 import {
   buildDescription, collectParts, combinedText, fallbackTitle, partLinks, MAX_FILE_BYTES,
   type CaptureDeps, type CapturedPart, type SharedFile,
 } from '@/lib/shortcut/whatsapp-capture'
-import { appendedDescription, decide, isVoiceOrPhoto, type ListenerMessage } from './rules'
+import { decide, isLateMessage, isVoiceOrPhoto, sentLabel, type ListenerMessage } from './rules'
 
 export interface RecentRequest {
   id: string
@@ -29,15 +34,29 @@ export interface ListenerDeps extends Pick<CaptureDeps, 'transcribe' | 'readImag
   /** Is this sender Cirqle (a listed Cirqle number or an active employee's phone)? */
   isStaffPhone: (phone: string) => Promise<boolean>
   isDuplicate: (messageId: string) => Promise<boolean>
-  /** The same sender's request from this chat, filed in the last few minutes and still untouched. */
-  recentRequest: (chatId: string, senderId: string) => Promise<RecentRequest | null>
+  /**
+   * The same sender's request from this chat that is still untouched and whose messages were
+   * SENT within a few minutes of this one (by WhatsApp's clock, not by when they reached us).
+   */
+  recentRequest: (chatId: string, senderId: string, sentAtMs: number | null) => Promise<RecentRequest | null>
+  /** Has anyone from Cirqle written in this chat after this time? Only asked for a message that arrived late. */
+  answeredSince: (chatId: string, sentAtMs: number) => Promise<boolean>
   /** Is this text a work request? null = could not tell. */
   looksLikeRequest: (text: string) => Promise<boolean | null>
   file: (request: {
     title: string; client?: string; service?: string; dueDate?: string; notes: string
     extraLinks: { label: string; url: string }[]
   }) => Promise<{ ok: boolean; error?: string; id?: string; ref?: string; title?: string; client?: string | null }>
-  append: (requestId: string, change: { description: string; extraLinks: { label: string; url: string }[] }) => Promise<boolean>
+  /** Adds a follow-up to a request as it stands now (rules.ts, appendChange). */
+  append: (requestId: string, addition: { text: string; links: { label: string; url: string }[] }) => Promise<boolean>
+  /**
+   * Several photos sent together arrive at the same instant, and each can start its own request
+   * before it sees the others. Called after filing: if an earlier request from the same burst
+   * exists, this one is folded into it and its ref is returned; otherwise null.
+   */
+  mergeDuplicate: (requestId: string, message: ListenerMessage) => Promise<string | null>
+  /** The clock, so tests can set it. */
+  now?: () => number
   /** Records the message against the request: the duplicate check and the burst lookup both read this. */
   logMessage: (requestId: string, message: ListenerMessage, summary: string) => Promise<void>
   /** Notes that an unlisted chat was seen (id, sender name, time — never content). */
@@ -97,12 +116,15 @@ export async function handleListenerMessage(m: ListenerMessage, deps: ListenerDe
   if (fromStaff) return { result: 'ignored', reason: 'staff' }
   if (duplicate) return { result: 'ignored', reason: 'duplicate' }
 
-  const recent = await deps.recentRequest(m.chatId, m.senderId).catch(() => null)
+  const late = isLateMessage(m.sentAtMs, deps.now ? deps.now() : Date.now())
+  // If the check itself fails the message is filed: a spare inbox item costs less than a lost request.
+  const answered = late && m.sentAtMs ? await deps.answeredSince(m.chatId, m.sentAtMs).catch(() => false) : false
+  const recent = answered ? null : await deps.recentRequest(m.chatId, m.senderId, m.sentAtMs).catch(() => null)
   const voiceOrPhoto = isVoiceOrPhoto(m.type)
   // Only a text message that would START a request is put to the AI check.
-  const looks = !recent && !voiceOrPhoto ? await deps.looksLikeRequest(m.body).catch(() => null) : null
+  const looks = !answered && !recent && !voiceOrPhoto ? await deps.looksLikeRequest(m.body).catch(() => null) : null
 
-  const decision = decide({ enabled: deps.enabled, message: m, listed, fromStaff, duplicate, hasRecentRequest: !!recent, looksLikeRequest: looks })
+  const decision = decide({ enabled: deps.enabled, message: m, listed, fromStaff, duplicate, hasRecentRequest: !!recent, looksLikeRequest: looks, answered })
   if (decision.action === 'ignore') return { result: 'ignored', reason: decision.reason }
 
   const { file, note } = mediaFile(m)
@@ -115,10 +137,7 @@ export async function handleListenerMessage(m: ListenerMessage, deps: ListenerDe
 
   if (decision.action === 'append' && recent) {
     const addition = buildDescription({ message, parts }).split('\n').slice(1).join('\n') // drop the "From WhatsApp" line
-    const ok = await deps.append(recent.id, {
-      description: appendedDescription(recent.description, addition),
-      extraLinks: [...recent.extraLinks, ...partLinks(parts, recent.extraLinks.length + 1)].slice(0, 10),
-    })
+    const ok = await deps.append(recent.id, { text: addition, links: partLinks(parts) })
     if (!ok) return { result: 'failed', error: `Could not add the message to ${recent.ref}.` }
     await deps.logMessage(recent.id, m, summary)
     return { result: 'appended', ref: recent.ref }
@@ -126,18 +145,28 @@ export async function handleListenerMessage(m: ListenerMessage, deps: ListenerDe
 
   const text = combinedText(m.body, parts)
   const parsed = text ? await deps.parse(text).catch(() => ({} as Awaited<ReturnType<ListenerDeps['parse']>>)) : {}
+  // A voice note with no typed words: the only text is the AI's hearing of Malayalam speech, which is
+  // often wrong. It stays in the request to be checked against the recording, but it is not the title.
+  const spokenOnly = !m.body.trim() && parts.some(p => p.kind === 'audio')
+  const lateNote = late && m.sentAtMs ? `Sent ${sentLabel(m.sentAtMs)}. It reached Cirqle App late, so check the chat for what happened since.` : null
   const filed = await deps.file({
-    title: (parsed.title || '').trim() || fallbackTitle(text, parts),
+    title: spokenOnly ? fallbackTitle('', parts) : (parsed.title || '').trim() || fallbackTitle(text, parts),
     // The allow-list names the client for this chat; that is more reliable than a guess from the text.
     client: client || parsed.client,
     service: parsed.service,
-    dueDate: parsed.dueDate,
-    notes: buildDescription({ group: client ? `${client} ${m.isGroup ? 'group' : 'chat'}` : m.isGroup ? 'group' : 'chat', sender, message, parts }),
+    // "Tomorrow" in a message that is days old would be counted from today: leave the date to a person.
+    dueDate: late ? undefined : parsed.dueDate,
+    notes: buildDescription({
+      group: client ? `${client} ${m.isGroup ? 'group' : 'chat'}` : m.isGroup ? 'group' : 'chat', sender,
+      message: [lateNote, message].filter(Boolean).join('\n'), parts,
+    }),
     extraLinks: partLinks(parts),
   })
   if (!filed.ok || !filed.id) return { result: 'failed', error: filed.error || 'Could not file the request.' }
 
   await deps.logMessage(filed.id, m, summary)
+  const mergedInto = await deps.mergeDuplicate(filed.id, m).catch(() => null)
+  if (mergedInto) return { result: 'appended', ref: mergedInto }
   await deps.notify({
     ref: filed.ref || '', title: filed.title || '', client: filed.client ?? (client || null),
     needsListening: parts.some(p => p.unread),

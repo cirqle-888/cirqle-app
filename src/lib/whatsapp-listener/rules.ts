@@ -391,13 +391,28 @@ export function isAcknowledgement(text: string): boolean {
 /** Messages from the same person in the same chat within this window become one request. */
 export const BURST_MINUTES = 10
 
+/**
+ * A message that reaches Cirqle App this long after it was sent did not come
+ * live: the gateway was off and is catching up. By then the conversation has
+ * usually moved on, so it is checked against what Cirqle said afterwards.
+ */
+export const LATE_AFTER_HOURS = 3
+
+/** Did this message arrive long after it was sent? Unknown send time counts as live. */
+export function isLateMessage(sentAtMs: number | null | undefined, arrivedAtMs: number): boolean {
+  return !!sentAtMs && arrivedAtMs - sentAtMs > LATE_AFTER_HOURS * 3_600_000
+}
+
 export type ListenerDecision =
-  | { action: 'ignore'; reason: 'disabled' | 'not-a-message' | 'from-us' | 'not-listed' | 'type' | 'staff' | 'duplicate' | 'acknowledgement' | 'not-a-request' }
+  | { action: 'ignore'; reason: 'disabled' | 'not-a-message' | 'from-us' | 'not-listed' | 'type' | 'staff' | 'duplicate' | 'acknowledgement' | 'answered' | 'not-a-request' }
   | { action: 'append' }
   | { action: 'file' }
 
 /**
  * The decision, given everything that had to be looked up.
+ *
+ * A message that arrived late (the gateway was catching up) and that Cirqle
+ * has already answered in the chat is never filed: see `LATE_AFTER_HOURS`.
  *
  * `looksLikeRequest` is only consulted for a text message that starts a new
  * request. Voice notes and photos are always captured (they are rarely
@@ -413,6 +428,8 @@ export function decide(input: {
   duplicate: boolean
   hasRecentRequest: boolean
   looksLikeRequest: boolean | null
+  /** The message arrived late and Cirqle has already spoken in the chat after it was sent. */
+  answered?: boolean
 }): ListenerDecision {
   const m = input.message
   if (!input.enabled) return { action: 'ignore', reason: 'disabled' }
@@ -425,6 +442,8 @@ export function decide(input: {
 
   const voiceOrPhoto = isVoiceOrPhoto(m.type)
   if (!voiceOrPhoto && isAcknowledgement(m.body)) return { action: 'ignore', reason: 'acknowledgement' }
+  // Old news: it stays in the chat view, but it is not a new item for the inbox.
+  if (input.answered) return { action: 'ignore', reason: 'answered' }
   if (input.hasRecentRequest) return { action: 'append' }
   if (!voiceOrPhoto && input.looksLikeRequest === false) return { action: 'ignore', reason: 'not-a-request' }
   return { action: 'file' }
@@ -436,4 +455,28 @@ export function appendedDescription(existing: string | null | undefined, additio
   const add = addition.trim()
   if (!add) return base
   return `${base}\n\n— later —\n${add}`.slice(0, 12000)
+}
+
+/**
+ * A follow-up added to a request that is already there: the text goes under
+ * "— later —", and its links are numbered on from the ones the request holds.
+ * Worked out from the request as it is NOW, so two follow-ups arriving at the
+ * same moment cannot overwrite each other (the caller re-reads and retries).
+ */
+export function appendChange(
+  existing: { description: string | null | undefined; extraLinks: readonly { label: string; url: string }[] },
+  addition: { text: string; links: readonly { label: string; url: string }[] },
+): { description: string; extraLinks: { label: string; url: string }[] } {
+  const have = new Set(existing.extraLinks.map(l => l.url))
+  const fresh = addition.links.filter(l => !have.has(l.url))
+  const numbered = fresh.map((l, i) => ({ label: l.label.replace(/\s*\d+$/, '') + ` ${existing.extraLinks.length + i + 1}`, url: l.url }))
+  return {
+    description: appendedDescription(existing.description, addition.text),
+    extraLinks: [...existing.extraLinks, ...numbered].slice(0, 10),
+  }
+}
+
+/** When a late message was sent, for the request text: "21 Nov, 21:11". India time. */
+export function sentLabel(sentAtMs: number): string {
+  return new Date(sentAtMs).toLocaleString('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })
 }

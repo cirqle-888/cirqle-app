@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { logCronRun } from '@/lib/cron/log'
 import { alertFlyerDeadlines, finishApprovedFlyers } from '@/lib/whatsapp-listener/flyer-desk-run'
 import { alertUnanswered, loadListenerContext, sendWeeklyDigest, updateAllReports } from '@/lib/whatsapp-listener/insights-run'
+import { syncWhatsAppRequests } from '@/lib/whatsapp-listener/request-sync-run'
 import { todayISO } from '@/lib/utils/local-date'
 import { autopilotOn } from '@/lib/autopilot/switches'
 import { loadAutopilotSettings } from '@/lib/autopilot/run'
@@ -16,7 +17,9 @@ import { assignWaitingRequests } from '@/lib/autopilot/assign'
  * inside Cirqle about anything new that is waiting on Cirqle. It then nudges
  * about clients who wrote last and got no reply and about offer flyers due
  * by tomorrow that have no finished design, and on Mondays sends the
- * admins a one-line summary of the week.
+ * admins a one-line summary of the week. Last, WhatsApp requests that were
+ * answered in the chat or came from a Cirqle number are archived
+ * (lib/whatsapp-listener/request-sync.ts).
  * Rules: lib/whatsapp-listener/insights.ts. Nothing is sent to WhatsApp.
  *
  * It also runs the autopilot's evening pass of "give requests to the right
@@ -56,9 +59,11 @@ export async function GET(req: NextRequest) {
     const approved = await finishApprovedFlyers(admin, ctx).catch(() => 0)
     const flyers = await alertFlyerDeadlines(admin, ctx).catch(() => 0)
     const weekly = await sendWeeklyDigest(admin, ctx).catch(() => false)
+    // WhatsApp requests that were answered in the chat, or came from a Cirqle number, leave the inbox.
+    const synced = await syncWhatsAppRequests(admin, ctx.settings).catch(() => null)
     const ok = run.failed === 0
-    await logCronRun(admin, 'whatsapp-reports', ok, { ...run, waiting, flyers, approved, weekly, assigned }, ok ? undefined : run.errors.join(' | '))
-    return NextResponse.json({ ok, ...run, waiting, flyers, approved, weekly, assigned })
+    await logCronRun(admin, 'whatsapp-reports', ok, { ...run, waiting, flyers, approved, weekly, assigned, synced }, ok ? undefined : run.errors.join(' | '))
+    return NextResponse.json({ ok, ...run, waiting, flyers, approved, weekly, assigned, synced })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'failed'
     await logCronRun(admin, 'whatsapp-reports', false, undefined, message)

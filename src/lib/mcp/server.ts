@@ -224,7 +224,7 @@ export function createCirqleMcpServer() {
 
   server.registerTool('list_requests', {
     title: 'List requests',
-    description: 'The Requests inbox (work asked for by clients/staff that is not yet a task). Open requests by default.',
+    description: 'The Requests inbox (work asked for by clients/staff that is not yet a task). Open requests by default. A request filed from WhatsApp carries `whatsapp`: who sent the last message and when, and when Cirqle replied in the chat (null = no reply seen yet).',
     inputSchema: {
       status: z.string().optional().describe('Filter to one status (submitted, in_progress, waiting_for_content, revision_requested, delivered, completed, cancelled…); omit for all open requests.'),
       client: z.string().optional().describe('Client name (fuzzy) or id.'),
@@ -242,7 +242,27 @@ export function createCirqleMcpServer() {
     }
     const { data, error } = await q
     if (error) return fail(error.message)
-    const rows = flatten(data).map((r) => ({ ...r, ref: `REQ-${String(r.ref_no ?? 0).padStart(4, '0')}` }))
+    // For requests the WhatsApp listener filed: when the client's last message was sent and whether
+    // Cirqle has replied in the chat since, so a brief does not report an answered message as new work.
+    const ids = ((data || []) as { id: string }[]).map((r) => r.id)
+    const wa = new Map<string, { last_message_at: string; sent_by: string | null; cirqle_replied_at: string | null }>()
+    if (ids.length) {
+      const { data: acts } = await admin.from('request_activity').select('request_id, action, actor_label, created_at, detail')
+        .in('request_id', ids).in('action', ['whatsapp_message', 'whatsapp_reply']).order('created_at', { ascending: true }).limit(2000)
+      for (const a of (acts || []) as { request_id: string; action: string; actor_label: string | null; created_at: string; detail: { sentAt?: string; repliedAt?: string } | null }[]) {
+        const w = wa.get(a.request_id) ?? { last_message_at: '', sent_by: null, cirqle_replied_at: null }
+        if (a.action === 'whatsapp_reply') w.cirqle_replied_at = a.detail?.repliedAt ?? a.created_at
+        else {
+          const at = a.detail?.sentAt ?? a.created_at
+          if (at > w.last_message_at) { w.last_message_at = at; w.sent_by = a.actor_label }
+        }
+        wa.set(a.request_id, w)
+      }
+    }
+    const rows = flatten(data).map((r) => ({
+      ...r, ref: `REQ-${String(r.ref_no ?? 0).padStart(4, '0')}`,
+      ...(wa.has(r.id as string) ? { whatsapp: wa.get(r.id as string) } : {}),
+    }))
     return result(`${rows.length} requests.`, { requests: rows })
   })
 
