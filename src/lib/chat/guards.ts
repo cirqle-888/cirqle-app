@@ -1,6 +1,6 @@
 import 'server-only'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
+import { loadCurrentUser, hasPermission, type CurrentUser } from '@/lib/permissions/check'
 
 /**
  * Signed in and allowed into chat — the same gate as chat/actions.ts.
@@ -26,4 +26,23 @@ export async function requireMembership(conversationId: string, employeeId: stri
   return data
     ? { ok: true as const, role: data.role as 'owner' | 'moderator' | 'member' }
     : { ok: false as const, error: 'You are not a member of this conversation.' }
+}
+
+/**
+ * An announcement channel takes new posts only from admins, chat moderators
+ * and the channel's own owner / moderators. Thread replies stay open to all,
+ * so people can still answer an announcement without filling the channel.
+ */
+export async function requireCanPost(
+  me: CurrentUser,
+  conversationId: string,
+  role: 'owner' | 'moderator' | 'member',
+  isThreadReply = false,
+) {
+  if (isThreadReply) return { ok: true as const }
+  // select('*'): the column arrives with the chat upgrade migration.
+  const { data: conv } = await createAdminClient().from('conversations').select('*').eq('id', conversationId).maybeSingle()
+  if (!conv || conv.posting !== 'admins') return { ok: true as const }
+  if (me.isAdmin || hasPermission(me, 'chat.moderate') || role === 'owner' || role === 'moderator') return { ok: true as const }
+  return { ok: false as const, error: 'Only admins can post in this channel. You can react, or reply in a thread.' }
 }

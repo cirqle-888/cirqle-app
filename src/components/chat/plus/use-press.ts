@@ -8,13 +8,16 @@ const SWIPE_MAX = 72
 
 /**
  * Touch gestures for a message row: press and hold opens the menu, swipe right
- * replies. A finger that moves is scrolling, not holding — so vertical movement
+ * replies, two quick taps give a heart. A finger that moves is scrolling, not holding — so vertical movement
  * cancels both, and a swipe only starts once it is clearly sideways.
  */
-export function useMessageGestures({ onHold, onSwipeReply }: {
+export function useMessageGestures({ onHold, onSwipeReply, onDoubleTap }: {
   onHold?: (point: { x: number; y: number }) => void
   onSwipeReply?: () => void
+  /** Two quick taps on the same spot — the heart, as on Instagram. */
+  onDoubleTap?: () => void
 }) {
+  const lastTap = useRef<{ at: number; x: number; y: number } | null>(null)
   const start = useRef<{ x: number; y: number } | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mode = useRef<'idle' | 'swipe' | 'scroll' | 'held'>('idle')
@@ -62,6 +65,15 @@ export function useMessageGestures({ onHold, onSwipeReply }: {
         if (mode.current === 'swipe' && dxRef.current >= SWIPE_TRIGGER) {
           try { navigator.vibrate?.(8) } catch { /* not supported */ }
           onSwipeReply?.()
+        }
+        // A tap that neither moved nor held: is it the second of a pair?
+        if (mode.current === 'idle' && start.current && onDoubleTap) {
+          const now = Date.now(), prev = lastTap.current, here = start.current
+          if (prev && now - prev.at < 320 && Math.abs(prev.x - here.x) < 28 && Math.abs(prev.y - here.y) < 28) {
+            lastTap.current = null
+            try { navigator.vibrate?.(8) } catch { /* not supported */ }
+            onDoubleTap()
+          } else lastTap.current = { at: now, x: here.x, y: here.y }
         }
         dxRef.current = 0
         setDx(0)

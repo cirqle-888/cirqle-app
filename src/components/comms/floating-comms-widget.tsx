@@ -19,7 +19,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { MessageCircle, Bell, X, ArrowLeft, Send, Hash, Lock, ChevronRight, ChevronLeft, Pin, PinOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useVisibleInterval } from '@/lib/hooks/use-visible-interval'
@@ -205,6 +205,7 @@ export function FloatingCommsWidget() {
   //              wheel rather than a fight.
   //   parked     a deliberate collapse to a slim edge tab, remembered, for
   //              people who want the corner back permanently.
+  const onChatPage = (usePathname() ?? '').startsWith('/dashboard/chat')
   const [parked, setParked] = useState(false)
   const [scrolling, setScrolling] = useState(false)
   useEffect(() => {
@@ -439,7 +440,8 @@ export function FloatingCommsWidget() {
           const level = notifyLevelRef.current.get(convId) ?? 'all'
           const mentions = (row.metadata as { mentions?: unknown } | null)?.mentions
           const mentioned = Array.isArray(mentions) && mentions.includes(employeeId)
-          if (level === 'none' || (level === 'mentions' && !mentioned)) return
+          const urgent = (row.metadata as { urgent?: unknown } | null)?.urgent === true
+          if (!urgent && (level === 'none' || (level === 'mentions' && !mentioned))) return
           const preview = previewOf(kind, body).slice(0, 90)
           playChime()
           systemNotify('💬 New message', preview, `msg:${convId}`,
@@ -571,7 +573,9 @@ export function FloatingCommsWidget() {
         // it shares z-50 with the modal overlay and would otherwise cover the
         // bottom-right of any mobile sheet, i.e. its footer buttons.
         data-chat-launcher
-        className={`fixed bottom-5 right-5 z-50 flex items-center gap-1 transition-transform duration-200 ${
+        // On the chat page itself the launcher only gets in the way — it sat on
+        // top of the Send button — and the page already is the chat.
+        className={`fixed bottom-5 right-5 z-50 ${onChatPage && !open ? 'hidden' : 'flex'} items-center gap-1 transition-transform duration-200 ${
           tucked ? 'translate-x-[calc(100%-0.75rem)]' : 'translate-x-0'
         }`}
       >

@@ -22,7 +22,9 @@ import { createNotification } from '@/lib/notifications/create'
 import { sendWebPush } from '@/lib/push/send'
 import { transcribeAudio } from '@/lib/ai/transcribe'
 import { todayISO } from '@/lib/utils/local-date'
-import { loadChatAccess, loadChatAccessRules } from '@/lib/chat/access-load'
+import { loadChatAccess, loadChatAccessRules, loadDepartmentsByEmployee } from '@/lib/chat/access-load'
+import { departmentSlug } from '@/lib/chat/mentions'
+import { requireCanPost } from '@/lib/chat/guards'
 import { canChat, canSeeDepartmentChannel, reachable, type ChatAccessContext } from '@/lib/chat/access'
 import { attachLinkPreview } from '@/lib/chat/link-preview'
 import { deliverDueScheduled } from '@/lib/chat/scheduled'
@@ -67,6 +69,10 @@ export interface ChatConversation {
   departmentId: string | null
   /** A direct chat the admin's rules have closed: history stays, sending is off. */
   blocked: boolean
+  /** 'admins' = an announcement channel: everyone reads, only admins and moderators post. */
+  posting: 'all' | 'admins'
+  /** Whether I may post here (always true unless it is an announcement channel). */
+  canPost: boolean
 }
 
 export interface ChatAttachment {
@@ -455,7 +461,7 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
   const convSelect = (withDept: boolean) => admin
     .from('conversations')
     .select(`
-      id, type, name, topic, is_private, category, created_at, archived_at, created_by, client_id${withDept ? ', department_id' : ''},
+      id, type, name, topic, is_private, category, created_at, archived_at, created_by, client_id${withDept ? ', department_id, posting' : ''},
       members:conversation_members(employee_id, role, employee:employee_id(id, name, cqid))
     `)
     .or(orFilter)
@@ -695,6 +701,8 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
         const other = members.find(m => m.employeeId !== me.employeeId)
         return !!other && !canChat(access, me.employeeId, other.employeeId)
       })(),
+      posting: c.posting === 'admins' ? 'admins' : 'all',
+      canPost: c.posting !== 'admins' || canModerate || myRole === 'owner' || myRole === 'moderator',
     } satisfies ChatConversation
   })
 
@@ -727,6 +735,8 @@ export async function createChannel(input: {
   clientId?: string | null
   /** For department channels: only that department's people see and join it */
   departmentId?: string | null
+  /** 'admins' makes it an announcement channel (admins and chat moderators only may create one) */
+  posting?: 'all' | 'admins'
 }): Promise<Result<{ id: string }>> {
   const auth = await requireChatUser()
   if (!auth.ok) return auth
@@ -748,6 +758,12 @@ export async function createChannel(input: {
     client_id: input.clientId ?? null,
   }
   if (input.departmentId) insertRow.department_id = input.departmentId
+  if (input.posting === 'admins') {
+    if (!me.isAdmin && !hasPermission(me, 'chat.moderate')) {
+      return { ok: false, error: 'Only an admin can create an announcement channel.' }
+    }
+    insertRow.posting = 'admins'
+  }
   // You can only bring in people you are allowed to chat with.
   let invitees = (input.memberIds ?? []).filter(id => id !== me.employeeId)
   if (invitees.length) {
@@ -965,7 +981,7 @@ export async function getThread(parentId: string): Promise<Result<{ parent: Chat
 export async function sendMessage(
   conversationId: string,
   body: string,
-  opts?: { parentId?: string | null; replyToId?: string | null },
+  opts?: { parentId?: string | null; replyToId?: string | null; urgent?: boolean },
 ): Promise<Result<ChatMessage>> {
   const auth = await requireChatUser()
   if (!auth.ok) return auth
@@ -976,6 +992,13 @@ export async function sendMessage(
   if (!live.ok) return live
   const open = await requireDmOpen(me, conversationId)
   if (!open.ok) return open
+  const mayPost = await requireCanPost(me, conversationId, membership.role, !!opts?.parentId)
+  if (!mayPost.ok) return mayPost
+  // Urgent reaches people even in a chat they muted, so only those who run the team may use it.
+  const urgent = !!opts?.urgent && !opts?.parentId
+  if (urgent && !me.isAdmin && !hasPermission(me, 'chat.moderate')) {
+    return { ok: false, error: 'Only an admin can mark a message urgent.' }
+  }
 
   const text = (body || '').trim()
   if (!text) return { ok: false, error: 'Message is empty.' }
@@ -1011,6 +1034,19 @@ export async function sendMessage(
     }
   })
   const mentionIds = extractMentions(text, members, me.employeeId)
+  // @department-name pings everyone in this chat who works in that department.
+  if (text.includes('@')) {
+    const lower = text.toLowerCase()
+    const { data: depts } = await admin.from('service_categories').select('id, name')
+    const hit = ((depts ?? []) as { id: string; name: string }[]).filter(d => lower.includes(`@${departmentSlug(d.name)}`))
+    if (hit.length) {
+      const byEmployee = await loadDepartmentsByEmployee(admin)
+      for (const m of members) {
+        if (m.employeeId === me.employeeId || mentionIds.includes(m.employeeId)) continue
+        if (hit.some(d => byEmployee.get(m.employeeId)?.has(d.id))) mentionIds.push(m.employeeId)
+      }
+    }
+  }
 
   // Quoted reply (WhatsApp-style): snapshot the original into metadata.
   let replySnapshot: ReplySnapshot | null = null
@@ -1022,6 +1058,7 @@ export async function sendMessage(
   const metadata: Record<string, unknown> = {}
   if (mentionIds.length) metadata.mentions = mentionIds
   if (replySnapshot) metadata.replyTo = replySnapshot
+  if (urgent) metadata.urgent = true
 
   const { data, error } = await admin
     .from('messages')
@@ -1076,10 +1113,10 @@ export async function sendMessage(
     after(async () => {
       await Promise.all(members
         .filter(m => m.employeeId !== me.employeeId
-          && m.notifyLevel === 'all'
+          && (urgent || m.notifyLevel === 'all')
           && !mentionIds.includes(m.employeeId))
         .map(m => sendWebPush(m.employeeId, {
-          title: `💬 ${me.cqid}`,
+          title: urgent ? `🚨 Urgent · ${me.cqid}` : `💬 ${me.cqid}`,
           body: preview,
           url: `/dashboard/chat?c=${conversationId}`,
           tag: `msg:${conversationId}`,
@@ -1168,6 +1205,8 @@ export async function sendFileMessage(input: {
   if (!live.ok) return live
   const open = await requireDmOpen(me, input.conversationId)
   if (!open.ok) return open
+  const mayPost = await requireCanPost(me, input.conversationId, membership.role)
+  if (!mayPost.ok) return mayPost
 
   // The path must be one we generated for THIS conversation, and must exist.
   if (!input.storagePath.startsWith(`${input.conversationId}/`)) {
@@ -1501,6 +1540,8 @@ export async function sendVoiceMessage(input: {
   if (!live.ok) return live
   const open = await requireDmOpen(me, input.conversationId)
   if (!open.ok) return open
+  const mayPost = await requireCanPost(me, input.conversationId, membership.role)
+  if (!mayPost.ok) return mayPost
 
   if (input.durationMs > MAX_VOICE_MS) return { ok: false, error: 'Voice notes are limited to 5 minutes.' }
   if (!input.storagePath.startsWith(`${input.conversationId}/`)) {

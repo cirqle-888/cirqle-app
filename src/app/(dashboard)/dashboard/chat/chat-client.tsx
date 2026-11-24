@@ -20,6 +20,7 @@ import {
   Trash2, RefreshCw, X, Paperclip, Search, SmilePlus, Reply, Download, FileText, ClipboardCheck,
   CornerUpLeft, Mic, Check, CheckCheck, Pencil, Pin, CheckSquare, Megaphone, CalendarDays, Inbox,
   MoreHorizontal, Star, Clock, Smile, BarChart3, Copy, Forward, Info, BellOff, ChevronDown, ShieldCheck, PinOff, Bell,
+  Bookmark, AlertTriangle, ClipboardList, MessageSquarePlus,
 } from 'lucide-react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
@@ -43,6 +44,7 @@ import {
 
 import {
   setConversationPinned, setConversationNotify, toggleStar, listStarredIds, togglePinMessage, votePoll, listChatDepartments,
+  getOrCreateMyNotes, listMentionGroups,
   type NotifyLevel,
 } from './actions-plus'
 import { readPoll } from '@/lib/chat/polls'
@@ -56,8 +58,9 @@ import { RichText, LinkPreviewCard, PollCard, ForwardedTag } from '@/components/
 import { useMessageGestures } from '@/components/chat/plus/use-press'
 import { useChatScroll } from '@/components/chat/plus/use-chat-scroll'
 import {
-  ForwardDialog, MessageInfoDialog, ChatDetailsDialog, StarredDialog, ScheduleDialog, PollDialog,
+  ForwardDialog, MessageInfoDialog, ChatDetailsDialog, StarredDialog, ScheduleDialog, PollDialog, RequestFromMessageDialog,
 } from '@/components/chat/plus/dialogs'
+import { MobileChatList } from '@/components/chat/plus/mobile-chat-list'
 
 const QUICK_EMOJI = ['👍', '❤️', '😂', '🎉', '✅', '👀']
 const NO_FILES: File[] = []
@@ -124,7 +127,9 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
   const deepLinkId = searchParams.get('c')
 
   // ── Privacy: CQID-first everywhere; names only for admin + reveal toggle ──
-  const { revealNames } = usePermissions()
+  const { revealNames, can } = usePermissions()
+  const canMakeRequests = can('requests.manage')
+  const canUrgent = isAdmin || can('chat.moderate')
   const showName = useCallback(
     (name?: string | null, cqid?: string | null) =>
       displayEmployee({ name: name ?? '', cqid: cqid ?? '' }, { revealNames, canReveal: true }),
@@ -177,6 +182,9 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
+  const [requestFrom, setRequestFrom] = useState<ChatMessage | null>(null)
+  const [mentionGroups, setMentionGroups] = useState<{ slug: string; name: string }[]>([])
+  useEffect(() => { let alive = true; listMentionGroups().then(r => { if (alive && r.ok) setMentionGroups(r.data) }); return () => { alive = false } }, [])
   const [toast, setToast] = useState('')
   const flash = useCallback((text: string) => { setToast(text); setTimeout(() => setToast(t => (t === text ? '' : t)), 2400) }, [])
 
@@ -315,10 +323,10 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
   const activePartnerId = active ? dmPartnerId(active, me.employeeId) : null
   const activePartner = presenceOf(activePartnerId)
 
-  const notifyIncoming = useCallback((convId: string, senderId: string | null, kind: string, body: string, mentionsMe = false) => {
+  const notifyIncoming = useCallback((convId: string, senderId: string | null, kind: string, body: string, mentionsMe = false, urgent = false) => {
     const conv = conversationsRef.current.find(c => c.id === convId)
-    // Muted chats stay quiet; "mentions only" speaks up just for a mention.
-    if (conv?.notifyLevel === 'none' || (conv?.notifyLevel === 'mentions' && !mentionsMe)) return
+    // Muted chats stay quiet; "mentions only" speaks up just for a mention. Urgent always gets through.
+    if (!urgent && (conv?.notifyLevel === 'none' || (conv?.notifyLevel === 'mentions' && !mentionsMe))) return
     const member = conv?.members.find(mm => mm.employeeId === senderId)
     const sender = member ? showName(member.name, member.cqid) : 'New message'
     const where = conv ? (conv.type === 'dm' ? '' : ` in #${convDisplayName(conv)}`) : ''
@@ -401,7 +409,8 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
             : c))
           notifyIncoming(convId, (row.sender_id as string | null) ?? null, String(row.kind ?? 'text'), String(row.body ?? ''),
             Array.isArray((row.metadata as { mentions?: string[] } | null)?.mentions)
-              && (row.metadata as { mentions: string[] }).mentions.includes(me.employeeId))
+              && (row.metadata as { mentions: string[] }).mentions.includes(me.employeeId),
+            (row.metadata as { urgent?: boolean } | null)?.urgent === true)
         })
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'message_reads' },
@@ -459,7 +468,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
   }, [active, showName])
 
   // ── Actions ────────────────────────────────────────────────────────────────
-  const handleSendRoot = useCallback((text: string) => {
+  const handleSendRoot = useCallback((text: string, opts?: { urgent?: boolean }) => {
     if (!activeId) return
     const replyToId = replyTo?.id ?? null
     const replySnap = replyTo
@@ -471,16 +480,19 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
       senderName: me.name, senderCqid: me.cqid, body: text, kind: 'text',
       createdAt: new Date().toISOString(), editedAt: null, deletedAt: null,
       parentId: null,
-      metadata: replySnap ? { replyTo: {
-        messageId: replySnap.id, senderId: replySnap.senderId,
-        senderName: replySnap.senderName ?? '', senderCqid: replySnap.senderCqid ?? '',
-        kind: replySnap.kind, preview: replySnap.kind === 'text' ? replySnap.body.slice(0, 90) : replySnap.kind,
-      } } : {},
+      metadata: {
+        ...(replySnap ? { replyTo: {
+          messageId: replySnap.id, senderId: replySnap.senderId,
+          senderName: replySnap.senderName ?? '', senderCqid: replySnap.senderCqid ?? '',
+          kind: replySnap.kind, preview: replySnap.kind === 'text' ? replySnap.body.slice(0, 90) : replySnap.kind,
+        } } : {}),
+        ...(opts?.urgent ? { urgent: true } : {}),
+      },
       replyCount: 0, reactions: {}, attachments: [], readerIds: [], playedByIds: [],
     }
     setMessages(prev => [...prev, optimistic])
     startTransition(async () => {
-      const res = await sendMessage(activeId, text, { replyToId })
+      const res = await sendMessage(activeId, text, { replyToId, urgent: opts?.urgent })
       if (res.ok) {
         setMessages(prev => prev.map(m => (m.id === tempId ? res.data : m))
           .filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i)) // dedupe vs realtime echo
@@ -699,6 +711,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
     if (forwardable) items.push({ key: 'forward', label: 'Forward', icon: Forward, onSelect: () => setForwardIds([m.id]) })
     items.push({ key: 'star', label: starredIds.has(m.id) ? 'Remove star' : 'Star', icon: Star, onSelect: () => void starMessage(m) })
     items.push({ key: 'pin', label: m.metadata.pinned ? 'Unpin' : 'Pin for everyone', icon: m.metadata.pinned ? PinOff : Pin, onSelect: () => void pinMessage(m) })
+    if (canMakeRequests && messageText(m)) items.push({ key: 'request', label: 'Make this a request', icon: ClipboardList, onSelect: () => setRequestFrom(m) })
     if (mine) items.push({ key: 'info', label: 'Info — who has seen it', icon: Info, onSelect: () => setInfoFor(m) })
     if (mine && m.kind === 'text' && !isPoll) items.push({ key: 'edit', label: 'Edit', icon: Pencil, onSelect: () => setEditingId(m.id) })
     if (mine) items.push({ key: 'delete', label: 'Delete', icon: Trash2, danger: true, onSelect: () => removeMessage(m) })
@@ -716,6 +729,16 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
     return items
   }
   const openConvMenu = useCallback((conv: ChatConversation, point: { x: number; y: number }) => setConvMenu({ conv, ...point }), [])
+  const openMyNotes = useCallback(() => {
+    startTransition(async () => {
+      const res = await getOrCreateMyNotes()
+      if (!res.ok) { flash(res.error); return }
+      await refreshList()
+      openConversation(res.data.id)
+    })
+  }, [flash, refreshList, openConversation])
+  // In a direct chat, "Seen" sits under my latest message once the other person has read it.
+  const lastOwnId = useMemo(() => [...messages].reverse().find(m => m.senderId === me.employeeId && !m.deletedAt && m.kind !== 'system')?.id ?? null, [messages, me.employeeId])
 
   // Every picture loaded in this chat, oldest first — the viewer steps through them.
   const chatImages = useMemo<ViewerImage[]>(() => messages.flatMap(m => (m.deletedAt || m.kind === 'voice' ? [] : m.attachments
@@ -796,9 +819,10 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
   const pinnedConvs = conversations.filter(c => c.pinned && c.isMember)
   const groups = {
     general:     conversations.filter(c => !c.pinned && isChannelish(c) && (c.category ?? 'general') === 'general'),
+    // (a "My notes" room has category 'self' and is listed with direct messages)
     department:  conversations.filter(c => !c.pinned && isChannelish(c) && c.category === 'department'),
     discussion:  allDiscussions.filter(c => !c.pinned && !groupedIds.has(c.id)),
-    dms:         conversations.filter(c => !c.pinned && c.type === 'dm'),
+    dms:         conversations.filter(c => !c.pinned && (c.type === 'dm' || c.category === 'self')),
   }
 
   const activeClientGroup = useMemo(() => {
@@ -838,7 +862,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
       )}
 
       {/* ── Pane 1: list + search ── */}
-      <aside className={`${activeId ? 'hidden md:flex' : 'flex'} w-full md:w-72 shrink-0 flex-col border-r border-border bg-background`}>
+      <aside className={`${activeId ? 'hidden md:flex' : 'flex'} relative w-full md:w-72 shrink-0 flex-col border-r border-border bg-background`}>
         {/* pl-14 on mobile clears the fixed global sidebar hamburger (see the
             thread header below); md:px-4 restores normal desktop padding. */}
         <div className="flex items-center justify-between pl-14 pr-4 md:px-4 py-3 border-b border-border">
@@ -850,6 +874,9 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
                 <ShieldCheck className="h-4 w-4" />
               </Link>
             )}
+            <button onClick={openMyNotes} className="rounded p-1.5 text-muted-foreground hover:text-foreground" aria-label="My notes" title="My notes — only you see them">
+              <Bookmark className="h-4 w-4" />
+            </button>
             <button onClick={() => setShowStarred(true)} className="rounded p-1.5 text-muted-foreground hover:text-foreground" aria-label="Starred messages" title="Starred messages">
               <Star className="h-4 w-4" />
             </button>
@@ -902,6 +929,13 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
             </>
           ) : (
             <>
+              {/* Phone: one list, newest first, like WhatsApp. Wide screens keep the grouped sidebar below. */}
+              <div className="md:hidden">
+                <MobileChatList conversations={conversations} activeId={activeId} meId={me.employeeId}
+                  nameOf={convDisplayName} showName={showName} onMenu={openConvMenu}
+                  onOpen={c => (c.isMember ? openConversation(c.id) : handleJoin(c.id))} />
+              </div>
+              <div className="hidden md:block">
               {pinnedConvs.length > 0 && (
                 <div>
                   <SectionLabel>Pinned</SectionLabel>
@@ -1000,9 +1034,14 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
               {groups.dms.length === 0 && (
                 <p className="px-4 py-1 text-xs text-muted-foreground">No direct messages yet.</p>
               )}
+              </div>
             </>
           )}
         </div>
+        <button onClick={() => setShowNewMenu('dm')} aria-label="New chat"
+          className="absolute bottom-5 right-5 flex h-14 w-14 items-center justify-center rounded-full gradient-bg text-white shadow-xl active:scale-95 md:hidden">
+          <MessageSquarePlus className="h-6 w-6" />
+        </button>
       </aside>
 
       {/* ── Pane 2: thread ── */}
@@ -1067,6 +1106,8 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
                     <EmployeePresenceDot employeeId={activePartnerId} size="sm" className="absolute -bottom-0.5 -right-0.5" />
                   </span>
                 )
+                : active.category === 'self' ? <Bookmark className="h-4 w-4 text-muted-foreground" />
+                : active.posting === 'admins' ? <Megaphone className="h-4 w-4 text-muted-foreground" />
                 : active.isPrivate ? <Lock className="h-4 w-4 text-muted-foreground" /> : <Hash className="h-4 w-4 text-muted-foreground" />}
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold">{convDisplayName(active)}</p>
@@ -1151,6 +1192,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
                         memberCount={active.members.length}
                         highlighted={highlightId === m.id}
                         starred={starredIds.has(m.id)}
+                        seenLabel={active.type === 'dm' && m.id === lastOwnId && m.readerIds.length > 0 ? 'Seen' : null}
                         editing={editingId === m.id}
                         onEditingChange={on => setEditingId(on ? m.id : null)}
                         onMenu={point => setMenu({ m, ...point })}
@@ -1199,10 +1241,16 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
               <p className="border-t border-border px-4 py-4 text-center text-sm text-muted-foreground">
                 Direct chat with this person is turned off by your admin. You can still read the earlier messages.
               </p>
+            ) : !active.canPost ? (
+              <p className="flex items-center justify-center gap-2 border-t border-border px-4 py-4 text-center text-sm text-muted-foreground">
+                <Megaphone className="h-4 w-4 shrink-0" /> Only admins can post here. Press and hold a message to react or reply in a thread.
+              </p>
             ) : (
               <Composer
                 key={active.id}
                 draftKey={active.id}
+                canUrgent={canUrgent && active.category !== 'self'}
+                groups={active.type === 'dm' || active.category === 'self' ? undefined : mentionGroups}
                 placeholder={`Message ${active.type === 'dm' ? convDisplayName(active) : `#${convDisplayName(active)}`}`}
                 members={active.members.filter(m => m.employeeId !== me.employeeId)}
                 disabled={!!uploading}
@@ -1271,6 +1319,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
       {showNewMenu && (
         <NewConversationDialog
           mode={showNewMenu}
+          canAnnounce={canUrgent}
           canCreateChannels={canCreateChannels}
           onClose={() => setShowNewMenu(null)}
           onCreated={async (id) => { setShowNewMenu(null); await refreshList(); openConversation(id) }}
@@ -1327,6 +1376,22 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
           }} />
       )}
       {infoFor && <MessageInfoDialog message={infoFor} mask={showName} onClose={() => setInfoFor(null)} />}
+      {requestFrom && (
+        <RequestFromMessageDialog message={requestFrom} defaultClientId={active?.clientId ?? null}
+          senderLabel={requestFrom.senderId === me.employeeId ? me.cqid : (requestFrom.senderCqid ?? active?.members.find(x => x.employeeId === requestFrom.senderId)?.cqid ?? 'a colleague')}
+          onClose={() => setRequestFrom(null)}
+          onCreated={title => {
+            const src = requestFrom
+            setRequestFrom(null)
+            flash('Request created')
+            // Say so in the chat, as a reply to the message it came from.
+            if (activeId && active?.canPost && !active.blocked) {
+              void sendMessage(activeId, `📋 Made this a request: ${title}`, { replyToId: src.id }).then(res => {
+                if (res.ok) setMessages(prev => (prev.some(x => x.id === res.data.id) ? prev : [...prev, res.data]))
+              })
+            }
+          }} />
+      )}
       {details && active && (
         <ChatDetailsDialog conversation={active} title={convDisplayName(active)} initialTab={details}
           onClose={() => setDetails(null)}
@@ -1379,11 +1444,11 @@ const draftStore = {
 }
 
 function Composer({ placeholder, members, disabled, onSend, onTyping, onVoice, replyTo, onCancelReply, showName,
-  draftKey, files = NO_FILES, onFilesChange, onSendFiles, uploading, onSchedule, onPoll }: {
+  draftKey, files = NO_FILES, onFilesChange, onSendFiles, uploading, onSchedule, onPoll, canUrgent = false, groups }: {
   placeholder: string
   members: { employeeId: string; name: string; cqid: string }[]
   disabled: boolean
-  onSend: (text: string) => void
+  onSend: (text: string, opts?: { urgent?: boolean }) => void
   onTyping?: () => void
   onVoice?: (rec: VoiceRecording) => void
   replyTo?: ChatMessage | null
@@ -1399,8 +1464,13 @@ function Composer({ placeholder, members, disabled, onSend, onTyping, onVoice, r
   uploading?: string | null
   onSchedule?: (text: string) => void
   onPoll?: () => void
+  /** Admins may mark a message urgent: it alerts everyone, even in a muted chat. */
+  canUrgent?: boolean
+  /** Departments that can be mentioned as a group: @social-media. */
+  groups?: { slug: string; name: string }[]
 }) {
   const mask = showName ?? ((name?: string | null, cqid?: string | null) => cqid || name || '—')
+  const [urgent, setUrgent] = useState(false)
   const [draft, setDraftState] = useState(() => draftStore.read(draftKey))
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const [showEmoji, setShowEmoji] = useState(false)
@@ -1423,6 +1493,21 @@ function Composer({ placeholder, members, disabled, onSend, onTyping, onVoice, r
       .filter(m => !q || m.name.toLowerCase().includes(q) || m.cqid.toLowerCase().includes(q))
       .slice(0, 6)
   }, [mentionQuery, members])
+  // Group mentions: everyone here, or everyone here from one department.
+  const groupMatches = useMemo(() => {
+    if (mentionQuery === null || !groups) return []
+    const q = mentionQuery.toLowerCase()
+    return [{ slug: 'everyone', name: 'Everyone in this chat' }, ...groups]
+      .filter(g => !q || g.slug.includes(q) || g.name.toLowerCase().includes(q))
+      .slice(0, 4)
+  }, [mentionQuery, groups])
+  const insertGroup = (slug: string) => {
+    const caret = taRef.current?.selectionStart ?? draft.length
+    const at = draft.slice(0, caret).lastIndexOf('@')
+    setDraft(`${draft.slice(0, at)}@${slug} ${draft.slice(caret)}`)
+    setMentionQuery(null)
+    taRef.current?.focus()
+  }
 
   const updateDraft = (value: string) => {
     setDraft(value)
@@ -1465,7 +1550,8 @@ function Composer({ placeholder, members, disabled, onSend, onTyping, onVoice, r
     setMentionQuery(null)
     setShowEmoji(false)
     if (files.length && onSendFiles) { onSendFiles(files, text); onFilesChange?.([]) }
-    else onSend(text)
+    else onSend(text, urgent ? { urgent: true } : undefined)
+    setUrgent(false)
   }
 
   const iconBtn = 'rounded p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-40'
@@ -1512,8 +1598,22 @@ function Composer({ placeholder, members, disabled, onSend, onTyping, onVoice, r
         </div>
       )}
       {uploading && <p className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground"><RefreshCw className="h-3 w-3 animate-spin" /> {uploading}</p>}
-      {mentionQuery !== null && mentionMatches.length > 0 && (
+      {urgent && (
+        <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-red-500">
+          <AlertTriangle className="h-3.5 w-3.5" /> Urgent — alerts everyone here, even if they muted this chat
+          <button onClick={() => setUrgent(false)} className="ml-auto rounded p-0.5 hover:bg-muted" aria-label="Not urgent"><X className="h-3 w-3" /></button>
+        </p>
+      )}
+      {mentionQuery !== null && (mentionMatches.length > 0 || groupMatches.length > 0) && (
         <div className="absolute bottom-full left-3 z-20 mb-1 w-64 overflow-hidden rounded-xl border border-border bg-background shadow-lg">
+          {groupMatches.map(g => (
+            <button key={g.slug} onClick={() => insertGroup(g.slug)}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-violet-500/20 text-violet-400"><Users2 className="h-3.5 w-3.5" /></span>
+              <span className="min-w-0 flex-1 truncate text-sm">@{g.slug}</span>
+              <span className="truncate text-xs text-muted-foreground">{g.slug === 'everyone' ? 'everyone' : 'department'}</span>
+            </button>
+          ))}
           {mentionMatches.map(m => (
             <button key={m.employeeId} onClick={() => insertMention(m)}
               className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted">
@@ -1547,6 +1647,11 @@ function Composer({ placeholder, members, disabled, onSend, onTyping, onVoice, r
             {onSchedule && (
               <button onClick={() => { setShowMore(false); onSchedule(draft.trim()) }} className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm hover:bg-muted">
                 <Clock className="h-4 w-4 text-muted-foreground" /> Send later
+              </button>
+            )}
+            {canUrgent && (
+              <button onClick={() => { setShowMore(false); setUrgent(u => !u) }} className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm hover:bg-muted">
+                <AlertTriangle className={`h-4 w-4 ${urgent ? 'text-red-500' : 'text-muted-foreground'}`} /> {urgent ? 'Not urgent' : 'Mark urgent'}
               </button>
             )}
           </div>
@@ -1587,7 +1692,7 @@ function Composer({ placeholder, members, disabled, onSend, onTyping, onVoice, r
           <VoiceRecorderButton disabled={disabled} onRecorded={onVoice} />
         ) : (
           <button onClick={send} disabled={!canSend || disabled}
-            className="rounded-lg bg-foreground p-2 text-background transition-opacity disabled:opacity-30" aria-label="Send">
+            className={`rounded-lg p-2 transition-opacity disabled:opacity-30 ${urgent ? 'bg-red-500 text-white' : 'bg-foreground text-background'}`} aria-label={urgent ? 'Send as urgent' : 'Send'}>
             <Send className="h-4 w-4" />
           </button>
         )}
@@ -1599,7 +1704,7 @@ function Composer({ placeholder, members, disabled, onSend, onTyping, onVoice, r
 // ── Message row ───────────────────────────────────────────────────────────────
 
 function MessageRow({ m, me, senderName, onDelete, onEdit, onPlayVoice, onReact, onReply, onQuote, onJumpTo, onMenu, onOpenImage, onVote, nameOfId,
-  editing: editingProp, onEditingChange, starred = false, isDm = false, memberCount = 2, highlighted = false, inThread = false, showName }: {
+  editing: editingProp, onEditingChange, starred = false, seenLabel = null, isDm = false, memberCount = 2, highlighted = false, inThread = false, showName }: {
   m: ChatMessage
   me: Me
   senderName: string
@@ -1619,6 +1724,8 @@ function MessageRow({ m, me, senderName, onDelete, onEdit, onPlayVoice, onReact,
   editing?: boolean
   onEditingChange?: (editing: boolean) => void
   starred?: boolean
+  /** "Seen" under my latest message in a direct chat. */
+  seenLabel?: string | null
   isDm?: boolean
   memberCount?: number
   highlighted?: boolean
@@ -1655,7 +1762,12 @@ function MessageRow({ m, me, senderName, onDelete, onEdit, onPlayVoice, onReact,
   const gestures = useMessageGestures({
     onHold: onMenu && !temp && !editing ? onMenu : undefined,
     onSwipeReply: onQuote && !inThread && !temp && !editing ? onQuote : undefined,
+    onDoubleTap: !temp && !editing ? () => onReact('❤️') : undefined,
   })
+  // On a phone a message is a bubble — mine on the right, theirs on the left,
+  // time and ticks inside it — as in WhatsApp. Wide screens keep the Slack-style row.
+  const hideHeaderOnPhone = (mine || isDm) && !pinned && !starred && !m.editedAt
+  const time = timeLabel(m.createdAt)
 
   if (m.deletedAt) {
     return <p className="py-1 pl-10 text-xs italic text-muted-foreground">Message deleted</p>
@@ -1682,28 +1794,34 @@ function MessageRow({ m, me, senderName, onDelete, onEdit, onPlayVoice, onReact,
       }}
       onClickCapture={e => { if (gestures.wasHeld()) { e.preventDefault(); e.stopPropagation() } }}
       style={gestures.dx ? { transform: `translateX(${gestures.dx}px)`, transition: 'none' } : undefined}
-      className={`group relative flex items-start gap-2.5 rounded-lg py-1.5 transition-[transform,background-color] duration-300 [-webkit-touch-callout:none] ${highlighted ? 'bg-amber-500/15' : ''}`}>
+      className={`group relative flex items-start gap-2.5 rounded-lg py-1.5 transition-[transform,background-color] duration-300 [-webkit-touch-callout:none] max-md:py-1 ${mine ? 'max-md:flex-row-reverse' : ''} ${highlighted ? 'bg-amber-500/15' : ''}`}>
       {gestures.dx > 0 && (
         <span aria-hidden className="absolute -left-9 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-muted text-muted-foreground"
           style={{ opacity: Math.min(1, gestures.dx / 56) }}>
           <CornerUpLeft className="h-3.5 w-3.5" />
         </span>
       )}
-      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium">
+      <span className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium ${mine || isDm ? 'max-md:hidden' : ''}`}>
         {initials(senderName)}
       </span>
-      <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-1 text-xs">
-          <span className="font-semibold">{mine ? 'You' : senderName}</span>
-          <span className="text-muted-foreground">{timeLabel(m.createdAt)}</span>
+      <div className={`min-w-0 flex-1 max-md:w-fit max-md:max-w-[85%] max-md:flex-none max-md:rounded-2xl max-md:px-3 max-md:py-1.5 ${
+        mine ? 'max-md:rounded-br-md max-md:bg-violet-600/25' : 'max-md:rounded-bl-md max-md:bg-muted'}`}>
+        <p className={`flex items-center gap-1 text-xs ${hideHeaderOnPhone ? 'max-md:hidden' : ''}`}>
+          <span className={`font-semibold ${mine || isDm ? 'max-md:hidden' : 'max-md:text-violet-400'}`}>{mine ? 'You' : senderName}</span>
+          <span className="text-muted-foreground max-md:hidden">{time}</span>
           {m.editedAt && <span className="text-muted-foreground">(edited)</span>}
           {pinned && <Pin className="h-3 w-3 fill-current text-violet-500" aria-label="Pinned" />}
           {starred && <Star className="h-3 w-3 fill-amber-400 text-amber-400" aria-label="Starred" />}
           {mine && !inThread && !temp && (
-            <ReadTicks m={m} isDm={isDm} memberCount={memberCount} mask={mask} />
+            <span className="inline-flex max-md:hidden"><ReadTicks m={m} isDm={isDm} memberCount={memberCount} mask={mask} /></span>
           )}
-          {temp && <Clock className="h-3 w-3 text-muted-foreground" aria-label="Sending" />}
+          {temp && <Clock className="h-3 w-3 text-muted-foreground max-md:hidden" aria-label="Sending" />}
         </p>
+        {m.metadata.urgent === true && (
+          <span className="mb-0.5 inline-flex items-center gap-1 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-500">
+            <AlertTriangle className="h-3 w-3" /> Urgent
+          </span>
+        )}
         {m.metadata.forwarded === true && <ForwardedTag />}
         {replySnap && (
           <button
@@ -1829,6 +1947,14 @@ function MessageRow({ m, me, senderName, onDelete, onEdit, onPlayVoice, onReact,
             {m.replyCount} {m.replyCount === 1 ? 'reply' : 'replies'} →
           </button>
         )}
+
+        {/* Phone: time and ticks sit at the bottom of the bubble. */}
+        <p className="mt-0.5 flex items-center justify-end gap-1 text-[10px] leading-none text-muted-foreground md:hidden">
+          <span>{time}</span>
+          {mine && !inThread && !temp && <ReadTicks m={m} isDm={isDm} memberCount={memberCount} mask={mask} />}
+          {temp && <Clock className="h-3 w-3" aria-label="Sending" />}
+        </p>
+        {seenLabel && <p className="mt-0.5 text-[10px] text-sky-500 max-md:text-right">{seenLabel}</p>}
       </div>
 
       {/* Hover actions (computer). On a phone: press and hold, or swipe right to reply. */}
@@ -2125,6 +2251,8 @@ function ConversationRow({ conv, active, onClick, onDelete, onMenu, displayName,
               <EmployeePresenceDot employeeId={partnerId} size="xs" className="absolute -bottom-0.5 -right-0.5" />
             </span>
           )
+          : conv.category === 'self' ? <Bookmark className="h-4 w-4 shrink-0 text-muted-foreground" />
+          : conv.posting === 'admins' ? <Megaphone className="h-4 w-4 shrink-0 text-muted-foreground" />
           : conv.isPrivate ? <Lock className="h-4 w-4 shrink-0 text-muted-foreground" /> : <Hash className={`${indented ? 'h-3 w-3' : 'h-4 w-4'} shrink-0 text-muted-foreground`} />}
         <span className="min-w-0 flex-1">
           <span className={`flex items-center gap-1.5 ${indented ? 'text-xs' : 'text-sm'}`}>
@@ -2165,9 +2293,11 @@ function ConversationRow({ conv, active, onClick, onDelete, onMenu, displayName,
   )
 }
 
-function NewConversationDialog({ mode, canCreateChannels, onClose, onCreated }: {
+function NewConversationDialog({ mode, canCreateChannels, canAnnounce = false, onClose, onCreated }: {
   mode: 'channel' | 'dm'
   canCreateChannels: boolean
+  /** May create an announcement channel (admins and chat moderators). */
+  canAnnounce?: boolean
   onClose: () => void
   onCreated: (id: string) => void
 }) {
@@ -2178,6 +2308,7 @@ function NewConversationDialog({ mode, canCreateChannels, onClose, onCreated }: 
   const [name, setName] = useState('')
   const [topic, setTopic] = useState('')
   const [isPrivate, setIsPrivate] = useState(false)
+  const [announce, setAnnounce] = useState(false)
   const [category, setCategory] = useState<'general' | 'department' | 'client'>('general')
   const [clientId, setClientId] = useState('')
   const [clients, setClients] = useState<{ id: string; name: string }[]>([])
@@ -2274,6 +2405,12 @@ function NewConversationDialog({ mode, canCreateChannels, onClose, onCreated }: 
               <input type="checkbox" checked={isPrivate} onChange={e => setIsPrivate(e.target.checked)} />
               Private (invite-only)
             </label>
+            {canAnnounce && (
+              <label className="flex items-start gap-2 text-sm text-muted-foreground">
+                <input type="checkbox" checked={announce} onChange={e => setAnnounce(e.target.checked)} className="mt-0.5" />
+                <span>Announcements only<span className="block text-xs">Everyone reads and reacts; only admins post.</span></span>
+              </label>
+            )}
             <button
               disabled={!name.trim() || pending || (category === 'client' && !clientId)}
               onClick={() => startTransition(async () => {
@@ -2281,6 +2418,7 @@ function NewConversationDialog({ mode, canCreateChannels, onClose, onCreated }: 
                   name, topic, isPrivate, category,
                   clientId: category === 'client' ? clientId : null,
                   departmentId: category === 'department' && departmentId ? departmentId : null,
+                  posting: announce ? 'admins' : 'all',
                 })
                 if (res.ok) onCreated(res.data.id); else setError(res.error)
               })}

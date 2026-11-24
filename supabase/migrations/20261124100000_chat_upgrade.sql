@@ -1,6 +1,6 @@
 -- Chat upgrade: pinned chats that follow the person, starred messages, polls,
--- scheduled messages, department channels, and admin rules for who may chat
--- with whom.
+-- scheduled messages, department and announcement channels, and admin rules
+-- for who may chat with whom.
 --
 -- Every table here is reached through server actions with the service role, so
 -- RLS is switched on with NO policies: nothing is readable or writable from a
@@ -18,6 +18,12 @@ alter table public.conversations
   add column if not exists department_id uuid references public.service_categories(id) on delete set null;
 create index if not exists conversations_department_idx
   on public.conversations (department_id) where department_id is not null;
+
+-- 2b. An announcement channel: everyone reads and reacts, only admins and the
+--     channel's own moderators post. Replies in a thread stay open.
+alter table public.conversations
+  add column if not exists posting text not null default 'all'
+  check (posting in ('all', 'admins'));
 
 -- 3. Starred messages — private to the person who starred them.
 create table if not exists public.message_stars (

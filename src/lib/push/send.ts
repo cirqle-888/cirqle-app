@@ -10,6 +10,7 @@
 import 'server-only'
 import webpush from 'web-push'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { sendNativePush } from './native-send'
 
 let configured: boolean | null = null
 function ensureConfigured(): boolean {
@@ -32,8 +33,18 @@ export interface PushPayload {
   tag?: string
 }
 
-/** Send a push to every registered device of one employee. Never throws. */
+/**
+ * Send a push to every registered device of one employee — browsers (Web Push)
+ * and the phone apps (Firebase). Never throws.
+ *
+ * The name is historical: every caller that alerts a person goes through here,
+ * so the phone apps are reached from the same single place.
+ */
 export async function sendWebPush(employeeId: string, payload: PushPayload): Promise<void> {
+  await Promise.all([sendBrowserPush(employeeId, payload), sendNativePush(employeeId, payload)])
+}
+
+async function sendBrowserPush(employeeId: string, payload: PushPayload): Promise<void> {
   if (!ensureConfigured()) return
   try {
     const admin = createAdminClient()

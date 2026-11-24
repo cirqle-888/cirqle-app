@@ -13,7 +13,9 @@
 
 import { after } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requireChatUser, requireMembership } from '@/lib/chat/guards'
+import { requireChatUser, requireMembership, requireCanPost } from '@/lib/chat/guards'
+import { hasPermission } from '@/lib/permissions/check'
+import { departmentSlug } from '@/lib/chat/mentions'
 import { loadChatAccess, loadChatAccessRules, loadDepartmentsByEmployee } from '@/lib/chat/access-load'
 import { canChat, type ChatAccessMode, type ChatAccessRule } from '@/lib/chat/access'
 import { buildPoll, readPoll, tallyVotes, type PollData } from '@/lib/chat/polls'
@@ -204,8 +206,14 @@ export async function forwardMessages(messageIds: string[], targetConversationId
   if (!usable.length) return { ok: false, error: 'These messages cannot be forwarded.' }
 
   const { data: convs } = await admin.from('conversations')
-    .select('id, type, archived_at, members:conversation_members(employee_id)').in('id', targets)
-  const liveTargets = (convs ?? []).filter(c => mine.has(c.id) && !c.archived_at)
+    .select('*, members:conversation_members(employee_id, role)').in('id', targets)
+  const mayModerate = me.isAdmin || hasPermission(me, 'chat.moderate')
+  const liveTargets = (convs ?? []).filter(c => {
+    if (!mine.has(c.id) || c.archived_at) return false
+    if (c.posting !== 'admins' || mayModerate) return true
+    const myRole = ((c.members ?? []) as { employee_id: string; role: string }[]).find(m => m.employee_id === me.employeeId)?.role
+    return myRole === 'owner' || myRole === 'moderator'
+  })
   if (!liveTargets.length) return { ok: false, error: 'You are not a member of those chats.' }
 
   // A direct chat the admin has closed stays closed for forwards too.
@@ -330,6 +338,8 @@ export async function createPoll(conversationId: string, question: string, optio
   const me = auth.me
   const membership = await requireMembership(conversationId, me.employeeId)
   if (!membership.ok) return membership
+  const mayPost = await requireCanPost(me, conversationId, membership.role)
+  if (!mayPost.ok) return mayPost
   const built = buildPoll(question, options, multi)
   if (!built.ok) return built
 
@@ -391,6 +401,8 @@ export async function scheduleMessage(conversationId: string, body: string, send
   const me = auth.me
   const membership = await requireMembership(conversationId, me.employeeId)
   if (!membership.ok) return membership
+  const mayPost = await requireCanPost(me, conversationId, membership.role)
+  if (!mayPost.ok) return mayPost
   const text = (body || '').trim()
   if (!text) return { ok: false, error: 'Message is empty.' }
   if (text.length > 8000) return { ok: false, error: 'Message is too long (8000 chars max).' }
@@ -428,6 +440,46 @@ export async function cancelScheduled(id: string): Promise<Result<null>> {
     .eq('id', id).eq('sender_id', auth.me.employeeId).is('sent_at', null)
   if (error) return { ok: false, error: error.message }
   return { ok: true, data: null }
+}
+
+// ── My notes: a chat with only me in it ───────────────────────────────────────
+
+/**
+ * Open (or create) my own notes chat — a private room with one member, for
+ * links, files and reminders to myself. It works like any other chat: search,
+ * star, pin and forward all apply.
+ */
+export async function getOrCreateMyNotes(): Promise<Result<{ id: string }>> {
+  const auth = await requireChatUser(true)
+  if (!auth.ok) return auth
+  const me = auth.me
+  const admin = createAdminClient()
+  const { data: existing } = await admin.from('conversations')
+    .select('id, members:conversation_members!inner(employee_id)')
+    .eq('category', 'self').eq('created_by', me.employeeId).is('archived_at', null)
+    .eq('members.employee_id', me.employeeId)
+    .limit(1)
+  if (existing?.length) return { ok: true, data: { id: existing[0].id as string } }
+
+  const { data: conv, error } = await admin.from('conversations')
+    .insert({ type: 'group', name: 'My notes', topic: 'Only you can see this', is_private: true, category: 'self', created_by: me.employeeId })
+    .select('id').single()
+  if (error || !conv) return { ok: false, error: error?.message ?? 'Could not create your notes.' }
+  const { error: memErr } = await admin.from('conversation_members')
+    .insert({ conversation_id: conv.id, employee_id: me.employeeId, role: 'owner' })
+  if (memErr) return { ok: false, error: memErr.message }
+  return { ok: true, data: { id: conv.id as string } }
+}
+
+/** Departments as they are written in a mention: @social-media. */
+export async function listMentionGroups(): Promise<Result<{ slug: string; name: string }[]>> {
+  const auth = await requireChatUser()
+  if (!auth.ok) return auth
+  const { data } = await createAdminClient().from('service_categories').select('name').order('name')
+  return {
+    ok: true,
+    data: ((data ?? []) as { name: string }[]).map(d => ({ slug: departmentSlug(d.name), name: d.name })).filter(d => d.slug),
+  }
 }
 
 // ── Departments, for a department channel ─────────────────────────────────────

@@ -11,7 +11,8 @@ import {
   scheduleMessage, createPoll, setConversationNotify, setConversationPinned,
   type SavedMessage, type SharedFile, type SharedLink, type ScheduledMessage, type NotifyLevel,
 } from '@/app/(dashboard)/dashboard/chat/actions-plus'
-import { getReadReceipts, getAttachmentUrl, type ChatConversation, type ChatMessage, type ReadReceiptDetail } from '@/app/(dashboard)/dashboard/chat/actions'
+import { getReadReceipts, getAttachmentUrl, listClientsForChat, type ChatConversation, type ChatMessage, type ReadReceiptDetail } from '@/app/(dashboard)/dashboard/chat/actions'
+import { createManualRequest } from '@/app/(dashboard)/dashboard/requests/actions'
 import { POLL_MAX_OPTIONS } from '@/lib/chat/polls'
 
 type Mask = (name?: string | null, cqid?: string | null) => string
@@ -407,3 +408,58 @@ export function PollDialog({ conversationId, onClose, onCreated }: { conversatio
   )
 }
 
+
+// ── Turn a message into a request ─────────────────────────────────────────────
+
+/**
+ * "Make this a request": what was said in chat becomes tracked work in
+ * Requests, for a client, without retyping it. Shown only to people who can
+ * manage requests.
+ */
+export function RequestFromMessageDialog({ message, senderLabel, defaultClientId, onClose, onCreated }: {
+  message: ChatMessage
+  senderLabel: string
+  defaultClientId: string | null
+  onClose: () => void
+  onCreated: (title: string) => void
+}) {
+  const text = message.kind === 'voice' ? (typeof message.metadata.transcript === 'string' ? message.metadata.transcript : '') : message.body
+  const [clients, setClients] = useState<{ id: string; name: string }[]>([])
+  const [clientId, setClientId] = useState(defaultClientId ?? '')
+  const [title, setTitle] = useState(() => (text.split('\n')[0] ?? '').replace(/\s+/g, ' ').trim().slice(0, 80))
+  const [details, setDetails] = useState(text)
+  const [error, setError] = useState('')
+  const [pending, start] = useTransition()
+  useEffect(() => { let alive = true; listClientsForChat().then(r => { if (alive && r.ok) setClients(r.data) }); return () => { alive = false } }, [])
+  const field = 'w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm outline-none focus:border-foreground/40'
+  return (
+    <ModalOverlay onClose={onClose} sheetOnMobile>
+      <div className={`${shell} max-w-md`}>
+        <Head title="Make this a request" sub="It lands in Requests, ready to assign" onClose={onClose} />
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
+          <select value={clientId} onChange={e => setClientId(e.target.value)} aria-label="Client" className={field}>
+            <option value="">Choose client…</option>
+            {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Title" className={field} />
+          <textarea value={details} onChange={e => setDetails(e.target.value)} rows={5} placeholder="Details" className={`${field} resize-none`} />
+          <p className="text-[11px] text-muted-foreground">From chat · {senderLabel} · {stamp(message.createdAt)}</p>
+          {error && <p className="text-xs text-red-500">{error}</p>}
+        </div>
+        <div className="shrink-0 border-t border-border px-5 py-4">
+          <button disabled={pending || !clientId || !title.trim()}
+            onClick={() => start(async () => {
+              const res = await createManualRequest({
+                clientId, title,
+                description: `${details.trim()}\n\n— From chat, ${senderLabel}, ${stamp(message.createdAt)}`.trim(),
+              })
+              if (res.ok) onCreated(title.trim()); else setError(res.error ?? 'Could not create the request.')
+            })}
+            className="flex h-10 w-full items-center justify-center gap-2 rounded-lg gradient-bg text-sm font-medium text-white disabled:opacity-50">
+            {pending && <Loader2 className="h-4 w-4 animate-spin" />} Create request
+          </button>
+        </div>
+      </div>
+    </ModalOverlay>
+  )
+}

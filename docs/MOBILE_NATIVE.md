@@ -34,8 +34,11 @@ that only the account owner can provision:
 ### Android (FCM)
 1. Create a Firebase project; add an Android app with id `work.cirqle.app`.
 2. Download `google-services.json` → `mobile/android/app/google-services.json`.
-3. Add the FCM **server key / service account JSON** to backend env
-   (`FCM_SERVICE_ACCOUNT`); wire it into `src/lib/push/send.ts` alongside VAPID.
+3. Add the Firebase **service account JSON** to the backend env as
+   `FCM_SERVICE_ACCOUNT` (the JSON itself, or its base64). Sending is already
+   wired: `src/lib/push/native-send.ts` is called from `sendWebPush`, so every
+   alert that reaches a browser also reaches the phone app once this is set.
+   Without it the phone app gets no push while closed.
 
 ### iOS (APNs) — blocked until an Apple Developer account exists
 1. In the Apple Developer portal create an **APNs Auth Key** (`.p8`).
