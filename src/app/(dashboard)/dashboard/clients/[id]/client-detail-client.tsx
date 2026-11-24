@@ -15,7 +15,6 @@ import {
   IndianRupee, CheckCircle2, Clock, FileText, CheckSquare, Handshake,
   Mail, Phone, MapPin, Globe, ExternalLink, Award, Tag, Plus, AlertTriangle,
 } from 'lucide-react'
-import dynamic from 'next/dynamic'
 import { formatDate } from '@/lib/utils/format-date'
 import { ClientSocialSection, type ClientSocialAccount } from '@/components/social-hub/client-social-section'
 

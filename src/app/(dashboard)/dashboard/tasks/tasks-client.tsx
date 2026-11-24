@@ -15,7 +15,7 @@ import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { getStatusColor, getStatusLabel } from '@/lib/utils/invoice'
 import {
-  Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ExternalLink, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, Building2, BarChart2, Copy, GripVertical, Settings2, ChevronUp, Inbox, Loader2, CheckSquare, Columns3,
+  Plus, X, Hash, Clock, CheckCircle, Pencil, Trash2, AlertTriangle, RefreshCw, TrendingDown, Users, Ban, Search, ChevronDown, ChevronLeft, ChevronRight, Layers, LayoutGrid, List, CalendarDays, Building2, BarChart2, Copy, GripVertical, Settings2, ChevronUp, Inbox, Loader2, CheckSquare, Columns3,
 } from 'lucide-react'
 import { TASK_COLUMNS_NO_PRICING, TASK_JOINS } from '@/lib/tasks/select-columns'
 import { viaPriced } from '@/lib/supabase/priced'
@@ -82,7 +82,7 @@ import { notifyAnalyticsChanged } from '../analytics-actions'
 import { copyToClipboard } from '@/lib/clipboard'
 import {
   normalizeNoChargeReason, isNoChargeColumnMissing,
-  withoutNoChargeReason, isWaivedTask, noChargeReasonLabel,
+  withoutNoChargeReason, noChargeReasonLabel,
 } from '@/lib/tasks/billable'
 import {
   buildCoverageIndex, taskBillingStatus, TASK_BILLING_LABEL,
@@ -100,14 +100,13 @@ import {
   departmentFilterOptions, departmentLabel, servicesInDepartment,
   type Department,
 } from '@/lib/departments/work-departments'
-import { useToast, ToastContainer } from '@/components/ui/toast'
+import { useToast } from '@/components/ui/toast'
 import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
 import { formatTaskDate, fullTaskDate } from '@/lib/utils/format-date'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { OverflowMenu } from '@/components/ui/overflow-menu'
 import { Button } from '@/components/ui/button'
 import { usePrivacy } from "@/contexts/privacy-context"
-import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from "@/lib/utils"
 import { daysFromTodayISO, todayISO } from '@/lib/utils/local-date'
 import { BrandSelect } from '@/components/brands/brand-select'
 import { taskNoun } from '@/lib/brands/brands'

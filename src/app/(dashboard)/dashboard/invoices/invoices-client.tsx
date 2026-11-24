@@ -1,7 +1,6 @@
 'use client'
 
 import { resolveBrandingUrl } from '@/lib/utils/branding'
-import QRCode from 'qrcode'
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
@@ -35,9 +34,8 @@ import {
   FileText, Plus, X, ChevronRight, CheckCircle, Send, CreditCard,
   Trash2, AlertTriangle, Clock, Eye, Lock, Zap, Download, RefreshCw, RotateCw, ListRestart, Undo2, CalendarClock,
   Calendar, Building2, IndianRupee, MoreHorizontal, Search, Filter,
-  Printer, TrendingUp, BadgeCheck, CircleDollarSign, Receipt, Edit2, Save,
-  History, Tag, Percent, ChevronDown, ChevronUp, ArrowDownToLine, Gift, ExternalLink, Copy,
-  Wallet, Link2, ShoppingBag, Share2, Layers, ListTree, ScrollText, Check, AlertCircle,
+  Printer, TrendingUp, BadgeCheck, Receipt, Edit2, History, Tag, Percent, ChevronDown, ChevronUp, ArrowDownToLine, Gift, ExternalLink, Copy,
+  Wallet, ShoppingBag, Share2, Layers, ListTree, Check, AlertCircle,
   Maximize2, Minimize2, ZoomIn, ZoomOut, ListPlus, PanelLeftOpen, PanelLeftClose, Columns2, BarChart3,
 } from 'lucide-react'
 import { logFollowup } from "./follow-ups/actions"
@@ -61,7 +59,6 @@ import { PERMS, RECORD_PAYMENT_PERMS } from '@/lib/permissions/keys'
 import { unitPriceOf } from '@/lib/invoices/line-math'
 import { showServiceColumn, serviceColumnSource } from '@/lib/invoices/service-column'
 import type { Currency } from '@/types'
-import { formatTaskDate } from '@/lib/utils/format-date'
 import { cn } from '@/lib/utils'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 

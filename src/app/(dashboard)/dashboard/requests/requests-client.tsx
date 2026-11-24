@@ -33,9 +33,8 @@ import { DraftRecoveryBanner, DraftSavedHint } from '@/components/ui/draft-recov
 const QuickCreateClientModal = dynamic(() => import('@/components/tasks/quick-create-modals').then(m => m.QuickCreateClientModal), { ssr: false })
 import {
   Inbox, AlertTriangle, ChevronRight, Clock, Link2, Loader2, Play,
-  CalendarDays, MessageSquarePlus, Save, CheckCircle2, X, Flag,
-  Search, Plus, UserRound, List, LayoutGrid, Link as LinkIcon, Trash2,
-  ExternalLink, GripVertical, Share2, RefreshCw, Sparkles,
+  CalendarDays, Save, CheckCircle2, X, Flag,
+  Search, Plus, UserRound, List, LayoutGrid, Link as LinkIcon, ExternalLink, GripVertical, Share2, RefreshCw, Sparkles,
   BadgePercent, Megaphone, ChevronDown, ListChecks, Building2, Tag,
   FolderOpen, MoreHorizontal, Send, Pencil, MessageCircle,
 } from 'lucide-react'

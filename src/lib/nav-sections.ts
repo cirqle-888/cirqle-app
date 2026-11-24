@@ -12,7 +12,7 @@ import {
   Settings, TrendingUp, Upload, Inbox, PhoneCall, Award, Activity, Blocks, Megaphone, Handshake,
   SlidersHorizontal, MessageSquare, ClipboardCheck, NotebookPen, LayoutGrid,
   Briefcase, ClipboardList, CalendarClock, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
-  BadgePercent, CalendarRange, HardHat, Repeat, Package as PackageIcon,
+  CalendarRange, HardHat, Repeat, Package as PackageIcon,
   Share2, UserPlus, Gauge, ShieldCheck, MapPin, Target,
   Scale, Receipt, Images, Wand2,
   Calculator, CreditCard, Landmark, ShoppingBag, Store, Bookmark,

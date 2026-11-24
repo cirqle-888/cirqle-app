@@ -10,7 +10,6 @@ import { usePermissions } from '@/contexts/permission-context'
 import { canOpenHref } from '@/lib/nav-sections'
 import { PlatformIcon } from './platform-icon'
 import { Share2, ChevronRight } from 'lucide-react'
-import { formatDistanceToNow } from 'date-fns'
 
 export interface ClientSocialAccount {
   id: string

@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { OFFER_STUDIO_URL, isExternalHref } from '@/lib/offers/studio'
 import Header from '@/components/layout/header'
 import {
-  Inbox, Tag, Settings as SettingsIcon, ArrowRight,
+  Inbox, Settings as SettingsIcon, ArrowRight,
   Sparkles, Link2, Copy, Check, Users, ExternalLink,
   Shield, ArrowUpRight, BarChart3,
   Paintbrush, Image as ImageIcon, Briefcase,

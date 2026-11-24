@@ -28,7 +28,7 @@ import { TokenizedSearch, type SearchFacet, type FacetOp } from '@/components/ui
 import { cn, ROW_INTERACTIVE_CLASS, BRANDED_PILL_BASE_CLASS, BRANDED_PILL_SELECTED_CLASS, BRANDED_PILL_ACTIVE_CLASS } from '@/lib/utils'
 import type { DateFilterValue } from '@/components/ui/date-filter'
 import {
-  ChevronLeft, ChevronRight, Minus, Plus, X, Check, Search, Filter, PlusCircle, Eye, EyeOff, Clock, CheckCircle2, AlertCircle, UserCheck, Users, CalendarDays, Lock, Edit2, ChevronDown, Trash2, Copy, ExternalLink, List, LayoutGrid, CheckCircle, PlusIcon, FileDownIcon, Sparkles, CheckSquare, Settings2,
+  ChevronLeft, ChevronRight, Minus, Plus, X, Check, PlusCircle, Eye, EyeOff, Clock, CheckCircle2, AlertCircle, UserCheck, Users, CalendarDays, Edit2, ChevronDown, Trash2, Copy, ExternalLink, List, LayoutGrid, CheckCircle, Sparkles, CheckSquare, Settings2,
 } from 'lucide-react'
 import { ToolbarSegment, SegmentButton, ScopeToggle, FiltersButton, StatusChip, ToolbarDivider } from '@/components/ui/list-toolbar'
 import { buildSuggestion, type ContributionEvidence } from '@/lib/contributions/suggest'

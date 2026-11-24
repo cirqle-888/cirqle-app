@@ -20,7 +20,6 @@ import { useToast, ToastContainer } from '@/components/ui/toast'
 import { refLabel } from '@/lib/requests/core'
 import { planPackageCalendar, cadenceLabel, suggestPlacements } from '@/lib/packages/calendar-coverage'
 import type { PackageRow, PackageItemRow, PackageTaskLike } from '@/lib/packages/types'
-import CaptionCanvasEditor from './caption-canvas'
 import ContentBriefFields from '@/components/content-brief/content-brief-fields'
 import { DiscussButton } from '@/components/chat/discuss-button'
 import {
@@ -45,11 +44,9 @@ import {
 import {
   CalendarDays, Loader2, Plus, Send, Trash2, Archive, ExternalLink, RotateCcw, X, ListChecks,
   Package as PackageIcon, CheckCircle2, AlertTriangle,
-  Settings2, FileDown, FileSpreadsheet, FileText, Lightbulb, Upload, LayoutGrid,
-  Link2, Clipboard, PanelRightClose, PanelRightOpen,
-  Bold, Italic, Underline, Strikethrough, List, ListOrdered, Heading2, Quote,
-  Link as LinkIcon, Highlighter, Palette, Smile, Eraser,
-  AlignLeft, AlignCenter, AlignRight, CalendarRange, ChevronDown, Undo2,
+  Settings2, FileDown, FileSpreadsheet, FileText, Lightbulb, LayoutGrid,
+  PanelRightClose, PanelRightOpen,
+  CalendarRange, ChevronDown, Undo2,
 } from 'lucide-react'
 import { todayISO } from '@/lib/utils/local-date'
 
