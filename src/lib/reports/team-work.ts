@@ -34,10 +34,13 @@ export interface TeamWorkInput {
   requests: readonly {
     id: string; client_id: string | null; service_id: string | null; status: string
     status_updated_at: string | null; assigned_employee_id: string | null; promoted_task_id: string | null
+    /** For the optional detailed breakdown. */
+    title?: string | null
   }[]
   tasks: readonly {
     id: string; client_id: string | null; service_id: string | null; status: string
     task_date: string | null; quantity: number | null; assignees: readonly string[]
+    title?: string | null
   }[]
   calendarItems: readonly {
     client_id: string | null; service_id: string | null; status: string
@@ -63,6 +66,18 @@ export interface ClientWork {
   posted: number
   open: number
   withClient: number
+  /** Each piece of work delivered this month — the optional detailed breakdown, newest first. */
+  items: DeliveredItem[]
+  /** CQID → pieces this client's work credited, so a hidden client also leaves the team counts. */
+  credits: Record<string, number>
+}
+
+export interface DeliveredItem {
+  title: string
+  service: string
+  /** 'YYYY-MM-DD' */
+  date: string
+  count: number
 }
 
 export interface TeamWorkReport {
@@ -81,7 +96,11 @@ export interface TeamWorkReport {
   /** Clients with any activity, most delivered first. */
   clients: ClientWork[]
   /** Department clients with nothing delivered, planned or open this month. */
+  quiet: { clientId: string; client: string }[]
+  /** The same, names only. */
   quietClients: string[]
+  /** Last month's pieces by client, so hiding a client keeps the comparison fair. */
+  lastMonthByClient: Record<string, number>
   /** CQID → pieces delivered, most first. */
   people: { cqid: string; delivered: number }[]
 }
@@ -118,16 +137,16 @@ export function buildTeamWorkReport(i: TeamWorkInput): TeamWorkReport {
     let r = rows.get(clientId)
     if (!r) {
       r = { clientId, client: i.clientName.get(clientId) ?? 'Unknown client', delivered: 0, byService: [], lastMonth: 0,
-        planned: 0, posted: 0, open: 0, withClient: 0, services: new Map() }
+        planned: 0, posted: 0, open: 0, withClient: 0, items: [], credits: {}, services: new Map() }
       rows.set(clientId, r)
     }
     return r
   }
-  const people = new Map<string, number>()
-  const credit = (employeeId: string | null, n: number) => {
+  const credit = (w: ClientWork, employeeId: string | null, n: number) => {
     const cqid = employeeId ? i.employeeCqid.get(employeeId) : null
-    if (cqid) people.set(cqid, (people.get(cqid) ?? 0) + n)
+    if (cqid) w.credits[cqid] = (w.credits[cqid] ?? 0) + n
   }
+  const itemTitle = (t: string | null | undefined, service: string) => (t ?? '').replace(/\s+/g, ' ').trim() || service
   const serviceLabel = (id: string | null) => (id && i.serviceName.get(id)) || 'Other work'
 
   // Requests
@@ -136,9 +155,11 @@ export function buildTeamWorkReport(i: TeamWorkInput): TeamWorkReport {
     if (!r.client_id || !inDept(r.service_id, r.client_id)) continue
     if (r.status === DONE_REQUEST && inMonth(r.status_updated_at, i.month)) {
       const w = row(r.client_id)
+      const service = serviceLabel(r.service_id)
       w.delivered += 1
-      w.services.set(serviceLabel(r.service_id), (w.services.get(serviceLabel(r.service_id)) ?? 0) + 1)
-      credit(r.assigned_employee_id, 1)
+      w.services.set(service, (w.services.get(service) ?? 0) + 1)
+      w.items.push({ title: itemTitle(r.title, service), service, date: r.status_updated_at!.slice(0, 10), count: 1 })
+      credit(w, r.assigned_employee_id, 1)
     } else if (r.status === DONE_REQUEST && inMonth(r.status_updated_at, prev)) {
       row(r.client_id).lastMonth += 1
     } else if ((OPEN_REQUEST as readonly string[]).includes(r.status)) {
@@ -155,11 +176,13 @@ export function buildTeamWorkReport(i: TeamWorkInput): TeamWorkReport {
     const n = Math.max(1, Math.round(t.quantity ?? 1))
     if (inMonth(t.task_date, i.month)) {
       const w = row(t.client_id)
+      const service = serviceLabel(t.service_id)
       w.delivered += n
-      w.services.set(serviceLabel(t.service_id), (w.services.get(serviceLabel(t.service_id)) ?? 0) + n)
+      w.services.set(service, (w.services.get(service) ?? 0) + n)
+      w.items.push({ title: itemTitle(t.title, service), service, date: t.task_date!.slice(0, 10), count: n })
       // Shared work is credited to each person on it — it is a count of
       // involvement for the team view, not a split of anything.
-      for (const e of t.assignees) credit(e, n)
+      for (const e of t.assignees) credit(w, e, n)
     } else if (inMonth(t.task_date, prev)) {
       row(t.client_id).lastMonth += n
     }
@@ -177,35 +200,64 @@ export function buildTeamWorkReport(i: TeamWorkInput): TeamWorkReport {
     .map(({ services, ...r }) => ({
       ...r,
       byService: [...services].map(([service, count]) => ({ service, count })).sort((a, b) => b.count - a.count),
+      items: [...r.items].sort((a, b) => b.date.localeCompare(a.date) || a.title.localeCompare(b.title)),
     }))
     .sort((a, b) => b.delivered - a.delivered || b.planned - a.planned || a.client.localeCompare(b.client))
 
   const active = new Set(clients.map(c => c.clientId))
-  const quietClients = [...i.clientDepartments]
-    .filter(([id, depts]) => depts.includes(i.departmentId) && !active.has(id))
-    .map(([id]) => i.clientName.get(id))
-    .filter((n): n is string => !!n)
-    .sort((a, b) => a.localeCompare(b))
+  const quiet = [...i.clientDepartments]
+    .filter(([id, depts]) => depts.includes(i.departmentId) && !active.has(id) && i.clientName.has(id))
+    .map(([id]) => ({ clientId: id, client: i.clientName.get(id)! }))
+    .sort((a, b) => a.client.localeCompare(b.client))
 
-  const sum = (k: keyof Pick<ClientWork, 'delivered' | 'planned' | 'posted' | 'open' | 'withClient'>) =>
-    clients.reduce((s, c) => s + c[k], 0)
+  const lastMonthByClient: Record<string, number> = {}
+  for (const r of rows.values()) if (r.lastMonth) lastMonthByClient[r.clientId] = r.lastMonth
 
-  return {
+  return totals({
     month: i.month,
     monthLabel: monthLabel(i.month),
     previousMonthLabel: monthLabel(prev),
     department: i.departmentName,
+    openKnown: i.includeOpen !== false,
+    clients,
+    quiet,
+    lastMonthByClient,
+  })
+}
+
+type ReportParts = Pick<TeamWorkReport,
+  'month' | 'monthLabel' | 'previousMonthLabel' | 'department' | 'openKnown' | 'clients' | 'quiet' | 'lastMonthByClient'>
+
+/** Every total is worked out from the clients, so a report with some clients removed adds up. */
+function totals(p: ReportParts): TeamWorkReport {
+  const sum = (k: 'delivered' | 'planned' | 'posted' | 'open' | 'withClient') => p.clients.reduce((s, c) => s + c[k], 0)
+  const people = new Map<string, number>()
+  for (const c of p.clients) for (const [cqid, n] of Object.entries(c.credits)) people.set(cqid, (people.get(cqid) ?? 0) + n)
+  return {
+    ...p,
     delivered: sum('delivered'),
-    lastMonth: [...rows.values()].reduce((s, r) => s + r.lastMonth, 0),
+    lastMonth: Object.values(p.lastMonthByClient).reduce((s, n) => s + n, 0),
     planned: sum('planned'),
     posted: sum('posted'),
     open: sum('open'),
     withClient: sum('withClient'),
-    openKnown: i.includeOpen !== false,
-    clients,
-    quietClients,
+    quietClients: p.quiet.map(q => q.client),
     people: [...people].map(([cqid, delivered]) => ({ cqid, delivered })).sort((a, b) => b.delivered - a.delivered || a.cqid.localeCompare(b.cqid)),
   }
+}
+
+/**
+ * The report without the clients someone chose to leave out of the share.
+ * Totals, last month's comparison and the team counts drop with them.
+ */
+export function withoutClients(r: TeamWorkReport, hidden: ReadonlySet<string>): TeamWorkReport {
+  if (!hidden.size) return r
+  return totals({
+    ...r,
+    clients: r.clients.filter(c => !hidden.has(c.clientId)),
+    quiet: r.quiet.filter(q => !hidden.has(q.clientId)),
+    lastMonthByClient: Object.fromEntries(Object.entries(r.lastMonthByClient).filter(([id]) => !hidden.has(id))),
+  })
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
@@ -250,7 +302,20 @@ export function nudge(r: TeamWorkReport): string {
 export interface ShareOptions {
   /** Show each person's count by CQID. Off by default: the report is about the clients. */
   showTeam?: boolean
+  /** List each piece of work under its client. Off by default: the summary is the message. */
+  showDetails?: boolean
 }
+
+/** Most pieces listed under one client in the image; the text lists more. */
+export const CARD_ITEMS_PER_CLIENT = 12
+const TEXT_ITEMS_PER_CLIENT = 40
+
+export function shortDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+}
+const itemLine = (it: DeliveredItem) =>
+  `${shortDate(it.date)} · ${it.title}${it.count > 1 ? ` ×${it.count}` : ''}${it.title === it.service ? '' : ` (${it.service})`}`
 
 /** The WhatsApp message. */
 export function teamWorkText(r: TeamWorkReport, opts: ShareOptions = {}): string {
@@ -271,6 +336,10 @@ export function teamWorkText(r: TeamWorkReport, opts: ShareOptions = {}): string
       if (c.planned) parts.push(`${c.planned} planned`)
       if (c.open) parts.push(`${c.open} open`)
       lines.push(`• ${c.client} — ${parts.join(' · ')}`)
+      if (opts.showDetails) {
+        for (const it of c.items.slice(0, TEXT_ITEMS_PER_CLIENT)) lines.push(`   – ${itemLine(it)}`)
+        if (c.items.length > TEXT_ITEMS_PER_CLIENT) lines.push(`   – and ${c.items.length - TEXT_ITEMS_PER_CLIENT} more`)
+      }
     }
     lines.push('')
   }
@@ -298,6 +367,9 @@ export function teamWorkCardHtml(r: TeamWorkReport, opts: ShareOptions = {}): st
       <div class="bar"><span style="width:${Math.round((c.delivered / max) * 100)}%"></span></div>
       <div class="num">${c.delivered}</div>
       <div class="meta">${c.planned ? `${c.planned} planned` : ''}${c.planned && c.open ? ' · ' : ''}${c.open ? `${c.open} open` : ''}</div>
+      ${opts.showDetails && c.items.length ? `<ul class="items">${c.items.slice(0, CARD_ITEMS_PER_CLIENT).map(it =>
+        `<li><span class="d">${esc(shortDate(it.date))}</span>${esc(it.title)}${it.count > 1 ? ` <b>×${it.count}</b>` : ''}${it.title === it.service ? '' : `<span class="s">${esc(it.service)}</span>`}</li>`).join('')}${
+        c.items.length > CARD_ITEMS_PER_CLIENT ? `<li class="more">and ${c.items.length - CARD_ITEMS_PER_CLIENT} more</li>` : ''}</ul>` : ''}
     </div>`).join('')
   const stat = (n: number, label: string, cls = '') => `<div class="stat ${cls}"><b>${n}</b><small>${label}</small></div>`
   return `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -324,6 +396,11 @@ export function teamWorkCardHtml(r: TeamWorkReport, opts: ShareOptions = {}): st
     .num{font-size:20px;font-weight:700;text-align:right}
     .meta{grid-column:1 / -1;font-size:12px;color:#a3a2b1;margin-top:-4px}
     .meta:empty{display:none}
+    .items{grid-column:1 / -1;list-style:none;margin:4px 0 0;padding:8px 12px;background:#faf9fd;border-radius:10px}
+    .items li{font-size:13px;color:#3b3a4a;line-height:1.5;padding:2px 0}
+    .items .d{display:inline-block;width:52px;color:#a3a2b1;font-weight:600}
+    .items .s{color:#a3a2b1;margin-left:6px}.items .s::before{content:'· '}
+    .items b{color:#6d28d9}.items .more{color:#a3a2b1;padding-left:52px}
     .quiet{font-size:14px;color:#55546a;line-height:1.6}
     .people{display:flex;flex-wrap:wrap;gap:8px}
     .p{background:#f3f2f8;border-radius:999px;padding:6px 12px;font-size:14px;font-weight:600}

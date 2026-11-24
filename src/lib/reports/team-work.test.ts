@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  buildTeamWorkReport, teamWorkText, teamWorkCardHtml, headline, nudge, previousMonth, type TeamWorkInput,
+  buildTeamWorkReport, teamWorkText, teamWorkCardHtml, headline, nudge, previousMonth, withoutClients, type TeamWorkInput,
 } from './team-work'
 
 const SM = 'dept-social', PRINT = 'dept-print'
@@ -111,6 +111,38 @@ describe('sharing', () => {
     })))
     expect(html).toContain('&lt;Sea &amp; Star&gt;')
     expect(html).not.toMatch(/₹|INR|amount/i)
+  })
+
+  it('lists each piece under its client only when details are asked for', () => {
+    const d = buildTeamWorkReport(base({
+      requests: [req({ title: 'Diwali offer post', status_updated_at: '2026-11-12T09:00:00Z' })],
+      tasks: [{ id: 't1', client_id: 'seastar', service_id: 'reel', status: 'done', task_date: '2026-11-03', quantity: 3, assignees: ['e6'], title: null }],
+    }))
+    expect(d.clients[0].items).toEqual([
+      { title: 'Diwali offer post', service: 'Social Media Poster', date: '2026-11-12', count: 1 },
+      { title: 'Reel', service: 'Reel', date: '2026-11-03', count: 3 },
+    ])
+    expect(teamWorkText(d)).not.toContain('Diwali')
+    expect(teamWorkText(d, { showDetails: true })).toContain('   – 12 Nov · Diwali offer post (Social Media Poster)')
+    expect(teamWorkText(d, { showDetails: true })).toContain('   – 3 Nov · Reel ×3')
+    expect(teamWorkCardHtml(d)).not.toContain('Diwali')
+    expect(teamWorkCardHtml(d, { showDetails: true })).toContain('Diwali offer post')
+  })
+
+  it('drops a removed client from every total, last month and the team', () => {
+    const full = buildTeamWorkReport(base({ requests: [
+      req({}), req({ client_id: 'elara', assigned_employee_id: 'e6' }),
+      req({ client_id: 'elara', status_updated_at: '2026-10-05T09:00:00Z' }),
+    ] }))
+    expect(full.delivered).toBe(2)
+    expect(full.lastMonth).toBe(1)
+    const cut = withoutClients(full, new Set(['elara', 'quiet']))
+    expect(cut.delivered).toBe(1)
+    expect(cut.lastMonth).toBe(0)
+    expect(cut.clients.map(c => c.client)).toEqual(['Sea Star'])
+    expect(cut.quietClients).toEqual([])
+    expect(cut.people).toEqual([{ cqid: 'CQID004', delivered: 1 }])
+    expect(withoutClients(full, new Set())).toBe(full)
   })
 
   it('steps back across a year boundary', () => {

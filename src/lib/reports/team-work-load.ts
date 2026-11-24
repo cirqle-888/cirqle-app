@@ -48,13 +48,13 @@ export async function loadTeamWorkReport(
     fetchAll(admin.from('client_service_pricing').select('client_id, service_id').eq('is_active', true)),
     fetchAll(admin.from('employees').select('id, cqid')),
     fetchAll(admin.from('task_requests')
-      .select('id, client_id, service_id, status, status_updated_at, assigned_employee_id, promoted_task_id')
+      .select('id, client_id, service_id, status, status_updated_at, assigned_employee_id, promoted_task_id, title')
       .eq('status', DONE_REQUEST).gte('status_updated_at', from).lt('status_updated_at', toExclusive)),
     fetchAll(admin.from('task_requests')
-      .select('id, client_id, service_id, status, status_updated_at, assigned_employee_id, promoted_task_id')
+      .select('id, client_id, service_id, status, status_updated_at, assigned_employee_id, promoted_task_id, title')
       .in('status', [...OPEN_REQUEST, WITH_CLIENT_REQUEST])),
     fetchAll(admin.from('tasks')
-      .select('id, client_id, service_id, status, task_date, quantity, assignments:task_assignments(employee_id)')
+      .select('id, client_id, service_id, status, task_date, quantity, title, assignments:task_assignments(employee_id)')
       .in('status', [...DONE_TASK]).is('deleted_at', null)
       .gte('task_date', from).lte('task_date', monthEnd(month))),
     fetchAll(admin.from('social_calendars').select('id, client_id')),
@@ -120,7 +120,7 @@ export async function loadTeamWorkReport(
     requests: [...requestById.values()],
     tasks: (tasks.data as {
       id: string; client_id: string | null; service_id: string | null; status: string
-      task_date: string | null; quantity: number | null; assignments: { employee_id: string }[] | null
+      task_date: string | null; quantity: number | null; title: string | null; assignments: { employee_id: string }[] | null
     }[])
       // Same rule as the report itself, applied with the full promoted list.
       .filter(t => !promoted.has(t.id))

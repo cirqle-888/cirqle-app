@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronLeft, ChevronRight, Share2, Copy, Download, MessageCircle, Image as ImageIcon, Loader2, Check, X as XIcon, Users } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Share2, Copy, Download, MessageCircle, Image as ImageIcon, Loader2, Check, X as XIcon, Users, ListChecks, ListTree, EyeOff } from 'lucide-react'
 import Header from '@/components/layout/header'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { isNative } from '@/lib/native'
@@ -10,7 +10,8 @@ import { shareContent, saveBase64File, writeClipboard } from '@/lib/native-capab
 import { renderPendingCard, blobToBase64 } from '@/lib/requests/my-work-share-image'
 import { whatsappUrl } from '@/lib/requests/my-work-share'
 import {
-  headline, nudge, previousMonth, teamWorkText, teamWorkCardHtml, TEAM_CARD_WIDTH, type TeamWorkReport,
+  headline, nudge, previousMonth, shortDate, withoutClients, teamWorkText, teamWorkCardHtml, TEAM_CARD_WIDTH,
+  type TeamWorkReport, type ShareOptions,
 } from '@/lib/reports/team-work'
 
 interface Props {
@@ -26,13 +27,54 @@ function nextMonth(m: string): string {
   return mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`
 }
 
-export default function TeamWorkClient({ report, departments, departmentId, month, thisMonth }: Props) {
+// Left-out clients live in this browser's storage (per department), with a
+// copy in memory so a private window still works for the visit.
+const HIDDEN_EVENT = 'team-work-hidden'
+const hiddenMemory = new Map<string, string>()
+function readHidden(key: string): string {
+  if (hiddenMemory.has(key)) return hiddenMemory.get(key)!
+  try { return localStorage.getItem(key) || '[]' } catch { return '[]' }
+}
+function writeHidden(key: string, value: string) {
+  hiddenMemory.set(key, value)
+  try { localStorage.setItem(key, value) } catch { /* memory copy is enough for now */ }
+  window.dispatchEvent(new Event(HIDDEN_EVENT))
+}
+function subscribeHidden(cb: () => void) {
+  window.addEventListener(HIDDEN_EVENT, cb)
+  window.addEventListener('storage', cb)
+  return () => { window.removeEventListener(HIDDEN_EVENT, cb); window.removeEventListener('storage', cb) }
+}
+
+export default function TeamWorkClient({ report: full, departments, departmentId, month, thisMonth }: Props) {
   const router = useRouter()
   const [sharing, setSharing] = useState(false)
-  // Who did what (by CQID) is optional — off by default, for the page and the share.
+  const [picking, setPicking] = useState(false)
+  // Who did what (by CQID) and the piece-by-piece list are optional — off by
+  // default, for the page and the share alike.
   const [showTeam, setShowTeam] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
+  // Clients left out of the report, remembered per department on this device.
+  const storageKey = `team-work-hidden:${departmentId}`
+  const hiddenRaw = useSyncExternalStore(subscribeHidden, () => readHidden(storageKey), () => '[]')
+  const hidden = useMemo(() => {
+    try { return new Set(JSON.parse(hiddenRaw) as string[]) } catch { return new Set<string>() }
+  }, [hiddenRaw])
+  const saveHidden = (next: Set<string>) => writeHidden(storageKey, JSON.stringify([...next]))
+  const hide = (id: string) => saveHidden(new Set(hidden).add(id))
+
+  const allClients = useMemo(() => full
+    ? [...full.clients.map(c => ({ clientId: c.clientId, client: c.client, delivered: c.delivered })),
+       ...full.quiet.map(q => ({ ...q, delivered: 0 }))]
+    : [], [full])
+  // Only ids that are in this month's report count as hidden.
+  const hiddenHere = allClients.filter(c => hidden.has(c.clientId)).length
+  const report = useMemo(() => full && withoutClients(full, hidden), [full, hidden])
+  const shareOpts = useMemo(() => ({ showTeam, showDetails }), [showTeam, showDetails])
+
   const go = (m: string, dept = departmentId) => router.push(`/dashboard/reports/team-work?month=${m}&dept=${dept}`)
   const isCurrent = month === thisMonth
+  const max = report ? Math.max(1, ...report.clients.map(x => x.delivered)) : 1
 
   return (
     <div className="space-y-5 pb-10">
@@ -59,19 +101,21 @@ export default function TeamWorkClient({ report, departments, departmentId, mont
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
-        {report && report.people.length > 0 && (
-          <label className="ml-auto inline-flex items-center gap-2 h-10 px-3 rounded-lg border border-border bg-secondary text-sm cursor-pointer select-none">
-            <input type="checkbox" checked={showTeam} onChange={e => setShowTeam(e.target.checked)} className="accent-violet-500" />
-            <Users className="w-4 h-4 text-muted-foreground" /> Show team
-          </label>
-        )}
         {report && (
-          <button
-            onClick={() => setSharing(true)}
-            className={`${report.people.length > 0 ? '' : 'ml-auto '} inline-flex items-center gap-1.5 h-10 px-4 rounded-lg gradient-bg text-white text-sm font-medium`}
-          >
-            <Share2 className="w-4 h-4" /> Share with the team
-          </button>
+          <>
+            <button onClick={() => setPicking(true)} className="inline-flex items-center gap-1.5 h-10 px-3 rounded-lg border border-border bg-secondary text-sm">
+              <ListChecks className="w-4 h-4 text-muted-foreground" /> Clients
+              <span className="text-muted-foreground tabular-nums">{allClients.length - hiddenHere}/{allClients.length}</span>
+            </button>
+            <Toggle on={showDetails} onChange={setShowDetails} icon={ListTree} label="Details" />
+            {full!.people.length > 0 && <Toggle on={showTeam} onChange={setShowTeam} icon={Users} label="Show team" />}
+            <button
+              onClick={() => setSharing(true)}
+              className="sm:ml-auto inline-flex items-center gap-1.5 h-10 px-4 rounded-lg gradient-bg text-white text-sm font-medium"
+            >
+              <Share2 className="w-4 h-4" /> Share with the team
+            </button>
+          </>
         )}
       </div>
 
@@ -79,6 +123,15 @@ export default function TeamWorkClient({ report, departments, departmentId, mont
         <p className="text-sm text-muted-foreground">No departments are set up yet (Settings → Departments).</p>
       ) : (
         <>
+          {hiddenHere > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm">
+              <EyeOff className="w-4 h-4 text-amber-500" />
+              <span>{hiddenHere} client{hiddenHere === 1 ? '' : 's'} left out of this report and the share.</span>
+              <button onClick={() => setPicking(true)} className="underline underline-offset-2">Change</button>
+              <button onClick={() => saveHidden(new Set())} className="underline underline-offset-2">Show all</button>
+            </div>
+          )}
+
           <div>
             <p className="text-base font-medium">{headline(report)}</p>
             {nudge(report) && <p className="text-sm text-muted-foreground mt-1">{nudge(report)}</p>}
@@ -99,10 +152,9 @@ export default function TeamWorkClient({ report, departments, departmentId, mont
               <p className="px-4 py-6 text-sm text-muted-foreground">Nothing delivered or planned this month yet.</p>
             ) : (
               <div className="divide-y divide-border">
-                {report.clients.map(c => {
-                  const max = Math.max(1, ...report.clients.map(x => x.delivered))
-                  return (
-                    <div key={c.clientId} className="px-4 py-3 grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_12rem_auto] items-center gap-x-4 gap-y-1">
+                {report.clients.map(c => (
+                  <div key={c.clientId} className="group px-4 py-3">
+                    <div className="grid grid-cols-[1fr_auto_auto] sm:grid-cols-[1fr_12rem_auto_auto] items-center gap-x-4 gap-y-1">
                       <div className="min-w-0">
                         <p className="text-sm font-medium truncate">{c.client}</p>
                         <p className="text-xs text-muted-foreground truncate">
@@ -116,22 +168,46 @@ export default function TeamWorkClient({ report, departments, departmentId, mont
                         <p className="text-lg font-bold tabular-nums">{c.delivered}</p>
                         <p className="text-[11px] text-muted-foreground whitespace-nowrap">
                           {[c.planned ? `${c.planned} planned` : '', c.posted ? `${c.posted} posted` : '', report.openKnown && c.open ? `${c.open} open` : '']
-                            .filter(Boolean).join(' · ') || ' '}
+                            .filter(Boolean).join(' · ') || ' '}
                         </p>
                       </div>
+                      <RemoveButton name={c.client} onClick={() => hide(c.clientId)} />
                     </div>
-                  )
-                })}
+                    {showDetails && c.items.length > 0 && (
+                      <ul className="mt-2 rounded-lg bg-secondary/50 px-3 py-2 space-y-1">
+                        {c.items.map((it, n) => (
+                          <li key={n} className="text-xs flex gap-2">
+                            <span className="w-12 shrink-0 text-muted-foreground tabular-nums">{shortDate(it.date)}</span>
+                            <span className="min-w-0">
+                              {it.title}
+                              {it.count > 1 && <b className="text-violet-400"> ×{it.count}</b>}
+                              {it.title !== it.service && <span className="text-muted-foreground"> · {it.service}</span>}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </section>
 
           <div className="grid gap-4 md:grid-cols-2">
-            {report.quietClients.length > 0 && (
+            {report.quiet.length > 0 && (
               <section className="rounded-2xl border border-border bg-card p-4">
-                <p className="text-sm font-semibold">Nothing yet this month · {report.quietClients.length}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{report.department} clients with no work delivered, planned or open</p>
-                <p className="text-sm mt-3 leading-relaxed">{report.quietClients.join(' · ')}</p>
+                <p className="text-sm font-semibold">Nothing yet this month · {report.quiet.length}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{report.department} clients with no work delivered, planned or open — tap × to leave one out</p>
+                <div className="flex flex-wrap gap-1.5 mt-3">
+                  {report.quiet.map(q => (
+                    <span key={q.clientId} className="inline-flex items-center gap-1 rounded-full bg-secondary pl-3 pr-1 py-0.5 text-sm">
+                      {q.client}
+                      <button onClick={() => hide(q.clientId)} aria-label={`Leave ${q.client} out`} className="p-1 rounded-full text-muted-foreground hover:text-foreground hover:bg-background/60">
+                        <XIcon className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
               </section>
             )}
             {showTeam && report.people.length > 0 && (
@@ -151,8 +227,79 @@ export default function TeamWorkClient({ report, departments, departmentId, mont
         </>
       )}
 
-      {sharing && report && <ShareReport report={report} showTeam={showTeam} onClose={() => setSharing(false)} />}
+      {picking && full && (
+        <ClientPicker clients={allClients} hidden={hidden} onSave={next => { saveHidden(next); setPicking(false) }} onClose={() => setPicking(false)} />
+      )}
+      {sharing && report && <ShareReport report={report} opts={shareOpts} onClose={() => setSharing(false)} />}
     </div>
+  )
+}
+
+function Toggle({ on, onChange, icon: Icon, label }: { on: boolean; onChange: (v: boolean) => void; icon: typeof Users; label: string }) {
+  return (
+    <button
+      role="switch"
+      aria-checked={on}
+      onClick={() => onChange(!on)}
+      className={`inline-flex items-center gap-1.5 h-10 px-3 rounded-lg border text-sm transition-colors ${on ? 'border-violet-500/50 bg-violet-500/15 text-foreground' : 'border-border bg-secondary text-muted-foreground hover:text-foreground'}`}
+    >
+      <Icon className="w-4 h-4" /> {label}
+    </button>
+  )
+}
+
+function RemoveButton({ name, onClick }: { name: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} aria-label={`Leave ${name} out of the report`} title="Leave out of the report"
+      className="p-1.5 rounded-lg text-muted-foreground/60 hover:text-foreground hover:bg-secondary sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100">
+      <XIcon className="w-4 h-4" />
+    </button>
+  )
+}
+
+/** Tick the clients to include; the rest are left out of the page and the share. */
+function ClientPicker({ clients, hidden, onSave, onClose }: {
+  clients: { clientId: string; client: string; delivered: number }[]
+  hidden: ReadonlySet<string>
+  onSave: (hidden: Set<string>) => void
+  onClose: () => void
+}) {
+  const [draft, setDraft] = useState(() => new Set(hidden))
+  const [q, setQ] = useState('')
+  const shown = clients.filter(c => c.client.toLowerCase().includes(q.trim().toLowerCase()))
+  const toggle = (id: string) => setDraft(d => { const n = new Set(d); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const included = clients.filter(c => !draft.has(c.clientId)).length
+  return (
+    <ModalOverlay onClose={onClose} sheetOnMobile>
+      <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col min-h-0 max-h-[85dvh]">
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-border shrink-0">
+          <div>
+            <h2 className="font-semibold">Clients in this report</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">{included} of {clients.length} included · unticked ones are left out of the share</p>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary"><XIcon className="w-4 h-4" /></button>
+        </div>
+        <div className="px-5 pt-3 flex gap-2 shrink-0">
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients" className="flex-1 h-9 rounded-lg border border-border bg-secondary px-3 text-sm" />
+          <button onClick={() => setDraft(new Set())} className="h-9 px-3 rounded-lg border border-border bg-secondary text-sm">All</button>
+          <button onClick={() => setDraft(new Set(clients.map(c => c.clientId)))} className="h-9 px-3 rounded-lg border border-border bg-secondary text-sm">None</button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
+          {shown.map(c => (
+            <label key={c.clientId} className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-secondary/60 cursor-pointer">
+              <input type="checkbox" checked={!draft.has(c.clientId)} onChange={() => toggle(c.clientId)} className="w-4 h-4 accent-violet-500" />
+              <span className="flex-1 text-sm truncate">{c.client}</span>
+              <span className="text-xs text-muted-foreground tabular-nums">{c.delivered ? `${c.delivered} done` : 'nothing yet'}</span>
+            </label>
+          ))}
+          {!shown.length && <p className="px-2 py-4 text-sm text-muted-foreground">No client matches “{q}”.</p>}
+        </div>
+        <div className="px-5 py-4 border-t border-border shrink-0 flex justify-end gap-2">
+          <button onClick={onClose} className="h-10 px-4 rounded-lg border border-border bg-secondary text-sm">Cancel</button>
+          <button onClick={() => onSave(draft)} disabled={!included} className="h-10 px-4 rounded-lg gradient-bg text-white text-sm font-medium disabled:opacity-50">Use these clients</button>
+        </div>
+      </div>
+    </ModalOverlay>
   )
 }
 
@@ -167,8 +314,8 @@ function Stat({ n, label, sub, tone = '' }: { n: number; label: string; sub?: st
 }
 
 /** Image card or text list, to a WhatsApp group — the same routes as My Work's Share. */
-function ShareReport({ report, showTeam, onClose }: { report: TeamWorkReport; showTeam: boolean; onClose: () => void }) {
-  const text = useMemo(() => teamWorkText(report, { showTeam }), [report, showTeam])
+function ShareReport({ report, opts, onClose }: { report: TeamWorkReport; opts: ShareOptions; onClose: () => void }) {
+  const text = useMemo(() => teamWorkText(report, opts), [report, opts])
   const fileName = `${report.department.replace(/[^\w-]+/g, '-')}-${report.month}.png`
   const [tab, setTab] = useState<'image' | 'text'>('image')
   const [image, setImage] = useState<{ blob: Blob; url: string } | null>(null)
@@ -178,11 +325,11 @@ function ShareReport({ report, showTeam, onClose }: { report: TeamWorkReport; sh
 
   useEffect(() => {
     let alive = true, url = ''
-    renderPendingCard(teamWorkCardHtml(report, { showTeam }), TEAM_CARD_WIDTH)
+    renderPendingCard(teamWorkCardHtml(report, opts), TEAM_CARD_WIDTH)
       .then(blob => { if (!alive) return; url = URL.createObjectURL(blob); setImage({ blob, url }) })
       .catch(() => { if (alive) setError('Could not create the image. The text version still works.') })
     return () => { alive = false; if (url) URL.revokeObjectURL(url) }
-  }, [report, showTeam])
+  }, [report, opts])
 
   const flash = (m: string) => { setDone(m); setTimeout(() => setDone(''), 2200) }
   const canShareFiles = useMemo(() => {
@@ -226,7 +373,7 @@ function ShareReport({ report, showTeam, onClose }: { report: TeamWorkReport; sh
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-border shrink-0">
           <div>
             <h2 className="font-semibold">Share with the team</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">{report.department} · {report.monthLabel} · counts only, no amounts{showTeam ? ' · with team' : ''}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{report.department} · {report.monthLabel} · counts only, no amounts{opts.showDetails ? ' · with details' : ''}{opts.showTeam ? ' · with team' : ''}</p>
           </div>
           <button onClick={onClose} aria-label="Close" className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary"><XIcon className="w-4 h-4" /></button>
         </div>
