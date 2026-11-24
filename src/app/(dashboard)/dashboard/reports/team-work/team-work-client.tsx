@@ -10,7 +10,7 @@ import { shareContent, saveBase64File, writeClipboard } from '@/lib/native-capab
 import { renderPendingCard, blobToBase64 } from '@/lib/requests/my-work-share-image'
 import { whatsappUrl } from '@/lib/requests/my-work-share'
 import {
-  headline, previousMonth, teamWorkText, teamWorkCardHtml, TEAM_CARD_WIDTH, type TeamWorkReport,
+  headline, nudge, previousMonth, teamWorkText, teamWorkCardHtml, TEAM_CARD_WIDTH, type TeamWorkReport,
 } from '@/lib/reports/team-work'
 
 interface Props {
@@ -29,6 +29,8 @@ function nextMonth(m: string): string {
 export default function TeamWorkClient({ report, departments, departmentId, month, thisMonth }: Props) {
   const router = useRouter()
   const [sharing, setSharing] = useState(false)
+  // Who did what (by CQID) is optional — off by default, for the page and the share.
+  const [showTeam, setShowTeam] = useState(false)
   const go = (m: string, dept = departmentId) => router.push(`/dashboard/reports/team-work?month=${m}&dept=${dept}`)
   const isCurrent = month === thisMonth
 
@@ -57,10 +59,16 @@ export default function TeamWorkClient({ report, departments, departmentId, mont
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
+        {report && report.people.length > 0 && (
+          <label className="ml-auto inline-flex items-center gap-2 h-10 px-3 rounded-lg border border-border bg-secondary text-sm cursor-pointer select-none">
+            <input type="checkbox" checked={showTeam} onChange={e => setShowTeam(e.target.checked)} className="accent-violet-500" />
+            <Users className="w-4 h-4 text-muted-foreground" /> Show team
+          </label>
+        )}
         {report && (
           <button
             onClick={() => setSharing(true)}
-            className="ml-auto inline-flex items-center gap-1.5 h-10 px-4 rounded-lg gradient-bg text-white text-sm font-medium"
+            className={`${report.people.length > 0 ? '' : 'ml-auto '} inline-flex items-center gap-1.5 h-10 px-4 rounded-lg gradient-bg text-white text-sm font-medium`}
           >
             <Share2 className="w-4 h-4" /> Share with the team
           </button>
@@ -71,7 +79,10 @@ export default function TeamWorkClient({ report, departments, departmentId, mont
         <p className="text-sm text-muted-foreground">No departments are set up yet (Settings → Departments).</p>
       ) : (
         <>
-          <p className="text-base font-medium">{headline(report)}</p>
+          <div>
+            <p className="text-base font-medium">{headline(report)}</p>
+            {nudge(report) && <p className="text-sm text-muted-foreground mt-1">{nudge(report)}</p>}
+          </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <Stat n={report.delivered} label="Delivered" tone="text-violet-400" sub={report.lastMonth ? `${report.lastMonth} in ${report.previousMonthLabel.split(' ')[0]}` : undefined} />
@@ -123,7 +134,7 @@ export default function TeamWorkClient({ report, departments, departmentId, mont
                 <p className="text-sm mt-3 leading-relaxed">{report.quietClients.join(' · ')}</p>
               </section>
             )}
-            {report.people.length > 0 && (
+            {showTeam && report.people.length > 0 && (
               <section className="rounded-2xl border border-border bg-card p-4">
                 <p className="text-sm font-semibold inline-flex items-center gap-1.5"><Users className="w-4 h-4" /> Team</p>
                 <p className="text-xs text-muted-foreground mt-0.5">Pieces each person delivered (shared work counts for everyone on it)</p>
@@ -140,7 +151,7 @@ export default function TeamWorkClient({ report, departments, departmentId, mont
         </>
       )}
 
-      {sharing && report && <ShareReport report={report} onClose={() => setSharing(false)} />}
+      {sharing && report && <ShareReport report={report} showTeam={showTeam} onClose={() => setSharing(false)} />}
     </div>
   )
 }
@@ -156,8 +167,8 @@ function Stat({ n, label, sub, tone = '' }: { n: number; label: string; sub?: st
 }
 
 /** Image card or text list, to a WhatsApp group — the same routes as My Work's Share. */
-function ShareReport({ report, onClose }: { report: TeamWorkReport; onClose: () => void }) {
-  const text = useMemo(() => teamWorkText(report), [report])
+function ShareReport({ report, showTeam, onClose }: { report: TeamWorkReport; showTeam: boolean; onClose: () => void }) {
+  const text = useMemo(() => teamWorkText(report, { showTeam }), [report, showTeam])
   const fileName = `${report.department.replace(/[^\w-]+/g, '-')}-${report.month}.png`
   const [tab, setTab] = useState<'image' | 'text'>('image')
   const [image, setImage] = useState<{ blob: Blob; url: string } | null>(null)
@@ -167,11 +178,11 @@ function ShareReport({ report, onClose }: { report: TeamWorkReport; onClose: () 
 
   useEffect(() => {
     let alive = true, url = ''
-    renderPendingCard(teamWorkCardHtml(report), TEAM_CARD_WIDTH)
+    renderPendingCard(teamWorkCardHtml(report, { showTeam }), TEAM_CARD_WIDTH)
       .then(blob => { if (!alive) return; url = URL.createObjectURL(blob); setImage({ blob, url }) })
       .catch(() => { if (alive) setError('Could not create the image. The text version still works.') })
     return () => { alive = false; if (url) URL.revokeObjectURL(url) }
-  }, [report])
+  }, [report, showTeam])
 
   const flash = (m: string) => { setDone(m); setTimeout(() => setDone(''), 2200) }
   const canShareFiles = useMemo(() => {
@@ -215,7 +226,7 @@ function ShareReport({ report, onClose }: { report: TeamWorkReport; onClose: () 
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-border shrink-0">
           <div>
             <h2 className="font-semibold">Share with the team</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">{report.department} · {report.monthLabel} · counts only, no amounts</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{report.department} · {report.monthLabel} · counts only, no amounts{showTeam ? ' · with team' : ''}</p>
           </div>
           <button onClick={onClose} aria-label="Close" className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary"><XIcon className="w-4 h-4" /></button>
         </div>

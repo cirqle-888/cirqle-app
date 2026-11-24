@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  buildTeamWorkReport, teamWorkText, teamWorkCardHtml, headline, previousMonth, type TeamWorkInput,
+  buildTeamWorkReport, teamWorkText, teamWorkCardHtml, headline, nudge, previousMonth, type TeamWorkInput,
 } from './team-work'
 
 const SM = 'dept-social', PRINT = 'dept-print'
@@ -79,16 +79,30 @@ describe('sharing', () => {
     req({}), req({}), req({ status_updated_at: '2026-10-02T09:00:00Z' }),
   ] }))
 
-  it('gives an encouraging headline with the change on last month', () => {
-    expect(headline(r)).toBe('2 pieces delivered for 1 client — 1 more than October 🚀')
+  it('says plainly how little was done, out of all the clients', () => {
+    expect(headline(r)).toBe('So far in November we have only done 2 pieces of work for 1 of our 3 clients — please be aware.')
+    expect(nudge(r)).toBe("That is 1 more than October. 2 clients have had nothing yet — let's make sure every client gets their work 💪")
   })
 
-  it('writes a WhatsApp message with the totals, clients, quiet clients and team', () => {
+  it('speaks of a past month in the past tense', () => {
+    const past = buildTeamWorkReport(base({ includeOpen: false, requests: [req({})] }))
+    expect(headline(past)).toBe('In November we only did 1 piece of work for 1 of our 3 clients — please be aware.')
+    expect(nudge(past)).toContain('have had nothing —')
+  })
+
+  it('writes a WhatsApp message with the totals, clients and quiet clients', () => {
     const text = teamWorkText(r)
     expect(text).toContain('*Social Media — November 2026*')
+    expect(text).toContain('please be aware')
     expect(text).toContain('• Sea Star — 2 done')
     expect(text).toContain('*Nothing yet this month (2)*')
-    expect(text).toContain('CQID004 2')
+  })
+
+  it('leaves the team out unless asked', () => {
+    expect(teamWorkText(r)).not.toContain('CQID004')
+    expect(teamWorkCardHtml(r)).not.toContain('CQID004')
+    expect(teamWorkText(r, { showTeam: true })).toContain('CQID004 2')
+    expect(teamWorkCardHtml(r, { showTeam: true })).toContain('CQID004')
   })
 
   it('carries no money and escapes names in the image', () => {

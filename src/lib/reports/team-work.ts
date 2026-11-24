@@ -208,20 +208,56 @@ export function buildTeamWorkReport(i: TeamWorkInput): TeamWorkReport {
   }
 }
 
-/** One encouraging line about the month — honest, never a telling-off. */
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+const shortMonth = (label: string) => label.split(' ')[0]
+
+/**
+ * The awareness line: plainly, this is all we have done for our clients.
+ * The report is shared to make the team aware of the gap, so it says "only"
+ * and names how many clients were covered out of all of them.
+ */
 export function headline(r: TeamWorkReport): string {
-  if (!r.delivered) return r.planned
-    ? `${r.planned} planned for ${r.monthLabel} — let's get the first ones out.`
-    : `A fresh month — nothing delivered yet. Let's get started.`
-  const diff = r.delivered - r.lastMonth
-  const trend = !r.lastMonth ? '' : diff > 0 ? ` — ${diff} more than ${r.previousMonthLabel.split(' ')[0]} 🚀`
-    : diff === 0 ? ` — the same as ${r.previousMonthLabel.split(' ')[0]}` : ` — ${-diff} fewer than ${r.previousMonthLabel.split(' ')[0]}, let's close the gap 💪`
-  return `${r.delivered} piece${r.delivered === 1 ? '' : 's'} delivered for ${r.clients.filter(c => c.delivered).length} client${r.clients.filter(c => c.delivered).length === 1 ? '' : 's'}${trend}`
+  const covered = r.clients.filter(c => c.delivered).length
+  const total = r.clients.length + r.quietClients.length
+  const when = r.openKnown ? `So far in ${shortMonth(r.monthLabel)}` : `In ${shortMonth(r.monthLabel)}`
+  const clients = plural(total, 'client')
+  if (!r.delivered) {
+    return r.openKnown
+      ? `${when} we have not delivered anything yet for any of our ${clients} — please be aware.`
+      : `${when} we did not deliver anything for any of our ${clients} — please be aware.`
+  }
+  const work = `${plural(r.delivered, 'piece')} of work for ${covered} of our ${clients}`
+  return r.openKnown
+    ? `${when} we have only done ${work} — please be aware.`
+    : `${when} we only did ${work} — please be aware.`
+}
+
+/** The follow-up: how it compares with last month and what to do about it. */
+export function nudge(r: TeamWorkReport): string {
+  const parts: string[] = []
+  const prev = shortMonth(r.previousMonthLabel)
+  if (r.lastMonth) {
+    const diff = r.delivered - r.lastMonth
+    parts.push(diff < 0 ? `That is ${-diff} fewer than ${prev}.` : diff > 0 ? `That is ${diff} more than ${prev}.` : `That is the same as ${prev}.`)
+  }
+  const quiet = r.quietClients.length
+  if (quiet) parts.push(`${plural(quiet, 'client')} ${quiet === 1 ? 'has' : 'have'} had nothing${r.openKnown ? ' yet' : ''} — let's make sure every client gets their work 💪`)
+  else if (r.delivered) parts.push('Every client has had work — great going, let\'s keep it up 🙌')
+  return parts.join(' ')
+}
+
+/** Choices for what a shared report includes. */
+export interface ShareOptions {
+  /** Show each person's count by CQID. Off by default: the report is about the clients. */
+  showTeam?: boolean
 }
 
 /** The WhatsApp message. */
-export function teamWorkText(r: TeamWorkReport): string {
-  const lines = [`*${r.department} — ${r.monthLabel}*`, headline(r), '']
+export function teamWorkText(r: TeamWorkReport, opts: ShareOptions = {}): string {
+  const lines = [`📢 *${r.department} — ${r.monthLabel}*`, '', headline(r)]
+  const n = nudge(r)
+  if (n) lines.push(n)
+  lines.push('')
   const stat = [`✅ ${r.delivered} delivered`]
   if (r.planned) stat.push(`🗓 ${r.planned} planned`)
   if (r.posted) stat.push(`📣 ${r.posted} posted`)
@@ -241,7 +277,7 @@ export function teamWorkText(r: TeamWorkReport): string {
   if (r.quietClients.length) {
     lines.push(`*Nothing yet this month (${r.quietClients.length})*`, r.quietClients.join(', '), '')
   }
-  if (r.people.length) {
+  if (opts.showTeam && r.people.length) {
     lines.push('*Team*', r.people.map(p => `${p.cqid} ${p.delivered}`).join(' · '))
   }
   return lines.join('\n').trim()
@@ -252,7 +288,7 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 export const TEAM_CARD_WIDTH = 760
 
 /** Self-contained HTML for the shareable image (rendered with html2canvas). */
-export function teamWorkCardHtml(r: TeamWorkReport): string {
+export function teamWorkCardHtml(r: TeamWorkReport, opts: ShareOptions = {}): string {
   const max = Math.max(1, ...r.clients.map(c => c.delivered))
   const clientRows = r.clients.map(c => `
     <div class="row">
@@ -273,6 +309,7 @@ export function teamWorkCardHtml(r: TeamWorkReport): string {
     .month{font-size:30px;font-weight:700;letter-spacing:-.5px;margin-top:4px}
     .brand{font-size:13px;font-weight:600;color:#a3a2b1}
     .head{margin-top:14px;font-size:17px;font-weight:600;color:#3b3a4a;line-height:1.4}
+    .nudge{margin-top:6px;font-size:14px;color:#6b6a78;line-height:1.45}
     .stats{display:flex;gap:10px;margin:20px 0 8px}
     .stat{flex:1;border:1px solid #ecebf3;border-radius:14px;padding:12px 14px}
     .stat b{display:block;font-size:26px;font-weight:700;line-height:1.1}.stat small{font-size:13px;color:#6b6a78}
@@ -295,11 +332,12 @@ export function teamWorkCardHtml(r: TeamWorkReport): string {
   </style></head><body><div class="card">
     <div class="top"><div><div class="dept">${esc(r.department)}</div><div class="month">${esc(r.monthLabel)}</div></div><div class="brand">Cirqle</div></div>
     <div class="head">${esc(headline(r))}</div>
+    ${nudge(r) ? `<div class="nudge">${esc(nudge(r))}</div>` : ''}
     <div class="stats">
       ${stat(r.delivered, 'Delivered', 'good')}${stat(r.planned, 'Planned')}${r.posted ? stat(r.posted, 'Posted') : ''}${r.openKnown ? stat(r.open, 'Still open') : stat(r.quietClients.length, 'Clients with nothing')}
     </div>
     ${r.clients.length ? `<div class="h">By client</div>${clientRows}` : ''}
     ${r.quietClients.length ? `<div class="h">Nothing yet this month · ${r.quietClients.length}</div><div class="quiet">${r.quietClients.map(esc).join(' · ')}</div>` : ''}
-    ${r.people.length ? `<div class="h">Team</div><div class="people">${r.people.map(p => `<div class="p">${esc(p.cqid)}<span>${p.delivered}</span></div>`).join('')}</div>` : ''}
+    ${opts.showTeam && r.people.length ? `<div class="h">Team</div><div class="people">${r.people.map(p => `<div class="p">${esc(p.cqid)}<span>${p.delivered}</span></div>`).join('')}</div>` : ''}
   </div><div class="foot">Shared from Cirqle · Team Work Report</div></body></html>`
 }
