@@ -1119,7 +1119,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
               </button>
             )}
             <div className="relative min-h-0 flex-1">
-            <div ref={scrollerRef} onScroll={onListScroll} className="absolute inset-0 overflow-y-auto overscroll-contain px-4 py-3">
+            <div ref={scrollerRef} onScroll={onListScroll} className="absolute inset-0 overflow-y-auto overscroll-contain px-4 py-3 [overflow-anchor:none]">
               <div ref={contentRef}>
               <div ref={topRef} className="h-px" />
               {olderCursor && (

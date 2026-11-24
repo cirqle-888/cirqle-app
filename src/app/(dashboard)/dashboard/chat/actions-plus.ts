@@ -27,7 +27,7 @@ type Result<T> = { ok: true; data: T } | { ok: false; error: string }
 
 /** Pin a chat to the top of my list (or unpin). Follows me to every device. */
 export async function setConversationPinned(conversationId: string, pinned: boolean): Promise<Result<null>> {
-  const auth = await requireChatUser()
+  const auth = await requireChatUser(true)
   if (!auth.ok) return auth
   const membership = await requireMembership(conversationId, auth.me.employeeId)
   if (!membership.ok) return membership
@@ -43,7 +43,7 @@ export type NotifyLevel = 'all' | 'mentions' | 'none'
 
 /** all = every message · mentions = only when I am mentioned · none = muted. */
 export async function setConversationNotify(conversationId: string, level: NotifyLevel): Promise<Result<null>> {
-  const auth = await requireChatUser()
+  const auth = await requireChatUser(true)
   if (!auth.ok) return auth
   if (!['all', 'mentions', 'none'].includes(level)) return { ok: false, error: 'Unknown setting.' }
   const membership = await requireMembership(conversationId, auth.me.employeeId)
@@ -91,7 +91,7 @@ const SAVED_SELECT = 'id, conversation_id, body, kind, metadata, created_at, del
 
 /** Star a message for myself (or remove the star). Returns the new state. */
 export async function toggleStar(messageId: string): Promise<Result<{ starred: boolean }>> {
-  const auth = await requireChatUser()
+  const auth = await requireChatUser(true)
   if (!auth.ok) return auth
   const me = auth.me
   const admin = createAdminClient()
@@ -142,7 +142,7 @@ export async function listStarred(): Promise<Result<SavedMessage[]>> {
 
 /** Pin a message for everyone in the chat (or unpin). Any member may. */
 export async function togglePinMessage(messageId: string): Promise<Result<{ pinned: boolean }>> {
-  const auth = await requireChatUser()
+  const auth = await requireChatUser(true)
   if (!auth.ok) return auth
   const me = auth.me
   const admin = createAdminClient()
@@ -183,7 +183,7 @@ export async function listPinnedMessages(conversationId: string): Promise<Result
  * at the same stored file — nothing is copied or re-uploaded.
  */
 export async function forwardMessages(messageIds: string[], targetConversationIds: string[]): Promise<Result<{ sent: number }>> {
-  const auth = await requireChatUser()
+  const auth = await requireChatUser(true)
   if (!auth.ok) return auth
   const me = auth.me
   const ids = [...new Set(messageIds)].slice(0, 20)
@@ -325,7 +325,7 @@ export async function listSharedContent(conversationId: string): Promise<Result<
 // ── Polls ─────────────────────────────────────────────────────────────────────
 
 export async function createPoll(conversationId: string, question: string, options: string[], multi: boolean): Promise<Result<{ id: string }>> {
-  const auth = await requireChatUser()
+  const auth = await requireChatUser(true)
   if (!auth.ok) return auth
   const me = auth.me
   const membership = await requireMembership(conversationId, me.employeeId)
@@ -347,7 +347,7 @@ export async function createPoll(conversationId: string, question: string, optio
 
 /** Set my vote. `optionIds` replaces whatever I chose before; empty removes my vote. */
 export async function votePoll(messageId: string, optionIds: string[]): Promise<Result<PollData>> {
-  const auth = await requireChatUser()
+  const auth = await requireChatUser(true)
   if (!auth.ok) return auth
   const me = auth.me
   const admin = createAdminClient()
@@ -386,7 +386,7 @@ export async function votePoll(messageId: string, optionIds: string[]): Promise<
 export interface ScheduledMessage { id: string; conversationId: string; body: string; sendAt: string }
 
 export async function scheduleMessage(conversationId: string, body: string, sendAtIso: string): Promise<Result<ScheduledMessage>> {
-  const auth = await requireChatUser()
+  const auth = await requireChatUser(true)
   if (!auth.ok) return auth
   const me = auth.me
   const membership = await requireMembership(conversationId, me.employeeId)
@@ -421,7 +421,7 @@ export async function listScheduled(conversationId?: string): Promise<Result<Sch
 }
 
 export async function cancelScheduled(id: string): Promise<Result<null>> {
-  const auth = await requireChatUser()
+  const auth = await requireChatUser(true)
   if (!auth.ok) return auth
   const { error } = await createAdminClient().from('chat_scheduled_messages')
     .update({ cancelled_at: new Date().toISOString() })
@@ -485,7 +485,7 @@ export async function getChatAccessSettings(): Promise<Result<ChatAccessSettings
 const MODES: ChatAccessMode[] = ['everyone', 'own_department', 'custom', 'none']
 
 export async function saveChatAccessRule(rule: ChatAccessRule): Promise<Result<null>> {
-  const auth = await requireChatUser()
+  const auth = await requireChatUser(true)
   if (!auth.ok) return auth
   const me = auth.me
   if (!me.isAdmin) return { ok: false, error: 'Only an admin can manage chat access.' }
@@ -513,7 +513,7 @@ export async function saveChatAccessRule(rule: ChatAccessRule): Promise<Result<n
 
 /** Remove a rule — the department or person goes back to the default. */
 export async function removeChatAccessRule(subjectType: 'department' | 'employee', subjectId: string): Promise<Result<null>> {
-  const auth = await requireChatUser()
+  const auth = await requireChatUser(true)
   if (!auth.ok) return auth
   if (!auth.me.isAdmin) return { ok: false, error: 'Only an admin can manage chat access.' }
   const { error } = await createAdminClient().from('chat_access_rules')

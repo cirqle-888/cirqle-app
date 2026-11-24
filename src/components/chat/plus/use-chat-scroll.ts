@@ -10,6 +10,8 @@ interface Row { id: string; senderId: string | null }
  *   · a new message scrolls down only if you were already at the bottom (or
  *     sent it yourself); otherwise a "new messages" button counts them
  *   · older messages loading at the top never move what you are reading
+ *     (the scroller must set overflow-anchor: none — this hook does the
+ *     correction itself, so every browser behaves the same, Safari included)
  *   · a picture that finishes loading keeps you pinned to the bottom
  */
 export function useChatScroll({ conversationId, rows, meId, markerId, onReachTop }: {
@@ -31,7 +33,9 @@ export function useChatScroll({ conversationId, rows, meId, markerId, onReachTop
   const toBottom = useCallback((smooth = false) => {
     const el = scrollerRef.current
     if (!el) return
-    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
+    // Animate only a short hop; a long way back just lands there.
+    const far = el.scrollHeight - el.scrollTop - el.clientHeight > 2500
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth && !far ? 'smooth' : 'auto' })
     atBottom.current = true
     setNewBelow(0)
     setShowJump(false)
@@ -62,7 +66,9 @@ export function useChatScroll({ conversationId, rows, meId, markerId, onReachTop
       const added = rows.slice(Math.max(0, p.len - 1)).filter(r => r.id !== p.last)
       const mine = rows[rows.length - 1]?.senderId === meId
       if (mine || atBottom.current) {
-        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+        // Instant, not animated: an animated scroll can be cut short (a hidden
+        // tab, a second message arriving mid-way) and leave you above the bottom.
+        el.scrollTop = el.scrollHeight
         atBottom.current = true
       } else {
         const fromOthers = added.filter(r => r.senderId !== meId).length
