@@ -23,6 +23,13 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
+      // `server-only` is not an installed package: Next supplies it at build
+      // time, and on the server it resolves to this empty file. Tests run as
+      // server code, so point at the same file. Without this, any test whose
+      // imports reach a `server-only` module dies on import unless that test
+      // remembers to mock it — which is how update-title.test.ts broke when
+      // ops-actions started importing analytics/invalidate.
+      'server-only': path.resolve(__dirname, 'node_modules/next/dist/compiled/server-only/empty.js'),
     },
   },
 })
