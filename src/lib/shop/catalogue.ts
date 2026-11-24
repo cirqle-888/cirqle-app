@@ -7,6 +7,8 @@
  * that is not a number or a list that is not a list.
  */
 
+import { round2 } from '@/lib/calculations/currency'
+
 export const SHOP_KEY = 'memoura'
 
 export const WHO_OPTIONS = [
@@ -84,7 +86,7 @@ const str = (v: unknown, max: number): string => (typeof v === 'string' ? v.trim
 const strOrNull = (v: unknown, max: number): string | null => str(v, max) || null
 const money = (v: unknown): number => {
   const n = typeof v === 'number' ? v : Number(v)
-  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 0
+  return Number.isFinite(n) && n > 0 ? round2(n) : 0
 }
 const whole = (v: unknown): number | null => {
   const n = Math.floor(Number(v))

@@ -6,6 +6,8 @@
  * (Memoura today). The buyer is a member of the public, never a client.
  */
 
+import { round2 } from '@/lib/calculations/currency'
+
 export const ORDER_STATUSES = [
   'new', 'advance_paid', 'preview_sent', 'approved', 'printing', 'shipped', 'delivered', 'cancelled',
 ] as const
@@ -87,7 +89,7 @@ export const MEMOURA_EXTRAS: readonly OrderExtra[] = [
 
 const money = (n: unknown): number => {
   const v = typeof n === 'number' ? n : Number(n)
-  return Number.isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : 0
+  return Number.isFinite(v) && v > 0 ? round2(v) : 0
 }
 
 /** Whatever arrived (form, JSON column) → clean lines. Drops empty and zero-quantity lines. */
