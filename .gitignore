@@ -51,6 +51,10 @@ next-env.d.ts
 # Claude session artifacts
 /.claude/
 
+# Agent skills installed on this Mac (a copy of .claude/skills for other
+# coding agents, mostly third-party). The app's own skills live in /skills/.
+/.agents/
+
 # env
 .env.local
 
