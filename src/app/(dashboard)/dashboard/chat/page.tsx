@@ -18,6 +18,7 @@ export default async function ChatPage() {
     <ChatClient
       me={{ employeeId: me.employeeId, name: me.name, cqid: me.cqid }}
       canCreateChannels={me.isAdmin || me.permissions.has('chat.create_channels')}
+      isAdmin={me.isAdmin}
     />
   )
 }

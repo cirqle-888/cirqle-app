@@ -22,8 +22,10 @@ import { createNotification } from '@/lib/notifications/create'
 import { sendWebPush } from '@/lib/push/send'
 import { transcribeAudio } from '@/lib/ai/transcribe'
 import { todayISO } from '@/lib/utils/local-date'
-import { loadServiceScope } from '@/lib/scope/service-scope'
-import { visibleEmployeeIds } from '@/lib/scope/employee-scope'
+import { loadChatAccess, loadChatAccessRules } from '@/lib/chat/access-load'
+import { canChat, canSeeDepartmentChannel, reachable, type ChatAccessContext } from '@/lib/chat/access'
+import { attachLinkPreview } from '@/lib/chat/link-preview'
+import { deliverDueScheduled } from '@/lib/chat/scheduled'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -55,6 +57,16 @@ export interface ChatConversation {
   /** Name of that client, so the sidebar can head a client group even when
    *  the client has no channel of its own yet. */
   clientName: string | null
+  /** I pinned this chat to the top of my list (saved for me, on every device). */
+  pinned: boolean
+  /** all = every message alerts me · mentions = only mentions · none = muted. */
+  notifyLevel: 'all' | 'mentions' | 'none'
+  /** When I last read it — the "new messages" line is drawn after this. */
+  lastReadAt: string | null
+  /** Department this channel belongs to, when it is a department channel. */
+  departmentId: string | null
+  /** A direct chat the admin's rules have closed: history stays, sending is off. */
+  blocked: boolean
 }
 
 export interface ChatAttachment {
@@ -130,6 +142,25 @@ async function requireNotArchived(conversationId: string) {
   return data?.archived_at
     ? { ok: false as const, error: 'This conversation was deleted — reopen it before posting.' }
     : { ok: true as const }
+}
+
+/**
+ * A direct chat stays open only while the admin's rules allow the pair to talk.
+ * Costs one small query when no rule exists, which is the usual case.
+ */
+async function requireDmOpen(me: Awaited<ReturnType<typeof loadCurrentUser>>, conversationId: string) {
+  const admin = createAdminClient()
+  const { data: conv } = await admin
+    .from('conversations').select('type, members:conversation_members(employee_id)').eq('id', conversationId).maybeSingle()
+  if (!conv || conv.type !== 'dm' || !me) return { ok: true as const }
+  const rules = await loadChatAccessRules(admin)
+  if (!rules.length) return { ok: true as const }
+  const other = ((conv.members ?? []) as { employee_id: string }[]).find(m => m.employee_id !== me.employeeId)?.employee_id
+  if (!other) return { ok: true as const }
+  const access = await loadChatAccess(admin, me, rules)
+  return canChat(access, me.employeeId, other)
+    ? { ok: true as const }
+    : { ok: false as const, error: 'Direct chat with this person is turned off by your admin.' }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -372,15 +403,23 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
   // for the second request if the column really is missing.
   type MembershipRow = {
     conversation_id: string; last_read_at: string; role: string; hidden_at?: string | null
+    pinned_at?: string | null; notify_level?: string | null
   }
   let memberships: MembershipRow[] = []
   // Per-member hide (DM "delete"). Missing column pre-026 → nothing hidden.
   const hiddenByConv = new Map<string, string>()
   {
-    const withHidden = await admin
+    let withHidden = await admin
       .from('conversation_members')
-      .select('conversation_id, last_read_at, role, hidden_at')
+      .select('conversation_id, last_read_at, role, hidden_at, notify_level, pinned_at')
       .eq('employee_id', me.employeeId)
+    // pinned_at arrives with the chat upgrade migration — without it, fall back.
+    if (withHidden.error) {
+      withHidden = await admin
+        .from('conversation_members')
+        .select('conversation_id, last_read_at, role, hidden_at, notify_level')
+        .eq('employee_id', me.employeeId) as typeof withHidden
+    }
     if (!withHidden.error) {
       memberships = (withHidden.data ?? []) as MembershipRow[]
       for (const m of memberships) {
@@ -400,21 +439,46 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
   }
   const lastReadByConv = new Map(memberships.map(m => [m.conversation_id, m.last_read_at]))
   const myRoleByConv = new Map(memberships.map(m => [m.conversation_id, m.role as ChatMember['role']]))
+  const prefsByConv = new Map(memberships.map(m => [m.conversation_id, {
+    pinned: !!m.pinned_at,
+    notifyLevel: (['all', 'mentions', 'none'].includes(m.notify_level ?? '') ? m.notify_level : 'all') as ChatConversation['notifyLevel'],
+  }]))
+
+  // Anything scheduled whose time has come goes out now, after this response.
+  after(() => deliverDueScheduled(admin).then(() => undefined, () => undefined))
   const memberIds = [...lastReadByConv.keys()]
 
   // My conversations + public channels I could join
   const orFilter = memberIds.length
     ? `id.in.(${memberIds.join(',')}),and(type.eq.channel,is_private.eq.false)`
     : 'and(type.eq.channel,is_private.eq.false)'
-  const { data: convs, error: convErr } = await admin
+  const convSelect = (withDept: boolean) => admin
     .from('conversations')
     .select(`
-      id, type, name, topic, is_private, category, created_at, archived_at, created_by, client_id,
+      id, type, name, topic, is_private, category, created_at, archived_at, created_by, client_id${withDept ? ', department_id' : ''},
       members:conversation_members(employee_id, role, employee:employee_id(id, name, cqid))
     `)
     .or(orFilter)
     .is('archived_at', null)
+  let convRes = await convSelect(true)
+  // department_id arrives with the chat upgrade migration — without it, fall back.
+  if (convRes.error) convRes = await convSelect(false) as typeof convRes
+  const { error: convErr } = convRes
   if (convErr) return { ok: false, error: convErr.message }
+
+  // The admin's rules: hide department channels that are not mine, and mark
+  // direct chats the rules have closed. Loaded only when there is something
+  // to decide — most refreshes pay for one tiny rules query and nothing more.
+  let access: ChatAccessContext | null = null
+  {
+    const rules = await loadChatAccessRules(admin)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyDeptChannel = (convRes.data ?? []).some((c: any) => c.department_id)
+    if (rules.length || anyDeptChannel) access = await loadChatAccess(admin, me, rules)
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const convs = ((convRes.data ?? []) as any[]).filter(c =>
+    lastReadByConv.has(c.id) || !access || canSeeDepartmentChannel(access, me.employeeId, c.department_id ?? null))
 
   // Last message + unread count per conversation (bounded parallel queries —
   // fine at team scale; swap for an RPC when conversations grow past ~50).
@@ -622,6 +686,15 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
       } : null,
       members,
       canDelete,
+      pinned: prefsByConv.get(c.id)?.pinned ?? false,
+      notifyLevel: prefsByConv.get(c.id)?.notifyLevel ?? 'all',
+      lastReadAt: lastReadByConv.get(c.id) ?? null,
+      departmentId: (c.department_id as string | null) ?? null,
+      blocked: (() => {
+        if (c.type !== 'dm' || !access?.rules.length) return false
+        const other = members.find(m => m.employeeId !== me.employeeId)
+        return !!other && !canChat(access, me.employeeId, other.employeeId)
+      })(),
     } satisfies ChatConversation
   })
 
@@ -652,6 +725,8 @@ export async function createChannel(input: {
   category?: 'general' | 'department' | 'client'
   /** For client channels: links the conversation to the CRM client */
   clientId?: string | null
+  /** For department channels: only that department's people see and join it */
+  departmentId?: string | null
 }): Promise<Result<{ id: string }>> {
   const auth = await requireChatUser()
   if (!auth.ok) return auth
@@ -672,6 +747,13 @@ export async function createChannel(input: {
     category: input.category ?? 'general',
     client_id: input.clientId ?? null,
   }
+  if (input.departmentId) insertRow.department_id = input.departmentId
+  // You can only bring in people you are allowed to chat with.
+  let invitees = (input.memberIds ?? []).filter(id => id !== me.employeeId)
+  if (invitees.length) {
+    const access = await loadChatAccess(admin, me)
+    invitees = invitees.filter(id => canChat(access, me.employeeId, id))
+  }
   let res = await admin.from('conversations').insert(insertRow).select('id').single()
   // Migration 019 not applied → retry without the new column
   if (res.error && /category/.test(res.error.message)) {
@@ -683,9 +765,7 @@ export async function createChannel(input: {
 
   const memberRows = [
     { conversation_id: convId, employee_id: me.employeeId, role: 'owner' },
-    ...(input.memberIds ?? [])
-      .filter(id => id !== me.employeeId)
-      .map(id => ({ conversation_id: convId, employee_id: id, role: 'member' })),
+    ...invitees.map(id => ({ conversation_id: convId, employee_id: id, role: 'member' })),
   ]
   const { error: memErr } = await admin.from('conversation_members').insert(memberRows)
   if (memErr) return { ok: false, error: memErr.message }
@@ -707,6 +787,12 @@ export async function getOrCreateDm(otherEmployeeId: string): Promise<Result<{ i
     return { ok: false, error: 'Pick another person to message.' }
   }
   const admin = createAdminClient()
+  {
+    const access = await loadChatAccess(admin, me)
+    if (!canChat(access, me.employeeId, otherEmployeeId)) {
+      return { ok: false, error: 'Direct chat with this person is not open to you.' }
+    }
+  }
 
   // Existing DM = a type='dm' conversation whose member set is exactly {me, other}
   const { data: myDms } = await admin
@@ -761,11 +847,17 @@ export async function joinChannel(conversationId: string): Promise<Result<null>>
 
   const { data: conv } = await admin
     .from('conversations')
-    .select('id, type, is_private')
+    .select('*')
     .eq('id', conversationId).maybeSingle()
   if (!conv) return { ok: false, error: 'Conversation not found.' }
   if (conv.type !== 'channel' || conv.is_private) {
     return { ok: false, error: 'This conversation is invite-only.' }
+  }
+  if (conv.department_id) {
+    const access = await loadChatAccess(admin, me)
+    if (!canSeeDepartmentChannel(access, me.employeeId, conv.department_id as string)) {
+      return { ok: false, error: 'This channel belongs to another department.' }
+    }
   }
   const { error } = await admin.from('conversation_members')
     .upsert({ conversation_id: conversationId, employee_id: me.employeeId, role: 'member' },
@@ -795,15 +887,12 @@ export async function listChatEmployees(): Promise<Result<{ id: string; name: st
     .order('name')
   if (error) return { ok: false, error: error.message }
 
-  const me = await loadCurrentUser()
-  const scope = await loadServiceScope(admin, me, 'global')
-  const visible = await visibleEmployeeIds(admin, scope)
-
+  // The admin's rules decide who you can reach; with no rule for you it is
+  // the people you share work with, as before.
+  const access = await loadChatAccess(admin, auth.me)
   return {
     ok: true,
-    data: (data ?? [])
-      .filter(e => e.id !== auth.me.employeeId)
-      .filter(e => !visible || visible.has(e.id))
+    data: reachable(access, auth.me.employeeId, data ?? [])
       .map(e => ({ id: e.id, name: e.name ?? '', cqid: e.cqid ?? '' })),
   }
 }
@@ -885,6 +974,8 @@ export async function sendMessage(
   if (!membership.ok) return membership
   const live = await requireNotArchived(conversationId)
   if (!live.ok) return live
+  const open = await requireDmOpen(me, conversationId)
+  if (!open.ok) return open
 
   const text = (body || '').trim()
   if (!text) return { ok: false, error: 'Message is empty.' }
@@ -969,6 +1060,9 @@ export async function sendMessage(
   }
 
   if (replySnapshot) afterReplyHooks(me, replySnapshot, conversationId, data.id)
+
+  // A link in the message gets its preview (title, picture) a moment later.
+  if (/https?:\/\//i.test(text)) after(() => attachLinkPreview(data.id, text).then(undefined, () => undefined))
 
   // Device push (Web Push) to the other members, so a closed tab / phone still
   // hears about the message — realtime only reaches OPEN tabs. Root messages
@@ -1072,6 +1166,8 @@ export async function sendFileMessage(input: {
   if (!membership.ok) return membership
   const live = await requireNotArchived(input.conversationId)
   if (!live.ok) return live
+  const open = await requireDmOpen(me, input.conversationId)
+  if (!open.ok) return open
 
   // The path must be one we generated for THIS conversation, and must exist.
   if (!input.storagePath.startsWith(`${input.conversationId}/`)) {
@@ -1403,6 +1499,8 @@ export async function sendVoiceMessage(input: {
   if (!membership.ok) return membership
   const live = await requireNotArchived(input.conversationId)
   if (!live.ok) return live
+  const open = await requireDmOpen(me, input.conversationId)
+  if (!open.ok) return open
 
   if (input.durationMs > MAX_VOICE_MS) return { ok: false, error: 'Voice notes are limited to 5 minutes.' }
   if (!input.storagePath.startsWith(`${input.conversationId}/`)) {
@@ -1835,7 +1933,9 @@ export async function addMembersToConversation(conversationId: string, targetEmp
     .in('employee_id', targetEmployeeIds)
   
   const existingSet = new Set(existing?.map(e => e.employee_id) ?? [])
-  const toAdd = targetEmployeeIds.filter(id => !existingSet.has(id))
+  // You can only bring in people you are allowed to chat with.
+  const access = await loadChatAccess(admin, me)
+  const toAdd = targetEmployeeIds.filter(id => !existingSet.has(id) && canChat(access, me.employeeId, id))
   
   if (toAdd.length === 0) return { ok: true, data: undefined }
 

@@ -382,6 +382,10 @@ export function FloatingCommsWidget() {
     }
   }, [])
 
+  // Each chat's notification setting, readable from the realtime handler below.
+  const notifyLevelRef = useRef(new Map<string, string>())
+  useEffect(() => { notifyLevelRef.current = new Map(convs.map(c => [c.id, c.notifyLevel])) }, [convs])
+
   // ── Realtime: messages (RLS-scoped to my conversations) + my notifications ──
   useEffect(() => {
     if (!employeeId) return
@@ -430,6 +434,12 @@ export function FloatingCommsWidget() {
           // Reading this conversation on the full chat page right now → the
           // unread bump above is enough; no toast/chime/banner in their face.
           if (isActivelyViewing(convId)) return
+          // A muted chat makes no sound and shows no banner; "mentions only"
+          // speaks up just when I am mentioned. The unread count above still moves.
+          const level = notifyLevelRef.current.get(convId) ?? 'all'
+          const mentions = (row.metadata as { mentions?: unknown } | null)?.mentions
+          const mentioned = Array.isArray(mentions) && mentions.includes(employeeId)
+          if (level === 'none' || (level === 'mentions' && !mentioned)) return
           const preview = previewOf(kind, body).slice(0, 90)
           playChime()
           systemNotify('💬 New message', preview, `msg:${convId}`,
