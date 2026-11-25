@@ -24,6 +24,7 @@ import {
 import {
   LEAD_STATUSES, SETTABLE_TASK_STATUSES, businessSnapshot, setTaskStatus, unbilledTasks, updateLead,
 } from './ops-actions'
+import { formatPendingMessage, formatTeamSummary, loadTeamPending, sendPendingReminders } from './team-pending'
 
 const write = { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
 const uuid = z.string().regex(/^[0-9a-f-]{36}$/i, 'an id from a list tool')
@@ -314,6 +315,42 @@ export function registerAutomationTools(server: McpServer, admin: Admin) {
     return result(`${r.unbilled.length} finished tasks not on an invoice, ${inr(r.total_inr)}; ${r.package_work.length} more covered by packages.`, r)
   })
 
+  // ── Team: pending work per CQID ──────────────────────────────────────────
+
+  server.registerTool('team_pending', {
+    title: 'Pending work for each person',
+    description: 'Open requests and tasks for each person, by CQID (never by name): late, due today, next few days, later, no date, and waiting for the client. Also lists open requests nobody is assigned to. Returns a ready-to-share team summary and, for each person, the exact message send_pending_reminders would send them.',
+    inputSchema: { cqid: z.string().optional().describe('Only this person, e.g. CQ002.') },
+    annotations: { readOnlyHint: true },
+  }, async ({ cqid }) => {
+    const today = todayISO()
+    const t = await loadTeamPending(admin, today)
+    const people = cqid ? t.people.filter(p => p.cqid.toUpperCase() === cqid.trim().toUpperCase()) : t.people
+    const view = { ...t, people }
+    return result(formatTeamSummary(view), {
+      today,
+      people: people.map(p => ({ cqid: p.cqid, counts: p.counts, items: p.items, message: formatPendingMessage(p, today) })),
+      unassigned: cqid ? [] : t.unassigned,
+      share_text: formatTeamSummary(view),
+    })
+  })
+
+  server.registerTool('send_pending_reminders', {
+    title: 'Send each person their pending list in Cirqle chat',
+    description: 'Sends every person who has pending work (or only the CQIDs given) a direct chat message in Cirqle from the owner\'s account, with their own point-wise list in Malayalam and English. Inside the app only. Safe to run again: anyone who already got today\'s reminder is skipped. The sender must be an admin.',
+    inputSchema: {
+      from_cqid: z.string().min(1).describe('CQID of the owner the messages come from.'),
+      cqids: z.array(z.string()).max(50).optional().describe('Only these people; leave out for everyone with pending work.'),
+    },
+    annotations: write,
+  }, async ({ from_cqid, cqids }) => {
+    const r = await sendPendingReminders(admin, { fromCqid: from_cqid, today: todayISO(), cqids, baseUrl: process.env.NEXT_PUBLIC_SITE_URL })
+    if (!r.ok) return fail(r.error)
+    const { sent, skipped } = r.result
+    const text = `Sent ${sent.length} reminder${sent.length === 1 ? '' : 's'}: ${sent.map(s => `${s.cqid} (${s.items}${s.late ? `, ${s.late} late` : ''})`).join(', ') || 'none'}.${skipped.length ? ` Skipped: ${skipped.map(s => `${s.cqid} (${s.reason})`).join(', ')}.` : ''}`
+    return result(text, r.result)
+  })
+
   // ── Leads and quotations ─────────────────────────────────────────────────
 
   server.registerTool('list_leads', {
@@ -384,6 +421,7 @@ export function registerAutomationTools(server: McpServer, admin: Admin) {
 3. Call upcoming_posts for 7 days and list the posts not yet sent to Requests, by client.
 4. Call list_invoices with outstanding_only and name the three biggest amounts due.
 5. Call list_unbilled_work for this month.
+6. Call team_pending and include its share_text: each CQID's late and today work, and open requests nobody is assigned to.
 Then write a short brief in plain words: first what needs action today, then what can wait. Do not change anything; ask me before sending posts to Requests.`))
 
   server.registerPrompt('plan_social_month', {
