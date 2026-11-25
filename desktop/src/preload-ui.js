@@ -9,7 +9,9 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('desk', {
   selectClientWorkspace: () => ipcRenderer.send('client-workspace:select'),
   clientChat: () => ipcRenderer.send('client-workspace:chat'),
-  workspaceMenu: () => ipcRenderer.send('workspace:menu'),
+  // Quick actions: the full menu, or one action by id (see main/quick-actions.js).
+  quickMenu: () => ipcRenderer.send('quick:menu'),
+  quickRun: (id) => ipcRenderer.send('quick:run', id),
   saveWorkspace: (name) => ipcRenderer.invoke('workspace:save', name),
   onWorkspacePrompt: (cb) => ipcRenderer.on('workspace:prompt', () => cb()),
   expandPane: (pane) => ipcRenderer.send('pane:expand', pane),

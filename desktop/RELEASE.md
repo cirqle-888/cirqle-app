@@ -1,11 +1,20 @@
 # Desktop releases
 
-## Local installer
+## Public installer (what the team uses)
 
-`npm run dmg` creates the unsigned macOS installer. It supports the in-app
-update badge and download instructions; it never attempts an unsigned automatic
-replacement. More options → Install in Applications is available when launching
-the packaged app outside Applications and will not overwrite an existing copy.
+1. Set the version in `package.json` and in `latest.json` (its `download` is the
+   release address `publish-mac.sh` prints the pattern for).
+2. `npm run dmg` — runs the checks and builds `dist/Cirqle Desktop-<version>-arm64.dmg`.
+   The app is signed locally ("ad-hoc"), not with an Apple Developer ID, so a
+   first launch needs **System Settings → Privacy & Security → Open Anyway**.
+3. `bash scripts/publish-mac.sh` — uploads the installer as a public GitHub
+   release. It refuses to run if `latest.json` does not describe this build.
+4. Commit and push `latest.json`. Installed apps read it from GitHub and show
+   the update badge; `https://app.cirqle.work/download` reads the same file and
+   always offers the published build, with the first-launch steps.
+
+More options → Install in Applications is available when the packaged app is
+launched outside Applications; it will not overwrite an existing copy.
 
 ## Signed automatic updates
 

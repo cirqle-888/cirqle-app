@@ -1,8 +1,8 @@
 {
   "name": "cirqle-desktop",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
-  "description": "Cirqle + WhatsApp Web, side by side, with one-tap clipboard \u2192 Quick Capture.",
+  "description": "Cirqle and WhatsApp Web side by side, with your daily actions one click away.",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",

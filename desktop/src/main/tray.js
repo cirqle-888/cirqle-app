@@ -2,19 +2,18 @@
 
 /**
  * Menu-bar / system-tray icon. Lightweight by design: mirrors actions that
- * already exist elsewhere (toolbar, app menu, update notifier) — no new
- * capabilities, just reachability while the window is hidden.
+ * already exist elsewhere (the Quick menu, downloads, the update notifier) —
+ * no new capabilities, just reachability while the window is hidden.
  */
 const { app, Tray, Menu, nativeImage, dialog } = require('electron')
 const path = require('path')
 
 const dl = require('./downloads')
 const updates = require('./updates')
+const quick = require('./quick-actions')
 
 const deps = {
   getWin: () => null,
-  sendClipboardToCirqle: () => {},
-  navigate: () => {},
 }
 function init(d) { Object.assign(deps, d) }
 
@@ -47,8 +46,9 @@ function create() {
     { label: 'Hide App', click: hideApp },
     { type: 'separator' },
     { label: 'Downloads', click: () => { showApp(); dl.toggleDownloadsPanel() } },
-    { label: 'Quick Capture', click: () => { showApp(); deps.sendClipboardToCirqle() } },
-    { label: 'Settings', click: () => { showApp(); deps.navigate('/dashboard/settings') } },
+    // The same list as the toolbar's Quick menu (quick-actions.js). Each one
+    // brings the window forward first, so it works with the app hidden.
+    ...quick.template(),
     { type: 'separator' },
     { label: 'Check for Updates…', click: () => updates.checkForUpdates({ interactive: true }) },
     {

@@ -308,6 +308,8 @@ export async function updateSession(request: NextRequest) {
                   || pathname.startsWith('/feed/')     // client feed approval — tokenized, no login
                   || pathname.startsWith('/start/')    // client hub — single link to all that client's intake apps
                   || pathname.startsWith('/careers')   // public job application form — no login
+                  || pathname === '/download'          // where to get the Mac and Android apps — a new team
+                                                         // member has no session on the machine they install onto
                   || pathname.startsWith('/api/shop/')   // The Memoura website's public price list (gifts that are on, banner,
                                                          // sizes, delivery charges). Read-only, nothing personal; the static
                                                          // site has no session, and a redirect to /login would fail its CORS.

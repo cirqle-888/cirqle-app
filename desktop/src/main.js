@@ -38,6 +38,8 @@ const deeplinks = require('./main/deeplinks')
 const health = require('./main/pane-health')
 const workspaces = require('./main/workspaces')
 const clientWorkspace = require('./main/client-workspace')
+const quick = require('./main/quick-actions')
+const toolbarMenus = require('./main/toolbar-menus')
 health.init({ getWin: () => win })
 updates.init({ getChrome: () => chrome, allowInstall: async () => {
   const ok = await health.confirmClose(['studio', 'studio2'])
@@ -174,8 +176,64 @@ function createCirqle2() {
   dl.wireEscToCloseDownloads(cirqle2)
   security.protectNavigation(cirqle2, shell)
   cirqle2.webContents.setWindowOpenHandler(makeWindowOpenHandler(() => cirqle2))
+  // The pane's label follows the page: "Prompt Studio" while it shows Prompt
+  // Studio, otherwise the plain compare label the toolbar already knows.
+  const nameIt = (url) => {
+    const title = besideTitle(url)
+    if (state.paneTitles.cirqle2 === title) return
+    state.paneTitles.cirqle2 = title
+    layoutMod.broadcast()
+  }
+  cirqle2.webContents.on('did-navigate', (_e, url) => nameIt(url))
+  cirqle2.webContents.on('did-navigate-in-page', (_e, url, isMainFrame) => { if (isMainFrame) nameIt(url) })
   win.contentView.addChildView(cirqle2)
   raiseChrome()
+}
+
+/** What to call the second Cirqle pane for the page it is on (null = "compare"). */
+function besideTitle(url) {
+  return String(url || '').startsWith(CIRQLE_URL + '/dashboard/prompt-studio') ? 'Prompt Studio' : null
+}
+
+/**
+ * Open a Cirqle page in the second Cirqle pane, beside whatever is on screen —
+ * how Prompt Studio opens next to the client or the WhatsApp chat it is for.
+ * Called again for a page that is already showing there, it puts the pane away
+ * (so the toolbar button toggles). With no room for another pane the page opens
+ * in the main pane instead, rather than doing nothing.
+ */
+function openBeside(route) {
+  const url = CIRQLE_URL + route
+  if (state.panes.includes('cirqle2')) {
+    if (cirqle2 && cirqle2.webContents.getURL().startsWith(url)) { layoutMod.removePane('cirqle2'); return }
+    cirqle2?.webContents.loadURL(url)
+  } else if (layoutMod.addPane('cirqle2')) {
+    cirqle2?.webContents.loadURL(url)
+  } else {
+    navigate(route)
+    return
+  }
+  state.paneTitles.cirqle2 = besideTitle(url)
+  layoutMod.broadcast()
+  cirqle2?.webContents.focus()
+}
+
+/** Bring the window forward — quick actions run from the tray and the Dock too. */
+function showApp() {
+  if (!win || win.isDestroyed()) return
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+}
+
+/** Open Cirqle's own search (⌘K) by pressing the key in the main pane. */
+function openSearch() {
+  ensureCirqleVisible()
+  const wc = cirqle.webContents
+  wc.focus()
+  const modifiers = [process.platform === 'darwin' ? 'meta' : 'control']
+  wc.sendInputEvent({ type: 'keyDown', keyCode: 'K', modifiers })
+  wc.sendInputEvent({ type: 'keyUp', keyCode: 'K', modifiers })
 }
 
 /**
@@ -526,7 +584,18 @@ notifications.init({
   cirqleUrl: CIRQLE_URL,
 })
 notifications.register()
-require('./main/toolbar-menus').register({ getWin: () => win, getChrome: () => chrome, switchWa: ensureWaPane, reloadCirqle: reloadCirqleView })
+toolbarMenus.register({ getWin: () => win, getChrome: () => chrome, switchWa: ensureWaPane, reloadCirqle: reloadCirqleView })
+quick.init({
+  showApp: () => showApp(),
+  navigate: (r) => navigate(r),
+  openBeside: (r) => openBeside(r),
+  sendClipboardToCirqle: () => sendClipboardToCirqle(),
+  openSearch: () => openSearch(),
+})
+// The toolbar's Quick button (a native menu: an HTML dropdown would be clipped
+// by the 48px toolbar view) and its one-click buttons.
+ipcMain.on(CH.QUICK_MENU, () => Menu.buildFromTemplate(quick.template()).popup())
+ipcMain.on(CH.QUICK_RUN, (_e, id) => { if (typeof id === 'string') quick.run(id) })
 
 // No init(): presence answers from the OS, not from any window or view.
 presence.register()
@@ -697,6 +766,13 @@ ipcMain.on(CH.SPLIT_MENU, () => {
       template.push({ label: `Close ${paneTitle(p)}`, click: () => ipcMain.emit(CH.SPLIT_CLOSE, null, p) })
     }
   }
+  // Less-used arrangements live here rather than on the toolbar, which is kept
+  // for what people reach for all day.
+  template.push(
+    { type: 'separator' },
+    { label: 'Client workspace…', click: () => ipcMain.emit(CH.CLIENT_WORKSPACE_SELECT, null) },
+    { label: 'Layouts', submenu: toolbarMenus.layoutItems({ getChrome: () => chrome }) },
+  )
   // NOTE: no { window } option — win is a BaseWindow, and popup() only accepts
   // a BrowserWindow; passing it makes the popup silently fail on some versions.
   Menu.buildFromTemplate(template).popup()
@@ -968,12 +1044,10 @@ app.whenReady().then(() => {
   setInterval(pollClipboard, 1500)
   setInterval(pollToolbarPeek, 150)
   updates.startPeriodicChecks()
-  tray.init({
-    getWin: () => win,
-    sendClipboardToCirqle: () => sendClipboardToCirqle(),
-    navigate: (r) => navigate(r),
-  })
+  tray.init({ getWin: () => win })
   tray.create()
+  // Right-click (or press and hold) the Dock icon: the same quick actions.
+  if (process.platform === 'darwin' && app.dock) app.dock.setMenu(Menu.buildFromTemplate(quick.template()))
 })
 
 app.on('activate', () => { if (win && !win.isDestroyed()) win.show() })

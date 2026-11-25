@@ -69,11 +69,12 @@ if (state.panes.includes('cirqle2')) {
 state.clientWorkspace = null
 state.expandedPane = null
 state.paneStatus = {}
+state.paneTitles = {}   // what a pane is showing right now, e.g. cirqle2 → 'Prompt Studio'
 state.saveStatus = {}
 if (!Array.isArray(state.savedWorkspaces)) state.savedWorkspaces = []
 const saveSettings = () => {
   try {
-    const { clientWorkspace, expandedPane, paneStatus, saveStatus, ...persisted } = state
+    const { clientWorkspace, expandedPane, paneStatus, paneTitles, saveStatus, ...persisted } = state
     const temporary = settingsFile() + '.tmp'
     fs.writeFileSync(temporary, JSON.stringify(persisted))
     fs.renameSync(temporary, settingsFile())

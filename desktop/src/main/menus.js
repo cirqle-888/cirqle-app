@@ -13,6 +13,7 @@ const { state } = require('./settings')
 const dl = require('./downloads')
 const wa = require('./whatsapp')
 const { applyPreset: applyPresetL } = require('./layout')
+const quick = require('./quick-actions')
 
 const FILE_URL_RE = /\.(pdf|xlsx?|csv|docx?|pptx?|png|jpe?g|zip)(\?|#|$)/i
 
@@ -28,19 +29,6 @@ const deps = {
   getClipHistory: () => [],
 }
 function init(d) { Object.assign(deps, d) }
-
-const QUICK_ACTIONS = [
-  { label: 'Request / Quick Capture', route: '/dashboard/capture' },
-  { label: 'Client', route: '/dashboard/clients' },
-  { label: 'Task', route: '/dashboard/tasks' },
-  // Offers are prepared in Offer Studio, not in Cirqle (the in-app Offer
-  // Intake page was retired in Oct 2026), so this opens the Studio pane.
-  { label: 'Offer', studio: true },
-  { label: 'Invoice', route: '/dashboard/invoices' },
-  { label: 'Quotation', route: '/dashboard/quotations' },
-]
-
-
 
 const truncate = (s, n = 60) => { const one = String(s).replace(/\s+/g, ' ').trim(); return one.length > n ? one.slice(0, n) + '…' : one }
 
@@ -109,21 +97,13 @@ function buildMenu() {
   const menu = Menu.buildFromTemplate([
     ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
     {
-      label: 'Capture',
+      // The daily actions, with their shortcuts. The list lives in
+      // quick-actions.js; this is the one place the shortcuts are registered.
+      label: 'Quick',
       submenu: [
-        { label: 'New Request from Clipboard', accelerator: 'CmdOrCtrl+Shift+N', click: deps.sendClipboardToCirqle },
-        { label: 'Recent Clipboard', submenu: recent },
+        ...quick.template({ accelerators: true }),
         { type: 'separator' },
-        {
-          label: 'New',
-          submenu: QUICK_ACTIONS.map((a) => ({
-            label: a.label,
-            // Open-only: toggling here would close a Studio pane that is already up.
-            click: () => (a.studio
-              ? (!state.panes.includes('studio') && deps.toggleStudio())
-              : deps.navigate(a.route)),
-          })),
-        },
+        { label: 'Recent Clipboard', submenu: recent },
       ],
     },
     // REQUIRED on macOS: without the Edit menu's roles, Cmd+C / Cmd+V don't work
@@ -167,4 +147,4 @@ function buildMenu() {
 }
 
 
-module.exports = { init, buildMenu, wireContextMenu, truncate, FILE_URL_RE, QUICK_ACTIONS }
+module.exports = { init, buildMenu, wireContextMenu, truncate, FILE_URL_RE }

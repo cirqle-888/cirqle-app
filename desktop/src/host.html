@@ -41,19 +41,22 @@ input { color:#f8fafc; background:#0f172a; border:1px solid #475569; border-radi
 #web-url { flex:1; padding:2px 6px; }
 #name-form { display:none; align-items:center; gap:4px; }
 #name-input { width:150px; }
-@media(max-width:1050px) { .brand,#btn-back,#btn-forward { display:none; } #btn-wa { max-width:150px; } button { padding:6px 8px; } .pane-state { max-width:75px; } }
+@media(max-width:1180px) { .brand,#btn-back,#btn-forward { display:none; } #btn-wa { max-width:150px; } button { padding:6px 8px; } .pane-state { max-width:75px; } }
+@media(max-width:1000px) { #btn-tasks { display:none; } #btn-wa { max-width:120px; } }
 </style>
 </head>
 <body>
 <div id="toolbar-row">
 <img id="app-logo" class="brand" src="../assets/icon.png" alt="Cirqle">
-<button id="cap" class="primary" title="Create a request from copied text">＋ New request</button>
+<button id="btn-quick" class="primary" title="Everything you do every day, in one menu">Quick ▾</button>
+<button id="btn-mywork" data-quick="my-work" title="My Work — log today's work (⌘1)">My Work</button>
+<button id="btn-tasks" data-quick="tasks" title="Tasks (⌘2)">Tasks</button>
+<button id="btn-chat" data-quick="chat" title="Team Chat (⌘3)">Chat</button>
+<button id="btn-prompt" data-quick="prompt-studio" title="Open Prompt Studio beside your work (⌘⇧P)">Prompt Studio</button>
 <button id="btn-back" aria-label="Go back in Cirqle">‹</button>
 <button id="btn-forward" aria-label="Go forward in Cirqle">›</button>
-<button id="btn-studio" title="Open Flyer Cirqle; Option-click opens a second Flyer">Flyer</button>
-<button id="btn-split" title="Add a pane">＋ Pane</button>
-<button id="btn-client" title="Choose a client and open their tasks, invoices and Flyers">Client workspace</button>
-<button id="btn-layouts" title="Choose or save a workspace layout">Layouts ▾</button>
+<button id="btn-split" title="Add or close a pane: Flyer, a second Cirqle page, WhatsApp, a browser. Client workspace and saved layouts are here too.">Panes ▾</button>
+<button id="btn-client" style="display:none" title="Change client workspace"></button>
 <form id="name-form"><input id="name-input" maxlength="60" aria-label="Name"><button type="submit">Save</button><button type="button" id="name-cancel" aria-label="Cancel">×</button></form>
 <div class="spacer"></div>
 <button id="btn-wa" title="Switch or manage WhatsApp accounts">WhatsApp ▾</button>
@@ -73,22 +76,17 @@ const $ = s => document.querySelector(s)
 let lastState = null, lastUpdate = null, messageTimer = null, promptAccount = null
 const logo = $('#app-logo'), defaultLogo = '../assets/icon.png'
 logo.onerror = () => { if (!logo.src.endsWith('assets/icon.png')) logo.src = defaultLogo }
-$('#cap').onclick = () => window.desk.capture()
+$('#btn-quick').onclick = () => window.desk.quickMenu()
+for (const b of document.querySelectorAll('[data-quick]')) b.onclick = () => window.desk.quickRun(b.dataset.quick)
 $('#btn-back').onclick = () => window.desk.goBack()
 $('#btn-forward').onclick = () => window.desk.goForward()
 $('#btn-split').onclick = () => window.desk.splitMenu()
 $('#btn-client').onclick = () => window.desk.selectClientWorkspace()
 $('#btn-client-chat').onclick = () => window.desk.clientChat()
-$('#btn-layouts').onclick = () => window.desk.workspaceMenu()
 $('#btn-wa').onclick = () => window.desk.waMenu()
 $('#btn-more').onclick = () => window.desk.moreMenu()
 $('#btn-notifs').onclick = () => window.desk.openNotifications()
 $('#btn-downloads').onclick = () => window.desk.toggleDownloads()
-$('#btn-studio').onclick = e => {
- const pane = e.altKey ? 'studio2' : 'studio'
- if (lastState?.panes.includes(pane)) window.desk.splitClose(pane)
- else window.desk.splitAdd({kind:pane})
-}
 function showMessage(text, kind = '', duration = 12000) {
  clearTimeout(messageTimer)
  $('#status-message').textContent = text
@@ -98,13 +96,13 @@ function showMessage(text, kind = '', duration = 12000) {
 function showDefaultMessage() {
  if (messageTimer) return
  const cramped = lastState?.panes.length > 2 && innerWidth < 1150
- $('#status-message').textContent = cramped ? 'Need more room? Use ↗ to expand a pane.' : 'Choose Layouts to save your workspace. Sharing opens a draft for review.'
+ $('#status-message').textContent = cramped ? 'Need more room? Use ↗ to expand a pane.' : 'Quick ▾ has everything you do daily. ⌘1 My Work · ⌘2 Tasks · ⌘3 Chat · ⌘⇧N request from clipboard.'
  $('#status-message').className = ''
 }
 function showNameForm(account = null) {
  promptAccount = account
  $('#name-form').style.display = 'flex'
- $('#btn-layouts').style.display = 'none'
+ $('#btn-split').style.display = 'none'
  $('#btn-back').style.display = 'none'
  $('#btn-forward').style.display = 'none'
  $('#name-input').value = account?.label || ''
@@ -114,10 +112,10 @@ function showNameForm(account = null) {
 }
 function closeNameForm() {
  $('#name-form').style.display = 'none'
- $('#btn-layouts').style.display = ''
+ $('#btn-split').style.display = ''
  $('#btn-back').style.display = ''
  $('#btn-forward').style.display = ''
- $('#btn-layouts').focus()
+ $('#btn-split').focus()
 }
 $('#name-cancel').onclick = closeNameForm
 $('#name-input').onkeydown = e => { if (e.key === 'Escape') { e.preventDefault(); closeNameForm() } }
@@ -155,13 +153,16 @@ window.desk.onDownloadsPulse(() => $('#btn-downloads').animate([{transform:'scal
 function reportDlBtn() { const r = $('#btn-downloads').getBoundingClientRect(); window.desk.reportDownloadBtn({x:r.x,y:r.y,w:r.width,h:r.height}) }
 function paneName(pane,s) {
  if (s.clientWorkspace?.roles?.[pane]) return s.clientWorkspace.roles[pane]
+ if (s.paneTitles?.[pane]) return s.paneTitles[pane]
  return ({cirqle:'Cirqle',cirqle2:'Cirqle · compare',studio:'Flyer Cirqle',studio2:'Flyer Cirqle · 2'})[pane]
  || (pane.startsWith('wa:') ? 'WhatsApp · ' + (s.waAccounts.find(a => a.id === pane.slice(3))?.label || '') : s.webTabs.find(t => t.id === pane.slice(4))?.label || 'Browser')
 }
 window.desk.onState(s => {
  lastState = s
- $('#btn-client').textContent = s.clientWorkspace ? s.clientWorkspace.code || 'Client workspace' : 'Client workspace'
- $('#btn-client').title = s.clientWorkspace ? 'Change client: '+s.clientWorkspace.name : 'Choose a client workspace'
+ // Shown only while a client workspace is open: which client, and a way to change it.
+ $('#btn-client').style.display = s.clientWorkspace ? '' : 'none'
+ $('#btn-client').textContent = s.clientWorkspace ? 'Client · '+(s.clientWorkspace.code || 'workspace') : ''
+ $('#btn-client').title = s.clientWorkspace ? 'Change client: '+s.clientWorkspace.name : ''
  $('#btn-client').classList.toggle('active',!!s.clientWorkspace)
  $('#btn-client-chat').style.display = s.clientWorkspace ? '' : 'none'
  const panes = s.panes || [], strip = $('#pane-strip')
@@ -193,8 +194,9 @@ window.desk.onState(s => {
   close.onclick = () => window.desk.splitClose(pane); item.appendChild(close)
   strip.appendChild(item)
  })
- const flyer = $('#btn-studio'); flyer.classList.toggle('active',panes.includes('studio')||panes.includes('studio2'))
- flyer.title = (panes.includes('studio') ? 'Close Flyer Cirqle' : 'Open Flyer Cirqle') + ' · Option-click for a second Flyer'
+ const promptOpen = panes.includes('cirqle2') && s.paneTitles?.cirqle2 === 'Prompt Studio'
+ $('#btn-prompt').classList.toggle('active',promptOpen)
+ $('#btn-prompt').title = (promptOpen ? 'Close Prompt Studio' : 'Open Prompt Studio beside your work') + ' (⌘⇧P)'
  const account = s.waAccounts?.find(a=>a.id===s.activeWa)
  $('#btn-wa').textContent = 'WhatsApp · '+(account?.label || 'Accounts')+' ▾'
  $('#btn-wa').title = 'Active sharing account: '+(account?.label || 'None')+'. Switch or manage accounts.'

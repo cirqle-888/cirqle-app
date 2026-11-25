@@ -25,11 +25,25 @@ so you stay logged in across restarts.
 
 ## Using it
 
-- **Layout:** toolbar buttons or the **View** menu — `50/50`, `Cirqle 75`,
-  `WhatsApp 75`, `Hide WhatsApp`, `Hide Cirqle`. Drag the divider to resize. The last
-  layout is remembered.
-- **Capture:** copy text in the WhatsApp pane → click **➕ New request from clipboard**
-  (or press **⌘⇧N**). Cirqle's Quick Capture opens prefilled; review and confirm.
+- **Quick ▾ (toolbar):** everything people do every day in one menu, in the
+  order staff actually use it — My Work, Tasks, Team Chat, Requests, Work Log,
+  then *New request from clipboard*, *Search or jump anywhere*, *Prompt Studio
+  beside*, *Record a payment*, clients and content, and the office pages. The
+  same list is in the menu bar (**Quick**, where the shortcuts are: ⌘1 My Work,
+  ⌘2 Tasks, ⌘3 Chat, ⌘4 Requests, ⌘5 Work Log, ⌘6 Clients, ⌘7 Social Calendar,
+  ⌘0 Home), on the **menu-bar icon** and on the **Dock icon** (right-click).
+  The list lives in one file, `src/main/quick-actions.js`.
+- **My Work / Tasks / Chat (toolbar):** the three most-used pages, one click.
+- **Prompt Studio (toolbar, or ⌘⇧P):** opens Prompt Studio in its own pane
+  beside whatever you are working on — the client page, or the WhatsApp chat you
+  are writing for. Click again to put it away.
+- **Panes ▾ (toolbar):** add or close a pane — a second Cirqle page to compare,
+  the Flyer app (Offer Studio, and a second Flyer pane), another WhatsApp
+  account, a browser. **Client workspace** and saved **Layouts** are in this
+  menu too. Drag a divider to resize; the last layout is remembered.
+- **Capture:** copy text in the WhatsApp pane → **Quick ▾ → New request from
+  clipboard** (or press **⌘⇧N** from anywhere, even another app). Cirqle's Quick
+  Capture opens prefilled; review and confirm.
 - **Copy/paste** uses the normal Edit menu shortcuts (⌘C / ⌘V).
 - **Right-click menu (both panes):** a Chrome/Safari-style, context-aware menu —
   **Copy Image / Copy Image Address / Save Image to Downloads**, **Copy / Open Link
@@ -45,15 +59,15 @@ so you stay logged in across restarts.
 - **Drag downloaded files out:** grab any item in the Downloads shelf and drag it
   straight into the WhatsApp pane's chat, into Finder, or onto any other app — a
   real OS file drag.
-- **Offer Studio beside Cirqle (toolbar button, or ⌘⇧O):** the flyer app as a
+- **Offer Studio beside Cirqle (Panes ▾, or ⌘⇧O):** the flyer app as a
   real pane, not a browser tab — downloads land in the common shelf, right-click
   offers *Share Image to Linked WhatsApp*, and it shares Cirqle's login. It comes
-  back when you reopen the window. **⌥-click the same button** (or ⌥⌘⇧O, or
-  the split menu's *Offer Studio 2*) for a **second Studio pane**: the sheet on
+  back when you reopen the window. Press **⌥⌘⇧O** (or choose *Offer Studio 2*
+  in Panes ▾) for a **second Studio pane**: the sheet on
   one side, the offer list or another client's sheet on the other. The two
   navigate independently, and closing a split keeps its page for when you
   reopen it.
-- **Compare two Cirqle pages (⧉ toolbar button):** open a **second Cirqle page
+- **Compare two Cirqle pages (Panes ▾ → Duplicate Cirqle):** open a **second Cirqle page
   side-by-side** in the right pane (duplicates the current page; shares your
   login). Great for comparing/analysing two records at once. Click it again — or
   click a WhatsApp tab — to bring WhatsApp back.
@@ -63,23 +77,21 @@ so you stay logged in across restarts.
   or *Download + reveal in Finder*. Set the default (and optionally force it) in
   **Cirqle → Settings → WhatsApp**.
 
-## Build an unsigned macOS app (free)
+## Build and publish the Mac app (free)
 
 ```bash
-npm run dmg          # → dist/Cirqle Desktop-<version>.dmg
+npm run dmg                    # → dist/Cirqle Desktop-<version>-arm64.dmg
+bash scripts/publish-mac.sh    # → public download (see RELEASE.md)
 ```
 
-This is **unsigned** (no paid Apple Developer ID). Because of that, macOS Gatekeeper
-blocks the first launch. Each user does this **once**:
+The build is signed locally ("ad-hoc"), not with a paid Apple Developer ID, so
+macOS asks each person once: open the app, choose **Done** on the warning, then
+**System Settings → Privacy & Security → Open Anyway**. The same steps are on
+the public page, `https://app.cirqle.work/download`.
 
-- **Right-click** the app in Applications → **Open** → **Open**, or
-- clear the quarantine flag:
-  ```bash
-  xattr -dr com.apple.quarantine "/Applications/Cirqle Desktop.app"
-  ```
-
-**Updates:** there is no auto-updater (auto-update needs signing). To update, build a
-new `.dmg`, share it, and re-install over the top. The toolbar shows the version.
+**Updates:** the app checks `desktop/latest.json` on GitHub and shows an update
+badge; the person downloads the new installer and replaces the app. Fully
+automatic updates need a Developer ID (see RELEASE.md, "Signed automatic updates").
 
 **Windows:** not built yet. The ~10% of staff not on Mac use Cirqle + WhatsApp Web in a
 browser meanwhile. A Windows target can be added later from this same codebase

@@ -2,6 +2,9 @@ appId: work.cirqle.desktop
 productName: Cirqle Desktop
 directories:
   output: dist
+# Package the Electron that is installed and that the checks ran against,
+# instead of downloading a copy at build time.
+electronDist: node_modules/electron/dist
 files:
   - src/**/*
   - assets/**/*
@@ -21,9 +24,17 @@ mac:
   category: public.app-category.business
   icon: assets/icon.icns
   target: dmg
-  # Unsigned, free build (no Apple Developer account). Gatekeeper blocks the
-  # first launch — see README for the one-time right-click → Open / xattr step.
-  identity: null
+  # Free build: no Apple Developer account, so no Developer ID. It is signed
+  # locally ("ad-hoc", identity "-") rather than left unsigned, because a bundle
+  # with a broken seal is reported as "damaged" on an Apple Silicon Mac once it
+  # has been downloaded, with no way to open it from System Settings. Signed
+  # ad-hoc, macOS says it "could not verify" the app and offers Open Anyway in
+  # System Settings → Privacy & Security (the steps are on /download).
+  identity: "-"
+  # Hardened runtime needs a real team identity: with an ad-hoc signature its
+  # library validation refuses Electron's own framework and the app will not
+  # start. The signed profile (electron-builder.signed.cjs) turns it back on.
+  hardenedRuntime: false
   # Microphone permission (chat voice notes): macOS shows this text in the
   # system dialog; without the key, mic access is silently denied.
   extendInfo:

@@ -5,20 +5,23 @@ const { state } = require('./settings')
 const layout = require('./layout')
 const workspaces = require('./workspaces')
 const updates = require('./updates')
+/**
+ * The saved-layout entries, as menu items. They used to be a toolbar button of
+ * their own; they now sit inside the Panes menu, next to the panes they arrange.
+ */
+function layoutItems(deps) {
+  const saved = state.savedWorkspaces.filter(w => typeof w.name === 'string' && Array.isArray(w.panes))
+  const items = [
+    ...workspaces.presets().map(w => ({ label: w.name, click: () => workspaces.apply(w) })),
+    { type: 'separator' },
+    ...saved.map(w => ({ label: w.name, click: () => workspaces.apply(w) })),
+    { label: 'Save current layout…', click: () => deps.getChrome()?.webContents.send(CH.WORKSPACE_PROMPT) },
+  ]
+  if (saved.length) items.push({ label: 'Remove saved layout', submenu: saved.map(w => ({ label: w.name, click: () => workspaces.remove(w.id) })) })
+  return items
+}
 function register(deps) {
   ipcMain.handle(CH.WORKSPACE_SAVE, (_e, name) => workspaces.save(name))
-  ipcMain.on(CH.WORKSPACE_MENU, () => {
-    const saved = state.savedWorkspaces.filter(w => typeof w.name === 'string' && Array.isArray(w.panes))
-    const items = [
-      { label: 'Workspaces', enabled: false },
-      ...workspaces.presets().map(w => ({ label: w.name, click: () => workspaces.apply(w) })),
-      { type: 'separator' },
-      ...saved.map(w => ({ label: w.name, click: () => workspaces.apply(w) })),
-      { label: 'Save current layout…', click: () => deps.getChrome()?.webContents.send(CH.WORKSPACE_PROMPT) },
-    ]
-    if (saved.length) items.push({ label: 'Remove saved layout', submenu: saved.map(w => ({ label: w.name, click: () => workspaces.remove(w.id) })) })
-    Menu.buildFromTemplate(items).popup()
-  })
   ipcMain.on(CH.WA_MENU, () => {
     const items = [{ label: 'WhatsApp accounts', enabled: false }]
     for (const account of state.waAccounts) {
@@ -54,4 +57,4 @@ function register(deps) {
     { label: `Cirqle Desktop ${app.getVersion()}`, enabled: false },
   ]).popup())
 }
-module.exports = { register }
+module.exports = { register, layoutItems }
