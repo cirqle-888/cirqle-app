@@ -1,52 +1,68 @@
 name: Desktop macOS build
 
-# Produces a UNIVERSAL Cirqle Desktop DMG (Apple Silicon + Intel) on a macOS
-# runner. Unsigned by default (no Apple account needed) — Gatekeeper shows a
-# one-time warning; see docs/DISTRIBUTION.md for the right-click → Open step.
+# Builds the Cirqle Desktop installer for Mac on a macOS runner and, for a
+# desktop-v* tag, attaches it to that tag's GitHub release — which is the
+# public download. Nothing has to be uploaded by hand: the installer is about
+# 120 MB, and the browser route for that proved easy to get wrong.
 #
-# To ship a SIGNED + NOTARIZED DMG (clean double-click install, like Slack),
-# add the Developer-ID secrets below and uncomment the signing env — that path
-# needs a paid Apple Developer account.
+# To release:  set the version in desktop/package.json and desktop/latest.json,
+# push to main, then push the tag  desktop-v<version>.  The tag must match the
+# version in package.json or the job stops before building.
 #
-# Trigger from the Actions tab or by pushing a desktop-v* tag.
+# Apple Silicon only (M1 and newer), signed locally ("ad-hoc"), not with an
+# Apple Developer ID: macOS asks each person once to allow the app in System
+# Settings → Privacy & Security. The steps are on https://app.cirqle.work/download.
+# A signed, notarised build needs a paid Apple Developer account — see
+# desktop/RELEASE.md, "Signed automatic updates".
+#
+# Also runs from the Actions tab (workflow_dispatch); that build is kept as a
+# workflow artifact only and is not attached to any release.
 on:
   workflow_dispatch:
   push:
     tags: ['desktop-v*']
 
+permissions:
+  contents: write   # to attach the installer to the release
+
 jobs:
   macos:
-    runs-on: macos-latest
+    runs-on: macos-latest   # Apple Silicon
     defaults:
       run:
         working-directory: desktop
+    env:
+      # The checks need puppeteer's code, not its ~150 MB browser download.
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
       - name: Install
         run: npm ci
 
-      - name: IPC channel gate
-        run: npm run check:ipc
+      - name: The tag must name the version being built
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "desktop-v$VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match desktop/package.json version $VERSION."
+            exit 1
+          fi
 
-      - name: Build universal DMG (Apple Silicon + Intel)
-        run: npx electron-builder --mac dmg --universal
-        env:
-          # Unsigned free build. Remove this and add the Developer-ID cert +
-          # notarization secrets below to produce a signed, notarized DMG.
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-          # --- Signing + notarization (Apple Developer account required) ---
-          # CSC_LINK: ${{ secrets.MAC_CSC_LINK }}                 # base64 .p12 (Developer ID Application)
-          # CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-          # APPLE_ID: ${{ secrets.APPLE_ID }}
-          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # `npm run dmg` runs the desktop checks first, then builds the arm64 DMG
+      # as electron-builder.yml describes it (ad-hoc signature, the installed
+      # Electron rather than a second download).
+      - name: Check and build the installer
+        run: npm run dmg
+
+      - name: The app must be validly signed
+        run: codesign --verify --deep --strict "dist/mac-arm64/Cirqle Desktop.app"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -54,3 +70,21 @@ jobs:
           path: |
             desktop/dist/*.dmg
           if-no-files-found: error
+
+      - name: Attach the installer to the release
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          # The download address is fixed by this name (desktop/latest.json and
+          # the /download page point at it), so no spaces and no surprises.
+          ASSET="Cirqle-Desktop-$VERSION-mac-arm64.dmg"
+          cp "dist/Cirqle Desktop-$VERSION-arm64.dmg" "$RUNNER_TEMP/$ASSET"
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "Cirqle Desktop $VERSION" \
+              --notes "Cirqle Desktop $VERSION for Mac (Apple Silicon). Install steps: https://app.cirqle.work/download"
+          fi
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/$ASSET" --repo "$GITHUB_REPOSITORY" --clobber
+          echo "Published: https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$ASSET"

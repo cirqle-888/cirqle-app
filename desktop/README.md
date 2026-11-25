@@ -80,9 +80,12 @@ so you stay logged in across restarts.
 ## Build and publish the Mac app (free)
 
 ```bash
-npm run dmg                    # → dist/Cirqle Desktop-<version>-arm64.dmg
-bash scripts/publish-mac.sh    # → public download (see RELEASE.md)
+npm run dmg                    # → dist/Cirqle Desktop-<version>-arm64.dmg (to try locally)
+git tag desktop-v<version> && git push origin desktop-v<version>   # → GitHub builds and publishes it
 ```
+
+Releasing is a pushed tag: GitHub builds the installer and attaches it to the
+release, which is the public download. The full order is in RELEASE.md.
 
 The build is signed locally ("ad-hoc"), not with a paid Apple Developer ID, so
 macOS asks each person once: open the app, choose **Done** on the warning, then
