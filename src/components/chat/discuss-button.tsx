@@ -17,7 +17,7 @@ import { MessageSquare } from 'lucide-react'
 import { getOrCreateEntityConversation, type DiscussEntityType } from '@/app/(dashboard)/dashboard/chat/actions'
 import { DiscussPanel } from './discuss-panel'
 
-export function DiscussButton({ entityType, entityId, label = 'Discuss', variant = 'default', mode = 'panel', panelTitle }: {
+export function DiscussButton({ entityType, entityId, label = 'Discuss', variant = 'default', mode = 'panel', panelTitle, className }: {
   entityType: DiscussEntityType
   entityId: string
   label?: string
@@ -25,6 +25,8 @@ export function DiscussButton({ entityType, entityId, label = 'Discuss', variant
   mode?: 'panel' | 'navigate'
   /** Header shown in the panel — e.g. the task title. Falls back to "Discussion". */
   panelTitle?: string
+  /** Replaces the default button's classes, so it can match a toolbar it sits in. */
+  className?: string
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -71,8 +73,8 @@ export function DiscussButton({ entityType, entityId, label = 'Discuss', variant
   return (
     <>
       <button onClick={open} disabled={pending}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50">
-        <MessageSquare className="h-3.5 w-3.5" /> {pending ? 'Opening…' : label}
+        className={className ?? 'inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50'}>
+        <MessageSquare className={className ? 'h-4 w-4' : 'h-3.5 w-3.5'} /> {pending ? 'Opening…' : label}
       </button>
       {panel}
     </>

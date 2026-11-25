@@ -113,18 +113,23 @@ export default async function SocialCalendarPage({
   let calendars: any[] = []
   let migrated = true
   try {
-    const { data, error } = await admin
+    // task_id lets the plan picker count items a task holds directly as sent.
+    // It needs 20260825120000, so a database without that column is asked
+    // again without it rather than being reported as unmigrated.
+    const listPlans = (itemCols: string) => admin
       .from('social_calendars')
       .select(`
         id, client_id, month, title, status, notes, created_at,
         client:clients(id, name, code),
-        items:social_calendar_items(id, status, request_id)
+        items:social_calendar_items(${itemCols})
       `)
       .order('month', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(200)
-    if (error) migrated = false
-    calendars = data || []
+    let res = await listPlans('id, status, request_id, task_id')
+    if (res.error) res = await listPlans('id, status, request_id')
+    if (res.error) migrated = false
+    calendars = res.data || []
   } catch { migrated = false }
 
   const selectedId =

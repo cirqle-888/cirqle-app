@@ -39,6 +39,28 @@ export const CONTENT_TYPE_CHIP: Record<ContentType, string> = {
   other:    'bg-secondary text-muted-foreground border-border',
 }
 
+/**
+ * One solid colour per content type — the thin bar on a calendar card.
+ *
+ * The card itself stays neutral so a full month reads as a schedule rather
+ * than a patchwork; the bar still answers "what kind of piece is this" at a
+ * glance, and leaves colour free to carry STATUS (done, late) on the card.
+ */
+export const CONTENT_TYPE_ACCENT: Record<ContentType, string> = {
+  post:     'bg-violet-500',
+  reel:     'bg-pink-500',
+  story:    'bg-amber-500',
+  carousel: 'bg-sky-500',
+  video:    'bg-red-500',
+  flyer:    'bg-teal-500',
+  poster:   'bg-emerald-500',
+  blog:     'bg-indigo-500',
+  seo:      'bg-lime-500',
+  ad:       'bg-fuchsia-500',
+  email:    'bg-cyan-500',
+  other:    'bg-slate-400',
+}
+
 /** Types that make sense as size/format variants of a visual creative. */
 export const VARIANT_TYPES: readonly ContentType[] = ['post', 'reel', 'story', 'carousel', 'video', 'flyer', 'poster']
 

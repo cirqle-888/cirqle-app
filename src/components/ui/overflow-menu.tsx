@@ -41,10 +41,16 @@ export function OverflowMenu({
   items,
   label = 'More actions',
   align = 'right',
+  icon: TriggerIcon = MoreHorizontal,
+  text,
 }: {
   items: OverflowItem[]
   label?: string
   align?: 'left' | 'right'
+  /** Trigger icon — the "…" unless the menu is a named group (e.g. Export). */
+  icon?: LucideIcon
+  /** Visible trigger text, for a named group. Omit for the plain "…" button. */
+  text?: string
 }) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
@@ -98,9 +104,10 @@ export function OverflowMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         title={label}
-        className="shrink-0 flex items-center justify-center text-muted-foreground hover:text-foreground border border-border rounded-lg px-2.5 py-2 bg-secondary hover:bg-secondary/80 transition-colors"
+        className="shrink-0 flex items-center justify-center gap-1.5 text-sm text-muted-foreground hover:text-foreground border border-border rounded-lg px-2.5 py-2 bg-secondary hover:bg-secondary/80 transition-colors"
       >
-        <MoreHorizontal className="w-4 h-4" />
+        <TriggerIcon className="w-4 h-4" />
+        {text && <span className="hidden sm:inline">{text}</span>}
       </button>
 
       {open && pos && typeof document !== 'undefined' && createPortal(

@@ -22,12 +22,14 @@ import { planPackageCalendar, cadenceLabel, suggestPlacements } from '@/lib/pack
 import type { PackageRow, PackageItemRow, PackageTaskLike } from '@/lib/packages/types'
 import ContentBriefFields from '@/components/content-brief/content-brief-fields'
 import { DiscussButton } from '@/components/chat/discuss-button'
+import { OverflowMenu, type OverflowItem } from '@/components/ui/overflow-menu'
+import { PlanPicker, type PlanOption } from './plan-picker'
 import {
   DndContext, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable,
   pointerWithin, type DragEndEvent,
 } from '@dnd-kit/core'
 import {
-  CONTENT_TYPES, CONTENT_TYPE_LABEL, CONTENT_TYPE_CHIP, VARIANT_TYPES,
+  CONTENT_TYPES, CONTENT_TYPE_LABEL, CONTENT_TYPE_ACCENT, VARIANT_TYPES,
   PLATFORMS, PLATFORM_LABEL, platformLabels, contentTypeWithVariants,
   PROGRESS_LABEL, PROGRESS_CHIP, resolveItemProgress, isClosedRequestStatus,
   isUnrouted, canPullBack, isPlanFrozen, isFinishedItem,
@@ -47,6 +49,7 @@ import {
   Settings2, FileDown, FileSpreadsheet, FileText, Lightbulb, LayoutGrid,
   PanelRightClose, PanelRightOpen,
   CalendarRange, ChevronDown, Undo2,
+  Circle, Clock, Eye, Ban, AlertCircle, Download, ArrowRight, type LucideIcon,
 } from 'lucide-react'
 import { todayISO } from '@/lib/utils/local-date'
 
@@ -60,7 +63,7 @@ interface CalendarRow {
   status: 'draft' | 'active' | 'archived'
   notes: string | null
   client?: { id: string; name: string; code: string } | null
-  items?: { id: string; status: string; request_id: string | null }[]
+  items?: { id: string; status: string; request_id: string | null; task_id?: string | null }[]
 }
 
 interface ItemRow {
@@ -267,6 +270,110 @@ function DroppableZone({ id, className, activeClassName, disabled, children }: {
     <div ref={setNodeRef} className={`${className} ${isOver && !disabled ? activeClassName : ''}`}>
       {children}
     </div>
+  )
+}
+
+// ── Where an item stands ─────────────────────────────────────────────────────
+// The pipeline has six states, which is right for the Board but too many to
+// read off a month at a glance. On the calendar they fold into the four things
+// a planner asks: is it done, is someone on it, is it still to come, and has
+// its day passed without it being finished.
+type Bucket = 'done' | 'active' | 'planned' | 'late'
+
+function itemBucket(
+  progress: ItemProgress,
+  it: { scheduled_date: string | null; scheduled_end_date?: string | null },
+  today: string,
+): Bucket | null {
+  if (progress === 'cancelled') return null
+  // Delivered counts as done, as it does for the monthly report: the client
+  // has the work, whatever their review still says.
+  if (progress === 'done' || progress === 'delivered') return 'done'
+  const start = it.scheduled_date
+  // A campaign is late only once its LAST day has gone.
+  const due = it.scheduled_end_date && start && it.scheduled_end_date > start ? it.scheduled_end_date : start
+  if (due && due < today) return 'late'
+  return progress === 'planned' ? 'planned' : 'active'
+}
+
+const BUCKETS: { key: Bucket; label: string; hint: string; Icon: LucideIcon; text: string; bar: string }[] = [
+  { key: 'done',    label: 'Done',        hint: 'Finished, or delivered to the client',          Icon: CheckCircle2, text: 'text-emerald-600 dark:text-emerald-400', bar: 'bg-emerald-500' },
+  { key: 'active',  label: 'In progress', hint: 'Sent on: in Requests or with a designer',       Icon: Clock,        text: 'text-blue-600 dark:text-blue-400',       bar: 'bg-blue-500' },
+  { key: 'planned', label: 'Planned',     hint: 'On the calendar, not sent yet',                 Icon: Circle,       text: 'text-muted-foreground',                  bar: 'bg-foreground/25' },
+  { key: 'late',    label: 'Late',        hint: 'The date has passed and it is not finished',    Icon: AlertCircle,  text: 'text-red-600 dark:text-red-400',         bar: 'bg-red-500' },
+]
+
+/** The small mark on every card — the full pipeline state, one icon each. */
+const STATUS_ICON: Record<ItemProgress, { Icon: LucideIcon; cls: string }> = {
+  planned:     { Icon: Circle,       cls: 'text-muted-foreground/60' },
+  requested:   { Icon: Send,         cls: 'text-blue-500' },
+  in_progress: { Icon: Clock,        cls: 'text-amber-500' },
+  delivered:   { Icon: Eye,          cls: 'text-purple-500' },
+  done:        { Icon: CheckCircle2, cls: 'text-emerald-500' },
+  cancelled:   { Icon: Ban,          cls: 'text-red-400' },
+}
+
+/**
+ * One plan item as a card — the same card on the month grid, the Board and the
+ * Idea Board, so an item looks like itself wherever it is.
+ *
+ * The card is neutral; a thin bar carries the content type. That leaves colour
+ * on the card itself free to mean exactly two things: green is done, red is
+ * late. Everything else is ordinary upcoming work and stays quiet.
+ */
+function PlanCard({ it, progress, bucket, compact, dimmed, showStatus = true, showDate, onClick }: {
+  it: ItemRow
+  progress: ItemProgress
+  bucket: Bucket | null
+  /** Month-grid size: one truncated line of title. */
+  compact?: boolean
+  /** Faded back because a status filter is on and this card is not in it. */
+  dimmed?: boolean
+  showStatus?: boolean
+  showDate?: boolean
+  onClick: (e: React.MouseEvent) => void
+}) {
+  const refs = itemRefs(it)
+  const isRange = !!it.scheduled_end_date && it.scheduled_end_date > (it.scheduled_date ?? '')
+  const late = bucket === 'late'
+  const cancelled = progress === 'cancelled'
+  const { Icon, cls } = late ? { Icon: AlertCircle, cls: 'text-red-500' } : STATUS_ICON[progress]
+  const tone = cancelled ? `border-border bg-card ${dimmed ? '' : 'opacity-60'}`
+    : bucket === 'done' ? 'border-emerald-500/30 bg-emerald-500/[0.08]'
+    : late ? 'border-red-500/40 bg-red-500/[0.06]'
+    : 'border-border bg-card'
+  const typeLabel = CONTENT_TYPE_LABEL[it.content_type as keyof typeof CONTENT_TYPE_LABEL] ?? it.content_type
+  const state = late ? `Late, still ${PROGRESS_LABEL[progress]}` : PROGRESS_LABEL[progress]
+  return (
+    <button
+      type="button" onClick={onClick}
+      title={`${it.title} — ${state}${it.scheduled_date ? ` · ${formatShortDateRange(it.scheduled_date, it.scheduled_end_date)}` : ''}`}
+      className={`relative block w-full overflow-hidden rounded-md border text-left leading-tight shadow-xs transition-[border-color,opacity] hover:border-foreground/30 ${compact ? 'py-1 pl-2.5 pr-1.5' : 'py-1.5 pl-3 pr-2'} ${tone} ${dimmed ? 'opacity-25' : ''}`}
+    >
+      <span aria-hidden className={`absolute inset-y-0 left-0 w-[3px] ${CONTENT_TYPE_ACCENT[it.content_type as keyof typeof CONTENT_TYPE_ACCENT] ?? CONTENT_TYPE_ACCENT.other}`} />
+      <span className={`flex gap-1.5 ${compact ? 'items-center' : 'items-start'}`}>
+        {refs[0] && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={refs[0]} alt="" className={`shrink-0 rounded-sm object-cover ${compact ? 'h-4 w-4' : 'h-7 w-7 border border-black/10'}`} />
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1">
+            <span className={`min-w-0 flex-1 font-medium text-foreground ${compact ? 'truncate text-[11px]' : 'text-xs'} ${cancelled ? 'line-through' : ''}`}>{it.title}</span>
+            {compact && refs.length > 1 && <span className="shrink-0 rounded bg-foreground/10 px-1 text-[8px] text-muted-foreground">{refs.length}</span>}
+            {showStatus && <Icon aria-label={state} className={`h-3 w-3 shrink-0 ${cls}`} />}
+          </span>
+          <span className={`block truncate text-muted-foreground ${compact ? 'text-[10px]' : 'mt-0.5 text-[11px]'}`}>
+            {late && <span className="font-medium text-red-600 dark:text-red-400">Late · </span>}
+            {isRange && compact
+              ? <>{typeLabel} → {formatShortDateRange(it.scheduled_date, it.scheduled_end_date).split(' – ')[1]}</>
+              : <>{contentTypeWithVariants(it.content_type, it.variants)}{compact && (it.platforms?.length ?? 0) > 0 && <> · {platformLabels(it.platforms, true)}</>}</>}
+          </span>
+          {showDate && it.scheduled_date && (
+            <span className="block truncate text-[11px] text-muted-foreground/80">{formatShortDateRange(it.scheduled_date, it.scheduled_end_date)}</span>
+          )}
+        </span>
+      </span>
+    </button>
   )
 }
 
@@ -498,6 +605,15 @@ export default function SocialCalendarClient({
 
   // ── Canvas state: view toggle, quick-add, drag & drop ──────────────────────
   const [viewMode, setViewMode] = useState<'calendar' | 'board'>('calendar')
+  // Status spotlight: pick Done / In progress / Planned / Late in the summary
+  // and every other card fades back. Tied to the plan it was set on — a filter
+  // carried to another client's month would hide cards for no visible reason.
+  const [focusState, setFocusState] = useState<{ planId: string | null; bucket: Bucket } | null>(null)
+  const focus = focusState && focusState.planId === selectedId ? focusState.bucket : null
+  const setFocus = (bucket: Bucket | null) => setFocusState(bucket ? { planId: selectedId, bucket } : null)
+  // Deleting a plan now sits in the "…" menu, one mis-click from Archive, so it
+  // asks first.
+  const [confirmDeletePlan, setConfirmDeletePlan] = useState(false)
 
   // ── Delivered overlay ──────────────────────────────────────────────────────
   // OFF by default: the calendar's job is planning, and every month's finished
@@ -756,13 +872,45 @@ export default function SocialCalendarClient({
     [hintsByDate],
   )
 
-  const progressCounts = useMemo(() => {
-    const counts: Record<ItemProgress, number> = {
-      planned: 0, requested: 0, in_progress: 0, delivered: 0, done: 0, cancelled: 0,
+  // Every item's pipeline state and calendar bucket, worked out once.
+  const standing = useMemo(() => {
+    const map = new Map<string, { progress: ItemProgress; bucket: Bucket | null }>()
+    for (const it of items) {
+      const progress = resolveItemProgress(it.status, it.request, it.task)
+      // Undated ideas are not on the schedule yet, so they are in no bucket.
+      map.set(it.id, { progress, bucket: it.scheduled_date ? itemBucket(progress, it, todayKey) : null })
     }
-    for (const it of items) counts[resolveItemProgress(it.status, it.request, it.task)]++
-    return counts
-  }, [items])
+    return map
+  }, [items, todayKey])
+  const standingOf = (it: ItemRow) => standing.get(it.id) ?? { progress: 'planned' as ItemProgress, bucket: null }
+  const isDimmed = (it: ItemRow) => !!focus && standingOf(it).bucket !== focus
+
+  /** The month in four numbers, plus what is next on the schedule. */
+  const summary = useMemo(() => {
+    const counts: Record<Bucket, number> = { done: 0, active: 0, planned: 0, late: 0 }
+    let cancelled = 0
+    const upcoming: ItemRow[] = []
+    for (const it of items) {
+      if (!it.scheduled_date) continue
+      const s = standing.get(it.id)
+      if (!s) continue
+      if (!s.bucket) { cancelled++; continue }
+      counts[s.bucket]++
+      if ((s.bucket === 'planned' || s.bucket === 'active') && it.scheduled_date >= todayKey) upcoming.push(it)
+    }
+    upcoming.sort((a, b) => a.scheduled_date!.localeCompare(b.scheduled_date!))
+    return {
+      counts, cancelled,
+      total: counts.done + counts.active + counts.planned + counts.late,
+      next: upcoming[0] ?? null,
+    }
+  }, [items, standing, todayKey])
+
+  /** "today" / "tomorrow" / "in 6 days" for the Next up line. */
+  const untilLabel = (date: string) => {
+    const days = Math.round((new Date(date + 'T00:00:00').getTime() - new Date(todayKey + 'T00:00:00').getTime()) / 86_400_000)
+    return days <= 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`
+  }
 
   // Items that have taken neither exit — the bulk "Send" buttons act on these.
   const unpushed = items.filter(isUnrouted)
@@ -937,6 +1085,59 @@ export default function SocialCalendarClient({
     router.refresh()
   }
 
+  // ── Toolbar data ───────────────────────────────────────────────────────────
+
+  const thisMonth = todayISO().slice(0, 7)
+
+  /** Every plan as the picker shows it. The list query carries only each
+   *  item's status and links, so "sent" is a count of items something already
+   *  holds; the plan on screen uses the exact figure from its loaded items. */
+  const planOptions = useMemo<PlanOption[]>(() => calendars.map(c => {
+    const live = (c.items ?? []).filter(i => i.status !== 'cancelled')
+    const exact = c.id === selectedId
+    return {
+      id: c.id, clientId: c.client_id, clientName: c.client?.name ?? 'Client',
+      month: c.month, title: c.title, status: c.status,
+      total: exact ? items.filter(i => i.status !== 'cancelled').length : live.length,
+      sent: exact
+        ? items.filter(i => i.status !== 'cancelled' && !isUnrouted(i)).length
+        : live.filter(i => i.request_id || i.task_id || i.status !== 'planned').length,
+    }
+  }), [calendars, selectedId, items])
+
+  function openPlan(id: string) {
+    router.push(`/dashboard/social-calendar?calendar=${id}`)
+    router.refresh()
+  }
+
+  function openNewPlan(prefill?: { clientId: string; month: string }) {
+    setPlanForm(p => ({ ...p, clientId: prefill?.clientId ?? p.clientId, month: prefill?.month ?? p.month }))
+    setShowNewPlan(true)
+  }
+
+  const exportItems: OverflowItem[] = [
+    { label: 'Plan PDF', icon: FileDown, onClick: () => void exportPlan('pdf'), disabled: !!exporting },
+    { label: 'Monthly report', icon: FileText, onClick: () => void exportReport(), disabled: !!exporting, badge: deliveredCount || undefined },
+    { label: 'Excel sheet', icon: FileSpreadsheet, onClick: () => void exportPlan('excel'), disabled: !!exporting },
+  ]
+
+  const moreItems: OverflowItem[] = !selected || !canManage ? [] : [
+    ...(services.length > 0 ? [{
+      label: 'Service defaults', icon: Settings2,
+      onClick: () => { setServiceMapDraft({ ...serviceMap }); setShowServiceDefaults(true) },
+    }] : []),
+    {
+      label: selected.status === 'archived' ? 'Restore plan' : 'Archive plan', icon: Archive,
+      onClick: () => void archivePlan(), disabled: busy === 'archive',
+    },
+    // Only while nothing was sent to Requests — a plan with requests behind it
+    // is a record, and is archived instead.
+    ...(items.every(i => !i.request_id) ? [{
+      label: 'Delete plan', icon: Trash2, danger: true, separatorBefore: true,
+      onClick: () => setConfirmDeletePlan(true), disabled: busy === 'delete-plan',
+    }] : []),
+  ]
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (!migrated) {
@@ -1014,21 +1215,7 @@ export default function SocialCalendarClient({
         )}
         {ideaBacklog.map(it => (
           <DraggableItem key={it.id} id={it.id} disabled={!canManage}>
-            <button
-              onClick={() => openEdit(it)}
-              className={`w-full text-left rounded-lg border px-2 py-1.5 text-[11px] leading-tight hover:opacity-85 ${CONTENT_TYPE_CHIP[it.content_type as keyof typeof CONTENT_TYPE_CHIP] ?? CONTENT_TYPE_CHIP.other}`}
-            >
-              <span className="flex items-start gap-1.5">
-                {itemRefs(it)[0] && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={itemRefs(it)[0]} alt="" className="w-7 h-7 rounded object-cover shrink-0 border border-black/10" />
-                )}
-                <span className="min-w-0">
-                  <span className="font-medium block">{it.title}</span>
-                  <span className="opacity-80">{contentTypeWithVariants(it.content_type, it.variants)}</span>
-                </span>
-              </span>
-            </button>
+            <PlanCard it={it} progress="planned" bucket={null} showStatus={false} onClick={() => openEdit(it)} />
           </DraggableItem>
         ))}
       </div>
@@ -1044,141 +1231,139 @@ export default function SocialCalendarClient({
     <>
       <Header
         title="Social Calendar"
-        subtitle="Plan a month of client content, then send planned items to the Requests inbox — they ride the normal request → task pipeline from there"
+        subtitle="Plan each client's month, then send it to Requests"
       />
       <div className="p-4 md:p-6 space-y-5">
 
       <SocialTabs />
 
-      {/* ── Toolbar: plan picker + primary actions + export group ── */}
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2.5">
-        <div className="min-w-[240px] flex-1 sm:flex-none">
-          <Combobox
-            options={(() => {
-              const opt = (c: (typeof calendars)[number]) => {
-                const total = c.items?.length ?? 0
-                const sent = c.items?.filter(i => i.request_id).length ?? 0
-                const sub = `${c.title ? c.title + ' · ' : ''}${total} items · ${sent} in requests`
-                return { id: c.id, label: `${c.client?.name ?? 'Client'} — ${monthLabel(c.month)}`, sub }
-              }
-              // Grouped by relevance, not creation order: what's being planned
-              // now sits on top; finished months sink but stay one scroll away
-              // (search still reaches everything flat).
-              const thisMonth = todayISO().slice(0, 7)
-              const key = (c: (typeof calendars)[number]) => c.month.slice(0, 7)
-              const live = calendars.filter(c => c.status !== 'archived')
-              return [
-                ...live.filter(c => key(c) === thisMonth)
-                  .map(c => ({ ...opt(c), group: 'This month' })),
-                ...live.filter(c => key(c) > thisMonth)
-                  .sort((a, b) => a.month.localeCompare(b.month))
-                  .map(c => ({ ...opt(c), group: 'Upcoming' })),
-                ...live.filter(c => key(c) < thisMonth)
-                  .sort((a, b) => b.month.localeCompare(a.month))
-                  .map(c => ({ ...opt(c), group: 'Past months' })),
-                ...calendars.filter(c => c.status === 'archived')
-                  .sort((a, b) => b.month.localeCompare(a.month))
-                  .map(c => ({ ...opt(c), group: 'Archived' })),
-              ]
-            })()}
-            value={selected?.id ?? ''}
-            onChange={id => { if (id) { router.push(`/dashboard/social-calendar?calendar=${id}`); router.refresh() } }}
-            placeholder={calendars.length ? 'Pick a plan…' : 'No plans yet'}
-            sortKey="social_calendars"
+      {/*
+        ── Toolbar ──
+        Two rows with two different jobs. The top row is the plan itself: which
+        one, and the one thing to do with it next. The second row is how you are
+        looking at it and the tools around it. Anything done once a month or less
+        (service defaults, archive, delete) lives behind the "…".
+      */}
+      <div className="rounded-xl border border-border bg-card">
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+          <PlanPicker
+            plans={planOptions}
+            selectedId={selected?.id ?? null}
+            onSelect={openPlan}
+            thisMonth={thisMonth}
+            canManage={canManage}
+            onNewPlan={openNewPlan}
           />
-        </div>
-        {canManage && (
-          <button
-            onClick={() => setShowNewPlan(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg gradient-bg px-3 py-2 text-sm font-medium text-white hover:opacity-90"
-          >
-            <Plus className="w-4 h-4" /> New Plan
-          </button>
-        )}
-        {canManage && services.length > 0 && (
-          <button
-            onClick={() => { setServiceMapDraft({ ...serviceMap }); setShowServiceDefaults(true) }}
-            title="Choose which service each content type's design request carries"
-            className="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-border bg-secondary text-muted-foreground hover:text-foreground"
-          >
-            <Settings2 className="w-4 h-4" />
-          </button>
-        )}
+          {selected?.status === 'archived' && (
+            <span className="rounded-full border border-border bg-secondary px-2 py-0.5 text-[11px] text-muted-foreground">Archived</span>
+          )}
+          {selected?.status === 'draft' && (
+            <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-700 dark:text-amber-300"
+              title="Nothing goes to designers until the plan is Active">
+              Draft
+              {canManage && (
+                <button type="button" onClick={activatePlan} disabled={busy === 'activate'}
+                  className="font-semibold underline underline-offset-2 disabled:opacity-50">
+                  {busy === 'activate' ? 'Saving…' : 'Mark Active'}
+                </button>
+              )}
+            </span>
+          )}
 
-        {selected && <CopyForAi clientId={selected.client_id} align="left" />}
-        {selected && canManage && (
-          <ImportPlanButton
-            clientId={selected.client_id}
-            clientName={selected.client?.name}
-            month={selected.month.slice(0, 7)}
-            onDone={() => router.refresh()}
-          />
-        )}
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            {canManage && (
+              // The page's one filled button is whatever comes next: sending
+              // what is planned, or — with nothing waiting — starting a plan.
+              <button
+                onClick={() => openNewPlan()}
+                className={unpushed.length > 0 && selected
+                  ? 'inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium transition-colors hover:border-primary/40'
+                  : 'inline-flex items-center gap-1.5 rounded-lg gradient-bg px-3 py-2 text-sm font-medium text-white hover:opacity-90'}
+              >
+                <Plus className="h-4 w-4" /> New Plan
+              </button>
+            )}
+            {selected && canManage && unpushed.length > 0 && (
+              <button
+                onClick={() => push(unpushed.map(i => i.id))}
+                disabled={busy === 'push-all'}
+                title="Send every planned item on this plan to the Requests inbox"
+                className="inline-flex items-center gap-1.5 rounded-lg gradient-bg px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {busy === 'push-all' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                Send {unpushed.length} to Requests
+              </button>
+            )}
+          </div>
+        </div>
 
         {selected && (
-          <div className="flex items-center gap-1.5 ml-auto flex-wrap justify-end">
-            {/* Plan discussion — chatter side panel, one room per plan */}
-            <DiscussButton
-              entityType="plan"
-              entityId={selected.id}
-              label="Discuss"
-              panelTitle={`${selected.client?.name ?? 'Plan'} — ${monthLabel(selected.month)}`}
-            />
-            {/* Export group */}
-            {items.length > 0 && (
-              <div className="flex items-center rounded-lg border border-border bg-secondary overflow-hidden">
-                <button onClick={() => void exportPlan('pdf')} disabled={!!exporting}
-                  title="Plan PDF — the full month plan (same design as invoices)"
-                  className="inline-flex items-center gap-1.5 px-2.5 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-50">
-                  {exporting === 'pdf' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileDown className="w-4 h-4" />} <span className="hidden sm:inline">Plan PDF</span>
+          <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2">
+            <div className="inline-flex rounded-lg border border-border bg-secondary p-0.5" role="group" aria-label="View">
+              {([['calendar', 'Calendar', CalendarDays], ['board', 'Board', LayoutGrid]] as const).map(([key, label, Icon]) => (
+                <button key={key} onClick={() => setViewMode(key)} aria-pressed={viewMode === key}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors ${
+                    viewMode === key ? 'bg-card font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                  <Icon className="h-4 w-4" /> {label}
                 </button>
-                <span className="w-px h-5 bg-border" />
-                <button onClick={() => void exportReport()} disabled={!!exporting}
-                  title={`Monthly client report — delivered/completed work only${deliveredCount ? ` (${deliveredCount})` : ''}`}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-50">
-                  {exporting === 'report' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />} <span className="hidden sm:inline">Report</span>
-                  {deliveredCount > 0 && <span className="text-[10px] px-1 rounded bg-green-500/15 text-green-600 dark:text-green-400">{deliveredCount}</span>}
-                </button>
-                <span className="w-px h-5 bg-border" />
-                <button onClick={() => void exportPlan('excel')} disabled={!!exporting}
-                  title="Download the plan as an Excel sheet"
-                  className="inline-flex items-center gap-1.5 px-2.5 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-background disabled:opacity-50">
-                  {exporting === 'excel' ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />} <span className="hidden sm:inline">Excel</span>
-                </button>
-              </div>
-            )}
-            {canManage && (
-              <>
-                {unpushed.length > 0 && (
-                  <button
-                    onClick={() => push(unpushed.map(i => i.id))}
-                    disabled={busy === 'push-all'}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/40 bg-blue-500/10 text-blue-500 px-3 py-2 text-sm font-medium hover:bg-blue-500/20 disabled:opacity-50"
-                  >
-                    {busy === 'push-all' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    Send {unpushed.length} to Requests
-                  </button>
-                )}
+              ))}
+            </div>
+            {moveHistory.length > 0 && (() => {
+              const last = moveHistory[moveHistory.length - 1]
+              return (
                 <button
-                  onClick={archivePlan}
-                  disabled={busy === 'archive'}
-                  title={selected.status === 'archived' ? 'Restore plan' : 'Archive plan'}
-                  className="rounded-lg border border-border px-2.5 py-2 text-muted-foreground hover:text-foreground hover:bg-secondary"
-                >
-                  <Archive className="w-4 h-4" />
+                  onClick={() => void undoMove()}
+                  title={`Put "${last.title}" back on ${dayLabel(last.from)} (Ctrl/Cmd+Z)`}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-sm font-medium text-amber-600 transition-colors hover:bg-amber-500/15 dark:text-amber-400">
+                  <Undo2 className="h-4 w-4" />
+                  Undo move{moveHistory.length > 1 ? ` (${moveHistory.length})` : ''}
                 </button>
-                {items.every(i => !i.request_id) && (
-                  <button
-                    onClick={removePlan}
-                    disabled={busy === 'delete-plan'}
-                    title="Delete plan (only while nothing was sent to Requests)"
-                    className="rounded-lg border border-border px-2.5 py-2 text-muted-foreground hover:text-red-500 hover:bg-secondary"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
-              </>
+              )
+            })()}
+            {/* Only offered when there IS off-plan delivered work — a toggle
+                that can only ever reveal nothing is just another control. */}
+            {deliveredTasks.length > 0 && (
+              <button
+                onClick={toggleDelivered} aria-pressed={showDelivered}
+                title="Work delivered for this client this month that was not on the plan"
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-sm transition-colors ${
+                  showDelivered
+                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                    : 'border-border bg-card text-muted-foreground hover:text-foreground'}`}>
+                <CheckCircle2 className="h-4 w-4" />
+                Off-plan work
+                <span className="rounded-full bg-foreground/10 px-1.5 text-[11px] tabular-nums">{deliveredTasks.length}</span>
+              </button>
             )}
+
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+              <CopyForAi clientId={selected.client_id} align="right" />
+              {canManage && (
+                <ImportPlanButton
+                  clientId={selected.client_id}
+                  clientName={selected.client?.name}
+                  month={selected.month.slice(0, 7)}
+                  onDone={() => router.refresh()}
+                />
+              )}
+              {items.length > 0 && (
+                <OverflowMenu
+                  items={exportItems}
+                  icon={exporting ? Loader2 : Download}
+                  text="Export"
+                  label="Export this plan"
+                />
+              )}
+              {/* Plan discussion — chatter side panel, one room per plan */}
+              <DiscussButton
+                entityType="plan"
+                entityId={selected.id}
+                label="Discuss"
+                panelTitle={`${selected.client?.name ?? 'Plan'} — ${monthLabel(selected.month)}`}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+              />
+              <OverflowMenu items={moreItems} label="More plan actions" />
+            </div>
           </div>
         )}
       </div>
@@ -1192,33 +1377,77 @@ export default function SocialCalendarClient({
         </div>
       ) : (
         <>
-          {/* ── Plan header: client + month + progress chips ── */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-semibold">{selected.client?.name}</span>
-            <span className="text-xs text-muted-foreground">· {monthLabel(selected.month)}</span>
-            {selected.title && <span className="text-xs text-muted-foreground">· {selected.title}</span>}
-            {selected.status === 'archived' && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border">Archived</span>
-            )}
-            {selected.status === 'draft' && (
-              <span className="inline-flex items-center gap-2 text-[11px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30">
-                Draft: nothing goes to designers until it is Active
-                <button type="button" onClick={activatePlan} disabled={busy === 'activate'}
-                  className="font-semibold underline underline-offset-2 disabled:opacity-50">
-                  {busy === 'activate' ? 'Saving…' : 'Mark Active'}
-                </button>
-              </span>
-            )}
-            <div className="flex flex-wrap items-center gap-1.5 ml-auto">
-              {(Object.keys(progressCounts) as ItemProgress[])
-                .filter(k => progressCounts[k] > 0)
-                .map(k => (
-                  <span key={k} className={`text-[10px] px-2 py-0.5 rounded-full border ${PROGRESS_CHIP[k]}`}>
-                    {progressCounts[k]} {PROGRESS_LABEL[k]}
+          {/*
+            ── Where the month stands ──
+            The answer to "what have we done and what is next", before a single
+            cell is read: how much is finished, how much is late, and the next
+            piece on the schedule. The four counts double as a spotlight — pick
+            one and every other card fades back.
+          */}
+          {summary.total > 0 && (
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2.5 rounded-xl border border-border bg-card px-3 py-2.5">
+              <div className="flex min-w-[200px] flex-1 items-center gap-3 sm:max-w-[280px]">
+                <div className="flex h-2 flex-1 overflow-hidden rounded-full bg-foreground/10"
+                  role="img" aria-label={`${summary.counts.done} of ${summary.total} done`}>
+                  {(['done', 'active', 'late'] as const).map(k => summary.counts[k] > 0 && (
+                    <div key={k} className={BUCKETS.find(b => b.key === k)!.bar}
+                      style={{ width: `${(summary.counts[k] / summary.total) * 100}%` }} />
+                  ))}
+                </div>
+                <span className="shrink-0 text-xs tabular-nums">
+                  <span className="font-semibold">{summary.counts.done}</span>
+                  <span className="text-muted-foreground"> of {summary.total} done</span>
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Highlight by status">
+                {BUCKETS.filter(b => summary.counts[b.key] > 0).map(b => {
+                  const on = focus === b.key
+                  return (
+                    <button key={b.key} type="button" aria-pressed={on}
+                      onClick={() => setFocus(on ? null : b.key)}
+                      title={on ? 'Show everything again' : `${b.hint} — click to highlight`}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                        on ? 'border-foreground/30 bg-secondary font-medium text-foreground'
+                          : focus ? 'border-border text-muted-foreground opacity-60 hover:opacity-100'
+                          : 'border-border text-foreground hover:bg-secondary'}`}>
+                      <b.Icon className={`h-3.5 w-3.5 ${b.text}`} />
+                      {b.label}
+                      <span className="tabular-nums font-semibold">{summary.counts[b.key]}</span>
+                    </button>
+                  )
+                })}
+                {focus && (
+                  <button type="button" onClick={() => setFocus(null)}
+                    className="inline-flex items-center gap-1 px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground">
+                    <X className="h-3 w-3" /> Clear
+                  </button>
+                )}
+                {summary.cancelled > 0 && (
+                  <span className="px-1 text-[11px] text-muted-foreground">{summary.cancelled} cancelled</span>
+                )}
+              </div>
+
+              <div className="ml-auto min-w-0 text-xs">
+                {summary.next ? (
+                  <button type="button" onClick={() => openEdit(summary.next!)}
+                    className="group flex max-w-full items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors hover:bg-secondary">
+                    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Next up</span>
+                    <span className="shrink-0 font-medium tabular-nums">{dayLabel(summary.next.scheduled_date)}</span>
+                    <span className="min-w-0 truncate text-muted-foreground group-hover:text-foreground sm:max-w-[260px]">{summary.next.title}</span>
+                    <span className="hidden shrink-0 text-muted-foreground sm:inline">· {untilLabel(summary.next.scheduled_date!)}</span>
+                    <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  </button>
+                ) : (
+                  <span className="px-2 text-muted-foreground">
+                    {summary.counts.late > 0 ? 'Nothing else scheduled — only the late items are left'
+                      : summary.counts.done === summary.total ? 'Everything on this plan is done'
+                      : 'Nothing left on the schedule'}
                   </span>
-                ))}
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/*
             ── Package commitment ──
@@ -1370,44 +1599,6 @@ export default function SocialCalendarClient({
             )
           })}
 
-          {/* ── View toggle ── */}
-          <div className="flex items-center gap-1 -mt-1">
-            {([['calendar', 'Calendar', CalendarDays], ['board', 'Board', LayoutGrid]] as const).map(([key, label, Icon]) => (
-              <button key={key} onClick={() => setViewMode(key)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                  viewMode === key ? 'bg-primary/10 text-primary border-primary/30' : 'bg-secondary text-muted-foreground border-transparent hover:text-foreground'}`}>
-                <Icon className="w-3.5 h-3.5" /> {label}
-              </button>
-            ))}
-            {/* Only offered when there IS off-plan delivered work — a toggle
-                that can only ever reveal nothing is just another control. */}
-            {moveHistory.length > 0 && (() => {
-              const last = moveHistory[moveHistory.length - 1]
-              return (
-                <button
-                  onClick={() => void undoMove()}
-                  title={`Put "${last.title}" back on ${dayLabel(last.from)} (Ctrl/Cmd+Z)`}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ml-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/15">
-                  <Undo2 className="w-3.5 h-3.5" />
-                  Undo move{moveHistory.length > 1 ? ` (${moveHistory.length})` : ''}
-                  <span className="hidden sm:inline text-amber-600/70 dark:text-amber-400/70 font-normal">· {dayLabel(last.to)} → {dayLabel(last.from)}</span>
-                </button>
-              )
-            })()}
-            {deliveredTasks.length > 0 && (
-              <button
-                onClick={toggleDelivered}
-                title="Show work delivered for this client this month that was not on the plan"
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ml-1 ${
-                  showDelivered
-                    ? 'bg-green-500/10 text-green-500 border-green-500/30'
-                    : 'bg-secondary text-muted-foreground border-transparent hover:text-foreground'}`}>
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                {showDelivered ? 'Hide delivered' : `Show delivered (${deliveredTasks.length})`}
-              </button>
-            )}
-          </div>
-
           {viewMode === 'calendar' ? (
           <DndContext id="social-calendar-dnd" sensors={dndSensors} collisionDetection={pointerWithin} onDragEnd={handleDragEnd}>
           <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-start">
@@ -1424,12 +1615,16 @@ export default function SocialCalendarClient({
                   const dayItems = itemsByDate.get(cell.key) ?? []
                   const spans = continuationsByDate.get(cell.key) ?? []
                   const hint = hintsByDate.get(cell.key)
+                  const isToday = cell.key === todayKey
+                  // Days already gone sit on a quieter ground, so the eye
+                  // lands on today and what is still ahead.
+                  const isPast = cell.inMonth && cell.key < todayKey
                   return (
                     <DroppableZone
                       key={cell.key}
                       id={`day:${cell.key}`}
                       disabled={!cell.inMonth}
-                      className={`min-h-[96px] border-b border-r border-border/50 align-top transition-colors ${cell.inMonth ? '' : 'bg-secondary/20 opacity-50'} ${cell.key === todayKey ? 'bg-primary/[0.06] ring-1 ring-inset ring-primary/30' : ''}`}
+                      className={`min-h-[104px] border-b border-r border-border/60 align-top transition-colors ${cell.inMonth ? '' : 'bg-secondary/30 opacity-50'} ${isPast ? 'bg-foreground/[0.03]' : ''} ${isToday ? 'bg-primary/[0.06] ring-2 ring-inset ring-primary/40' : ''}`}
                       activeClassName="bg-primary/10"
                     >
                       <div
@@ -1441,48 +1636,23 @@ export default function SocialCalendarClient({
                           setItemModal({ mode: 'add' })
                         }}
                       >
-                        <div className={cell.key === todayKey
-                          ? 'text-[10px] font-semibold w-4 h-4 rounded-full bg-primary text-white flex items-center justify-center'
-                          : 'text-[10px] text-muted-foreground'}>
-                          {cell.date.getDate()}
+                        <div className="flex h-5 items-center gap-1.5">
+                          <span className={isToday
+                            ? 'flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[11px] font-semibold text-white'
+                            : `text-[11px] tabular-nums ${isPast ? 'text-muted-foreground/60' : 'font-medium text-muted-foreground'}`}>
+                            {cell.date.getDate()}
+                          </span>
+                          {isToday && <span className="text-[10px] font-semibold uppercase tracking-wide text-primary">Today</span>}
                         </div>
                         <div className="mt-1 space-y-1">
                           {dayItems.map(it => {
-                            const progress = resolveItemProgress(it.status, it.request, it.task)
-                            const refs = itemRefs(it)
-                            const isRange = !!it.scheduled_end_date && it.scheduled_end_date > (it.scheduled_date ?? '')
+                            const { progress, bucket } = standingOf(it)
                             return (
                               <DraggableItem key={it.id} id={it.id} disabled={!canManage || !!it.request?.promoted_task_id}>
-                                <button
+                                <PlanCard
+                                  it={it} progress={progress} bucket={bucket} compact dimmed={isDimmed(it)}
                                   onClick={e => { e.stopPropagation(); openEdit(it) }}
-                                  // Content type answers "what is this" — useful while
-                                  // it is still work. Once the piece is FINISHED that
-                                  // question stops mattering and "is it done?" takes
-                                  // over, so a completed card reads green like the
-                                  // delivered chips instead of staying the same purple
-                                  // as something nobody has started.
-                                  className={`w-full text-left rounded-md border px-1.5 py-1 text-[10px] leading-tight hover:opacity-80 ${isRange ? 'border-l-[3px]' : ''} ${
-                                    progress === 'done' || progress === 'cancelled'
-                                      ? PROGRESS_CHIP[progress]
-                                      : CONTENT_TYPE_CHIP[it.content_type as keyof typeof CONTENT_TYPE_CHIP] ?? CONTENT_TYPE_CHIP.other
-                                  }`}
-                                  title={`${it.title} — ${PROGRESS_LABEL[progress]}${isRange ? ` · ${formatShortDateRange(it.scheduled_date, it.scheduled_end_date)}` : ''}`}
-                                >
-                                  <span className="flex items-center gap-1">
-                                    {refs[0] && (
-                                      // eslint-disable-next-line @next/next/no-img-element
-                                      <img src={refs[0]} alt="" className="w-4 h-4 rounded-sm object-cover shrink-0" />
-                                    )}
-                                    {refs.length > 1 && <span className="text-[8px] px-1 rounded bg-black/10 shrink-0">{refs.length}</span>}
-                                    <span className="font-medium block truncate">{it.title}</span>
-                                  </span>
-                                  <span className="flex items-center gap-1 opacity-80">
-                                    {isRange
-                                      ? <>{CONTENT_TYPE_LABEL[it.content_type as keyof typeof CONTENT_TYPE_LABEL] ?? it.content_type} → {formatShortDateRange(it.scheduled_date, it.scheduled_end_date).split(' – ')[1]}</>
-                                      : <>{contentTypeWithVariants(it.content_type, it.variants)}{(it.platforms?.length ?? 0) > 0 && <> · {platformLabels(it.platforms, true)}</>}</>}
-                                    <span className={`ml-auto inline-block w-1.5 h-1.5 rounded-full ${progress === 'planned' ? 'bg-gray-400' : progress === 'requested' ? 'bg-blue-400' : progress === 'in_progress' ? 'bg-amber-400' : progress === 'delivered' ? 'bg-purple-400' : progress === 'done' ? 'bg-green-500' : 'bg-red-400'}`} />
-                                  </span>
-                                </button>
+                                />
                               </DraggableItem>
                             )
                           })}
@@ -1490,8 +1660,8 @@ export default function SocialCalendarClient({
                           {spans.map(it => (
                             <button key={`span-${it.id}`} onClick={e => { e.stopPropagation(); openEdit(it) }}
                               title={`${it.title} · ${formatShortDateRange(it.scheduled_date, it.scheduled_end_date)}`}
-                              className={`w-full flex items-center gap-1 rounded-sm border-l-[3px] px-1 py-0.5 text-[9px] opacity-70 hover:opacity-100 truncate ${CONTENT_TYPE_CHIP[it.content_type as keyof typeof CONTENT_TYPE_CHIP] ?? CONTENT_TYPE_CHIP.other}`}>
-                              <span className="opacity-70">⟶</span>
+                              className={`relative flex w-full items-center gap-1 overflow-hidden truncate rounded-sm bg-foreground/[0.05] py-0.5 pl-2.5 pr-1 text-[10px] text-muted-foreground hover:text-foreground ${isDimmed(it) ? 'opacity-25' : ''}`}>
+                              <span aria-hidden className={`absolute inset-y-0 left-0 w-[3px] ${CONTENT_TYPE_ACCENT[it.content_type as keyof typeof CONTENT_TYPE_ACCENT] ?? CONTENT_TYPE_ACCENT.other}`} />
                               <span className="truncate">{it.title}{it.scheduled_end_date === cell.key ? ' (ends)' : ''}</span>
                             </button>
                           ))}
@@ -1584,32 +1754,34 @@ export default function SocialCalendarClient({
                   <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border">{colItems.length}</span>
                 </div>
                 <div className="p-2 space-y-1.5 min-h-[80px] max-h-[480px] overflow-y-auto">
-                  {colItems.map(it => (
-                    <button key={it.id} onClick={() => openEdit(it)}
-                      className={`w-full text-left rounded-lg border px-2 py-1.5 text-[11px] leading-tight hover:opacity-85 ${CONTENT_TYPE_CHIP[it.content_type as keyof typeof CONTENT_TYPE_CHIP] ?? CONTENT_TYPE_CHIP.other}`}>
-                      <span className="flex items-start gap-1.5">
-                        {itemRefs(it)[0] && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={itemRefs(it)[0]} alt="" className="w-7 h-7 rounded object-cover shrink-0 border border-black/10" />
-                        )}
-                        <span className="min-w-0">
-                          <span className="font-medium block">{it.title}</span>
-                          <span className="opacity-80 block">{contentTypeWithVariants(it.content_type, it.variants)}</span>
-                          {it.scheduled_date && <span className="opacity-60">{formatShortDateRange(it.scheduled_date, it.scheduled_end_date)}</span>}
-                        </span>
-                      </span>
-                    </button>
-                  ))}
+                  {colItems.map(it => {
+                    const { progress, bucket } = standingOf(it)
+                    return (
+                      <PlanCard key={it.id} it={it} progress={progress} bucket={bucket}
+                        showStatus={key !== 'idea'} showDate dimmed={isDimmed(it)}
+                        onClick={() => openEdit(it)} />
+                    )
+                  })}
                 </div>
               </div>
             ))}
           </div>
           )}
-          <p className="text-[11px] text-muted-foreground -mt-2">
-            {canManage ? 'Brainstorm on the Idea Board and drag ideas onto days · drag between days to reschedule · click any card to edit or send it to Requests. ' : ''}
-            Sent items appear in the <Link href="/dashboard/requests" className="text-primary hover:underline">Requests inbox</Link> with
-            a “planned” chip; once started there, progress flows back here automatically.
-          </p>
+          <div className="-mt-1 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-muted-foreground">
+            {([
+              ['planned', PROGRESS_LABEL.planned], ['requested', PROGRESS_LABEL.requested],
+              ['in_progress', PROGRESS_LABEL.in_progress], ['delivered', PROGRESS_LABEL.delivered],
+              ['done', PROGRESS_LABEL.done],
+            ] as const).map(([k, label]) => {
+              const { Icon, cls } = STATUS_ICON[k]
+              return <span key={k} className="inline-flex items-center gap-1"><Icon className={`h-3 w-3 ${cls}`} /> {label}</span>
+            })}
+            <span className="inline-flex items-center gap-1"><AlertCircle className="h-3 w-3 text-red-500" /> Late</span>
+            <span className="ml-auto">
+              {canManage ? 'Click a day to add · drag a card to move it · ' : ''}
+              sent items show in <Link href="/dashboard/requests" className="text-primary hover:underline">Requests</Link>
+            </span>
+          </div>
         </>
       )}
 
@@ -2223,6 +2395,17 @@ export default function SocialCalendarClient({
             </div>
           </div>
         </ModalOverlay>
+      )}
+
+      {confirmDeletePlan && selected && (
+        <ConfirmDialog
+          title="Delete this plan?"
+          body={`${selected.client?.name ?? 'This plan'} — ${monthLabel(selected.month)}${items.length ? `, with its ${items.length} item${items.length === 1 ? '' : 's'},` : ''} will be removed for good. Nothing on it was sent to Requests, so no request or task is affected. To keep it out of the way without losing it, archive it instead.`}
+          confirmLabel="Delete plan"
+          danger
+          onConfirm={() => { setConfirmDeletePlan(false); void removePlan() }}
+          onCancel={() => setConfirmDeletePlan(false)}
+        />
       )}
 
       {removeConfirm && (
