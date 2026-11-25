@@ -46,6 +46,12 @@ jobs:
       - name: Install
         run: npm ci
 
+      # npm no longer downloads Electron itself during install; the package
+      # fetches it on first use. Packaging uses that copy (electronDist in
+      # electron-builder.yml), so fetch it now.
+      - name: Fetch Electron
+        run: node node_modules/electron/install.js && test -d node_modules/electron/dist
+
       - name: The tag must name the version being built
         if: startsWith(github.ref, 'refs/tags/desktop-v')
         run: |
