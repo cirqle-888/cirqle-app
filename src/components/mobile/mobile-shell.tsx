@@ -7,6 +7,7 @@ import { routeForDeepLink } from '@/lib/deep-link'
 import { syncRoute } from '@/lib/mobile/last-route'
 import { trackKeyboard } from '@/lib/mobile/keyboard'
 import { runIntroCover, loadImageInBrowser } from '@/lib/mobile/intro-cover'
+import { startNativePush } from '@/lib/native-push'
 import { OfflineIndicator } from '@/components/mobile/offline-indicator'
 import { UpdateBanner } from '@/components/mobile/update-banner'
 
@@ -141,6 +142,24 @@ export function MobileShell() {
       (to) => router.replace(to),
     )
   }, [pathname, router])
+
+  // Phone notifications: register this device for the signed-in employee and
+  // open the right page when a notification is tapped. Only inside the app (the
+  // token is saved against whoever is signed in, and nobody wants a permission
+  // prompt on the login page), and only on a build that ships Firebase — see
+  // startNativePush. Re-runs after a sign-out and sign-in, so the phone follows
+  // the person who is signed in now.
+  const signedIn = pathname?.startsWith('/dashboard') ?? false
+  useEffect(() => {
+    if (!isNative() || !signedIn) return
+    let stop = () => {}
+    let gone = false
+    void startNativePush(path => router.push(path)).then((s) => {
+      if (gone) s()
+      else stop = s
+    })
+    return () => { gone = true; stop() }
+  }, [signedIn, router])
 
   // Both render null off-native: offline/sync status + native update prompt.
   return (

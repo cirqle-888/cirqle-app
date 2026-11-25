@@ -68,6 +68,9 @@ next-env.d.ts
 /mobile/*.keystore
 /mobile/*.jks
 /mobile/keystore.properties
+# Firebase config for the phone app — not a password, but tied to the owner's
+# Firebase project, so it stays on the build machine like the keystore.
+/mobile/google-services.json
 /mobile/latest.json
 backfill-recovery-*.json
 backfill-baseline-*.json

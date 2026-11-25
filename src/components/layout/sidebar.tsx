@@ -39,6 +39,7 @@ import { useLiquidGlass } from '@/components/ui/use-liquid-glass'
 import { resolveFavoriteIcon, iconKeyFor } from '@/lib/favorites/icon-map'
 import { useFavorites } from '@/contexts/favorites-context'
 import type { FavoriteEntry } from '@/lib/favorites/queries'
+import { forgetNativePush } from '@/lib/native-push'
 
 // ─────────────────────────────────────────────────────
 // Change Password Modal
@@ -124,6 +125,8 @@ export function ProfileActions({
   const { theme, cycleTheme, mounted: themeMounted } = useTheme()
 
   async function handleSignOut() {
+    // While still signed in: stop this phone getting this person's notifications.
+    await forgetNativePush()
     const supabase = createClient()
     // scope 'local' ends only this browser's session — the default ('global')
     // revokes every session for the user, including the desktop app.
@@ -306,6 +309,8 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
   }, [activeSectionLabel])
 
   async function handleSignOut() {
+    // While still signed in: stop this phone getting this person's notifications.
+    await forgetNativePush()
     const supabase = createClient()
     // scope 'local' ends only this browser's session — the default ('global')
     // revokes every session for the user, including the desktop app.

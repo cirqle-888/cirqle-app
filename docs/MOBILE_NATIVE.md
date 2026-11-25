@@ -33,12 +33,21 @@ that only the account owner can provision:
 
 ### Android (FCM)
 1. Create a Firebase project; add an Android app with id `work.cirqle.app`.
-2. Download `google-services.json` → `mobile/android/app/google-services.json`.
+2. Download `google-services.json` → `mobile/google-services.json` (git-ignored).
+   `mobile/scripts/build-android.sh` copies it into the generated `android/`
+   project on every build, and refuses to build version code 4 or later
+   without it.
 3. Add the Firebase **service account JSON** to the backend env as
    `FCM_SERVICE_ACCOUNT` (the JSON itself, or its base64). Sending is already
    wired: `src/lib/push/native-send.ts` is called from `sendWebPush`, so every
    alert that reaches a browser also reaches the phone app once this is set.
    Without it the phone app gets no push while closed.
+4. Build and hand out the new app (version code 4+). The web app registers a
+   phone only when its build number is at least `PUSH_MIN_ANDROID_BUILD`
+   (`src/lib/native-push.ts`): on an older build, which has no Firebase inside,
+   `PushNotifications.register()` would close the app. Registration runs from
+   `MobileShell` once the user is inside `/dashboard`; signing out removes the
+   phone's token first.
 
 ### iOS (APNs) — blocked until an Apple Developer account exists
 1. In the Apple Developer portal create an **APNs Auth Key** (`.p8`).
@@ -46,9 +55,9 @@ that only the account owner can provision:
 3. Upload the APNs key to Firebase (or call APNs directly) and store the key id
    + team id in backend env.
 
-Until these are set, `registerNativePush()` still runs and stores tokens; no push
-is delivered. Nothing crashes — the table write is graceful pre-migration and the
-whole path no-ops on web.
+Until these are set nothing registers and no push is delivered. Nothing
+crashes — older builds are skipped by build number, the table write is graceful
+pre-migration and the whole path no-ops on web.
 
 ## Offline queue & sync (`src/lib/offline`)
 

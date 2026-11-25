@@ -39,6 +39,33 @@ npx @capacitor/assets generate --android
 echo "▶ Applying Cirqle native settings…"
 node scripts/patch-android-native.mjs
 
+# Phone notifications need Firebase's google-services.json inside the generated
+# project. android/ is generated, so the file is kept at mobile/google-services.json
+# (git-ignored) and copied in on every build.
+#
+# From build 4 on, the web app asks the phone to register for push
+# (PUSH_MIN_ANDROID_BUILD in src/lib/native-push.ts — keep the two in step). An
+# app at or past that number WITHOUT Firebase closes itself on launch, so such a
+# build is refused here rather than handed to the team.
+PUSH_MIN_CODE=4
+# Firebase's own instructions say to drop the file into android/app/. If that is
+# where it was put, keep a copy in the place that survives a regenerate.
+if [ ! -f google-services.json ] && [ -f android/app/google-services.json ]; then
+  cp android/app/google-services.json google-services.json
+fi
+if [ -f google-services.json ]; then
+  echo "▶ Firebase config found — phone notifications ON."
+  cp google-services.json android/app/google-services.json
+elif [ "$VERSION_CODE" -ge "$PUSH_MIN_CODE" ]; then
+  echo "✗ mobile/google-services.json is missing."
+  echo "  Builds from code $PUSH_MIN_CODE on must include Firebase (see docs/MOBILE_NATIVE.md,"
+  echo "  'Push notifications'). Download it from the Firebase console and put it at"
+  echo "  mobile/google-services.json, then run this again."
+  exit 1
+else
+  echo "⚠ No mobile/google-services.json — phone notifications OFF in this build."
+fi
+
 echo "▶ Stamping version (code=$VERSION_CODE name=$VERSION_NAME)…"
 sed -i.bak "s/versionCode [0-9][0-9]*/versionCode $VERSION_CODE/" android/app/build.gradle
 sed -i.bak "s/versionName \"[^\"]*\"/versionName \"$VERSION_NAME\"/" android/app/build.gradle
