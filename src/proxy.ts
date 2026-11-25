@@ -21,6 +21,11 @@ export const config = {
    * `push-sw.js` is skipped for the same kind of reason: a browser refuses a service
    * worker script that answers with a redirect, so a signed-out phone could never
    * update it. It holds no data, only how to show a notification.
+   *
+   * `mobile/latest.json` is what an installed phone app reads to learn that a
+   * newer app exists. Behind the auth check a signed-out phone got the login
+   * page instead and was never offered the update. It holds a version number
+   * and a public download address, nothing else.
    */
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|push-sw\\.js$|theme-init\\.js$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webmanifest|ico)$).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|push-sw\\.js$|theme-init\\.js$|mobile/latest\\.json$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webmanifest|ico)$).*)'],
 }

@@ -76,6 +76,34 @@ Until these are set nothing registers and no push is delivered. Nothing
 crashes — older builds are skipped by build number, the table write is graceful
 pre-migration and the whole path no-ops on web.
 
+## Releasing a new Android build
+
+Ordinary changes need no release: the app loads the live web app. A new build
+is only for a change to the native shell (a plugin, the icon, Firebase).
+
+1. Raise `versionCode` (and `versionName`) in `mobile/app-version.json`.
+2. `bash mobile/scripts/build-android.sh` — the signed APK lands in
+   `mobile/dist/`.
+3. `node --env-file=.env.local mobile/scripts/publish-android.mjs --notes "…"` —
+   uploads the APK to the public `app-releases` storage bucket and writes
+   `public/mobile/latest.json`.
+4. Commit `public/mobile/latest.json` and deploy. Every installed app with a
+   lower build number then shows **Update available**; Download opens the APK
+   in the phone's browser and it installs over the old app (same signing key).
+
+The APK is deliberately not served from `app.cirqle.work`: the app's WebView
+keeps links to its own host inside the WebView, where a download does nothing.
+
+### Tapping a notification
+
+A tap is handed to the web app by the push plugin and opens the notification's
+page (`startNativePush` in `src/lib/native-push.ts`). There is no other window
+into the phone app, so each tap leaves one `[push-tap] {…}` line in the server
+log: the fields the phone handed over, the page asked for, where the app was and
+where it ended up, and whether the page had to be loaded outright because the
+in-app navigation did not arrive. No tap line at all after a tap means the phone
+never passed the tap to the page.
+
 ## Offline queue & sync (`src/lib/offline`)
 
 A persistent mutation queue that replays Server Actions when connectivity

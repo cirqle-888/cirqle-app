@@ -210,7 +210,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
   const [searchQ, setSearchQ] = useState('')
   const [searchHits, setSearchHits] = useState<ChatSearchHit[] | null>(null)
   const [pending, startTransition] = useTransition()
-  const deepLinked = useRef(false)
+  const openedLink = useRef<string | null>(null)
 
   const active = useMemo(
     () => conversations.find(c => c.id === activeId) ?? null,
@@ -261,14 +261,22 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
     })
   }, [me.employeeId])
 
-  // Deep link (?c=) — open once after the first list load
+  // Deep link (?c=, from a notification) — open that conversation once the list
+  // has loaded, then take the id out of the address. A later notification
+  // changes the address again and is opened again, even for the same chat and
+  // even when this page is already showing; nothing re-opens it otherwise.
   useEffect(() => {
-    if (deepLinked.current || !deepLinkId || conversations.length === 0) return
-    if (conversations.some(c => c.id === deepLinkId)) {
-      deepLinked.current = true
-      const t = setTimeout(() => openConversation(deepLinkId), 0)
-      return () => clearTimeout(t)
-    }
+    if (!deepLinkId) { openedLink.current = null; return }
+    if (openedLink.current === deepLinkId || conversations.length === 0) return
+    if (!conversations.some(c => c.id === deepLinkId)) return
+    openedLink.current = deepLinkId
+    setTimeout(() => {
+      openConversation(deepLinkId)
+      const params = new URLSearchParams(window.location.search)
+      params.delete('c')
+      const rest = params.toString()
+      window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : ''))
+    }, 0)
   }, [deepLinkId, conversations, openConversation])
 
   // ── Realtime: ONE workspace-wide subscription (RLS scopes events to my

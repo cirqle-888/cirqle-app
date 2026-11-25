@@ -94,6 +94,28 @@ else
   echo "⚠ No keystore.properties — building UNSIGNED (run gen-keystore.sh to sign)."
 fi
 
+# android/ is generated and kept between builds, so a hand edit to the Gradle
+# wrapper outlives the reason for it. One such edit pointed the wrapper at a
+# Gradle zip in ~/Downloads; when that file was cleared the build stopped with
+# "FileNotFoundException" before compiling anything. If the wrapper names a
+# local zip that is not there, put the official address back — the same version,
+# which Gradle already has unpacked from an earlier build or fetches once.
+WRAPPER=android/gradle/wrapper/gradle-wrapper.properties
+if [ -f "$WRAPPER" ]; then
+  DIST_URL="$(sed -n 's/^distributionUrl=//p' "$WRAPPER" | sed 's/\\:/:/g')"
+  case "$DIST_URL" in
+    file:*)
+      DIST_FILE="/$(printf '%s' "$DIST_URL" | sed -E 's#^file:/+##')"
+      if [ ! -f "$DIST_FILE" ]; then
+        DIST_NAME="$(basename "$DIST_FILE")"
+        echo "▶ Gradle wrapper pointed at a missing file ($DIST_FILE) — using the official $DIST_NAME."
+        sed -i.bak "s#^distributionUrl=.*#distributionUrl=https\\\\://services.gradle.org/distributions/$DIST_NAME#" "$WRAPPER"
+        rm -f "$WRAPPER.bak"
+      fi
+      ;;
+  esac
+fi
+
 echo "▶ Gradle assembleRelease + bundleRelease…"
 ( cd android && chmod +x ./gradlew && ./gradlew assembleRelease bundleRelease --no-daemon ${SIGN_ARGS[@]+"${SIGN_ARGS[@]}"} )
 

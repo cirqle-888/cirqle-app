@@ -19,7 +19,7 @@
  * complete before pushes actually arrive.
  */
 import { capPlugin, isNative, getPlatform } from '@/lib/native'
-import { saveNativePushToken, removeNativePushToken } from '@/lib/push/native-actions'
+import { saveNativePushToken, removeNativePushToken, reportPushTap } from '@/lib/push/native-actions'
 
 type PermState = 'prompt' | 'prompt-with-rationale' | 'granted' | 'denied'
 
@@ -175,6 +175,8 @@ export function pushTargetPath(data: Record<string, unknown> | undefined): strin
 }
 
 const TOKEN_KEY = 'native_push_token'
+/** How long a tapped notification's in-app navigation gets before the page is loaded outright. */
+const TAP_SETTLE_MS = 2500
 
 /**
  * Turn push on for a signed-in phone app: register this device for the
@@ -195,7 +197,29 @@ export async function startNativePush(onOpen: (path: string) => void): Promise<(
   const stop = addPushNotificationHandlers({
     onActionPerformed: (n) => {
       const path = pushTargetPath(n.data)
+      const from = window.location.pathname
       if (path) onOpen(path)
+      // The in-app navigation can be lost while the app is still starting or
+      // waking up. Give it a moment; if the page has not changed, load the
+      // target outright. Either way, leave one line in the server log saying
+      // what this tap did — see reportPushTap.
+      window.setTimeout(() => {
+        const landed = window.location.pathname
+        const hard = path !== null && landed !== path.split('?')[0]
+        const done = reportPushTap({
+          keys: Object.keys(n.data ?? {}),
+          target: path ? path.split('?')[0] : null,
+          from,
+          landed,
+          hard,
+          sinceLoadMs: performance.now(),
+        }).catch(() => {})
+        if (hard && path) {
+          // Let the log line leave first; the page load would cancel it.
+          void Promise.race([done, new Promise(resolve => setTimeout(resolve, 1000))])
+            .then(() => { window.location.assign(path) })
+        }
+      }, TAP_SETTLE_MS)
     },
   })
   void registerNativePush().then((reg) => {
