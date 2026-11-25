@@ -26,6 +26,12 @@ jobs:
       - name: Install
         run: npm ci
 
+      # npm no longer downloads Electron itself during install; the package
+      # fetches it on first use. Packaging uses that copy (electronDist in
+      # electron-builder.yml), so fetch it now — same step as the macOS build.
+      - name: Fetch Electron
+        run: node node_modules/electron/install.js
+
       - name: IPC channel gate
         run: npm run check:ipc
 
