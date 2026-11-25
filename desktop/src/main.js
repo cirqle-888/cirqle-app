@@ -54,10 +54,8 @@ menus.init({
   reloadStudio: (which) => reloadStudio(which),
   toggleStudio: () => toggleStudio(),
   toggleStudio2: () => toggleStudio2(),
-  sendTextToCirqle: (t) => sendTextToCirqle(t),
   sendClipboardToCirqle: () => sendClipboardToCirqle(),
   navigate: (r) => navigate(r),
-  getClipHistory: () => clipHistory,
 })
 const { layout, applyPreset, TOOLBAR_H, MIN_RATIO, MAX_RATIO, MAX_PANES } = layoutMod
 
@@ -108,9 +106,6 @@ const webs = {}        // built-in browser panes, keyed by web-tab id
 const DL_PANEL_W = 380
 const DL_PANEL_H = 460
 
-// Recent clipboard items (newest first), surfaced in the Capture menu.
-const clipHistory = []
-let lastClip = ''
 
 // New-window (target=_blank / window.open) links from the Cirqle pane: if they
 // point at a file (report / invoice PDF, Excel, CSV, image) download it into the
@@ -563,19 +558,6 @@ function pollToolbarPeek() {
   }
 }
 
-function pollClipboard() {
-  try {
-    if (!win?.isFocused()) return
-    const t = clipboard.readText()
-    if (t && t.trim() && t !== lastClip) {
-      lastClip = t
-      clipHistory.unshift(t)
-      if (clipHistory.length > 20) clipHistory.pop()
-      buildMenu() // refresh the Recent Clipboard submenu
-    }
-  } catch { /* ignore */ }
-}
-
 notifications.init({
   getWin: () => win,
   getChrome: () => chrome,
@@ -995,16 +977,12 @@ deeplinks.init({
 if (!deeplinks.register()) return
 
 app.whenReady().then(() => {
-  // ── Microphone for chat voice notes ─────────────────────────────────────
-  // 1. macOS: ask the OS once (shows the system dialog; remembered after).
-  //    Requires NSMicrophoneUsageDescription in Info.plist (electron-builder.yml).
-  if (process.platform === 'darwin') {
-    const { systemPreferences } = require('electron')
-    if (systemPreferences.getMediaAccessStatus('microphone') !== 'granted') {
-      systemPreferences.askForMediaAccess('microphone').catch(() => {})
-    }
-  }
-  // 2. Chromium layer: grant getUserMedia to our own app, deny everyone else.
+  // ── Microphone for chat voice notes ──────────────────────────────────────
+  // Nothing is asked when the app opens. macOS shows its microphone dialog the
+  // first time someone actually records a voice note (see the handler below);
+  // until then the app has never touched the microphone and has no access to it.
+  // Requires NSMicrophoneUsageDescription in Info.plist (electron-builder.yml).
+  // Chromium layer: grant getUserMedia to our own app, deny everyone else.
   //    (Without this handler Electron silently DENIES media requests — the
   //    reason voice recording showed "Microphone access is needed".)
   const { session } = require('electron')
@@ -1013,6 +991,15 @@ app.whenReady().then(() => {
     let trusted = false
     try { trusted = [CIRQLE_URL, STUDIO_URL].some(base => new URL(url).origin === new URL(base).origin) } catch {}
     if ((permission === 'media' || permission === 'microphone' || permission === 'audioCapture') && trusted) {
+      // The page is asking because the person pressed record. This is the
+      // moment macOS is asked, and its answer is the answer.
+      if (process.platform === 'darwin') {
+        const { systemPreferences } = require('electron')
+        if (systemPreferences.getMediaAccessStatus('microphone') !== 'granted') {
+          systemPreferences.askForMediaAccess('microphone').then(ok => callback(ok), () => callback(false))
+          return
+        }
+      }
       return callback(true)
     }
     if (permission === 'notifications' && trusted) return callback(true)
@@ -1041,7 +1028,6 @@ app.whenReady().then(() => {
     }
   })
   globalShortcut.register('CommandOrControl+Shift+N', sendClipboardToCirqle)
-  setInterval(pollClipboard, 1500)
   setInterval(pollToolbarPeek, 150)
   updates.startPeriodicChecks()
   tray.init({ getWin: () => win })

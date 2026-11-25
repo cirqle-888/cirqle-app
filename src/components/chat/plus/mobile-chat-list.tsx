@@ -50,8 +50,9 @@ export function MobileChatList({ conversations, activeId, meId, nameOf, showName
       return true
     })
     const at = (c: ChatConversation) => c.lastMessage?.createdAt ?? ''
+    // A waiting urgent message leads, above even a pinned chat.
     return [...list].sort((a, b) =>
-      Number(b.pinned) - Number(a.pinned) || Number(b.isMember) - Number(a.isMember) || at(b).localeCompare(at(a)))
+      Number(b.urgentUnread) - Number(a.urgentUnread) || Number(b.pinned) - Number(a.pinned) || Number(b.isMember) - Number(a.isMember) || at(b).localeCompare(at(a)))
   }, [conversations, filter])
 
   return (
@@ -103,6 +104,7 @@ function Row({ conv, active, meId, name, showName, onOpen, onMenu }: {
       <span className="min-w-0 flex-1 border-b border-border/60 pb-2.5">
         <span className="flex items-baseline gap-2">
           <span className={`min-w-0 flex-1 truncate text-[15px] ${conv.unread > 0 ? 'font-semibold' : 'font-medium'}`}>{name}</span>
+          {conv.urgentUnread && <span className="shrink-0 rounded bg-red-500 px-1.5 py-px text-[10px] font-bold uppercase tracking-wide text-white">Urgent</span>}
           {last && <span className={`shrink-0 text-[11px] ${conv.unread > 0 && !muted ? 'font-medium text-violet-400' : 'text-muted-foreground'}`}>{when(last.createdAt)}</span>}
         </span>
         <span className="mt-0.5 flex items-center gap-1.5">

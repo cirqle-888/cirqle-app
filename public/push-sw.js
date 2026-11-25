@@ -13,7 +13,9 @@ self.addEventListener('push', (event) => {
     data: { url: data.url || '/dashboard' },
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
-    vibrate: [200, 100, 200],
+    // Urgent: a longer buzz, and it stays on screen until someone deals with it.
+    vibrate: data.urgent ? [300, 120, 300, 120, 300] : [200, 100, 200],
+    requireInteraction: data.urgent === true,
     timestamp: Date.now(),
   }
   // Always shown, even with the app open. iPhone and iPad require every push to show a

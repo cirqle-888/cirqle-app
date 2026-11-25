@@ -39,7 +39,16 @@ export async function sendNativePush(employeeId: string, payload: PushPayload): 
               notification: { title: payload.title, body: payload.body ?? '' },
               // Read by the app when the notification is tapped, to open the right screen.
               data: { url: payload.url ?? '/dashboard', tag: payload.tag ?? '' },
-              android: { priority: 'HIGH', ...(payload.tag ? { notification: { tag: payload.tag } } : {}) },
+              // The phone app creates two channels (native-push.ts): "messages", and
+              // "urgent", which rings and shows over whatever is on screen. A phone
+              // that has not created them yet falls back to Android's default one.
+              android: {
+                priority: 'HIGH',
+                notification: {
+                  channel_id: payload.urgent ? 'urgent' : 'messages',
+                  ...(payload.tag ? { tag: payload.tag } : {}),
+                },
+              },
               apns: { payload: { aps: { sound: 'default', ...(payload.tag ? { 'thread-id': payload.tag } : {}) } } },
             },
           }),

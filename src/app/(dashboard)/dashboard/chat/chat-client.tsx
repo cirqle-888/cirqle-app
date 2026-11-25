@@ -114,7 +114,7 @@ type Me = { employeeId: string; name: string; cqid: string }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ChatClient(props: { me: Me; canCreateChannels: boolean; isAdmin?: boolean }) {
+export function ChatClient(props: { me: Me; canCreateChannels: boolean; isAdmin?: boolean; initialConversations?: ChatConversation[] | null }) {
   return (
     <Suspense>
       <ChatInner {...props} />
@@ -122,7 +122,7 @@ export function ChatClient(props: { me: Me; canCreateChannels: boolean; isAdmin?
   )
 }
 
-function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCreateChannels: boolean; isAdmin?: boolean }) {
+function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversations = null }: { me: Me; canCreateChannels: boolean; isAdmin?: boolean; initialConversations?: ChatConversation[] | null }) {
   const searchParams = useSearchParams()
   const deepLinkId = searchParams.get('c')
 
@@ -144,7 +144,10 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
     return conv.name ?? ''
   }, [showName])
 
-  const [conversations, setConversations] = useState<ChatConversation[]>([])
+  // The page arrives with the list already in it (page.tsx), so the chats are
+  // on screen with the first paint instead of after a second trip to the server.
+  const [conversations, setConversations] = useState<ChatConversation[]>(initialConversations ?? [])
+  const seeded = useRef(initialConversations != null)
   const [listError, setListError] = useState<string | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -186,7 +189,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
   const [mentionGroups, setMentionGroups] = useState<{ slug: string; name: string }[]>([])
   useEffect(() => { let alive = true; listMentionGroups().then(r => { if (alive && r.ok) setMentionGroups(r.data) }); return () => { alive = false } }, [])
   const [toast, setToast] = useState('')
-  const flash = useCallback((text: string) => { setToast(text); setTimeout(() => setToast(t => (t === text ? '' : t)), 2400) }, [])
+  const flash = useCallback((text: string, ms = 2400) => { setToast(text); setTimeout(() => setToast(t => (t === text ? '' : t)), ms) }, [])
 
   // Pinned chats are saved for the person, so they follow them to every device.
   const pinnedIds = useMemo(() => conversations.filter(c => c.pinned).map(c => c.id), [conversations])
@@ -219,6 +222,8 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
 
   // ── Conversation list: deferred initial load + 30s poll ────────────────────
   const refreshList = useCallback(async () => {
+    // The first tick fires on mount; the page just delivered that same list.
+    if (seeded.current) { seeded.current = false; return }
     const res = await listConversations()
     if (res.ok) { setConversations(res.data); setListError(null) }
     else setListError(res.error)
@@ -255,7 +260,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
         setMessages(res.data.messages)
         setOlderCursor(res.data.nextCursor)
         void markRead(id)
-        setConversations(prev => prev.map(c => (c.id === id ? { ...c, unread: 0, lastReadAt: new Date().toISOString() } : c)))
+        setConversations(prev => prev.map(c => (c.id === id ? { ...c, unread: 0, urgentUnread: false, lastReadAt: new Date().toISOString() } : c)))
       }
       if (stars.ok) setStarredIds(new Set(stars.data))
     })
@@ -408,6 +413,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
             ? {
                 ...c,
                 unread: c.unread + 1,
+                urgentUnread: c.urgentUnread || (row.metadata as { urgent?: boolean } | null)?.urgent === true,
                 lastMessage: {
                   body: String(row.kind ?? 'text') === 'text' ? String(row.body ?? '') : `[${row.kind}]`,
                   senderName: null, senderCqid: null,
@@ -504,12 +510,19 @@ function ChatInner({ me, canCreateChannels, isAdmin = false }: { me: Me; canCrea
       if (res.ok) {
         setMessages(prev => prev.map(m => (m.id === tempId ? res.data : m))
           .filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i)) // dedupe vs realtime echo
+        // Urgent can only ring a device that was set up for alerts — say how many.
+        const reach = res.data.urgentReach
+        if (reach) {
+          flash(reach.reachable >= reach.people
+            ? `Urgent sent. All ${reach.people} can be alerted on a phone or browser.`
+            : `Urgent sent, but only ${reach.reachable} of ${reach.people} can be alerted. The rest have not turned on notifications and will see it when they open Cirqle.`, 9000)
+        }
       } else {
         setMessages(prev => prev.filter(m => m.id !== tempId))
         alert(res.error)
       }
     })
-  }, [activeId, replyTo, me])
+  }, [activeId, replyTo, me, flash])
 
   // Send picked / pasted / dropped files one after another; the caption rides on the first.
   const handleUploadMany = useCallback((files: File[], caption: string) => {
@@ -2265,6 +2278,7 @@ function ConversationRow({ conv, active, onClick, onDelete, onMenu, displayName,
         <span className="min-w-0 flex-1">
           <span className={`flex items-center gap-1.5 ${indented ? 'text-xs' : 'text-sm'}`}>
             <span className={`truncate ${conv.unread > 0 ? 'font-semibold' : ''}`}>{displayName}</span>
+            {conv.urgentUnread && <span className="shrink-0 rounded bg-red-500 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-white">Urgent</span>}
             {partnerId && <PresenceNote presence={partner} max={14} className="shrink-0" />}
             {ENTITY_BADGE[conv.type] && (
               <span className={`shrink-0 rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide ${ENTITY_BADGE[conv.type].cls}`}>
@@ -2477,6 +2491,7 @@ function WorkNavigatorRow({ conv, active, onClick, isPinned, togglePin, onDelete
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className={`truncate text-sm ${conv.unread > 0 ? 'font-semibold text-foreground' : 'font-medium text-foreground/90'}`}>{displayName}</span>
+            {conv.urgentUnread && <span className="shrink-0 rounded bg-red-500 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-white">Urgent</span>}
             {conv.unread > 0 && (
               <span className="shrink-0 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[9px] font-semibold text-background">
                 {conv.unread > 99 ? '99+' : conv.unread}

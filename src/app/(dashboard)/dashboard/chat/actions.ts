@@ -61,6 +61,8 @@ export interface ChatConversation {
   clientName: string | null
   /** I pinned this chat to the top of my list (saved for me, on every device). */
   pinned: boolean
+  /** An urgent message is waiting here, unread. Such chats lead the list. */
+  urgentUnread: boolean
   /** all = every message alerts me · mentions = only mentions · none = muted. */
   notifyLevel: 'all' | 'mentions' | 'none'
   /** When I last read it — the "new messages" line is drawn after this. */
@@ -86,6 +88,9 @@ export interface ChatAttachment {
 
 export interface ChatMessage {
   id: string
+  /** Only on the reply to sending an urgent message: how many of the other
+   *  people have a phone or browser that can be alerted. */
+  urgentReach?: { people: number; reachable: number }
   conversationId: string
   senderId: string | null
   senderName: string | null
@@ -398,6 +403,9 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
   const me = auth.me
   const admin = createAdminClient()
   const canModerate = me.isAdmin || hasPermission(me, 'chat.moderate')
+  // Needed further down and independent of everything before it, so it is
+  // asked for now and travels alongside the membership query.
+  const rulesReady = loadChatAccessRules(admin).catch(() => [] as Awaited<ReturnType<typeof loadChatAccessRules>>)
 
   // Memberships: per-conversation last_read_at, role, and the DM hide marker.
   //
@@ -477,7 +485,7 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
   // to decide — most refreshes pay for one tiny rules query and nothing more.
   let access: ChatAccessContext | null = null
   {
-    const rules = await loadChatAccessRules(admin)
+    const rules = await rulesReady
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const anyDeptChannel = (convRes.data ?? []).some((c: any) => c.department_id)
     if (rules.length || anyDeptChannel) access = await loadChatAccess(admin, me, rules)
@@ -543,8 +551,9 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
   }
 
   // Client names for the sidebar's per-client grouping headers.
+  // Asked for now, awaited after the summaries: the two do not depend on each other.
   const clientNames = new Map<string, string>()
-  {
+  const clientNamesReady = (async () => {
     const ids = [...new Set([
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...(convs ?? []).map((c: any) => c.client_id as string | null),
@@ -556,7 +565,25 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
         clientNames.set(c.id, c.name ?? 'Client')
       }
     }
-  }
+  })().catch(() => undefined)
+
+  // Chats where an urgent message is waiting, unread — they lead the list.
+  const urgentConvs = new Set<string>()
+  const urgentReady = (async () => {
+    const mine = (convs ?? []).map((c: { id: string }) => c.id).filter((id: string) => lastReadByConv.has(id))
+    if (!mine.length) return
+    const { data } = await admin.from('messages')
+      .select('conversation_id, created_at')
+      .in('conversation_id', mine)
+      .eq('metadata->>urgent', 'true')
+      .neq('sender_id', me.employeeId)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .limit(200)
+    for (const r of (data ?? []) as { conversation_id: string; created_at: string }[]) {
+      if (r.created_at > (lastReadByConv.get(r.conversation_id) ?? '')) urgentConvs.add(r.conversation_id)
+    }
+  })().catch(() => undefined)
 
   // Last message + unread count for every conversation, in ONE round-trip.
   //
@@ -636,6 +663,8 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
     }
   }
 
+  await Promise.all([clientNamesReady, urgentReady])
+
   const results = (convs ?? []).map((c) => {
     const isMember = lastReadByConv.has(c.id)
     const summary = summaries.get(c.id) ?? null
@@ -694,6 +723,7 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
       canDelete,
       pinned: prefsByConv.get(c.id)?.pinned ?? false,
       notifyLevel: prefsByConv.get(c.id)?.notifyLevel ?? 'all',
+      urgentUnread: isMember && urgentConvs.has(c.id) && (summary?.unread ?? 0) > 0,
       lastReadAt: lastReadByConv.get(c.id) ?? null,
       departmentId: (c.department_id as string | null) ?? null,
       blocked: (() => {
@@ -714,10 +744,10 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
     return !!c.lastMessage && c.lastMessage.createdAt > hiddenAt
   })
 
-  // Sort: unread first, then most recent activity
+  // Sort: a waiting urgent message first, then most recent activity
   visible.sort((a, b) => {
     const at = a.lastMessage?.createdAt ?? '', bt = b.lastMessage?.createdAt ?? ''
-    return bt.localeCompare(at)
+    return Number(b.urgentUnread) - Number(a.urgentUnread) || bt.localeCompare(at)
   })
   return { ok: true, data: visible }
 }
@@ -1112,21 +1142,42 @@ export async function sendMessage(
     const preview = text.length > 120 ? `${text.slice(0, 120)}…` : text
     after(async () => {
       await Promise.all(members
+        // An urgent message goes to everyone, muted or mentioned alike: the
+        // mention's own notification is an ordinary one, and urgent must not be.
         .filter(m => m.employeeId !== me.employeeId
-          && (urgent || m.notifyLevel === 'all')
-          && !mentionIds.includes(m.employeeId))
+          && (urgent || (m.notifyLevel === 'all' && !mentionIds.includes(m.employeeId))))
         .map(m => sendWebPush(m.employeeId, {
           title: urgent ? `🚨 Urgent · ${me.cqid}` : `💬 ${me.cqid}`,
           body: preview,
           url: `/dashboard/chat?c=${conversationId}`,
           tag: `msg:${conversationId}`,
+          urgent,
         })))
     })
   }
 
+  // An urgent message can only alert a device that has been set up for alerts.
+  // Tell the sender how many of the others it can actually reach, so "urgent"
+  // is never assumed to have rung a phone that was never registered.
+  let urgentReach: ChatMessage['urgentReach']
+  if (urgent) {
+    const others = members.map(m => m.employeeId).filter(id => id !== me.employeeId)
+    if (others.length) {
+      const [phones, browsers] = await Promise.all([
+        admin.from('native_push_tokens').select('employee_id').in('employee_id', others),
+        admin.from('push_subscriptions').select('employee_id').in('employee_id', others),
+      ])
+      const reachable = new Set([
+        ...((phones.data ?? []) as { employee_id: string }[]).map(r => r.employee_id),
+        ...((browsers.data ?? []) as { employee_id: string }[]).map(r => r.employee_id),
+      ])
+      urgentReach = { people: others.length, reachable: reachable.size }
+    }
+  }
+
   return {
     ok: true,
-    data: { ...mapMessage(data), senderName: me.name, senderCqid: me.cqid },
+    data: { ...mapMessage(data), senderName: me.name, senderCqid: me.cqid, ...(urgentReach ? { urgentReach } : {}) },
   }
 }
 

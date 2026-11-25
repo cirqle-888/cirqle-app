@@ -133,7 +133,7 @@ WhatsApp uses a retry-only preload for the bundled error page. App navigation
 is restricted to the configured Cirqle and Flyer origins, with other links
 opening in the system browser. Download filenames cannot escape the downloads
 folder, and receipt downloads accept PNG, JPEG or WebP with a size limit.
-Clipboard history is collected only while the Cirqle window is focused.
+The clipboard is read only when you choose New Request from Clipboard; no clipboard history is kept (removed in 0.12.1). The microphone is requested the first time you record a voice note, never at launch.
 Cold-start deep links wait for the window; update requests have a timeout.
 Auto-paste reports whether the paste operation was attempted successfully,
 not whether WhatsApp accepted or sent the image. Sending still requires review.

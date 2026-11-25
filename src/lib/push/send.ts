@@ -31,6 +31,8 @@ export interface PushPayload {
   body?: string
   url?: string
   tag?: string
+  /** An admin marked it urgent: it stays on screen and uses the loud phone channel. */
+  urgent?: boolean
 }
 
 /**
@@ -59,6 +61,7 @@ async function sendBrowserPush(employeeId: string, payload: PushPayload): Promis
       body: payload.body ?? '',
       url: payload.url ?? '/dashboard',
       tag: payload.tag,
+      urgent: payload.urgent === true,
     })
 
     await Promise.all(subs.map(async (s) => {

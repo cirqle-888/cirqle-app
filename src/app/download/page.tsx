@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Apple, Download, Smartphone } from 'lucide-react'
 import desktop from '../../../desktop/latest.json'
 import android from '../../../public/mobile/latest.json'
+import { CopyCommand } from './copy-command'
 
 export const metadata: Metadata = {
   title: 'Get the Cirqle apps',
@@ -55,8 +56,16 @@ export default function DownloadPage() {
                 </li>
                 <li>From then on it opens like any other app. Updates are offered inside the app.</li>
               </ol>
+              <h3 className="mt-5 text-sm font-semibold">Or do it in one line</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                After dragging the app into Applications, open the <b className="text-foreground">Terminal</b> app, paste
+                this, and press Return. Then open Cirqle Desktop as usual, with no warning.
+              </p>
+              <CopyCommand command={'xattr -dr com.apple.quarantine "/Applications/Cirqle Desktop.app"'} />
               <p className="mt-3 text-xs text-muted-foreground">
-                The extra step is there because the app is not yet registered with Apple. It is the same Cirqle.
+                Why the extra step: the app is not yet registered with Apple, so macOS will not open it until you say
+                so, once. The command only removes the &ldquo;downloaded from the internet&rdquo; mark from this one app. It is
+                the same Cirqle, and it asks for the microphone only if you record a voice note.
               </p>
             </div>
           </div>
@@ -79,7 +88,10 @@ export default function DownloadPage() {
               <ol className="mt-5 list-decimal space-y-1.5 pl-5 text-sm text-muted-foreground">
                 <li>Open the downloaded file on your phone. If asked, allow your browser to install apps.</li>
                 <li>Install. It replaces an older Cirqle app and keeps you signed in.</li>
-                <li>Open Cirqle and choose <b className="text-foreground">Allow</b> when it asks about notifications.</li>
+                <li>
+                  Open Cirqle. To be alerted about messages, choose <b className="text-foreground">Turn on</b> when the app
+                  offers it. It never asks for your microphone, camera, location or contacts.
+                </li>
               </ol>
             </div>
           </div>

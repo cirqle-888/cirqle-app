@@ -6,10 +6,10 @@ import { isNative, capPlugin } from '@/lib/native'
 import { routeForDeepLink } from '@/lib/deep-link'
 import { syncRoute } from '@/lib/mobile/last-route'
 import { trackKeyboard } from '@/lib/mobile/keyboard'
-import { runIntroCover, loadImageInBrowser } from '@/lib/mobile/intro-cover'
 import { startNativePush } from '@/lib/native-push'
 import { OfflineIndicator } from '@/components/mobile/offline-indicator'
 import { UpdateBanner } from '@/components/mobile/update-banner'
+import { NotifyPrompt } from '@/components/mobile/notify-prompt'
 
 interface StatusBarPlugin {
   setStyle?: (o: { style: 'DARK' | 'LIGHT' }) => Promise<void>
@@ -36,8 +36,8 @@ interface AppPlugin {
  * - StatusBar: non-overlay so the WebView starts below the status bar (Android;
  *   iOS uses contentInset:"always" from capacitor.config, so no overlay there).
  *   Style follows the app theme and re-syncs when the .dark class toggles.
- * - SplashScreen: hidden once the web app has mounted (config keeps it up until
- *   we call hide, avoiding a white flash while the remote URL loads).
+ * - SplashScreen: hidden as soon as the web app has mounted. It is the only
+ *   launch screen; nothing else is shown between it and the app.
  * - Last route: remembered across launches, because Capacitor always boots the
  *   WebView at the site root and keeps no page state of its own. See
  *   @/lib/mobile/last-route.
@@ -65,14 +65,10 @@ export function MobileShell() {
     }
 
     applyStatusBar()
-    // Hands over from the native splash to the opening cover (when
-    // theme-init.js put one up) and then to the app. With no cover this just
-    // hides the splash, as before.
-    void runIntroCover(document.documentElement, {
-      loadImage: loadImageInBrowser,
-      hideSplash: () => { SplashScreen?.hide?.().catch(() => {}) },
-      setTimer: (fn, ms) => window.setTimeout(fn, ms),
-    })
+    // The app is on screen: take the launch screen down. There used to be a
+    // second, designed cover here that stayed for 1.5 s after the app was
+    // already ready — two covers in a row, and a slower start for it.
+    SplashScreen?.hide?.().catch(() => {})
 
     // Re-sync the status bar when the theme (.dark class) changes.
     const obs = new MutationObserver(applyStatusBar)
@@ -145,9 +141,9 @@ export function MobileShell() {
 
   // Phone notifications: register this device for the signed-in employee and
   // open the right page when a notification is tapped. Only inside the app (the
-  // token is saved against whoever is signed in, and nobody wants a permission
-  // prompt on the login page), and only on a build that ships Firebase — see
-  // startNativePush. Re-runs after a sign-out and sign-in, so the phone follows
+  // token is saved against whoever is signed in), and only on a build that
+  // ships Firebase — see startNativePush. No permission dialog is raised here:
+  // where Android needs one, NotifyPrompt offers it and the person decides. Re-runs after a sign-out and sign-in, so the phone follows
   // the person who is signed in now.
   const signedIn = pathname?.startsWith('/dashboard') ?? false
   useEffect(() => {
@@ -166,6 +162,7 @@ export function MobileShell() {
     <>
       <OfflineIndicator />
       <UpdateBanner />
+      <NotifyPrompt active={signedIn} />
     </>
   )
 }

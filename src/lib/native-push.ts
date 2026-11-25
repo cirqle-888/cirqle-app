@@ -37,6 +37,8 @@ interface PushPlugin {
   checkPermissions: () => Promise<{ receive: PermState }>
   requestPermissions: () => Promise<{ receive: PermState }>
   register: () => Promise<void>
+  /** Android only: a named notification channel (its sound and prominence). */
+  createChannel?: (channel: { id: string; name: string; description?: string; importance: 1 | 2 | 3 | 4 | 5; visibility?: -1 | 0 | 1; vibration?: boolean }) => Promise<void>
   removeAllListeners: () => Promise<void>
   addListener: (
     event: 'registration' | 'registrationError' | 'pushNotificationReceived' | 'pushNotificationActionPerformed',
@@ -55,7 +57,7 @@ export interface NativePushRegistration {
  * native, permission denied, the plugin is missing, or registration times out.
  * Safe to call more than once (the server action upserts on the unique token).
  */
-export async function registerNativePush(timeoutMs = 15000): Promise<NativePushRegistration | null> {
+export async function registerNativePush(timeoutMs = 15000, { ask = false }: { ask?: boolean } = {}): Promise<NativePushRegistration | null> {
   if (!isNative()) return null
   const platform = getPlatform()
   if (platform !== 'ios' && platform !== 'android') return null
@@ -63,10 +65,11 @@ export async function registerNativePush(timeoutMs = 15000): Promise<NativePushR
   const Push = capPlugin<PushPlugin>('PushNotifications')
   if (!Push?.register) return null
 
-  // Ask for permission (idempotent — checkPermissions first avoids re-prompting).
+  // Permission. The system dialog is shown only when the caller says the
+  // person asked for it (`ask`) — never as a side effect of opening the app.
   try {
     let perm = await Push.checkPermissions()
-    if (perm.receive !== 'granted') perm = await Push.requestPermissions()
+    if (perm.receive !== 'granted' && ask) perm = await Push.requestPermissions()
     if (perm.receive !== 'granted') return null
   } catch { return null }
 
@@ -222,11 +225,56 @@ export async function startNativePush(onOpen: (path: string) => void): Promise<(
       }, TAP_SETTLE_MS)
     },
   })
-  void registerNativePush().then((reg) => {
-    if (!reg) return
-    try { window.localStorage.setItem(TOKEN_KEY, reg.token) } catch { /* private mode — sign-out just can't forget it */ }
-  })
+  // Two channels, so an urgent message can ring and show over whatever is on
+  // screen while ordinary messages stay ordinary. Creating one that exists is a
+  // no-op; the server names the channel per message (push/native-send.ts).
+  const Push = capPlugin<PushPlugin>('PushNotifications')
+  void Push?.createChannel?.({ id: 'messages', name: 'Messages', description: 'Chat messages and Cirqle notifications', importance: 4, visibility: 1, vibration: true })?.catch(() => {})
+  void Push?.createChannel?.({ id: 'urgent', name: 'Urgent', description: 'Messages an admin marked urgent', importance: 5, visibility: 1, vibration: true })?.catch(() => {})
+
+  // Register silently when notifications are already allowed (always the case
+  // before Android 13). Otherwise nothing is asked here: the person turns them
+  // on from the prompt in the app (enableNativePush), with the reason in view.
+  void registerNativePush().then(remember)
   return stop
+}
+
+function remember(reg: NativePushRegistration | null): void {
+  if (!reg) return
+  try { window.localStorage.setItem(TOKEN_KEY, reg.token) } catch { /* private mode — sign-out just can't forget it */ }
+}
+
+/** Can this phone app be alerted, and if not, is it worth offering? */
+export type NativePushState = 'unsupported' | 'on' | 'ask' | 'blocked'
+
+/**
+ * Where notifications stand on this phone app, without asking for anything.
+ * 'ask' means the system has not been asked yet; 'blocked' means the person
+ * said no, and only the phone's own settings can change that.
+ */
+export async function nativePushState(): Promise<NativePushState> {
+  if (!isNative()) return 'unsupported'
+  const App = capPlugin<{ getInfo?: () => Promise<{ build?: string }> }>('App')
+  let build: string | undefined
+  try { build = (await App?.getInfo?.())?.build } catch { return 'unsupported' }
+  if (!buildHasPush(getPlatform(), build)) return 'unsupported'
+  const Push = capPlugin<PushPlugin>('PushNotifications')
+  if (!Push?.checkPermissions) return 'unsupported'
+  try {
+    const { receive } = await Push.checkPermissions()
+    return receive === 'granted' ? 'on' : receive === 'denied' ? 'blocked' : 'ask'
+  } catch { return 'unsupported' }
+}
+
+/**
+ * The person tapped "Turn on": show the system's permission dialog and
+ * register the phone. Resolves true when notifications are on.
+ */
+export async function enableNativePush(): Promise<boolean> {
+  if ((await nativePushState()) === 'unsupported') return false
+  const reg = await registerNativePush(15000, { ask: true })
+  remember(reg)
+  return reg !== null
 }
 
 /**

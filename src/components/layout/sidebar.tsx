@@ -10,7 +10,7 @@ import { useTheme } from '@/contexts/theme-context'
 import {
   LayoutDashboard,
   CheckSquare,
-  LogOut,
+  LogOut, Download,
   ChevronRight,
   TrendingUp,
   Lock,
@@ -199,6 +199,18 @@ export function ProfileActions({
         <KeyRound className="w-4 h-4 shrink-0" />
         <span className="truncate whitespace-nowrap">Change password</span>
       </button>
+
+      {/* The Mac and Android apps, with how to install them. A public page, so
+          the link can also be sent to someone who is not signed in yet. */}
+      <a
+        href="/download"
+        target="_blank"
+        rel="noreferrer"
+        className={`${itemCls} text-muted-foreground hover:bg-sidebar-accent hover:text-foreground`}
+      >
+        <Download className="w-4 h-4 shrink-0" />
+        <span className="truncate whitespace-nowrap">Get the apps</span>
+      </a>
 
       {/* Sign out */}
       <button

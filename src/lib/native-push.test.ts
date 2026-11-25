@@ -105,3 +105,64 @@ describe('a tapped notification', () => {
     expect(trace).toMatchObject({ landed: '/dashboard', hard: true })
   })
 })
+
+describe('notification permission', () => {
+  async function phone(receive: 'prompt' | 'granted' | 'denied') {
+    vi.resetModules()
+    const asked = vi.fn(async () => ({ receive: 'granted' as const }))
+    const registered = vi.fn(async () => {})
+    ;(globalThis as unknown as { window: unknown }).window = {
+      location: { pathname: '/dashboard', assign: () => {} },
+      setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+      localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+      Capacitor: {
+        isNativePlatform: () => true,
+        getPlatform: () => 'android',
+        Plugins: {
+          App: { getInfo: async () => ({ build: String(PUSH_MIN_ANDROID_BUILD) }) },
+          PushNotifications: {
+            checkPermissions: async () => ({ receive }),
+            requestPermissions: asked,
+            register: registered,
+            createChannel: async () => {},
+            addListener: () => ({ remove: async () => {} }),
+          },
+        },
+      },
+    }
+    const mod = await import('./native-push')
+    return { mod, asked, registered }
+  }
+
+  it('is never asked for just because the app opened', async () => {
+    const { mod, asked, registered } = await phone('prompt')
+    await mod.startNativePush(() => {})
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(asked).not.toHaveBeenCalled()
+    expect(registered).not.toHaveBeenCalled()
+    expect(await mod.nativePushState()).toBe('ask')
+  })
+
+  it('registers quietly when notifications are already allowed', async () => {
+    const { mod, asked, registered } = await phone('granted')
+    await mod.startNativePush(() => {})
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(asked).not.toHaveBeenCalled()
+    expect(registered).toHaveBeenCalled()
+    expect(await mod.nativePushState()).toBe('on')
+  })
+
+  it('is asked for when the person turns notifications on', async () => {
+    const { mod, asked } = await phone('prompt')
+    void mod.enableNativePush()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(asked).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports a refusal as blocked, and does not ask again by itself', async () => {
+    const { mod, asked } = await phone('denied')
+    await mod.startNativePush(() => {})
+    expect(await mod.nativePushState()).toBe('blocked')
+    expect(asked).not.toHaveBeenCalled()
+  })
+})

@@ -23,10 +23,8 @@ const deps = {
   reloadStudio: () => {},
   toggleStudio: () => {},
   toggleStudio2: () => {},
-  sendTextToCirqle: () => {},
   sendClipboardToCirqle: () => {},
   navigate: () => {},
-  getClipHistory: () => [],
 }
 function init(d) { Object.assign(deps, d) }
 
@@ -87,13 +85,11 @@ function wireContextMenu(view, isCirqle) {
 }
 
 
-// Native menu — unclipped, so clipboard history + New-record shortcuts live here
-// (a dropdown inside the 48px toolbar view would be clipped to its bounds).
+// Native menu. The clipboard is read at one moment only: when the person
+// chooses New Request from Clipboard. There is no clipboard history — the app
+// used to keep the last 20 things copied while it was in front, which could
+// include a password or a private message copied for some other purpose.
 function buildMenu() {
-  const recent = deps.getClipHistory().length
-    ? deps.getClipHistory().map((h) => ({ label: truncate(h), click: () => deps.sendTextToCirqle(h) }))
-    : [{ label: '(clipboard history is empty)', enabled: false }]
-
   const menu = Menu.buildFromTemplate([
     ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
     {
@@ -102,8 +98,6 @@ function buildMenu() {
       label: 'Quick',
       submenu: [
         ...quick.template({ accelerators: true }),
-        { type: 'separator' },
-        { label: 'Recent Clipboard', submenu: recent },
       ],
     },
     // REQUIRED on macOS: without the Edit menu's roles, Cmd+C / Cmd+V don't work

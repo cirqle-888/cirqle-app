@@ -67,7 +67,7 @@ async function runCheck({interactive = false} = {}) {
     publish({available:true,latest:manifest.version,label:`Update ${manifest.version}`,message:''})
     if (interactive || notifiedVersion !== manifest.version) {
       notifiedVersion = manifest.version
-      const answer = await dialog.showMessageBox({type:'info',message:`Update available: ${manifest.version}`,detail:'This build uses manual updates. Download the installer, quit Cirqle after saving your work, and replace the app in Applications.',buttons:['Open download','Later'],defaultId:0,cancelId:1})
+      const answer = await dialog.showMessageBox({type:'info',message:`Update available: ${manifest.version}`,detail:'This build uses manual updates. Download the installer, quit Cirqle after saving your work, and replace the app in Applications. If macOS says it cannot verify the new copy, open System Settings → Privacy & Security and choose Open Anyway; the steps are on the download page.',buttons:['Open download','Later'],defaultId:0,cancelId:1})
       if (answer.response === 0) require('./security').openExternal(shell,url.href)
     }
     return {ok:true,updateAvailable:true}

@@ -335,19 +335,14 @@ export function FloatingCommsWidget() {
   // once on focus, and ticks at 300s instead of 120s while visible.
   useVisibleInterval(() => { void refreshConvs(); void refreshNotifs() }, 300_000)
 
-  // Unlock the chime's AudioContext on the first user gesture, and use the
-  // same gesture to ask for system-notification permission (a gesture-tied
-  // prompt is far more likely to be shown/granted than one on page load).
+  // Unlock the chime's AudioContext on the first user gesture. Nothing else
+  // rides on that gesture: the browser's notification permission used to be
+  // requested here, on the first click anywhere, which put a system prompt in
+  // front of people who had asked for nothing. It is asked only from the
+  // notification switch now (PushToggle), where the person chose it.
   useEffect(() => {
     const cleanupChime = installChimeUnlock()
-    const askOnce = () => {
-      if (typeof Notification !== 'undefined' && Notification.permission === 'default' && !inDesktopShell()) {
-        void Notification.requestPermission().catch(() => {})
-      }
-      window.removeEventListener('pointerdown', askOnce)
-    }
-    window.addEventListener('pointerdown', askOnce, { passive: true })
-    return () => { cleanupChime(); window.removeEventListener('pointerdown', askOnce) }
+    return () => { cleanupChime() }
   }, [])
 
   // System notification for a message/alert the user isn't looking at —

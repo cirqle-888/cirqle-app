@@ -11,10 +11,19 @@ bundle stays dependency-free (`src/lib/native.ts` reads `window.Capacitor`).
 | Module | Exports | Native plugin | Web / desktop fallback |
 |---|---|---|---|
 | `native.ts` | `isNative`, `getPlatform`, `capPlugin` | — | `window.Capacitor` undefined → no-op |
-| `native-capabilities.ts` | `shareContent`, `read/writeClipboard`, `hapticImpact/Notification`, `capturePhoto`, `scheduleLocalNotification`, `saveBase64File` | Share, Clipboard, Haptics, Camera, LocalNotifications, Filesystem | Web Share / Clipboard / `navigator.vibrate` / `<input type=file>` / download |
-| `native-push.ts` | `registerNativePush`, `addPushNotificationHandlers`, `unregisterNativePush` | PushNotifications | no-op (web uses VAPID `<PushToggle>`) |
-| `native-biometric.ts` | `isBiometricAvailable`, `authenticateBiometric` | BiometricAuth | no-op (returns false) |
+| `native-capabilities.ts` | `shareContent`, `writeClipboard`, `saveBase64File` | Share, Clipboard, Filesystem | Web Share / Clipboard API / download |
+| `native-push.ts` | `startNativePush`, `nativePushState`, `enableNativePush`, `forgetNativePush` | PushNotifications | no-op (web uses VAPID `<PushToggle>`) |
 | `deep-link.ts` | `routeForDeepLink` | — (used by `MobileShell` App listener) | pure function |
+
+**What the phone app can touch — keep this list short.** The app declares only
+what it uses: the internet, and notifications. It has no microphone, camera,
+location, contacts or storage permission, and no plugin that could add one.
+Local notifications, biometrics, the camera and haptics were removed in 0.10.0:
+nothing called them, and they made the app ask Android for start-at-boot,
+exact-alarm, wake-lock, fingerprint and vibrate permissions it had no use for.
+Add a plugin only together with the feature that needs it. Notification
+permission is asked only after the person taps **Turn on** (`NotifyPrompt`),
+never on launch.
 
 `MobileShell` (`src/components/mobile/mobile-shell.tsx`) wires the app lifecycle:
 status bar theming, splash hide, Android hardware **back button**, `cirqle://`
