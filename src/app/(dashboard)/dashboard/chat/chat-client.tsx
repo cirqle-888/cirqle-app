@@ -369,6 +369,9 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
           const row = payload.new as Record<string, unknown>
+          // A row Supabase would not let this connection read arrives empty.
+          // It says nothing, so it must not be announced as a new message.
+          if (!row.id || !row.conversation_id) return
           const convId = String(row.conversation_id)
           const mine = row.sender_id === me.employeeId
 
@@ -1499,6 +1502,14 @@ function Composer({ placeholder, members, disabled, onSend, onTyping, onVoice, r
   const fileRef = useRef<HTMLInputElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const setDraft = (value: string) => { setDraftState(value); draftStore.write(draftKey, value) }
+  // Choosing Reply puts the cursor in the box: the next thing anyone does is
+  // type. (After the menu has closed and given focus back, hence the tick.)
+  const replyingTo = replyTo?.id ?? null
+  useEffect(() => {
+    if (!replyingTo) return
+    const t = setTimeout(() => taRef.current?.focus(), 0)
+    return () => clearTimeout(t)
+  }, [replyingTo])
 
   const previews = useMemo(() => files.map(f => (f.type.startsWith('image/') ? URL.createObjectURL(f) : null)), [files])
   useEffect(() => () => { previews.forEach(u => { if (u) URL.revokeObjectURL(u) }) }, [previews])

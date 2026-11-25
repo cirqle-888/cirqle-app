@@ -1,19 +1,22 @@
 import { createBrowserClient } from '@supabase/ssr'
 import { Database } from '../../types/supabase'
 import { logger } from '../logger'
+import { subscribeAfterAuth } from './realtime-auth'
 
+// Every client goes through subscribeAfterAuth: without it, live updates join
+// as the anonymous role and deliver nothing. See ./realtime-auth.ts.
 export function createClient() {
-  return createBrowserClient(
+  return subscribeAfterAuth(createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
+  ))
 }
 
 export function createTypedClient() {
-  return createBrowserClient<Database>(
+  return subscribeAfterAuth(createBrowserClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
+  ))
 }
 
 /**
