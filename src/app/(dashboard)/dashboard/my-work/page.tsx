@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { unitTeamIds } from '@/lib/units/membership'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
@@ -31,13 +32,17 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
   if (!hasPermission(me, PERMS.REQUESTS_WORK_OWN) && !canManageTeam) redirect('/dashboard')
 
   const admin = createAdminClient()
+  // A business-unit team (lib/units) manages only its own people: a lead in
+  // Social Media never sees Cirqle Flyers' boards. null = not in a unit.
+  const unitTeam = await unitTeamIds(admin, me)
 
   // Team: everyone active with work on their board, busiest-late first.
   let team: { employeeId: string; cqid: string; open: number; overdue: number }[] = []
   if (canManageTeam) {
     const { data: emps } = await admin.from('employees').select('id, cqid').eq('is_active', true).order('cqid')
     const today = toISODate(new Date())
-    const loads = await Promise.all(((emps ?? []) as { id: string; cqid: string }[]).map(async e => {
+    const people = ((emps ?? []) as { id: string; cqid: string }[]).filter(e => !unitTeam || unitTeam.has(e.id))
+    const loads = await Promise.all(people.map(async e => {
       const work = await loadMyWork(admin, e.id).catch(() => [])
       const open = work.filter(r => isPending(rowStageOf(r))).length
       const overdue = work.filter(r => isPending(rowStageOf(r)) && r.due_date && r.due_date < today).length
@@ -48,7 +53,7 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
   }
 
   const { for: forId } = await searchParams
-  const viewing = canManageTeam && forId && forId !== me.employeeId ? team.find(t => t.employeeId === forId)
+  const viewing = canManageTeam && forId && forId !== me.employeeId && (!unitTeam || unitTeam.has(forId)) ? team.find(t => t.employeeId === forId)
     ?? await admin.from('employees').select('id, cqid').eq('id', forId).maybeSingle()
       .then(({ data }) => data ? { employeeId: data.id as string, cqid: data.cqid as string, open: 0, overdue: 0 } : null)
     : null

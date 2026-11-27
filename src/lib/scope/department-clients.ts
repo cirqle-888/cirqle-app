@@ -107,6 +107,9 @@ export async function loadDepartmentClientScope(
   const confined = await confinedScope(admin, me)
   if (!confined && (isDepartmentUnrestricted(me) || !me?.employeeId)) return UNRESTRICTED
   const departmentIds = confined ? confined.categoryIds : await employeeDepartmentIds(admin, me!.employeeId!)
+  // Confined to nothing (a unit with a team but no departments yet) sees no
+  // clients — never everyone.
+  if (confined && departmentIds && departmentIds.size === 0) return { restricted: true, departmentIds, clientIds: new Set() }
   if (!departmentIds || departmentIds.size === 0) return UNRESTRICTED
 
   const [clients, services, pricing] = await Promise.all([

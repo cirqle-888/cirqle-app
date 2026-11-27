@@ -1,0 +1,76 @@
+import 'server-only'
+
+/**
+ * Who belongs to which unit (server-only, service role).
+ *
+ * A non-admin member of an ACTIVE unit is confined to it: their data is
+ * narrowed to the unit's departments (lib/brands/restriction → confinedScope)
+ * and the pages they may open are the allow-list in ./access.
+ *
+ * Fail-closed: a read error other than "the table is not there yet" throws,
+ * so a hiccup can never quietly show a unit member everything.
+ */
+
+import type { SupabaseClient } from '@supabase/supabase-js'
+import type { CurrentUser } from '@/lib/permissions/check'
+
+type Admin = SupabaseClient
+
+export interface MyUnit {
+  id: string
+  slug: string
+  name: string
+  categoryIds: string[]
+  teamSeesResults: boolean
+  role: 'lead' | 'member'
+}
+
+const notInstalled = (e: { code?: string; message?: string } | null) =>
+  !!e && (e.code === 'PGRST205' || e.code === '42P01' || /does not exist|schema cache/i.test(e.message ?? ''))
+
+/** The active units an employee belongs to. [] before the migration (two small indexed reads). */
+export async function unitsOfEmployee(admin: Admin, employeeId: string): Promise<MyUnit[]> {
+  const { data: mem, error } = await admin.from('business_unit_members').select('unit_id, role').eq('employee_id', employeeId)
+  if (error) {
+    if (notInstalled(error)) return []
+    throw new Error(`Could not check unit membership: ${error.message}`)
+  }
+  if (!mem?.length) return []
+  const role = new Map((mem as { unit_id: string; role: string }[]).map(m => [m.unit_id, m.role === 'lead' ? 'lead' as const : 'member' as const]))
+  const { data: units, error: uErr } = await admin.from('business_units')
+    .select('id, slug, name, category_ids, team_sees_results, is_active').in('id', [...role.keys()]).eq('is_active', true)
+  if (uErr) throw new Error(`Could not check unit membership: ${uErr.message}`)
+  return ((units ?? []) as { id: string; slug: string; name: string; category_ids: string[] | null; team_sees_results: boolean }[])
+    .map(u => ({
+      id: u.id, slug: u.slug, name: u.name, categoryIds: u.category_ids ?? [],
+      teamSeesResults: !!u.team_sees_results, role: role.get(u.id) ?? 'member',
+    }))
+}
+
+/** Is this person confined to their unit(s)? Admins never are. */
+export async function isUnitConfined(admin: Admin, me: Pick<CurrentUser, 'isAdmin' | 'employeeId'> | null): Promise<boolean> {
+  if (!me || me.isAdmin || !me.employeeId) return false
+  return (await unitsOfEmployee(admin, me.employeeId)).length > 0
+}
+
+/**
+ * The departments (service categories) a confined member may see, or null
+ * when they are not confined. An empty array means "confined to nothing" —
+ * a unit with a team but no work yet shows its team nothing, never everything.
+ */
+export async function unitCategoryIdsFor(admin: Admin, me: Pick<CurrentUser, 'isAdmin' | 'employeeId'> | null): Promise<string[] | null> {
+  if (!me || me.isAdmin || !me.employeeId) return null
+  const units = await unitsOfEmployee(admin, me.employeeId)
+  if (!units.length) return null
+  return [...new Set(units.flatMap(u => u.categoryIds))]
+}
+
+/** Everyone on the same unit(s) as this member — for team pickers and boards. */
+export async function unitTeamIds(admin: Admin, me: Pick<CurrentUser, 'isAdmin' | 'employeeId'> | null): Promise<Set<string> | null> {
+  if (!me || me.isAdmin || !me.employeeId) return null
+  const units = await unitsOfEmployee(admin, me.employeeId)
+  if (!units.length) return null
+  const { data, error } = await admin.from('business_unit_members').select('employee_id').in('unit_id', units.map(u => u.id))
+  if (error) throw new Error(`Could not read the unit team: ${error.message}`)
+  return new Set([me.employeeId, ...((data ?? []) as { employee_id: string }[]).map(r => r.employee_id)])
+}

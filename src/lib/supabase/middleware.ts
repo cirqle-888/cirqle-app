@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { safeNextPath } from '@/lib/safe-next-path'
+import { UNIT_TEAM_HOME, unitTeamMayOpen } from '@/lib/units/access'
 
 /**
  * Map of pathname prefix -> required permission key.
@@ -107,6 +108,12 @@ interface ProfileCachePayload {
   designationId: string | null
   /** Permission keys granted to this designation (empty for admins — they have all). */
   allowedPerms: string[]
+  /**
+   * A non-admin member of a business unit (lib/units): may open only the
+   * unit-team pages (lib/units/access). Missing on cookies signed before this
+   * field existed, which read as false for at most PROFILE_TTL_SEC.
+   */
+  unitRoutesOnly?: boolean
   /** Unix seconds expiry. */
   exp: number
 }
@@ -471,12 +478,35 @@ export async function updateSession(request: NextRequest) {
         }
       }
 
+      // Is this person on a unit's team (Social Media, Cirqle Flyers,
+      // Memoura…)? Then they may open only their unit's pages. Asked with
+      // their own session through a function that answers for the caller
+      // alone. Before the migration the function does not exist: nobody is a
+      // unit member yet. Any other failure fails CLOSED, like the profile read
+      // above — a unit member must never be let loose by a hiccup.
+      let unitRoutesOnly = false
+      if (!isAdmin) {
+        const { data: locked, error: lockErr } = await supabase.rpc('my_unit_route_lock')
+        if (lockErr) {
+          const missing = lockErr.code === 'PGRST202' || lockErr.code === '42883' || /could not find the function|does not exist/i.test(lockErr.message ?? '')
+          if (!missing) {
+            const url = request.nextUrl.clone()
+            url.pathname = '/login'
+            url.searchParams.set('error', 'profile')
+            return NextResponse.redirect(url)
+          }
+        } else {
+          unitRoutesOnly = locked === true
+        }
+      }
+
       profile = {
         authId: user.id,
         isAdmin,
         isArchived: emp.is_archived === true,
         designationId: designation?.id ?? null,
         allowedPerms,
+        unitRoutesOnly,
         exp: Math.floor(Date.now() / 1000) + PROFILE_TTL_SEC,
       }
 
@@ -510,6 +540,16 @@ export async function updateSession(request: NextRequest) {
 
     // Admin designation → no gating
     if (profile.isAdmin) return supabaseResponse
+
+    // A unit team member opens only the unit-team pages — an allow-list, so a
+    // page added later is closed to them until it is made safe for units.
+    if (profile.unitRoutesOnly && !unitTeamMayOpen(pathname)) {
+      const url = request.nextUrl.clone()
+      url.pathname = UNIT_TEAM_HOME
+      url.search = ''
+      if (pathname !== '/dashboard') url.searchParams.set('denied', '1')
+      return NextResponse.redirect(url)
+    }
 
     // Regular designation → check route permission
     const matched = ROUTE_PERMS.find(([re]) => re.test(pathname))

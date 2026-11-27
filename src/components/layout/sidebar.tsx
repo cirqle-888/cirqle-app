@@ -278,12 +278,12 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
         .map(s => ({
           ...s,
           items: s.items.filter(i =>
-            isNavItemVisible(i, can, user.isAdmin) &&
+            isNavItemVisible(i, can, user.isAdmin, !!user.unitRoutesOnly) &&
             (!workspaceHrefs || workspaceHrefs.includes(i.href))
           ),
         }))
         .filter(s => s.items.length > 0),
-    [can, user.isAdmin, workspaceHrefs],
+    [can, user.isAdmin, user.unitRoutesOnly, workspaceHrefs],
   )
 
   const activeHref = useMemo(() => resolveActiveHref(visibleNavSections, pathname), [visibleNavSections, pathname])

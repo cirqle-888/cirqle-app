@@ -60,6 +60,7 @@ const ROUTE_LABELS: Record<string, string> = {
   settings:      'Settings',
   finance:       'Finance',
   'profit-sharing': 'Profit Sharing',
+  units:         'Departments & Brands',
   investors:     'Investors & Capital',
   periods:       'Profit Periods',
   departments:   'Departments',

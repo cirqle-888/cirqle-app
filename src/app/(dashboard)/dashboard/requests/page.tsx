@@ -1,4 +1,5 @@
 import { getBrandFilter, inBrand } from '@/lib/brands/filter'
+import { inUnitWork, unitWorkFilter } from '@/lib/units/work-filter'
 import { redirect } from 'next/navigation'
 import { withDraftFlag } from '@/lib/clients/draft'
 import { createAdminClient } from '@/lib/supabase/server'
@@ -105,15 +106,32 @@ export default async function RequestsPage({
       : inBrand(brandFilter, { clientId: r.client_id }))
   }
 
+  // A unit team (Social Media, Cirqle Flyers, Memoura…) sees only its own
+  // unit's requests, clients and prices — never another unit's.
+  const unit = await unitWorkFilter(admin, me)
+  let clientRows = brandFilter ? (clientsRes.data || []).filter((c: any) => brandFilter.clientIds.has(c.id)) : (clientsRes.data || [])
+  let unitPricing = pricingRows
+  if (unit) {
+    requests = requests.filter(r => inUnitWork(unit, { serviceId: r.service_id, clientId: r.client_id }))
+    clientRows = clientRows.filter((c: { id: string }) => unit.clientIds.has(c.id))
+    unitPricing = pricingRows.filter(r => unit.clientIds.has(r.client_id) && unit.serviceIds.has(r.service_id))
+    offerCampaigns = unit.coversOfferFlyers
+      ? offerCampaigns.filter((c: { client?: { id?: string } | { id?: string }[] | null }) => {
+          const client = Array.isArray(c.client) ? c.client[0] : c.client
+          return !!client?.id && unit.clientIds.has(client.id)
+        })
+      : []
+  }
+
   return (
     <RequestsClient
       migrated={migrated}
       initialRequests={requests}
       perms={perms}
-      clients={brandFilter ? (clientsRes.data || []).filter((c: any) => brandFilter.clientIds.has(c.id)) : (clientsRes.data || [])}
+      clients={clientRows}
       employees={employeesRes.data || []}
-      services={servicesRes.data || []}
-      servicePricing={pricingRows}
+      services={unit ? (servicesRes.data || []).filter(s => unit.serviceIds.has(s.id as string)) : (servicesRes.data || [])}
+      servicePricing={unitPricing}
       offerCampaigns={offerCampaigns}
       initialFocusId={focusId}
     />

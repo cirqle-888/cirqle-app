@@ -105,9 +105,9 @@ export function AppLauncherTrigger() {
   const visibleSections = useMemo(
     () =>
       navSections
-        .map(s => ({ label: s.label, items: s.items.filter(i => isNavItemVisible(i, can, user.isAdmin)) }))
+        .map(s => ({ label: s.label, items: s.items.filter(i => isNavItemVisible(i, can, user.isAdmin, !!user.unitRoutesOnly)) }))
         .filter(s => s.items.length > 0),
-    [can, user.isAdmin],
+    [can, user.isAdmin, user.unitRoutesOnly],
   )
 
   const activeHref = useMemo(() => resolveActiveHref(visibleSections, pathname), [visibleSections, pathname])

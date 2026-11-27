@@ -109,7 +109,7 @@ export function FavoritesSection({
   // Saved views are favourites rows as well, but they belong to the screen
   // whose filters they restore and render as chips there — not in this list.
   const visibleFavorites = favorites.filter(fav =>
-    fav.entityType !== SAVED_VIEW_ENTITY_TYPE && canOpenHref(fav.href, can, user.isAdmin),
+    fav.entityType !== SAVED_VIEW_ENTITY_TYPE && canOpenHref(fav.href, can, user.isAdmin, !!user.unitRoutesOnly),
   )
 
   if (visibleFavorites.length === 0) return null

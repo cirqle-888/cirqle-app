@@ -15,9 +15,10 @@ import {
   CalendarRange, HardHat, Repeat, Package as PackageIcon,
   Share2, UserPlus, Gauge, ShieldCheck, MapPin, Target,
   Scale, Receipt, Images, Wand2,
-  Calculator, CreditCard, Landmark, ShoppingBag, Store, Bookmark,
+  Calculator, CreditCard, Landmark, ShoppingBag, Store, Bookmark, Split,
   type LucideIcon,
 } from 'lucide-react'
+import { unitTeamMayOpen } from '@/lib/units/access'
 
 export type NavItem = {
   label: string
@@ -32,6 +33,8 @@ export type NavItem = {
    */
   requiredAnyPerm?: string[]
   adminOnly?: boolean
+  /** With adminOnly: also shown to business-unit team members (their own unit's page). */
+  unitTeams?: boolean
   /** Extra search terms for the App Launcher (src/components/layout/app-launcher.tsx) — never rendered, only matched against. */
   keywords?: string[]
 }
@@ -43,9 +46,12 @@ export type NavSection = {
 }
 
 /** Permission/admin gate shared by every navSections consumer (Sidebar, App Launcher, Command Palette). */
-export function isNavItemVisible(item: NavItem, can: (key: string) => boolean, isAdmin: boolean): boolean {
+export function isNavItemVisible(item: NavItem, can: (key: string) => boolean, isAdmin: boolean, unitOnly = false): boolean {
+  // A business-unit team member sees only the unit-team pages (lib/units/access).
+  if (unitOnly && !isAdmin && !unitTeamMayOpen(item.href)) return false
   const anyOk = !item.requiredAnyPerm?.length || item.requiredAnyPerm.some(can)
-  return (!item.requiredPerm || can(item.requiredPerm)) && anyOk && (!item.adminOnly || isAdmin)
+  return (!item.requiredPerm || can(item.requiredPerm)) && anyOk
+    && (!item.adminOnly || isAdmin || (!!item.unitTeams && unitOnly))
 }
 
 /**
@@ -61,12 +67,13 @@ export function isNavItemVisible(item: NavItem, can: (key: string) => boolean, i
  * back to /dashboard. Query strings and hashes are ignored. Routes outside
  * the sidebar, and /dashboard itself, are left to their own page checks.
  */
-export function canOpenHref(href: string, can: (key: string) => boolean, isAdmin: boolean): boolean {
+export function canOpenHref(href: string, can: (key: string) => boolean, isAdmin: boolean, unitOnly = false): boolean {
   const path = href.split(/[?#]/)[0]
+  if (unitOnly && !isAdmin && !unitTeamMayOpen(path)) return false
   const active = resolveActiveHref(navSections, path)
   if (!active || active === '/dashboard') return true
   const item = navSections.flatMap(s => s.items).find(i => i.href === active)
-  return !item || isNavItemVisible(item, can, isAdmin)
+  return !item || isNavItemVisible(item, can, isAdmin, unitOnly)
 }
 
 export function resolveActiveHref(sections: { items: NavItem[] }[], pathname: string): string | null {
@@ -149,6 +156,12 @@ export const navSections: NavSection[] = [
       // Admin only in this release: company cash profit, capital and every
       // investor's share. The route and every action re-check isAdmin.
       { label: 'Profit Sharing',    href: '/dashboard/finance/profit-sharing', icon: PieChart, requiredPerm: 'profit_sharing.view', adminOnly: true, keywords: ['capital', 'investment', 'investor', 'founder', 'profit share', 'dividend', 'reserve', 'entitlement', 'payout', 'device'] },
+      // Cirqle's departments and sub-brands (units): their teams, optional
+      // profit-and-loss agreements (Social Media & Creative 40/30/30), own
+      // invoices and Cash Book, and a Focus mode for meetings. Admins manage
+      // them; a unit's team sees only its own unit here, and only the results
+      // the owner chose to share. Pages and actions re-check all of this.
+      { label: 'Departments & Brands', href: '/dashboard/units', icon: Split, adminOnly: true, unitTeams: true, keywords: ['department', 'brand', 'unit', 'team', 'profit share', 'agreement', 'partnership', 'focus mode', 'social media team', 'cirqle flyers', 'memoura', 'split', 'general costs', 'p&l'] },
     ],
   },
   {

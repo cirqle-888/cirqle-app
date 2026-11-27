@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
-const mocks = vi.hoisted(() => ({ getUser: vi.fn(), getClaims: vi.fn(), from: vi.fn(), signOut: vi.fn() }))
+const mocks = vi.hoisted(() => ({ getUser: vi.fn(), getClaims: vi.fn(), from: vi.fn(), signOut: vi.fn(), rpc: vi.fn() }))
 vi.mock('@supabase/ssr', () => ({
-  createServerClient: () => ({ auth: { getUser: mocks.getUser, getClaims: mocks.getClaims, signOut: mocks.signOut }, from: mocks.from }),
+  createServerClient: () => ({ auth: { getUser: mocks.getUser, getClaims: mocks.getClaims, signOut: mocks.signOut }, from: mocks.from, rpc: mocks.rpc }),
 }))
 import { updateSession } from '@/lib/supabase/middleware'
 
@@ -24,6 +24,7 @@ describe('dashboard route authorization', () => {
     mocks.getUser.mockResolvedValue({ data: { user: { id: 'signed-in-user' } } })
     mocks.getClaims.mockResolvedValue({ data: { claims: { sub: 'signed-in-user' } } })
     mocks.from.mockImplementation(() => query({ id: 'employee', is_archived: false, designation: null }))
+    mocks.rpc.mockResolvedValue({ data: false, error: null })
   })
 
   it('denies a protected route to an employee without a designation', async () => {
@@ -75,6 +76,7 @@ describe('profile cache on Server Actions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-signing-secret'
+    mocks.rpc.mockResolvedValue({ data: false, error: null })
   })
 
   it('a page request still gets the profile cookie', async () => {
@@ -116,5 +118,71 @@ describe('profile cache on Server Actions', () => {
     mocks.from.mockImplementation(() => query({ id: 'employee', is_archived: false, designation: null }))
     const response = await updateSession(action('/dashboard/payroll'))
     expect(response.headers.get('location')).toBe('https://cirqle.test/dashboard?denied=1')
+  })
+})
+
+/**
+ * Business units (lib/units): a non-admin on a unit's team opens only the
+ * unit-team pages. The check is the caller's own `my_unit_route_lock()`.
+ */
+describe('unit team page lock', () => {
+  const asMember = (sub: string) => {
+    mocks.getUser.mockResolvedValue({ data: { user: { id: sub } } })
+    mocks.getClaims.mockResolvedValue({ data: { claims: { sub } } })
+    mocks.from.mockImplementation(table => query(table === 'employees'
+      ? { id: 'member', is_archived: false, designation: { id: 'designer', is_admin: false } }
+      : [{ permission: { key: 'billing.view_invoices' } }, { permission: { key: 'requests.view' } }]))
+  }
+  beforeEach(() => { vi.clearAllMocks() })
+
+  it('sends a unit member away from a page outside their unit, even with its permission', async () => {
+    asMember('unit-member-1')
+    mocks.rpc.mockResolvedValue({ data: true, error: null })
+    const response = await updateSession(new NextRequest('https://cirqle.test/dashboard/invoices'))
+    expect(response.headers.get('location')).toBe('https://cirqle.test/dashboard/my-work?denied=1')
+  })
+
+  it('lands a unit member on their own work instead of the company dashboard', async () => {
+    asMember('unit-member-2')
+    mocks.rpc.mockResolvedValue({ data: true, error: null })
+    const response = await updateSession(new NextRequest('https://cirqle.test/dashboard'))
+    expect(response.headers.get('location')).toBe('https://cirqle.test/dashboard/my-work')
+  })
+
+  it('lets a unit member open their unit pages', async () => {
+    asMember('unit-member-3')
+    mocks.rpc.mockResolvedValue({ data: true, error: null })
+    const response = await updateSession(new NextRequest('https://cirqle.test/dashboard/requests'))
+    expect(response.headers.get('location')).toBeNull()
+  })
+
+  it('leaves staff outside any unit as they were', async () => {
+    asMember('office-staff')
+    mocks.rpc.mockResolvedValue({ data: false, error: null })
+    const response = await updateSession(new NextRequest('https://cirqle.test/dashboard/invoices'))
+    expect(response.headers.get('location')).toBeNull()
+  })
+
+  it('treats a database without the units migration as "no units yet"', async () => {
+    asMember('before-migration')
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: 'PGRST202', message: 'Could not find the function public.my_unit_route_lock' } })
+    const response = await updateSession(new NextRequest('https://cirqle.test/dashboard/invoices'))
+    expect(response.headers.get('location')).toBeNull()
+  })
+
+  it('fails closed when the membership check errors', async () => {
+    asMember('check-failed')
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } })
+    const response = await updateSession(new NextRequest('https://cirqle.test/dashboard/requests'))
+    expect(response.headers.get('location')).toContain('/login?error=profile')
+  })
+
+  it('never asks for an Admin', async () => {
+    mocks.getUser.mockResolvedValue({ data: { user: { id: 'admin-x' } } })
+    mocks.getClaims.mockResolvedValue({ data: { claims: { sub: 'admin-x' } } })
+    mocks.from.mockImplementation(() => query({ id: 'admin', is_archived: false, designation: { id: 'admin-role', is_admin: true } }))
+    const response = await updateSession(new NextRequest('https://cirqle.test/dashboard/invoices'))
+    expect(response.headers.get('location')).toBeNull()
+    expect(mocks.rpc).not.toHaveBeenCalled()
   })
 })
