@@ -131,7 +131,12 @@ export async function loadSplits(admin: Admin): Promise<Map<string, { parts: Spl
  * Compute every department from `fromMonth` (YYYY-MM, default: the earliest
  * agreement start) to `toMonth` (default: this month).
  */
-export async function loadShares(admin: Admin, opts: { fromMonth?: string; toMonth?: string } = {}): Promise<SharesData> {
+export async function loadShares(admin: Admin, opts: {
+  fromMonth?: string
+  toMonth?: string
+  /** Work units out even for months before they start (allocation needs every unit's revenue). */
+  ignoreStart?: boolean
+} = {}): Promise<SharesData> {
   const departments = await loadDepartments(admin)
   const thisMonth = monthStartISO(0).slice(0, 7)
   const earliest = departments.map(d => d.startsOn.slice(0, 7)).sort()[0] ?? thisMonth
@@ -258,8 +263,11 @@ export async function loadShares(admin: Admin, opts: { fromMonth?: string; toMon
     isPassThrough: passIds.has(e.id) || !!e.is_billable,
   }))
 
+  const engineDepartments = opts.ignoreStart
+    ? departments.map(d => (d.startsOn > start ? { ...d, startsOn: start } : d))
+    : departments
   const result = computeDepartmentShares({
-    departments, months, invoices, collections, entries, tags, generalCategoryIds: new Set(generalCategoryIds),
+    departments: engineDepartments, months, invoices, collections, entries, tags, generalCategoryIds: new Set(generalCategoryIds),
     splits: new Map([...splits].map(([id, s]) => [id, s.parts])),
   })
   return { departments, months, result, generalCategoryIds, assignments, entries, splits, tags }

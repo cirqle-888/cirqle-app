@@ -185,6 +185,22 @@ export function describeAllocation(a: Allocation, unitName: ReadonlyMap<string, 
   }
 }
 
+/**
+ * Turn any ratio (revenue, amounts, 1:1:1) into percentages with two decimals
+ * that add up to exactly 100 (largest remainder). All-zero weights split equally.
+ */
+export function percentsByWeight(weights: readonly number[]): number[] {
+  if (!weights.length) return []
+  const w = weights.some(x => x > 0) ? weights.map(x => Math.max(0, x)) : weights.map(() => 1)
+  const total = w.reduce((t, x) => t + x, 0)
+  const raw = w.map(x => (x / total) * 10000)
+  const cents = raw.map(Math.floor)
+  let left = 10000 - cents.reduce((t, v) => t + v, 0)
+  const order = raw.map((v, i) => [v - Math.floor(v), i] as const).sort((a, b) => b[0] - a[0])
+  for (let k = 0; left > 0 && k < order.length; k++, left--) cents[order[k][1]]++
+  return cents.map(c => c / 100)
+}
+
 /** Is a custom split valid? Percentages must total 100; amounts must total the entry. */
 export function validateSplit(
   parts: { unitId: string; value: number }[], basis: 'percent' | 'amount', entryAmount: number,

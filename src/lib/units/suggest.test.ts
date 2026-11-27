@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeAllocation, normaliseDescription, phrasesFor, suggestAllocation, validateSplit, type SuggestContext, type SuggestEntry } from './suggest'
+import { describeAllocation, normaliseDescription, percentsByWeight, phrasesFor, suggestAllocation, validateSplit, type SuggestContext, type SuggestEntry } from './suggest'
 import { computeDepartmentShares, type DeptConfig, type EngineEntry } from './engine'
 
 const SOCIAL = 'u-social', FLYERS = 'u-flyers', MEMOURA = 'u-memoura'
@@ -131,5 +131,17 @@ describe('a split entry in the unit results', () => {
       splits: new Map([['ipad', [{ unitId: SOCIAL, share: 1 }, { unitId: FLYERS, share: 1 }]]]),
     })
     for (const l of r.ledgers) expect(l.months[0].directCostsInr).toBe(0)
+  })
+})
+
+describe('percentsByWeight', () => {
+  it('turns a revenue ratio into percentages that total exactly 100', () => {
+    const p = percentsByWeight([17930.02, 20209.68, 0])
+    expect(p.reduce((t, x) => Math.round((t + x) * 100) / 100, 0)).toBe(100)
+    expect(p[2]).toBe(0)
+    expect(p).toEqual([47.01, 52.99, 0])
+  })
+  it('splits equally when every weight is zero', () => {
+    expect(percentsByWeight([0, 0, 0])).toEqual([33.34, 33.33, 33.33])
   })
 })

@@ -77,6 +77,7 @@ export default async function AllocatePage({ searchParams }: { searchParams: Pro
           units={data.units}
           totals={totals}
           generalSplitBetween={data.shares.result.general[0]?.splitBetween.map(id => unitName.get(id) ?? '').filter(Boolean) ?? []}
+          revenueByUnit={data.revenueByUnit}
         />
       </div>
     </>

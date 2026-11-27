@@ -10,6 +10,7 @@ import { Lightbulb, Pencil, Plus, Sparkles, X } from 'lucide-react'
 import { Badge, Button, Card, Empty, Table, useAction } from '../../finance/profit-sharing/_components'
 import { inr, inputCls, td, tdNum } from '../../finance/profit-sharing/_format'
 import { allocateEntry, applySuggestions, type EntryAllocationChoice } from '../actions'
+import { percentsByWeight } from '@/lib/units/suggest'
 
 export interface BoardRow {
   id: string
@@ -33,10 +34,11 @@ const STATUS_TONE: Record<BoardRow['status'], 'good' | 'info' | 'warn' | 'muted'
   unit: 'good', split: 'info', general: 'info', excluded: 'muted', waiting: 'warn',
 }
 
-export function AllocateBoard({ month, rows, units, totals, generalSplitBetween }: {
+export function AllocateBoard({ month, rows, units, totals, generalSplitBetween, revenueByUnit }: {
   month: string
   rows: BoardRow[]
   units: Unit[]
+  revenueByUnit: Record<string, number>
   totals: { payments: number; units: number; split: number; general: number; excluded: number; waiting: number; waitingCount: number; suggested: number }
   generalSplitBetween: string[]
 }) {
@@ -67,6 +69,11 @@ export function AllocateBoard({ month, rows, units, totals, generalSplitBetween 
         {tile('Waiting', inr(totals.waiting), `${totals.waitingCount} entries · ${totals.suggested} with a suggestion`, totals.waitingCount > 0)}
       </div>
 
+      <p className="text-xs text-muted-foreground">
+        Revenue this month, for splitting by revenue:{' '}
+        {units.map((u, i) => <span key={u.id}>{i ? ' · ' : ''}<b className="text-foreground">{u.name}</b> {inr(revenueByUnit[u.id] ?? 0)}</span>)}
+      </p>
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-1">
           {([['waiting', 'Waiting'], ['suggested', 'With a suggestion'], ['unit', 'One unit'], ['split', 'Split'], ['general', 'General'], ['excluded', 'Left out'], ['all', 'All']] as const).map(([k, l]) => (
@@ -90,7 +97,7 @@ export function AllocateBoard({ month, rows, units, totals, generalSplitBetween 
         {shown.length === 0 ? <Empty>Nothing here.</Empty> : (
           <Table head={['Date', 'Entry', 'Amount', 'Now', 'Suggestion', '']}>
             {shown.map(r => (
-              <Row key={r.id} r={r} units={units} month={month} editing={editing === r.id} setEditing={setEditing} />
+              <Row key={r.id} r={r} units={units} month={month} revenueByUnit={revenueByUnit} editing={editing === r.id} setEditing={setEditing} />
             ))}
           </Table>
         )}
@@ -99,8 +106,8 @@ export function AllocateBoard({ month, rows, units, totals, generalSplitBetween 
   )
 }
 
-function Row({ r, units, month, editing, setEditing }: {
-  r: BoardRow; units: Unit[]; month: string; editing: boolean; setEditing: (id: string | null) => void
+function Row({ r, units, month, revenueByUnit, editing, setEditing }: {
+  r: BoardRow; units: Unit[]; month: string; revenueByUnit: Record<string, number>; editing: boolean; setEditing: (id: string | null) => void
 }) {
   const { run, busy, host } = useAction()
   return (
@@ -139,14 +146,14 @@ function Row({ r, units, month, editing, setEditing }: {
       </tr>
       {editing && (
         <tr className="border-b border-border/60 bg-muted/20">
-          <td colSpan={6} className="px-2 py-3"><Editor r={r} units={units} onDone={() => setEditing(null)} /></td>
+          <td colSpan={6} className="px-2 py-3"><Editor r={r} units={units} revenueByUnit={revenueByUnit} onDone={() => setEditing(null)} /></td>
         </tr>
       )}
     </>
   )
 }
 
-function Editor({ r, units, onDone }: { r: BoardRow; units: Unit[]; onDone: () => void }) {
+function Editor({ r, units, revenueByUnit, onDone }: { r: BoardRow; units: Unit[]; revenueByUnit: Record<string, number>; onDone: () => void }) {
   const { run, busy, host } = useAction()
   type Mode = 'unit' | 'split' | 'general' | 'exclude' | 'auto'
   const [mode, setMode] = useState<Mode>(r.status === 'split' ? 'split' : r.status === 'general' && r.manual ? 'general' : r.status === 'excluded' && r.manual ? 'exclude' : r.unitId ? 'unit' : 'unit')
@@ -220,6 +227,9 @@ function Editor({ r, units, onDone }: { r: BoardRow; units: Unit[]; onDone: () =
                   onChange={e => setParts(parts.map((x, j) => j === i ? { ...x, value: Number(e.target.value) } : x))} />
                 <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">{basis === 'percent' ? '%' : '₹'}</span>
               </div>
+              <button title="Give this unit whatever is still left" disabled={Math.abs(left) < 0.01}
+                className="whitespace-nowrap rounded-md border border-border px-2 py-1 text-[11px] hover:bg-secondary disabled:opacity-40"
+                onClick={() => setParts(parts.map((x, j) => j === i ? { ...x, value: Math.max(0, Math.round((x.value + left) * 100) / 100) } : x))}>Rest here</button>
               <span className="w-24 text-right text-[11px] tabular-nums text-muted-foreground">
                 {basis === 'percent' ? inr((p.value / 100) * r.amountInr) : `${Math.round((p.value / (r.amountInr || 1)) * 1000) / 10}%`}
               </span>
@@ -237,7 +247,18 @@ function Editor({ r, units, onDone }: { r: BoardRow; units: Unit[]; onDone: () =
               const each = Math.floor((target / n) * 100) / 100
               setParts(parts.map((p, i) => ({ ...p, value: i === 0 ? Math.round((target - each * (n - 1)) * 100) / 100 : each })))
             }}>Split equally</Button>
+            <Button disabled={!units.some(u => (revenueByUnit[u.id] ?? 0) > 0)} onClick={() => {
+              // Every unit with revenue this month, by its share of that revenue.
+              const earning = units.filter(u => (revenueByUnit[u.id] ?? 0) > 0)
+              const pct = percentsByWeight(earning.map(u => revenueByUnit[u.id]))
+              setBasis('percent')
+              setParts(earning.map((u, i) => ({ unitId: u.id, value: pct[i] })))
+            }}>By revenue</Button>
           </div>
+          <p className="text-[11px] text-muted-foreground">
+            <b>Split equally</b> gives each unit the same. <b>By revenue</b> uses each unit&apos;s income this month.
+            <b> Rest here</b> gives a unit whatever is still left — for a fixed amount to one unit and the remainder to another.
+          </p>
         </div>
       )}
 

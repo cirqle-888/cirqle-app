@@ -37,6 +37,8 @@ export interface AllocationRow {
 export interface AllocationData {
   month: string
   units: { id: string; name: string; color: string | null; sharesGeneralCosts: boolean }[]
+  /** Each unit's own revenue in the month (its income basis), for splitting by revenue. */
+  revenueByUnit: Record<string, number>
   rows: AllocationRow[]
   shares: SharesData
 }
@@ -61,7 +63,9 @@ function allocationOf(entryId: string, shares: SharesData): Allocation | null {
 }
 
 export async function loadAllocation(admin: Admin, month: string): Promise<AllocationData> {
-  const shares = await loadShares(admin, { fromMonth: month, toMonth: month })
+  // ignoreStart: a unit that starts later still has revenue this month, and a
+  // split by revenue needs every unit's figure.
+  const shares = await loadShares(admin, { fromMonth: month, toMonth: month, ignoreStart: true })
   const units = shares.departments.filter(d => d.isActive)
   const unitName = new Map(units.map(u => [u.id, u.name]))
   const unitOfCategory = new Map<string, string>()
@@ -158,9 +162,13 @@ export async function loadAllocation(admin: Admin, month: string): Promise<Alloc
     })
     .sort((a, b) => b.entry.date.localeCompare(a.entry.date))
 
+  const revenueByUnit: Record<string, number> = {}
+  for (const l of shares.result.ledgers) revenueByUnit[l.department.id] = l.months[0]?.incomeInr ?? 0
+
   return {
     month,
     units: units.map(u => ({ id: u.id, name: u.name, color: u.color, sharesGeneralCosts: u.sharesGeneralCosts })),
+    revenueByUnit,
     rows,
     shares,
   }

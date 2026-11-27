@@ -18,7 +18,7 @@ import { slugify, validateDepartment, type RevenueBasis } from '@/lib/units/engi
 import { loadDepartments, searchInvoices } from '@/lib/units/load'
 import { unitsOfEmployee } from '@/lib/units/membership'
 import { loadAllocation } from '@/lib/units/allocate-load'
-import { validateSplit, type Allocation } from '@/lib/units/suggest'
+import { percentsByWeight, validateSplit, type Allocation } from '@/lib/units/suggest'
 import { loadServiceScope } from '@/lib/scope/service-scope'
 import { isNavItemVisible, navSections } from '@/lib/nav-sections'
 import type { CurrentUser } from '@/lib/permissions/check'
@@ -464,13 +464,8 @@ export async function allocateEntry(entryId: string, choice: EntryAllocationChoi
 /** A suggestion as a choice; an equal or learned split is stored as percentages that total exactly 100. */
 function choiceFor(a: Allocation): EntryAllocationChoice {
   if (a.kind !== 'split') return a.kind === 'unit' ? { kind: 'unit', unitId: a.unitId } : { kind: a.kind }
-  const total = a.parts.reduce((t, p) => t + p.share, 0) || 1
-  const raw = a.parts.map(p => (p.share / total) * 100)
-  const cents = raw.map(v => Math.floor(v * 100))
-  let left = 10000 - cents.reduce((t, v) => t + v, 0)
-  const order = raw.map((v, i) => [v * 100 - Math.floor(v * 100), i] as const).sort((x, y) => y[0] - x[0])
-  for (let k = 0; left > 0 && k < order.length; k++, left--) cents[order[k][1]]++
-  return { kind: 'split', basis: 'percent', parts: a.parts.map((p, i) => ({ unitId: p.unitId, value: cents[i] / 100 })) }
+  const pct = percentsByWeight(a.parts.map(p => p.share))
+  return { kind: 'split', basis: 'percent', parts: a.parts.map((p, i) => ({ unitId: p.unitId, value: pct[i] })) }
 }
 
 /**
