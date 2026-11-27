@@ -17,11 +17,11 @@
  * they are already the basis for task visibility — so the two agree by
  * construction instead of drifting.
  *
- * FAIL-OPEN, deliberately, matching filterTasksByVisibility:
+ * Matching filterTasksByVisibility:
  *   • mode 'all' (admins, tasks.view_all) → everyone
- *   • viewer with NO assigned services    → everyone, so a half-configured
- *                                            account is never left alone in an
- *                                            empty org
+ *   • viewer with NO assigned services    → only themselves (2026-11-27: reach
+ *                                            is defined explicitly; it used to
+ *                                            be everyone)
  * You are always visible to yourself.
  */
 
@@ -83,8 +83,8 @@ export async function visibleEmployeeIds(
   scope: ServiceScope,
 ): Promise<Set<string> | null> {
   if (scope.mode !== 'services') return null
-  if (scope.serviceIds.size === 0) return null      // half-configured → no narrowing
-  if (!scope.employeeId) return null
+  if (!scope.employeeId) return new Set()
+  if (scope.serviceIds.size === 0) return new Set([scope.employeeId])   // nothing assigned → just themselves
 
   const effective = await loadEffectiveServicesByEmployee(admin)
   const mine = scope.serviceIds

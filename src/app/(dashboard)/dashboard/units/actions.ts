@@ -16,6 +16,10 @@ import { requireAdmin } from '@/lib/permissions/check'
 import { round2 } from '@/lib/calculations/currency'
 import { slugify, validateDepartment, type RevenueBasis } from '@/lib/units/engine'
 import { loadDepartments, searchInvoices } from '@/lib/units/load'
+import { unitsOfEmployee } from '@/lib/units/membership'
+import { loadServiceScope } from '@/lib/scope/service-scope'
+import { isNavItemVisible, navSections } from '@/lib/nav-sections'
+import type { CurrentUser } from '@/lib/permissions/check'
 
 type Result<T = undefined> = { ok: true; data?: T } | { ok: false; error: string }
 
@@ -263,5 +267,112 @@ export async function saveGeneralCategories(categoryIds: string[]): Promise<Resu
     return { ok: true }
   } catch (e) {
     return fail(e)
+  }
+}
+
+// ═══ Access map ═════════════════════════════════════════════════════════════
+
+/** Put a person on a unit's team (as lead or member), or take them off it (null). */
+export async function setUnitMember(unitId: string, employeeId: string, role: 'lead' | 'member' | null): Promise<Result> {
+  const g = await requireAdmin()
+  if (!g.ok) return g
+  if (!UUID.test(unitId) || !UUID.test(employeeId)) return { ok: false, error: 'Unknown unit or person.' }
+  try {
+    const admin = createAdminClient()
+    if (role === null) {
+      const { error } = await admin.from('business_unit_members').delete().eq('unit_id', unitId).eq('employee_id', employeeId)
+      if (error) return fail(error)
+    } else {
+      const { data: unit, error: uErr } = await admin.from('business_units').select('category_ids').eq('id', unitId).maybeSingle()
+      if (uErr) return fail(uErr)
+      if (!unit) return { ok: false, error: 'Unknown unit.' }
+      if (!((unit as { category_ids?: string[] | null }).category_ids ?? []).length) {
+        return { ok: false, error: 'Pick the work this unit covers before adding its team.' }
+      }
+      const { error } = await admin.from('business_unit_members')
+        .upsert({ unit_id: unitId, employee_id: employeeId, role }, { onConflict: 'unit_id,employee_id' })
+      if (error) return fail(error)
+    }
+    done()
+    return { ok: true }
+  } catch (e) {
+    return fail(e)
+  }
+}
+
+/** Pin a client to one department (it then belongs there alone), or back to "by what it buys" (null). */
+export async function setClientDepartment(clientId: string, departmentId: string | null): Promise<Result> {
+  const g = await requireAdmin()
+  if (!g.ok) return g
+  if (!UUID.test(clientId) || (departmentId !== null && !UUID.test(departmentId))) return { ok: false, error: 'Unknown client or department.' }
+  try {
+    const admin = createAdminClient()
+    const { error } = await admin.from('clients').update({ department_id: departmentId }).eq('id', clientId)
+    if (error) return fail(error)
+    done()
+    revalidatePath('/dashboard/clients')
+    return { ok: true }
+  } catch (e) {
+    return fail(e)
+  }
+}
+
+export interface PersonCheck {
+  cqid: string
+  designation: string | null
+  reach: string
+  pages: string[]
+  /** null = every client. */
+  clients: string[] | null
+  clientCount: number
+}
+
+/** What one person will see: their reach, the pages they can open, the clients they see. */
+export async function checkPerson(employeeId: string): Promise<Result<PersonCheck>> {
+  const g = await requireAdmin()
+  if (!g.ok) return g
+  if (!UUID.test(employeeId)) return { ok: false, error: 'Pick a person.' }
+  try {
+    const admin = createAdminClient()
+    const { data: emp, error } = await admin.from('employees')
+      .select('id, cqid, designation_id, designation:designation_id(name, is_admin)').eq('id', employeeId).maybeSingle()
+    if (error || !emp) return { ok: false, error: 'Person not found.' }
+    const e = emp as unknown as { id: string; cqid: string | null; designation_id: string | null; designation: { name: string; is_admin: boolean } | { name: string; is_admin: boolean }[] | null }
+    const d = Array.isArray(e.designation) ? e.designation[0] : e.designation
+    const isAdmin = d?.is_admin === true
+    const { data: dp } = e.designation_id && !isAdmin
+      ? await admin.from('designation_permissions').select('permission:permission_id(key)').eq('designation_id', e.designation_id).eq('allowed', true)
+      : { data: [] }
+    const keys = new Set(((dp ?? []) as { permission: { key: string } | { key: string }[] | null }[])
+      .map(r => (Array.isArray(r.permission) ? r.permission[0] : r.permission)?.key).filter((k): k is string => !!k))
+    const person = {
+      authId: '', employeeId: e.id, cqid: e.cqid ?? '', email: '', designationId: e.designation_id,
+      designationName: d?.name ?? null, isAdmin, isArchived: false, permissions: keys, dateOfBirth: null,
+    } as CurrentUser
+
+    const [units, scope] = await Promise.all([unitsOfEmployee(admin, e.id), loadServiceScope(admin, person, 'global')])
+    const confined = !isAdmin && units.length > 0
+    const can = (k: string) => isAdmin || keys.has(k)
+    const pages = navSections.flatMap(s => s.items).filter(i => isNavItemVisible(i, can, isAdmin, confined)).map(i => i.label)
+
+    let clients: string[] | null = null
+    let clientCount = 0
+    if (scope.mode === 'services') {
+      const ids = [...scope.visibleClientIds]
+      const { data: names } = ids.length ? await admin.from('clients').select('name').in('id', ids).order('name') : { data: [] }
+      clients = ((names ?? []) as { name: string }[]).map(c => c.name)
+      clientCount = clients.length
+    } else {
+      const { count } = await admin.from('clients').select('id', { count: 'exact', head: true }).eq('is_active', true)
+      clientCount = count ?? 0
+    }
+    const reach = isAdmin ? 'Admin — everything'
+      : confined ? `Unit team: ${units.map(u => u.name).join(', ')} — only those units, and only the unit-team pages`
+      : scope.mode === 'all' ? 'View all — every client and all work'
+      : scope.mode === 'legacy' ? 'Org unit — narrowed by their org unit'
+      : scope.serviceIds.size ? 'Assigned departments only' : 'Nothing yet — no unit, no View all, nothing assigned'
+    return { ok: true, data: { cqid: e.cqid ?? '', designation: d?.name ?? null, reach, pages, clients, clientCount } }
+  } catch (err) {
+    return fail(err)
   }
 }

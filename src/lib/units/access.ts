@@ -31,7 +31,7 @@ export const UNIT_TEAM_PAGES: readonly UnitTeamPage[] = [
   {
     href: '/dashboard/tasks',
     scopedBy: 'Service scope — confined to the unit’s services',
-    proof: [{ file: 'src/app/(dashboard)/dashboard/tasks/page.tsx', marker: 'loadServiceScope' }],
+    proof: [{ file: 'src/app/(dashboard)/dashboard/tasks/page.tsx', marker: 'taskScopeP.then(s => [...s.serviceIds])' }],
   },
   {
     href: '/dashboard/clients',
@@ -44,7 +44,7 @@ export const UNIT_TEAM_PAGES: readonly UnitTeamPage[] = [
   {
     href: '/dashboard/contributions',
     scopedBy: 'Service scope — the unit’s tasks only',
-    proof: [{ file: 'src/app/(dashboard)/dashboard/contributions/page.tsx', marker: 'loadServiceScope' }],
+    proof: [{ file: 'src/app/(dashboard)/dashboard/contributions/page.tsx', marker: 'const myServiceIds = [...taskScope.serviceIds]' }],
   },
   {
     href: '/dashboard/requests',

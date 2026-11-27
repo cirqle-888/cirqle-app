@@ -107,10 +107,13 @@ export async function loadDepartmentClientScope(
   const confined = await confinedScope(admin, me)
   if (!confined && (isDepartmentUnrestricted(me) || !me?.employeeId)) return UNRESTRICTED
   const departmentIds = confined ? confined.categoryIds : await employeeDepartmentIds(admin, me!.employeeId!)
-  // Confined to nothing (a unit with a team but no departments yet) sees no
-  // clients — never everyone.
-  if (confined && departmentIds && departmentIds.size === 0) return { restricted: true, departmentIds, clientIds: new Set() }
-  if (!departmentIds || departmentIds.size === 0) return UNRESTRICTED
+  // No departments (or a failed read) means no clients — never everyone
+  // (2026-11-27: reach is defined explicitly). Org-unit-scoped viewers are
+  // the exception: unit-scope narrows them elsewhere, as before.
+  if (!departmentIds || departmentIds.size === 0) {
+    if (!confined && me && hasPermission(me, PERMS.SCOPE_BY_UNIT)) return UNRESTRICTED
+    return { restricted: true, departmentIds: departmentIds ?? new Set(), clientIds: new Set() }
+  }
 
   const [clients, services, pricing] = await Promise.all([
     admin.from('clients').select('id, department_id'),

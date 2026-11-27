@@ -261,8 +261,8 @@ export const PERMS = {
   /**
    * RESTRICTION: the holder only sees the services assigned to them
    * (employee_services) and only the clients who buy those services.
-   * Leave OFF for admin / task-manager / finance designations — they see all.
-   * Opt-in: without it, behaviour is unchanged.
+   * Since 2026-11-27 this is also what a designation WITHOUT any scope key
+   * gets: reach is explicit, so office designations need SCOPE_VIEW_ALL.
    */
   SCOPE_BY_SERVICE: 'scope.by_service',
   /**
@@ -270,7 +270,6 @@ export const PERMS = {
    * team, branch or region they are a member of, plus every unit beneath it,
    * and the clients/services those units are mapped to. The cross-module form
    * of TASKS_VIEW_BY_UNIT / CONTRIBUTIONS_VIEW_UNIT.
-   * Opt-in: without it, behaviour is unchanged.
    */
   SCOPE_BY_UNIT:    'scope.by_unit',
   /** Explicit escape hatch: overrides SCOPE_BY_SERVICE / SCOPE_BY_UNIT and shows everything. */

@@ -48,8 +48,10 @@ describe('resolveServiceScopeMode', () => {
     ['admin sees all', user([], { isAdmin: true }), 'all'],
     ['scope.view_all overrides the restriction', user([PERMS.SCOPE_VIEW_ALL, PERMS.SCOPE_BY_SERVICE]), 'all'],
     ['scope.by_service restricts', user([PERMS.SCOPE_BY_SERVICE]), 'services'],
-    ['neither key = legacy passthrough', user([]), 'legacy'],
-    ['unrelated perms do not restrict', user(['tasks.create', 'billing.view_invoices']), 'legacy'],
+    // 2026-11-27: reach is explicit — no scope key means "only what is assigned".
+    ['no scope key = only what is assigned', user([]), 'services'],
+    ['unrelated perms grant no reach', user(['tasks.create', 'billing.view_invoices']), 'services'],
+    ['org-unit scoping steps service scope aside', user([PERMS.SCOPE_BY_UNIT]), 'legacy'],
   ]
   it.each(cases)('%s', (_label, me, expected) => {
     expect(resolveServiceScopeMode(me)).toBe(expected)
@@ -58,7 +60,15 @@ describe('resolveServiceScopeMode', () => {
   it('honours the legacy tasks keys only on the tasks module', () => {
     const byService = user([PERMS.TASKS_VIEW_BY_SERVICE])
     expect(resolveServiceScopeMode(byService, 'tasks')).toBe('services')
-    expect(resolveServiceScopeMode(byService, 'global')).toBe('legacy')
+    expect(resolveServiceScopeMode(byService, 'global')).toBe('services')
+
+    const byUnit = user([PERMS.TASKS_VIEW_BY_UNIT])
+    expect(resolveServiceScopeMode(byUnit, 'tasks')).toBe('legacy')
+    expect(resolveServiceScopeMode(byUnit, 'global')).toBe('services')
+
+    const contribAll = user([PERMS.CONTRIBUTIONS_VIEW_ALL])
+    expect(resolveServiceScopeMode(contribAll, 'contributions')).toBe('all')
+    expect(resolveServiceScopeMode(contribAll, 'global')).toBe('services')
 
     const viewAll = user([PERMS.TASKS_VIEW_ALL, PERMS.SCOPE_BY_SERVICE])
     expect(resolveServiceScopeMode(viewAll, 'tasks')).toBe('all')
@@ -68,7 +78,7 @@ describe('resolveServiceScopeMode', () => {
 
 // ── the opt-in guarantee ─────────────────────────────────────────────────────
 
-describe('legacy mode is a byte-identical passthrough', () => {
+describe('unrestricted modes are a byte-identical passthrough', () => {
   const services = [{ id: 's1' }, { id: 's2' }, { id: 's3' }]
   const clients = [{ id: 'c1' }, { id: 'c2' }]
   const rows = [{ id: 't1', service_id: 's9', client_id: 'c9' }]
@@ -83,11 +93,17 @@ describe('legacy mode is a byte-identical passthrough', () => {
     })
   }
 
-  it('restricted-but-unassigned also passes through (never lock anyone out)', () => {
+  it('restricted-but-unassigned sees nothing (reach is never granted by omission)', () => {
     const s = scope({ mode: 'services', serviceIds: new Set() })
-    expect(isServiceRestricted(s)).toBe(false)
-    expect(scopeServiceList(services, s)).toBe(services)
-    expect(scopeClientList(clients, s)).toBe(clients)
+    expect(isServiceRestricted(s)).toBe(true)
+    expect(scopeServiceList(services, s)).toEqual([])
+    expect(scopeClientList(clients, s)).toEqual([])
+    expect(scopeRowsByService(rows, s, r => r.service_id)).toEqual([])
+  })
+
+  it('restricted-but-unassigned still sees the work they personally did', () => {
+    const s = scope({ mode: 'services', serviceIds: new Set() })
+    expect(scopeRowsByService(rows, s, r => r.service_id, { ids: ['t1'], id: r => r.id }).map(r => r.id)).toEqual(['t1'])
   })
 })
 
@@ -104,11 +120,11 @@ describe('scopeClientList', () => {
     expect(scopeClientList([{ id: 'c1' }, { id: 'c2' }], restricted()).map(c => c.id)).toEqual(['c1'])
   })
 
-  it('keeps UNCONFIGURED clients visible (not set up ≠ buys nothing)', () => {
+  it('hides UNCONFIGURED clients from restricted viewers (they belong to no one yet)', () => {
     const s = markUnconfiguredClients(restricted(), ['c1', 'c2', 'c3'])
     expect(s.unconfiguredClientIds.has('c3')).toBe(true)
     expect(scopeClientList([{ id: 'c1' }, { id: 'c2' }, { id: 'c3' }], s).map(c => c.id))
-      .toEqual(['c1', 'c3'])
+      .toEqual(['c1'])
   })
 })
 
@@ -119,8 +135,10 @@ describe('scopeRowsByService / scopeRowsByClient', () => {
     { id: 't3', service_id: null, client_id: null },   // unclassified / internal
   ]
 
-  it('keeps assigned services and always keeps unclassified rows', () => {
+  it('keeps assigned services; unclassified rows only when they are the viewer\'s own', () => {
     expect(scopeRowsByService(rows, restricted(), r => r.service_id).map(r => r.id))
+      .toEqual(['t1'])
+    expect(scopeRowsByService(rows, restricted(), r => r.service_id, { ids: ['t3'], id: r => r.id }).map(r => r.id))
       .toEqual(['t1', 't3'])
   })
 
@@ -128,11 +146,13 @@ describe('scopeRowsByService / scopeRowsByClient', () => {
     const out = scopeRowsByService(rows, restricted(), r => r.service_id, {
       ids: ['t2'], id: r => r.id,
     })
-    expect(out.map(r => r.id)).toEqual(['t1', 't2', 't3'])
+    expect(out.map(r => r.id)).toEqual(['t1', 't2'])
   })
 
-  it('client scoping keeps internal (null client) work', () => {
+  it('client scoping keeps internal (null client) work only when it is the viewer\'s own', () => {
     expect(scopeRowsByClient(rows, restricted(), r => r.client_id).map(r => r.id))
+      .toEqual(['t1'])
+    expect(scopeRowsByClient(rows, restricted(), r => r.client_id, { ids: ['t3'], id: r => r.id }).map(r => r.id))
       .toEqual(['t1', 't3'])
   })
 })
@@ -178,8 +198,8 @@ describe('toServiceScopePayload', () => {
     })
   })
 
-  it('reports restricted=false when the viewer has no assignments', () => {
+  it('reports restricted=true even when the viewer has no assignments', () => {
     const p = toServiceScopePayload(scope({ mode: 'services' }))
-    expect(p.restricted).toBe(false)
+    expect(p.restricted).toBe(true)
   })
 })

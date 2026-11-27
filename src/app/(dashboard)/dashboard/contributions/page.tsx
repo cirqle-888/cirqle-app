@@ -3,7 +3,7 @@ import { getCompanySettings } from '@/lib/settings/company-settings'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, userCanSee } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
-import { resolveTaskVisibilityMode, filterTasksByVisibility } from '@/lib/tasks/visibility'
+import { filterTasksByVisibility } from '@/lib/tasks/visibility'
 import {
   loadUnitScope, isUnitScoped, scopeRowsByUnitMember, scopeTasksByUnit, unitTaskIdsFrom,
 } from '@/lib/scope/unit-scope'
@@ -282,12 +282,12 @@ export default async function ContributionsPage() {
   // ── Service-scoped task visibility (tasks.view_by_service) ────────────────
   // Opt-in restriction: viewers with the perm (and without tasks.view_all) see
   // only tasks of their assigned services, plus tasks they personally worked on.
-  const visibilityMode = resolveTaskVisibilityMode(me)
+  // The shared service scope: carries business-unit and brand confinement too.
+  const taskScope = await loadServiceScope(supabase, me, 'tasks')
+  const visibilityMode = taskScope.mode
   let outTasks = tasksRes.data || []
   if (visibilityMode === 'services' && myEmployeeId) {
-    const myServiceIds = employeeServicesWithCategories
-      .filter(es => es.employee_id === myEmployeeId)
-      .map(es => es.service_id)
+    const myServiceIds = [...taskScope.serviceIds]
     const ownTaskIds = new Set<string>([
       ...mergedAssignments.filter(a => a.employee_id === myEmployeeId).map(a => a.task_id),
       ...(scoresRes.data || []).filter((s: any) => s.employee_id === myEmployeeId).map((s: any) => s.task_id),

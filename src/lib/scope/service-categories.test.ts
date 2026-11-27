@@ -91,16 +91,16 @@ describe('effective services = categories ∪ direct', () => {
 })
 
 describe('failure modes decide over- vs under-scoping', () => {
-  it('degrades to legacy when the DIRECT assignment read fails', async () => {
+  it('sees nothing when the DIRECT assignment read fails', async () => {
     const scope = await loadServiceScope(fakeAdmin({
       ...NO_COMMITMENTS,
       employee_services:           { error: { message: 'boom' } },
       employee_service_categories: { data: [] },
     }), restrictedUser())
 
-    // Fail OPEN: a read failure must never masquerade as "assigned nothing",
-    // which would blank the entire app for a restricted user.
-    expect(scope.mode).toBe('legacy')
+    // Fail CLOSED (2026-11-27): with reach defined explicitly, a read failure
+    // may leave a restricted person with nothing, never with everything.
+    expect(scope.mode).toBe('services')
     expect(scope.serviceIds.size).toBe(0)
   })
 
@@ -117,9 +117,9 @@ describe('failure modes decide over- vs under-scoping', () => {
     expect([...scope.serviceIds]).toEqual(['direct-1'])
   })
 
-  it('degrades to legacy when expanding HELD categories fails', async () => {
-    // The employee demonstrably holds category assignments, so returning only
-    // their direct services would silently UNDER-scope them. Fail open instead.
+  it('sees nothing when expanding HELD categories fails', async () => {
+    // The employee demonstrably holds category assignments; the read failed, so
+    // they are shown nothing until it works again — never everything.
     const scope = await loadServiceScope(fakeAdmin({
       ...NO_COMMITMENTS,
       employee_services:           { data: [{ service_id: 'direct-1' }] },
@@ -127,21 +127,43 @@ describe('failure modes decide over- vs under-scoping', () => {
       services:                    { error: { message: 'boom' } },
     }), restrictedUser())
 
-    expect(scope.mode).toBe('legacy')
+    expect(scope.mode).toBe('services')
+    expect(scope.serviceIds.size).toBe(0)
   })
 })
 
-describe('an unrestricted viewer never pays for the category queries', () => {
-  it('resolves to legacy without touching either assignment table', async () => {
+describe('reach is explicit', () => {
+  it('a viewer with no scope key sees only what is assigned to them', async () => {
     const plain = { ...restrictedUser(), permissions: new Set<string>() } as CurrentUser
     const scope = await loadServiceScope(fakeAdmin({
       ...NO_COMMITMENTS,
-      employee_services:           { data: [{ service_id: 'must-not-appear' }] },
+      employee_services:           { data: [{ service_id: 'direct-1' }] },
       employee_service_categories: { data: [{ category_id: 'cat-A' }] },
-      services:                    { data: [{ id: 'must-not-appear-either' }] },
+      services:                    { data: [{ id: 'cat-A-svc' }] },
     }), plain)
 
-    expect(scope.mode).toBe('legacy')
-    expect(scope.serviceIds.size).toBe(0)
+    expect(scope.mode).toBe('services')
+    expect([...scope.serviceIds].sort()).toEqual(['cat-A-svc', 'direct-1'])
+  })
+})
+
+describe('a client pinned to a department belongs there alone', () => {
+  it('shows pinned clients only to that department, whatever they buy', async () => {
+    const scope = await loadServiceScope(fakeAdmin({
+      employee_services:           { data: [] },
+      employee_service_categories: { data: [{ category_id: 'cat-A' }] },
+      services:                    { data: [{ id: 's1', category_id: 'cat-A' }] },
+      client_service_pricing:      { data: [
+        { client_id: 'c1', service_id: 's1' },   // buys from A, not pinned → visible
+        { client_id: 'c2', service_id: 's1' },   // buys from A but pinned to B → hidden
+      ] },
+      clients: { data: [
+        { id: 'c1', department_id: null },
+        { id: 'c2', department_id: 'cat-B' },
+        { id: 'c3', department_id: 'cat-A' },     // buys nothing yet, pinned to A → visible
+      ] },
+    }), restrictedUser())
+
+    expect([...scope.visibleClientIds].sort()).toEqual(['c1', 'c3'])
   })
 })

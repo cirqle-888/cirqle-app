@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { ArrowRight, Lock, Maximize2, Plus, Settings2, Users } from 'lucide-react'
+import { ArrowRight, Lock, Maximize2, Plus, Settings2, ShieldCheck, Users } from 'lucide-react'
 import Header from '@/components/layout/header'
 import type { DeptLedger } from '@/lib/units/engine'
 import { loadDepartments, loadLookups, loadShares } from '@/lib/units/load'
@@ -31,9 +31,14 @@ export default async function UnitsPage({ searchParams }: { searchParams: Promis
       title="Departments & Brands"
       subtitle="Cirqle's departments and sub-brands: their teams, results and profit-and-loss agreements."
       actions={installed ? (
-        <Link href={`${ROOT}/new`} className="gradient-bg inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-white hover:opacity-90">
-          <Plus className="h-3.5 w-3.5" /> New unit
-        </Link>
+        <span className="flex items-center gap-2">
+          <Link href={`${ROOT}/access`} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-secondary">
+            <ShieldCheck className="h-3.5 w-3.5" /> Access map
+          </Link>
+          <Link href={`${ROOT}/new`} className="gradient-bg inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-white hover:opacity-90">
+            <Plus className="h-3.5 w-3.5" /> New unit
+          </Link>
+        </span>
       ) : undefined}
     />
   )
