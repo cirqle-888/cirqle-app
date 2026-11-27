@@ -22,10 +22,11 @@ import { createNotification } from '@/lib/notifications/create'
 import { sendWebPush } from '@/lib/push/send'
 import { transcribeAudio } from '@/lib/ai/transcribe'
 import { todayISO } from '@/lib/utils/local-date'
-import { loadChatAccess, loadChatAccessRules, loadDepartmentsByEmployee } from '@/lib/chat/access-load'
+import { anyUnitLines, loadChatAccess, loadChatAccessRules, loadDepartmentsByEmployee } from '@/lib/chat/access-load'
 import { departmentSlug } from '@/lib/chat/mentions'
 import { requireCanPost } from '@/lib/chat/guards'
-import { canChat, canSeeDepartmentChannel, reachable, type ChatAccessContext } from '@/lib/chat/access'
+import { blockedByUnitLine, canChat, canSeeDepartmentChannel, isUnitMember, reachable, type ChatAccessContext } from '@/lib/chat/access'
+import { blockedConversationIds, recipientsPastUnitLines } from '@/lib/chat/unit-lines'
 import { attachLinkPreview } from '@/lib/chat/link-preview'
 import { deliverDueScheduled } from '@/lib/chat/scheduled'
 
@@ -136,8 +137,13 @@ async function requireMembership(conversationId: string, employeeId: string) {
     .eq('conversation_id', conversationId)
     .eq('employee_id', employeeId)
     .maybeSingle()
-  return data ? { ok: true as const, role: data.role as ChatMember['role'] } :
-                { ok: false as const, error: 'You are not a member of this conversation.' }
+  if (!data) return { ok: false as const, error: 'You are not a member of this conversation.' }
+  // A business-unit team member may not read or write a conversation that
+  // includes people outside their unit (lib/chat/access → blockedByUnitLine).
+  if ((await blockedConversationIds(admin, employeeId, [conversationId])).size) {
+    return { ok: false as const, error: 'This conversation includes people outside your unit.' }
+  }
+  return { ok: true as const, role: data.role as ChatMember['role'] }
 }
 
 /**
@@ -489,7 +495,7 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
     const rules = await rulesReady
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const anyDeptChannel = (convRes.data ?? []).some((c: any) => c.department_id)
-    if (rules.length || anyDeptChannel) access = await loadChatAccess(admin, me, rules)
+    if (rules.length || anyDeptChannel || await anyUnitLines(admin)) access = await loadChatAccess(admin, me, rules)
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const convs = ((convRes.data ?? []) as any[]).filter(c =>
@@ -728,7 +734,7 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
       lastReadAt: lastReadByConv.get(c.id) ?? null,
       departmentId: (c.department_id as string | null) ?? null,
       blocked: (() => {
-        if (c.type !== 'dm' || !access?.rules.length) return false
+        if (c.type !== 'dm' || !access) return false
         const other = members.find(m => m.employeeId !== me.employeeId)
         return !!other && !canChat(access, me.employeeId, other.employeeId)
       })(),
@@ -739,7 +745,12 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
 
   // Drop conversations this member hid, unless something was said since —
   // a new message brings a hidden DM back, exactly like every messenger.
+  // A business-unit team member never sees one across their unit line.
+  const unitView = access && isUnitMember(access, me.employeeId) ? access : null
   const visible = results.filter(c => {
+    if (unitView && blockedByUnitLine(unitView, me.employeeId, {
+      departmentId: c.departmentId, posting: c.posting, memberIds: c.members.map(m => m.employeeId),
+    })) return false
     const hiddenAt = hiddenByConv.get(c.id)
     if (!hiddenAt) return true
     return !!c.lastMessage && c.lastMessage.createdAt > hiddenAt
@@ -905,6 +916,10 @@ export async function joinChannel(conversationId: string): Promise<Result<null>>
     if (!canSeeDepartmentChannel(access, me.employeeId, conv.department_id as string)) {
       return { ok: false, error: 'This channel belongs to another department.' }
     }
+  }
+  // A unit's team cannot join a channel that holds people outside their unit.
+  if ((await blockedConversationIds(admin, me.employeeId, [conversationId])).size) {
+    return { ok: false, error: 'This channel includes people outside your unit.' }
   }
   const { error } = await admin.from('conversation_members')
     .upsert({ conversation_id: conversationId, employee_id: me.employeeId, role: 'member' },
@@ -1113,10 +1128,11 @@ export async function sendMessage(
     .then(undefined, () => {})
 
   // Mention notifications (idempotent per message+mention via source_key;
-  // respects each member's notify_level).
+  // respects each member's notify_level, and never crosses a unit line).
+  const mentionable = mentionIds.length ? new Set(await recipientsPastUnitLines(admin, conversationId, mentionIds)) : new Set<string>()
   for (const empId of mentionIds) {
     const member = members.find(m => m.employeeId === empId)
-    if (!member || member.notifyLevel === 'none') continue
+    if (!member || member.notifyLevel === 'none' || !mentionable.has(empId)) continue
     void createNotification({
       employeeId: empId,
       type: 'chat_mention',
@@ -1142,10 +1158,12 @@ export async function sendMessage(
   if (!parentId) {
     const preview = text.length > 120 ? `${text.slice(0, 120)}…` : text
     after(async () => {
+      // Nobody is alerted about a conversation a unit line closes to them.
+      const reachableIds = new Set(await recipientsPastUnitLines(admin, conversationId, members.map(m => m.employeeId)))
       await Promise.all(members
         // An urgent message goes to everyone, muted or mentioned alike: the
         // mention's own notification is an ordinary one, and urgent must not be.
-        .filter(m => m.employeeId !== me.employeeId
+        .filter(m => m.employeeId !== me.employeeId && reachableIds.has(m.employeeId)
           && (urgent || (m.notifyLevel === 'all' && !mentionIds.includes(m.employeeId))))
         .map(m => sendWebPush(m.employeeId, {
           title: urgent ? `🚨 Urgent · ${me.cqid}` : `💬 ${me.cqid}`,
@@ -1348,7 +1366,9 @@ export async function searchMessages(query: string): Promise<Result<ChatSearchHi
     .from('conversation_members')
     .select('conversation_id')
     .eq('employee_id', auth.me.employeeId)
-  const convIds = (memberships ?? []).map(m => m.conversation_id)
+  const memberOf = (memberships ?? []).map(m => m.conversation_id)
+  const closed = await blockedConversationIds(admin, auth.me.employeeId, memberOf)
+  const convIds = memberOf.filter(id => !closed.has(id))
   if (convIds.length === 0) return { ok: true, data: [] }
 
   const { data, error } = await admin

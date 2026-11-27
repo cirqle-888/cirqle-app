@@ -1,6 +1,7 @@
 import 'server-only'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { loadCurrentUser, hasPermission, type CurrentUser } from '@/lib/permissions/check'
+import { blockedConversationIds } from './unit-lines'
 
 /**
  * Signed in and allowed into chat — the same gate as chat/actions.ts.
@@ -23,9 +24,13 @@ export async function requireMembership(conversationId: string, employeeId: stri
     .eq('conversation_id', conversationId)
     .eq('employee_id', employeeId)
     .maybeSingle()
-  return data
-    ? { ok: true as const, role: data.role as 'owner' | 'moderator' | 'member' }
-    : { ok: false as const, error: 'You are not a member of this conversation.' }
+  if (!data) return { ok: false as const, error: 'You are not a member of this conversation.' }
+  // A business-unit team member may not use a conversation that includes
+  // people outside their unit (lib/chat/access → blockedByUnitLine).
+  if ((await blockedConversationIds(admin, employeeId, [conversationId])).size) {
+    return { ok: false as const, error: 'This conversation includes people outside your unit.' }
+  }
+  return { ok: true as const, role: data.role as 'owner' | 'moderator' | 'member' }
 }
 
 /**

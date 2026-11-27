@@ -61,6 +61,40 @@ export async function loadAdminIds(admin: Admin): Promise<Set<string>> {
   return out
 }
 
+export interface UnitLines {
+  unitsByEmployee: Map<string, Set<string>>
+  unitDepartmentsByEmployee: Map<string, Set<string>>
+}
+
+/**
+ * Business-unit teams (lib/units): non-admin members of ACTIVE units → their
+ * units, and those units' departments. Empty before the units migration.
+ * A read failure other than "not installed" throws — a unit line must not
+ * silently disappear.
+ */
+export async function loadUnitLines(admin: Admin, adminIds: ReadonlySet<string>): Promise<UnitLines> {
+  const out: UnitLines = { unitsByEmployee: new Map(), unitDepartmentsByEmployee: new Map() }
+  const { data: members, error } = await admin.from('business_unit_members').select('unit_id, employee_id')
+  if (error) {
+    if (error.code === 'PGRST205' || error.code === '42P01' || /does not exist|schema cache/i.test(error.message ?? '')) return out
+    throw new Error(`Could not read unit teams: ${error.message}`)
+  }
+  if (!members?.length) return out
+  const { data: units, error: uErr } = await admin.from('business_units').select('id, category_ids').eq('is_active', true)
+  if (uErr) throw new Error(`Could not read units: ${uErr.message}`)
+  const departmentsOf = new Map(((units ?? []) as { id: string; category_ids: string[] | null }[]).map(u => [u.id, u.category_ids ?? []]))
+  for (const m of members as { unit_id: string; employee_id: string }[]) {
+    if (adminIds.has(m.employee_id) || !departmentsOf.has(m.unit_id)) continue
+    const u = out.unitsByEmployee.get(m.employee_id) ?? new Set<string>()
+    u.add(m.unit_id)
+    out.unitsByEmployee.set(m.employee_id, u)
+    const d = out.unitDepartmentsByEmployee.get(m.employee_id) ?? new Set<string>()
+    for (const c of departmentsOf.get(m.unit_id) ?? []) d.add(c)
+    out.unitDepartmentsByEmployee.set(m.employee_id, d)
+  }
+  return out
+}
+
 /** Everything canChat() needs, for the person asking. */
 export async function loadChatAccess(admin: Admin, me: CurrentUser, preloadedRules?: ChatAccessRule[]): Promise<ChatAccessContext> {
   const [rules, departmentsByEmployee, adminIds, scope] = await Promise.all([
@@ -70,11 +104,29 @@ export async function loadChatAccess(admin: Admin, me: CurrentUser, preloadedRul
     loadServiceScope(admin, me, 'global'),
   ])
   if (me.isAdmin) adminIds.add(me.employeeId)
-  const mine = await visibleEmployeeIds(admin, scope)
+  const [mine, lines] = await Promise.all([visibleEmployeeIds(admin, scope), loadUnitLines(admin, adminIds)])
   return {
     rules,
     departmentsByEmployee,
     adminIds,
     defaultVisible: viewerId => (viewerId === me.employeeId ? mine : null),
+    ...lines,
   }
+}
+
+/**
+ * Just the unit lines and what they depend on — for checks made on behalf of
+ * someone other than the signed-in person (who gets a push, who may read a
+ * conversation). No default-visibility: unit lines never need it.
+ */
+export async function loadUnitLineContext(admin: Admin): Promise<ChatAccessContext> {
+  const [rules, adminIds] = await Promise.all([loadChatAccessRules(admin), loadAdminIds(admin)])
+  const lines = await loadUnitLines(admin, adminIds)
+  return { rules, departmentsByEmployee: new Map(), adminIds, defaultVisible: () => null, ...lines }
+}
+
+/** Does anyone stand behind a unit line? One small query, for the fast paths. */
+export async function anyUnitLines(admin: Admin): Promise<boolean> {
+  const { count, error } = await admin.from('business_unit_members').select('employee_id', { count: 'exact', head: true })
+  return !error && (count ?? 0) > 0
 }

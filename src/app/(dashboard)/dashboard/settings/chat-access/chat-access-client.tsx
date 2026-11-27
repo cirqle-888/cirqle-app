@@ -171,6 +171,12 @@ export default function ChatAccessClient({ settings, error }: { settings: ChatAc
           <li>Both sides must be allowed. If Social Media is “own department only”, nobody outside can message them either.</li>
           <li>Admins are never cut off — anyone can reach an admin and an admin can reach anyone.</li>
           <li>With no rule, people can reach the colleagues they share work with (as before).</li>
+          <li>
+            <b className="text-foreground">Unit teams come first</b> (Departments &amp; Brands): someone on a unit&apos;s team chats only with
+            their own unit and admins, and does not see group chats or channels that include anyone else. To let a person — say
+            an office colleague — talk with a unit across that line, give <b className="text-foreground">that person</b> a rule of
+            “Everyone”, or name the unit members in their rule. Department rules never cross a unit line.
+          </li>
         </ul>
       </div>
 
