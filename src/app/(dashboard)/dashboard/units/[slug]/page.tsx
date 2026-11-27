@@ -45,8 +45,12 @@ export default async function DepartmentPage({ params, searchParams }: {
   // its results. Everything they see here is read-only.
   const readOnly = myUnits !== null
   if (readOnly && !myUnits.some(u => u.slug === slug && u.teamSeesResults)) redirect(ROOT)
+  // Focus mode is for sitting with the team, so it is view-only too: no list
+  // of untagged company entries (they include everyone's salary) and no
+  // search across every client's invoices.
   const sp = await searchParams
   const focus = sp.focus === '1'
+  const viewOnly = readOnly || focus
   const tab: Tab = (TABS.find(t => t.key === sp.tab)?.key ?? 'overview') as Tab
 
   const history = await loadShares(admin)
@@ -101,8 +105,8 @@ export default async function DepartmentPage({ params, searchParams }: {
       {tab === 'overview' && <Overview ledger={ledger} figures={figures} periodLabel={periodLabel} all={all} month={month}
         categories={dept.categoryIds.map(c => categoryName.get(c) ?? '').filter(Boolean)}
         generalSplit={(all ? null : period.result.general[0]?.splitBetween.length) ?? null} />}
-      {tab === 'invoices' && <Invoices ledger={detail} assignments={history.assignments} departments={otherDepts} periodLabel={periodLabel} readOnly={readOnly} />}
-      {tab === 'cashbook' && <CashBook ledger={detail} untagged={readOnly ? [] : period.result.untagged} figures={figures} periodLabel={periodLabel} readOnly={readOnly} />}
+      {tab === 'invoices' && <Invoices ledger={detail} assignments={history.assignments} departments={otherDepts} periodLabel={periodLabel} readOnly={viewOnly} />}
+      {tab === 'cashbook' && <CashBook ledger={detail} untagged={viewOnly ? [] : period.result.untagged} figures={figures} periodLabel={periodLabel} readOnly={viewOnly} />}
       {tab === 'work' && <Work ledger={detail} tasks={tasks} periodLabel={periodLabel} />}
     </div>
   )

@@ -73,8 +73,14 @@ export const UNIT_TEAM_PAGES: readonly UnitTeamPage[] = [
   },
 ]
 
-/** Where a unit member lands instead of a page they may not open. */
-export const UNIT_TEAM_HOME = '/dashboard/my-work'
+/**
+ * Where a unit member lands instead of a page they may not open. It must be a
+ * page EVERY member can open whatever their designation — the units page
+ * (lib/units, requireUnitViewer) is. My Work was the first choice, but a
+ * member whose designation cannot open it was sent to the dashboard, which
+ * sent them back: a redirect loop (found testing as CQID004, 2026-11-27).
+ */
+export const UNIT_TEAM_HOME = '/dashboard/units'
 
 /** May a unit team member open this path? Query strings and hashes are ignored. */
 export function unitTeamMayOpen(href: string): boolean {

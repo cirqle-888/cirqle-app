@@ -139,14 +139,14 @@ describe('unit team page lock', () => {
     asMember('unit-member-1')
     mocks.rpc.mockResolvedValue({ data: true, error: null })
     const response = await updateSession(new NextRequest('https://cirqle.test/dashboard/invoices'))
-    expect(response.headers.get('location')).toBe('https://cirqle.test/dashboard/my-work?denied=1')
+    expect(response.headers.get('location')).toBe('https://cirqle.test/dashboard/units?denied=1')
   })
 
-  it('lands a unit member on their own work instead of the company dashboard', async () => {
+  it('lands a unit member on their unit page instead of the company dashboard', async () => {
     asMember('unit-member-2')
     mocks.rpc.mockResolvedValue({ data: true, error: null })
     const response = await updateSession(new NextRequest('https://cirqle.test/dashboard'))
-    expect(response.headers.get('location')).toBe('https://cirqle.test/dashboard/my-work')
+    expect(response.headers.get('location')).toBe('https://cirqle.test/dashboard/units')
   })
 
   it('lets a unit member open their unit pages', async () => {

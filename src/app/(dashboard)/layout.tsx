@@ -151,9 +151,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Same helper the UI uses to decide whether to show a link at all — see
   // canOpenHref. Keeping one rule is what stops a button from offering a page
   // this guard would then bounce the user away from.
-  if (!canOpenHref(pathname, (key) => hasPermission(me, key), user.isAdmin, unitOnly)) {
-    // A unit member lands on their own work, never on the company dashboard.
-    redirect(unitOnly ? `${UNIT_TEAM_HOME}?denied=1` : '/dashboard?denied=1')
+  if (!canOpenHref(pathname, (key) => hasPermission(me, key), user.isAdmin)) {
+    redirect('/dashboard?denied=1')
+  }
+  // A business-unit team member opens only the unit-team pages. Checked
+  // against the real path (x-request-path is set on every request); the
+  // landing page is open to every member, so this can never loop. Also what
+  // makes an admin's view-as preview of a member accurate.
+  const requestPath = headersList.get('x-request-path')
+  if (unitOnly && requestPath && requestPath !== UNIT_TEAM_HOME
+      && !canOpenHref(requestPath, (key) => hasPermission(me, key), user.isAdmin, true)) {
+    redirect(`${UNIT_TEAM_HOME}?denied=1`)
   }
 
   return (

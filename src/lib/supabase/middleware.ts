@@ -259,6 +259,11 @@ function checkRateLimit(request: NextRequest): boolean {
 }
 
 export async function updateSession(request: NextRequest) {
+  // The real path, on EVERY request, for the dashboard layout's unit-team
+  // check. (`x-pathname` below is only set when the session cookie is
+  // refreshed, so the layout's older guard usually sees '/dashboard'; a unit
+  // check reading it would bounce a unit member on every page.)
+  request.headers.set('x-request-path', request.nextUrl.pathname)
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(

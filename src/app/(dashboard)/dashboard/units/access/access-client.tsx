@@ -240,7 +240,7 @@ function Check({ people }: { people: AccessProps['people'] }) {
               setViewing(true)
               const r = await startViewAs(id)
               setViewing(false)
-              if (r.ok) router.push('/dashboard/my-work'); else setErr(r.error ?? 'Could not open the preview.')
+              if (r.ok) router.push('/dashboard/units'); else setErr(r.error ?? 'Could not open the preview.')
             }}><Eye className="h-3.5 w-3.5" /> Open the app as this person</Button>
           )}
         </div>

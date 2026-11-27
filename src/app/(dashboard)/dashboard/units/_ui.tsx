@@ -136,7 +136,7 @@ export function DepartmentForm({ defaults, categories, takenCategories, employee
                   const checked = f.categoryIds.includes(c.id)
                   return (
                     <label key={c.id} className={`flex items-center gap-2 text-sm ${taken && !checked ? 'opacity-50' : ''}`}>
-                      <input type="checkbox" checked={checked} disabled={!!taken && !checked}
+                      <input type="checkbox" aria-label={c.name} checked={checked} disabled={!!taken && !checked}
                         onChange={e => set('categoryIds', e.target.checked ? [...f.categoryIds, c.id] : f.categoryIds.filter(x => x !== c.id))} />
                       <span>{c.name}</span>
                       {taken && <span className="text-[11px] text-muted-foreground">· in {taken}</span>}
@@ -153,7 +153,7 @@ export function DepartmentForm({ defaults, categories, takenCategories, employee
         <div className="text-xs font-medium text-muted-foreground">Team — who runs this unit</div>
         <p className="text-[11px] text-muted-foreground">
           Team members (except Admins) see only this unit: its clients, tasks, requests, social calendar and chats,
-          and none of Cirqle&apos;s other units. Leave the office team out — they keep seeing everything.
+          and none of Cirqle&apos;s other units. Leave the office team out — what they see comes from their designation.
         </p>
         <div className="space-y-2">
           {f.members.map((m, i) => (

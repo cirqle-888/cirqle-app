@@ -25,7 +25,7 @@ import {
   UserCircle,
   ChevronDown,
 } from 'lucide-react'
-import { navSections, isNavItemVisible, resolveActiveHref } from '@/lib/nav-sections'
+import { navSections, isNavItemVisible, resolveActiveHref, canOpenHref } from '@/lib/nav-sections'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { useRequestsBadge } from '@/contexts/requests-badge-context'
 import { WorkspaceSwitcher } from '@/components/layout/workspace-switcher'
@@ -635,6 +635,7 @@ export default function Sidebar() {
   // along its top edge (Chromium; frosted only elsewhere).
   const bottomNavRef = useRef<HTMLDivElement>(null)
   useLiquidGlass(bottomNavRef, { bezel: 14, strength: 16 })
+  const { user, can } = usePermissions()
   const [isPinned, setIsPinned] = useState(true)
   const [isHovered, setIsHovered] = useState(false)
   const [mounted, setMounted] = useState(false)
@@ -776,7 +777,9 @@ export default function Sidebar() {
                 { href: '/dashboard/tasks',         label: 'Tasks',    icon: CheckSquare },
                 { href: '/dashboard/contributions', label: 'Activity', icon: TrendingUp },
               ]
-          ).map(item => {
+          // Only pages this person can open — a business-unit team member
+          // (lib/units/access) must not be offered Home or a stale favourite.
+          ).filter(item => canOpenHref(item.href, can, user.isAdmin, !!user.unitRoutesOnly)).map(item => {
             // Dashboard root: exact match only so Tasks/Contributions don't highlight it
             const active = item.href === '/dashboard'
               ? pathname === '/dashboard'

@@ -12,5 +12,6 @@ export default async function EditDepartmentPage({ params }: { params: Promise<{
   const { slug } = await params
   const dept = (await loadDepartments(admin)).find(d => d.slug === slug)
   if (!dept) notFound()
-  return <FormPage admin={admin} me={me} dept={dept} />
+  // A plain call: a database client must not travel as a component prop.
+  return FormPage({ admin, me, dept })
 }

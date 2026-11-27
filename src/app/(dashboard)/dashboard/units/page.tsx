@@ -24,7 +24,9 @@ const tone = (n: number) => (n > 0 ? 'good' : n < 0 ? 'bad' : 'muted') as 'good'
  */
 export default async function UnitsPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
   const { admin, installed, myUnits } = await requireUnitViewer()
-  if (myUnits) return <MemberIndex admin={admin} myUnitIds={myUnits.map(u => u.id)} />
+  // A plain call, not <MemberIndex admin={…} />: a database client passed as a
+  // component prop gets serialised for React's dev tools and breaks the page.
+  if (myUnits) return memberIndex(admin, myUnits.map(u => u.id))
 
   const header = (
     <Header
@@ -75,8 +77,8 @@ export default async function UnitsPage({ searchParams }: { searchParams: Promis
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 md:px-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">Cirqle</span> (you and the office team) sees everything.
-            Each unit&apos;s team sees only its own unit. Showing <span className="font-medium text-foreground">{monthName(month)}</span>.
+            You see everything; office staff see what their designation allows; each unit&apos;s team sees only its
+            own unit (see the Access map). Showing <span className="font-medium text-foreground">{monthName(month)}</span>.
           </p>
           <MonthPicker months={pickerMonths} value={month} allLabel={null} />
         </div>
@@ -213,7 +215,7 @@ export default async function UnitsPage({ searchParams }: { searchParams: Promis
 }
 
 /** A team member's view: their own unit(s) and nothing else. */
-async function MemberIndex({ admin, myUnitIds }: { admin: Parameters<typeof loadDepartments>[0]; myUnitIds: string[] }) {
+async function memberIndex(admin: Parameters<typeof loadDepartments>[0], myUnitIds: string[]) {
   const units = (await loadDepartments(admin)).filter(d => myUnitIds.includes(d.id))
   if (units.length === 1 && units[0].teamSeesResults) redirect(`${ROOT}/${units[0].slug}`)
   return (

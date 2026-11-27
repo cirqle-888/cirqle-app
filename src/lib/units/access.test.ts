@@ -105,6 +105,24 @@ describe('enforcement', () => {
   it('the layout guard knows about units too', () => {
     const layout = read('src/app/(dashboard)/layout.tsx')
     expect(layout).toContain('isUnitConfined(')
-    expect(layout).toMatch(/canOpenHref\(pathname, .*unitOnly\)/)
+    expect(layout).toMatch(/canOpenHref\(requestPath, .*true\)/)
+    // The real path must reach the layout on every request, not only when the
+    // session cookie is refreshed — otherwise every page looks like
+    // '/dashboard' to the unit check and a member bounces forever.
+    expect(mw).toContain("request.headers.set('x-request-path', request.nextUrl.pathname)")
+    expect(layout).toContain("headersList.get('x-request-path')")
+  })
+})
+
+describe('no redirect loops', () => {
+  it('a unit member lands on a page every member can open, whatever their designation', () => {
+    const nobodyCan = () => false
+    expect(unitTeamMayOpen(UNIT_TEAM_HOME)).toBe(true)
+    expect(canOpenHref(UNIT_TEAM_HOME, nobodyCan, false, true)).toBe(true)
+  })
+  it('Focus mode never lists untagged company entries (they include salaries)', () => {
+    const page = read('src/app/(dashboard)/dashboard/units/[slug]/page.tsx')
+    expect(page).toContain('const viewOnly = readOnly || focus')
+    expect(page).toContain('untagged={viewOnly ? [] : period.result.untagged}')
   })
 })
