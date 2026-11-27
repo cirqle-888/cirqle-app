@@ -101,8 +101,10 @@ export async function globalSearch(q: string): Promise<GlobalSearchResults> {
       : none,
     canEmployees
       ? admin.from('employees')
-          .select('id, name, email')
-          .or(`name.ilike.%${term}%,email.ilike.%${term}%`).limit(LIMIT)
+          .select('id, name:cqid, email')
+          // By CQID or email only. Searching by real name would turn the search
+          // box into a name → CQID lookup, which is the mapping this app hides.
+          .or(`cqid.ilike.%${term}%,email.ilike.%${term}%`).limit(LIMIT)
       : none,
     canAdvertising
       ? admin.from('ad_projects')
@@ -116,7 +118,7 @@ export async function globalSearch(q: string): Promise<GlobalSearchResults> {
       : none,
     canPayroll
       ? admin.from('payroll')
-          .select('id, payslip_number, month, year, status, employee:employees(name)')
+          .select('id, payslip_number, month, year, status, employee:employees(name:cqid)')
           .ilike('payslip_number', `%${term}%`).limit(LIMIT)
       : none,
     canCashbook

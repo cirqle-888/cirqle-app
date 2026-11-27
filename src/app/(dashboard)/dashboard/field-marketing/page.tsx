@@ -29,7 +29,7 @@ export default async function FieldMarketingPage() {
   const [placesRes, territoriesRes, employeesRes] = await Promise.all([
     fetchAll(supabase.from('field_places').select('*').order('created_at', { ascending: false })),
     fetchAll(supabase.from('field_territories').select('*').order('name')),
-    supabase.from('employees').select('id, cqid, name').eq('is_active', true).order('cqid'),
+    supabase.from('employees').select('id, cqid').eq('is_active', true).order('cqid'),
   ])
 
   const places = (placesRes.data || []) as FieldPlace[]

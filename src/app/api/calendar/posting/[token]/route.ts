@@ -53,7 +53,7 @@ export async function GET(
 
   const { data: employee, error } = await admin
     .from('employees')
-    .select('id, name')
+    .select('id, cqid')
     .eq('calendar_feed_token', token)
     .maybeSingle()
 
@@ -84,7 +84,7 @@ export async function GET(
       reminderMinutes: DEFAULT_REMINDER_MINUTES,
     })),
     {
-      name: feed.seesAll ? 'Cirqle — Posting times' : `Cirqle — ${employee.name ?? 'My'} posting times`,
+      name: feed.seesAll ? 'Cirqle — Posting times' : `Cirqle — ${employee.cqid ?? 'My'} posting times`,
       description: feed.ready
         ? 'Every planned post with a 15-minute alarm. Managed in Cirqle — edits here are overwritten.'
         : 'Posting times are not switched on yet. This calendar will fill once they are.',

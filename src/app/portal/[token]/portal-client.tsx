@@ -5,7 +5,7 @@ import { submitContributions } from './actions'
 import { CheckCircle, Clock, ChevronDown, ChevronUp, Zap, AlertCircle, IndianRupee, ClipboardList } from 'lucide-react'
 
 interface Props {
-  employee: { id: string; cqid: string; name: string; email?: string; performance_rating: number; base_salary?: number; is_active: boolean }
+  employee: { id: string; cqid: string; email?: string; performance_rating: number; base_salary?: number; is_active: boolean }
   tasks: any[]
   contributions: { task_id: string; parameter_id: string; value: number }[]
   scores: { task_id: string; score_percentage: number; earnings_inr: number }[]
@@ -126,8 +126,6 @@ export default function PortalClient({ employee, tasks, contributions, scores, p
             </div>
             <div className="text-right">
               <div className="font-semibold text-sm">{employee.cqid}</div>
-              {/* eslint-disable-next-line no-restricted-syntax -- self-view: the employee's own name on their own token-scoped portal */}
-              {employee.name && <div className="text-xs text-muted-foreground">{employee.name}</div>}
             </div>
           </div>
         </div>

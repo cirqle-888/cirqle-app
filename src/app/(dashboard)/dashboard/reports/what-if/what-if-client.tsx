@@ -776,8 +776,7 @@ function GoalSeekPanel({ raw, active, updateActive, employees, pairings, baseSal
         {goalKind === 'employee_earnings' && (
           <select value={goalEmp} onChange={e => setGoalEmp(e.target.value)} className={inputCls}>
             <option value="">Whose earnings…</option>
-            {/* eslint-disable-next-line no-restricted-syntax -- `employees` is pre-masked with dn() in WhatIfClient's useMemo, so this `.name` IS the CQID when locked. */}
-            {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+            {employees.map(e => <option key={e.id} value={e.id}>{e.cqid}</option>)}
           </select>
         )}
         <select value={leverKind} onChange={e => setLeverKind(e.target.value as typeof leverKind)} className={inputCls}>
@@ -789,8 +788,7 @@ function GoalSeekPanel({ raw, active, updateActive, employees, pairings, baseSal
         {leverKind === 'employee_rating' && (
           <select value={leverEmp} onChange={e => setLeverEmp(e.target.value)} className={inputCls}>
             <option value="">Which employee…</option>
-            {/* eslint-disable-next-line no-restricted-syntax -- `employees` is pre-masked with dn() in WhatIfClient's useMemo, so this `.name` IS the CQID when locked. */}
-            {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+            {employees.map(e => <option key={e.id} value={e.id}>{e.cqid}</option>)}
           </select>
         )}
         {leverKind === 'client_service_price' && (
@@ -987,7 +985,7 @@ function ApplyReviewModal({ active, cmp, raw, employees, baseSalaries, pairings,
   canApply: Props['canApply']
   onClose: () => void
 }) {
-  const empName = (id: string) => employees.find(e => e.id === id)?.name || '—'
+  const empName = (id: string) => employees.find(e => e.id === id)?.cqid || '—'
   const pairingLabel = (key: string) => pairings.find(p => p.key === key)?.label || key.replace('|', ' × ')
 
   // Build the concrete change list from the scenario.

@@ -18,7 +18,7 @@ export default async function ImportPage() {
   const [clientsRes, servicesRes, employeesRes, groupsRes, paramsRes, bankAccountsRes, cashCategoriesRes] = await Promise.all([
     supabase.from('clients').select('id, name, code').order('name'),
     supabase.from('services').select('id, name').order('name'),
-    supabase.from('employees').select('id, cqid, name').order('cqid'),
+    supabase.from('employees').select('id, cqid').order('cqid'),
     supabase.from('contribution_groups').select('id, name, weight').order('display_order'),
     supabase.from('parameters').select('id, name, group_id, weight, display_order').order('display_order'),
     supabase.from('bank_accounts').select('id, name').order('name'),

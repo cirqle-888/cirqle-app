@@ -64,3 +64,45 @@ they are safe to run even if they were run before.
 
 Nothing to do. Migration 0007 (`clients.shown`) is in: the live app already
 runs code from migrations 0015–0017, which came after it.
+
+## 3. Privacy clean-up: staff names inside old WhatsApp requests (added 2026-11-27)
+
+Not a schema change. Some requests the WhatsApp listener filed **before** the
+staff-numbers list existed start with a line like
+`From WhatsApp · group · sent by <WhatsApp display name>`, and where the sender
+was one of our own people that display name is their real name. The app now
+shows CQIDs only, but this text is stored data, so the code cannot remove it.
+New requests are not affected: messages from staff numbers are no longer filed.
+
+### Step 1: see which rows would change
+
+Read the list before doing anything. It should contain our own people only —
+a client contact who happens to share a first name must **not** be in it.
+
+```sql
+select r.ref_no,
+       substring(r.description from 'sent by ([^\n]+)') as sender_in_text,
+       e.cqid as would_become
+  from public.task_requests r
+  join public.employees e
+    on lower(substring(r.description from 'sent by ([^\n]+)'))
+       like '%' || lower(split_part(trim(e.name), ' ', 1)) || '%'
+ where r.description like 'From WhatsApp%sent by %'
+   and length(split_part(trim(e.name), ' ', 1)) >= 4
+ order by r.ref_no;
+```
+
+### Step 2: only if every row above is one of ours
+
+```sql
+update public.task_requests r
+   set description = regexp_replace(r.description, 'sent by [^\n]+', 'sent by ' || e.cqid)
+  from public.employees e
+ where r.description like 'From WhatsApp%sent by %'
+   and length(split_part(trim(e.name), ' ', 1)) >= 4
+   and lower(substring(r.description from 'sent by ([^\n]+)'))
+       like '%' || lower(split_part(trim(e.name), ' ', 1)) || '%';
+```
+
+If Step 1 lists a client contact, do not run Step 2 as written — edit those
+few requests by hand in the app instead (open the request, edit the brief).

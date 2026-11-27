@@ -180,7 +180,8 @@ function activityText(a: any): string {
     case 'note':                  return d.message || 'Update posted'
     case 'promoted':              return `Promoted → Task #${d.task_number ?? ''}`
     case 'internal_note_updated': return 'Internal notes updated'
-    case 'assigned':              return `Assigned to ${d.employee_name || 'an employee'}`
+    // Older rows stored a real name here. Only a CQID is ever shown.
+    case 'assigned':              return `Assigned to ${/^CQID\d+$/i.test(String(d.employee_name || '')) ? d.employee_name : 'an employee'}`
     case 'board_moved':           return `Moved on the board — Task #${d.task_number ?? ''} → ${TASK_STATUS_WORD[d.to] || d.to}`
     case 'unassigned':            return 'Assignment cleared'
     default:                      return String(a.action).replace(/_/g, ' ')
@@ -395,7 +396,7 @@ export default function RequestsClient({
   /** value = may see money (billing.view_amounts): pipeline value, estimated values. */
   perms: { review: boolean; start: boolean; manage: boolean; activity: boolean; value?: boolean }
   clients?: { id: string; name: string; code?: string | null; drive_folder_link?: string | null; is_draft?: boolean | null }[]
-  employees?: { id: string; cqid?: string | null; name: string }[]
+  employees?: { id: string; cqid?: string | null }[]
   services?: { id: string; name: string }[]
   servicePricing?: { client_id: string; service_id: string; price: number | null }[]
   /** Offer-campaign submissions — shown in the same inbox as a different request type. */
@@ -450,10 +451,10 @@ export default function RequestsClient({
     client: { type: 'text', get: (r: any) => r.client?.name },
     agency: { type: 'text', get: (r: any) => r.agency?.name },
     ref:    { type: 'text', get: (r: any) => refLabel(r.ref_no) },
-    assignee: { type: 'text', get: (r: any) => r.assigned_employee?.name },
+    assignee: { type: 'text', get: (r: any) => r.assigned_employee?.cqid },
   }), [])
   const requestGeneric = (r: any) =>
-    `${refLabel(r.ref_no)} ${r.title || ''} ${r.client?.name || ''} ${r.agency?.name || ''} ${r.submitter_name || ''} ${r.assigned_employee?.name || ''}`
+    `${refLabel(r.ref_no)} ${r.title || ''} ${r.client?.name || ''} ${r.agency?.name || ''} ${r.submitter_name || ''} ${r.assigned_employee?.cqid || ''}`
   const [clientFilter, setClientFilter] = useState('')
   // Inbox type filter: design requests vs offer-campaign submissions.
   const [typeFilter, setTypeFilter] = useState<'all' | 'request' | 'offer' | 'checklist'>('all')
@@ -828,7 +829,7 @@ export default function RequestsClient({
     const res = await assignRequestEmployee(r.id, employeeId || null, emp?.cqid || null)
     setBusy(false)
     if (res.ok) {
-      const patch = { assigned_employee_id: employeeId || null, assigned_employee: emp ? { id: emp.id, cqid: emp.cqid, name: emp.name } : null }
+      const patch = { assigned_employee_id: employeeId || null, assigned_employee: emp ? { id: emp.id, cqid: emp.cqid } : null }
       setRequests(prev => prev.map(x => x.id === r.id ? { ...x, ...patch } : x))
       setOpen((o: any) => o && o.id === r.id ? { ...o, ...patch } : o)
       success(emp ? `Assigned to ${dn(emp)}` : 'Assignment cleared',
@@ -891,7 +892,7 @@ export default function RequestsClient({
     setBulkBusy(false)
     if (res.data) {
       const succeededSet = new Set(res.data.succeeded)
-      const patch = { assigned_employee_id: employeeId || null, assigned_employee: emp ? { id: emp.id, cqid: emp.cqid, name: emp.name } : null }
+      const patch = { assigned_employee_id: employeeId || null, assigned_employee: emp ? { id: emp.id, cqid: emp.cqid } : null }
       setRequests(prev => prev.map(x => succeededSet.has(x.id) ? { ...x, ...patch } : x))
     }
     finishBulk(summariseBulkOutcome(res.data, ids, 'request'), () => {
@@ -1682,7 +1683,7 @@ export default function RequestsClient({
                         {boardBy === 'status'
                           ? <span className="text-[10px] text-muted-foreground truncate max-w-[140px]">{requesterOf(r)}</span>
                           : <span className={`text-[9px] px-1.5 py-0.5 rounded-full border ${STATUS_CHIP[r.status] || ''}`}>{STATUS_LABEL[r.status] || r.status}</span>}
-                        {r.assigned_employee?.name && (
+                        {r.assigned_employee?.cqid && (
                           <span className="flex items-center gap-0.5 text-[10px] text-violet-700 dark:text-violet-300/80"><UserRound className="w-2.5 h-2.5" />{dn(r.assigned_employee).split(' ')[0]}</span>
                         )}
                         {r.promoted_task?.task_number != null && (
@@ -1847,7 +1848,7 @@ export default function RequestsClient({
                           <span className="font-mono text-muted-foreground/80">{refLabel(r.ref_no)}</span>
                           <span className="inline-flex items-center gap-1 min-w-0 text-foreground/75"><Building2 className="w-3 h-3 shrink-0 text-muted-foreground/60" /><span className="truncate max-w-[200px]">{requesterOf(r)}</span></span>
                           {r.service?.name && <span className="inline-flex items-center gap-1 text-cyan-700 dark:text-cyan-400/80"><Tag className="w-3 h-3 shrink-0 opacity-70" />{r.service.name}</span>}
-                          {r.assigned_employee?.name ? (
+                          {r.assigned_employee?.cqid ? (
                             <><span className="inline-flex items-center gap-1 text-violet-700 dark:text-violet-300/90"><UserRound className="w-3 h-3" />{dn(r.assigned_employee)}</span></>
                           ) : OPEN_LOAD_STATUSES.includes(r.status) && (
                             <><span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400/90"><UserRound className="w-3 h-3" />Unassigned</span></>

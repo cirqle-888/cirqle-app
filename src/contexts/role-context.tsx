@@ -11,7 +11,7 @@ export type Role = 'super_admin' | 'accounts' | 'team_lead' | 'employee' | 'view
 export interface Employee {
   id: string
   auth_id: string | null
-  name: string | null
+  // No `name` — real names never reach the browser; the CQID identifies people.
   email: string | null
   role: Role
   cqid: string | null
@@ -23,7 +23,6 @@ export interface Employee {
 export interface ServerEmployee {
   id: string
   authId: string
-  name: string
   email: string
   cqid: string
   isAdmin: boolean
@@ -108,7 +107,6 @@ function serverToEmployee(s: ServerEmployee): Employee {
   return {
     id: s.id,
     auth_id: s.authId,
-    name: s.name,
     email: s.email,
     role: s.isAdmin ? 'super_admin' : 'employee',
     cqid: s.cqid,
@@ -145,7 +143,7 @@ export function RoleProvider({ children, initialEmployee }: RoleProviderProps) {
 
         const { data: emp, error } = await supabase
           .from('employees')
-          .select('id, auth_id, name, email, role, cqid, is_active, avatar_url')
+          .select('id, auth_id, email, role, cqid, is_active, avatar_url')
           .or(`auth_id.eq.${user.id},email.eq.${user.email}`)
           .maybeSingle()
 

@@ -51,7 +51,7 @@ export default async function ClientsPage() {
       const base = 'id, name, code, contact_name, email, phone, country, default_currency, is_active, pricing_pending, business_partner_id, created_at'
         + (hasDeptOverride ? ', department_id' : '')
       const res = await fetchAll(supabase.from('clients')
-        .select(`${base}, is_draft, draft_note, draft_created_at, draft_creator:employees!clients_draft_created_by_fkey(name)`)
+        .select(`${base}, is_draft, draft_note, draft_created_at, draft_creator:employees!clients_draft_created_by_fkey(name:cqid)`)
         .order('name'))
       if (!res.error) return res
       return fetchAll(supabase.from('clients').select(base).order('name'))

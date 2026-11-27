@@ -108,7 +108,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
     employeeId: '',
     authId: '',
     cqid: '',
-    name: '',
     email: '',
     designationId: null,
     designationName: null,
@@ -122,7 +121,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
         employeeId: me.employeeId,
         authId: me.authId,
         cqid: me.cqid,
-        name: me.name,
         email: me.email,
         designationId: me.designationId,
         designationName: me.designationName,
@@ -139,7 +137,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Pre-populate the client-side RoleProvider from server data so the
   // sidebar renders correctly on first paint — no async fetch / no flicker.
   const serverEmployee: ServerEmployee | null = me
-    ? { id: me.employeeId, authId: me.authId, name: me.name, email: me.email, cqid: me.cqid, isAdmin: user.isAdmin }
+    ? { id: me.employeeId, authId: me.authId, email: me.email, cqid: me.cqid, isAdmin: user.isAdmin }
     : null
 
   const headersList = await headers()
@@ -243,7 +241,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
             {showBirthday && me && (
               <BirthdayCelebration
                 employeeId={me.employeeId}
-                name={me.name}
                 cqid={me.cqid}
               />
             )}

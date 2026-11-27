@@ -168,7 +168,7 @@ export async function recalcTaskCommissions(taskId: string, userId?: string) {
   const [
     employeesRes, groupsRes, parametersRes, toolsRes, toolServicesRes, groupServicesRes, pricingRes, historyRes, taskToolsRes, oldScoresRes, ratesRes, agreementsRes
   ] = await Promise.all([
-    supabase.from('employees').select('id, cqid, name, performance_rating, role'),
+    supabase.from('employees').select('id, cqid, performance_rating, role'),
     // Active-only — the scoring UIs (contributions page, task edit panel) are
     // fed active-only groups/params/tools, so recalcs must use the same set or
     // scores ping-pong between paths once something is archived.

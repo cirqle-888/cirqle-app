@@ -40,3 +40,33 @@ export async function getCompanySettings(): Promise<CompanySettings> {
     return {}
   }
 }
+
+/**
+ * Only the named keys — for a page that hands settings to the BROWSER.
+ *
+ * The table is one key/value bag: branding sits next to the bank account, the
+ * WhatsApp listener's staff phone list and gateway state. A client component
+ * given the whole map gives all of that to whoever opens the page, whatever
+ * the page actually uses. Pass the keys a screen needs and nothing else.
+ */
+export function pickCompanySettings(settings: CompanySettings, keys: readonly string[]): CompanySettings {
+  const out: CompanySettings = {}
+  for (const k of keys) if (settings[k] !== undefined) out[k] = settings[k]
+  return out
+}
+
+/**
+ * Everything except the keys no screen should receive: integration state and
+ * anything that reads like a credential. For finance screens that legitimately
+ * need the company's own invoice and bank details, but not the staff phone
+ * list or a gateway session.
+ */
+export function withoutPrivateSettings(settings: CompanySettings): CompanySettings {
+  const out: CompanySettings = {}
+  for (const [k, v] of Object.entries(settings)) {
+    if (/^whatsapp_listener_|^openwa_|token|secret|password|api_key|apikey|session|webhook/i.test(k)) continue
+    out[k] = v
+  }
+  return out
+}
+

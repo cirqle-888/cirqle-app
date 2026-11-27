@@ -130,7 +130,7 @@ const APPLICATION_SELECT = `
   country, location, experience, expected_salary, availability, portfolio_url,
   linkedin_url, resume_storage_path, cover_letter, skills, why_join, stage,
   source, rejected_reason, assigned_to, created_at, updated_at,
-  assignee:assigned_to(id, name, cqid)
+  assignee:assigned_to(id, cqid)
 `
 
 // ── Employees (for assignee / interviewer pickers) ───────────────────────────
@@ -140,9 +140,9 @@ export async function listEmployeesForPicker(): Promise<Result<EmployeeRef[]>> {
   if (!guard.ok) return guard
   const admin = createAdminClient()
   const { data, error } = await admin.from('employees')
-    .select('id, name, cqid').eq('is_active', true).order('cqid')
+    .select('id, cqid').eq('is_active', true).order('cqid')
   if (error) return { ok: false, error: error.message }
-  return { ok: true, data: (data ?? []).map(e => ({ id: e.id, name: e.name ?? '', cqid: e.cqid ?? '' })) }
+  return { ok: true, data: (data ?? []).map(e => ({ id: e.id, name: '', cqid: e.cqid ?? '' })) }
 }
 
 // ── Positions ─────────────────────────────────────────────────────────────────
@@ -275,9 +275,9 @@ export async function getApplication(id: string): Promise<Result<ApplicationProf
 
   const [appRes, notesRes, docsRes, interviewsRes, offersRes] = await Promise.all([
     admin.from('job_applications').select(APPLICATION_SELECT).eq('id', id).maybeSingle(),
-    admin.from('application_notes').select('id, application_id, note, created_at, author:author_id(id, name, cqid)').eq('application_id', id).order('created_at', { ascending: false }),
-    admin.from('application_documents').select('id, application_id, doc_type, storage_path, file_name, mime_type, size_bytes, created_at, uploader:uploaded_by(id, name, cqid)').eq('application_id', id).order('created_at', { ascending: false }),
-    admin.from('application_interviews').select('id, application_id, scheduled_at, duration_minutes, meeting_link, status, outcome_notes, created_at, interviewer:interviewer_id(id, name, cqid)').eq('application_id', id).order('scheduled_at', { ascending: false }),
+    admin.from('application_notes').select('id, application_id, note, created_at, author:author_id(id, cqid)').eq('application_id', id).order('created_at', { ascending: false }),
+    admin.from('application_documents').select('id, application_id, doc_type, storage_path, file_name, mime_type, size_bytes, created_at, uploader:uploaded_by(id, cqid)').eq('application_id', id).order('created_at', { ascending: false }),
+    admin.from('application_interviews').select('id, application_id, scheduled_at, duration_minutes, meeting_link, status, outcome_notes, created_at, interviewer:interviewer_id(id, cqid)').eq('application_id', id).order('scheduled_at', { ascending: false }),
     admin.from('application_offers').select('id, application_id, position_title, offered_salary, currency, start_date, expiry_date, status, notes, sent_at, responded_at, created_at').eq('application_id', id).order('created_at', { ascending: false }),
   ])
 
@@ -383,7 +383,7 @@ export async function addNote(applicationId: string, note: string): Promise<Resu
   void logActivity({ actorId: guard.me.employeeId, entityType: 'job_application', entityId: applicationId, action: 'note_added' })
   return {
     ok: true,
-    data: { id: data.id, applicationId: data.application_id, note: data.note, createdAt: data.created_at, author: { id: guard.me.employeeId, name: guard.me.name, cqid: guard.me.cqid } },
+    data: { id: data.id, applicationId: data.application_id, note: data.note, createdAt: data.created_at, author: { id: guard.me.employeeId, name: '', cqid: guard.me.cqid } },
   }
 }
 
@@ -484,7 +484,7 @@ export async function listInterviews(filters?: { upcomingOnly?: boolean }): Prom
   if (!guard.ok) return guard
   const admin = createAdminClient()
   let q = admin.from('application_interviews')
-    .select('id, application_id, scheduled_at, duration_minutes, meeting_link, status, outcome_notes, created_at, interviewer:interviewer_id(id, name, cqid), application:application_id(full_name, reference_number)')
+    .select('id, application_id, scheduled_at, duration_minutes, meeting_link, status, outcome_notes, created_at, interviewer:interviewer_id(id, cqid), application:application_id(full_name, reference_number)')
     .order('scheduled_at', { ascending: true })
   if (filters?.upcomingOnly) q = q.eq('status', 'scheduled').gte('scheduled_at', new Date().toISOString())
   const { data, error } = await q

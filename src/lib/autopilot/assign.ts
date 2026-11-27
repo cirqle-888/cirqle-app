@@ -47,8 +47,9 @@ export async function assignWaitingRequests(admin: Admin, today: string, opts: {
       if (t) history.push({ client_id: t.client_id, service_id: t.service_id, employee_id: a.employee_id })
     }
   }
-  const { data: emps } = await admin.from('employees').select('id, name, is_active, is_archived')
-  const empName = new Map(((emps || []) as any[]).map(e => [e.id as string, (e.name as string) || 'Someone']))
+  const { data: emps } = await admin.from('employees').select('id, cqid, is_active, is_archived')
+  // CQID, not the name: this label goes into the activity log and the summary message.
+  const empName = new Map(((emps || []) as any[]).map(e => [e.id as string, (e.cqid as string) || 'Someone']))
   const active = new Set(((emps || []) as any[]).filter(e => e.is_active && !e.is_archived).map(e => e.id as string))
 
   const assigned: { ref: string; title: string; client: string; person: string }[] = []

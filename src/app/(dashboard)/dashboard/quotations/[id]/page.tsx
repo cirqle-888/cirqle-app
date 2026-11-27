@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { getCompanySettings } from '@/lib/settings/company-settings'
+import { getCompanySettings, withoutPrivateSettings } from '@/lib/settings/company-settings'
 import QuotationEditor from '../quotation-editor'
 import { QUOTATION_SELECT } from '../types'
 
@@ -22,7 +22,7 @@ export default async function QuotationPage({ params }: { params: Promise<{ id: 
       key={id}
       quotation={quotationRes.data}
       clients={clientsRes.data || []}
-      companySettings={companySettings}
+      companySettings={withoutPrivateSettings(companySettings)}
     />
   )
 }

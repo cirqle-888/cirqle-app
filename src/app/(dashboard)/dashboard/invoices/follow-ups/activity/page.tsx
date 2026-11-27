@@ -13,7 +13,7 @@ export default async function FollowupActivityPage() {
     .from('invoice_followups')
     .select(`
       id, note, outcome, promised_date, next_followup_date, created_at,
-      creator:created_by(cqid, name),
+      creator:created_by(cqid),
       invoice:invoice_id(id, invoice_number, status, client:clients(id, name))
     `)
     .order('created_at', { ascending: false })
@@ -32,7 +32,7 @@ export default async function FollowupActivityPage() {
       promised_date:      r.promised_date as string | null,
       next_followup_date: r.next_followup_date as string | null,
       created_at:         r.created_at as string,
-      employee:           creator ? { cqid: creator.cqid, name: creator.name } : null,
+      employee:           creator ? { cqid: creator.cqid, name: creator.cqid } : null,
       invoice:            inv ? { id: inv.id, invoice_number: inv.invoice_number, status: inv.status } : null,
       client:             client ? { id: client.id, name: client.name } : null,
     }

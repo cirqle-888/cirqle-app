@@ -1,7 +1,11 @@
 // ── Employee-name privacy guard — SINGLE SOURCE OF TRUTH ─────────────────────
 //
-// Employee real names are private. The UI shows CQID everywhere; the name is
-// revealed only through the privacy helpers, and only where explicitly allowed.
+// Employee real names are private. The UI shows CQID everywhere, for everyone,
+// with no reveal: dn() and displayEmployee() return the CQID and nothing else.
+//
+// This render-time rule is the SECOND line of defence. The first is the read
+// gate in scripts/check-name-privacy.mjs, which fails the build when a file
+// loads a name from the database at all.
 //
 // This module is imported by BOTH:
 //   • eslint.config.mjs          — normal linting, alongside every other rule
@@ -32,9 +36,9 @@ const EMP_IDENT = "/^(emp|employee|assignee|staff|member|creator|author|actor|me
 const EMP_CHAIN = "/^(employee|creator|author|actor|assignee|assigned_employee|assignedEmployee|requestedBy|decidedBy|sender|designer)$/";
 
 const NAME_MSG =
-  "Employee names are private — render CQID via dn(emp) or <EmployeeName emp={emp} />, not `.name`. " +
-  "Better still, don't select `name` from the database for this feature at all. " +
-  "If this is a deliberate unlock-gated or self-name reveal, add an eslint-disable-next-line with a reason.";
+  "Employee names are private — render the CQID via dn(emp) or <EmployeeName emp={emp} />, never `.name`. " +
+  "Do not select `name` from the database for this feature at all (select `cqid`, or `name:cqid`). " +
+  "There is no unlock-gated or own-name exception: nobody's real name is shown, including your own.";
 
 export const nameLeakRules = [
   // Direct JSX text: <span>{emp.name}</span>

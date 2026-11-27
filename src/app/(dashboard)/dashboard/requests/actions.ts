@@ -537,7 +537,7 @@ export async function createManualRequest(input: {
     created_by: guard.employeeId,
   }
   if (input.estimatedValue != null && !isNaN(input.estimatedValue)) payload.estimated_value = input.estimatedValue
-  const SELECT_COLS = '*, client:clients(id, name, code), agency:agencies(id, name), service:services(id, name), assigned_employee:employees!task_requests_assigned_employee_id_fkey(id, name), promoted_task:tasks!task_requests_promoted_task_id_fkey(id, task_number, title, status)'
+  const SELECT_COLS = '*, client:clients(id, name, code), agency:agencies(id, name), service:services(id, name), assigned_employee:employees!task_requests_assigned_employee_id_fkey(id, name:cqid), promoted_task:tasks!task_requests_promoted_task_id_fkey(id, task_number, title, status)'
   let { data, error } = await admin.from('task_requests').insert(payload).select(SELECT_COLS).single()
   // Graceful pre-patch fallbacks: columns from later migrations may be missing.
   if (error && /created_by/i.test(error.message || '')) {
@@ -672,7 +672,7 @@ export async function getRequestBriefForTask(taskId: string): Promise<ActionResu
     const base = 'id, ref_no, title, description, design_plan, remarks, priority, due_date, status, source, created_at, ' +
       'content_link, reference_link, deliverables_link, drive_folder_link, extra_links, ' +
       'client:clients(id, name, code), agency:agencies(id, name), service:services(id, name), ' +
-      'assigned_employee:employees!task_requests_assigned_employee_id_fkey(id, name)'
+      'assigned_employee:employees!task_requests_assigned_employee_id_fkey(id, name:cqid)'
     // content_brief / social_meta come from later migrations — retry without.
     let res = await admin.from('task_requests').select(`${base}, content_brief, social_meta`)
       .eq('promoted_task_id', taskId).maybeSingle()

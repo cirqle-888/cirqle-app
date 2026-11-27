@@ -11,11 +11,16 @@ interface PrivacyContextType {
   isUnlocked: boolean
   openUnlockModal: () => void
   lock: () => void
-  /** Returns name when unlocked, CQID when locked */
+  /**
+   * The label for a person: ALWAYS the CQID. Unlocking does not change it —
+   * an employee's real name is never shown anywhere in the app, so there is
+   * no state in which this returns one. The parameter still accepts a `name`
+   * only so older call sites type-check; it is never read.
+   */
   dn: (emp: { cqid?: string | null; name?: string | null } | null | undefined) => string
   /** Returns value when unlocked, masked string when locked */
   ds: (value: string | null | undefined, mask?: string) => string
-  /** When true, names are always hidden regardless of unlock state */
+  /** When true, masked details stay hidden regardless of unlock state */
   forceLock: boolean
   /** Enable/disable forced lock mode (persists in localStorage) */
   setForceLockMode: (v: boolean) => void
@@ -225,12 +230,12 @@ export function PrivacyProvider({ children }: { children: ReactNode }) {
     if (v) setIsUnlocked(false)
   }, [])
 
+  // CQID, always. This used to return the real name while the PIN was
+  // unlocked; that made every screen one PIN away from a list of names, and
+  // the PIN is for masked contact details, not for identities.
   const dn = useCallback(
-    (emp: { cqid?: string | null; name?: string | null } | null | undefined): string => {
-      if (!emp) return '—'
-      return effectivelyUnlocked ? (emp.name || emp.cqid || '—') : (emp.cqid || '—')
-    },
-    [effectivelyUnlocked]
+    (emp: { cqid?: string | null; name?: string | null } | null | undefined): string => emp?.cqid || '—',
+    [],
   )
 
   const ds = useCallback(
@@ -262,7 +267,7 @@ export function PrivacyBadge() {
   if (forceLock) {
     return (
       <span
-        title="Privacy enforced by settings — names cannot be unlocked"
+        title="Privacy enforced by settings — hidden details cannot be unlocked"
         className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full border bg-amber-500/10 border-amber-500/25 text-amber-400">
         <Lock className="w-3 h-3" /> Locked (enforced)
       </span>
@@ -271,14 +276,14 @@ export function PrivacyBadge() {
   return (
     <button
       onClick={isUnlocked ? lock : openUnlockModal}
-      title={isUnlocked ? 'Names visible — click to lock' : 'Names hidden — click to unlock'}
+      title={isUnlocked ? 'Contact details visible — click to lock' : 'Contact details hidden — click to unlock'}
       className={`flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors ${
         isUnlocked
           ? 'bg-green-500/10 border-green-500/25 text-green-400 hover:bg-red-500/10 hover:border-red-500/25 hover:text-red-400'
           : 'bg-secondary border-border text-muted-foreground hover:border-primary/30 hover:text-foreground'
       }`}>
       {isUnlocked ? <ShieldCheck className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
-      {isUnlocked ? 'Names visible' : 'Names hidden'}
+      {isUnlocked ? 'Details visible' : 'Details hidden'}
     </button>
   )
 }

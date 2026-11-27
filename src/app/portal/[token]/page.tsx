@@ -27,7 +27,7 @@ export default async function PortalPage({ params }: { params: Promise<{ token: 
   // 1. Fetch employee by portal_token
   const { data: employee, error: empError } = await supabase
     .from('employees')
-    .select('id, cqid, name, email, performance_rating, base_salary, is_active')
+    .select('id, cqid, email, performance_rating, base_salary, is_active')
     .eq('portal_token', token)
     .single()
 

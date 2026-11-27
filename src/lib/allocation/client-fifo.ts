@@ -274,7 +274,7 @@ export function payrollToItem(p: {
     entity_id: p.employee_id,
     item_date: date,
     label: p.payslip_number || `Salary ${p.month}/${p.year}`,
-    sub: p.employee?.name || p.employee?.cqid || '',
+    sub: p.employee?.cqid || '',
     outstanding_inr: Math.max(0, Math.round((p.net_salary - (allocatedInr || 0)) * 100) / 100),
   }
 }

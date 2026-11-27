@@ -61,7 +61,7 @@ export default async function SocialCalendarPage({
       .select('id, client_id, owner_type, platform, name, username, profile_picture_url, status, publishing_enabled')
       .neq('status', 'disconnected')
       .order('name'),
-    admin.from('employees').select('id, cqid, name').eq('is_active', true).order('cqid'),
+    admin.from('employees').select('id, cqid').eq('is_active', true).order('cqid'),
   ])
 
   const posts = (postsRes.data ?? []).map((p: any) => {

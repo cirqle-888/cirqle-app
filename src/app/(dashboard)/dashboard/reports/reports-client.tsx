@@ -103,7 +103,7 @@ function fmt(n: number) {
 export default function ReportsClient({
   employees, scores, tasks, contributions, parameters, groups, performanceHistory = [],
 }: Props) {
-  const { dn, isUnlocked } = usePrivacy()
+  const { dn } = usePrivacy()
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -950,7 +950,7 @@ export default function ReportsClient({
                                 style={{ backgroundColor: row.color }}>
                                 {row.name.replace('CQID', '')}
                               </div>
-                              <span className="font-semibold">{isUnlocked ? (employees.find(e => e.cqid === row.name)?.name || row.name) : row.name}</span>
+                              <span className="font-semibold">{row.name}</span>
                               {i === 0 && row.totalEarnings > 0 && (
                                 <span className="text-[10px] bg-yellow-500/15 text-yellow-400 border border-yellow-500/20 px-1.5 py-0.5 rounded font-semibold">TOP</span>
                               )}

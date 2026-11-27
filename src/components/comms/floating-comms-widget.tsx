@@ -494,7 +494,7 @@ export function FloatingCommsWidget() {
     const tempId = `tmp-${Date.now()}`
     const optimistic: ChatMessage = {
       id: tempId, conversationId: activeId, senderId: employeeId,
-      senderName: user.name ?? null, senderCqid: user.cqid, body: text, kind: 'text',
+      senderName: null, senderCqid: user.cqid, body: text, kind: 'text',
       createdAt: new Date().toISOString(), editedAt: null, deletedAt: null, parentId: null,
       metadata: {}, replyCount: 0, reactions: {}, attachments: [], readerIds: [], playedByIds: [],
     }

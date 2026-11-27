@@ -56,7 +56,7 @@ export async function fetchEntityActivity(
     const admin = createAdminClient()
     const { data, error } = await admin
       .from('activity_logs')
-      .select('*, actor:actor_id(cqid, name)')
+      .select('*, actor:actor_id(cqid)')
       .eq('entity_type', entityType)
       .eq('entity_id', entityId)
       .order('created_at', { ascending: false })

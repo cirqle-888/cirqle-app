@@ -181,7 +181,9 @@ function mapMessage(r: any): ChatMessage {
     id: r.id,
     conversationId: r.conversation_id,
     senderId: r.sender_id ?? null,
-    senderName: sender?.name ?? null,
+    // Always null: a sender is identified by CQID. The field stays so the
+    // message shape is unchanged; no real name is loaded to fill it.
+    senderName: null,
     senderCqid: sender?.cqid ?? null,
     body: r.deleted_at ? '' : (r.body ?? ''),
     kind: r.kind ?? 'text',
@@ -322,7 +324,7 @@ export interface ReplySnapshot {
 async function buildReplySnapshot(admin: any, replyToId: string, conversationId: string): Promise<ReplySnapshot | null> {
   const { data: t } = await admin
     .from('messages')
-    .select('id, conversation_id, sender_id, body, kind, metadata, deleted_at, sender:sender_id(name, cqid)')
+    .select('id, conversation_id, sender_id, body, kind, metadata, deleted_at, sender:sender_id(cqid)')
     .eq('id', replyToId).maybeSingle()
   if (!t || t.conversation_id !== conversationId || t.deleted_at) return null
   const sender = Array.isArray(t.sender) ? t.sender[0] : t.sender
@@ -338,7 +340,7 @@ async function buildReplySnapshot(admin: any, replyToId: string, conversationId:
   return {
     messageId: t.id,
     senderId: t.sender_id ?? null,
-    senderName: sender?.name ?? sender?.cqid ?? 'Someone',
+    senderName: sender?.cqid ?? 'Someone',
     senderCqid: sender?.cqid ?? '',
     kind: t.kind ?? 'text',
     preview,
@@ -348,7 +350,7 @@ async function buildReplySnapshot(admin: any, replyToId: string, conversationId:
 }
 
 /** Shared post-send hooks for quote replies: notify original sender + timeline. */
-function afterReplyHooks(me: { employeeId: string; name: string; cqid: string }, snapshot: ReplySnapshot, conversationId: string, newMessageId: string): void {
+function afterReplyHooks(me: { employeeId: string; cqid: string }, snapshot: ReplySnapshot, conversationId: string, newMessageId: string): void {
   if (snapshot.senderId && snapshot.senderId !== me.employeeId) {
     void createNotification({
       employeeId: snapshot.senderId,
@@ -368,7 +370,7 @@ function afterReplyHooks(me: { employeeId: string; name: string; cqid: string },
 }
 
 // ── Mentions ─────────────────────────────────────────────────────────────────
-// Syntax: @Full Name or @CQID — resolved against conversation members only
+// Syntax: @CQID — resolved against conversation members only
 // (you can't ping someone who can't read the message). Parsed server-side so
 // notifications can't be forged for arbitrary employees.
 
@@ -382,9 +384,8 @@ function extractMentions(
   const hit = new Set<string>()
   for (const m of members) {
     if (m.employeeId === senderId) continue
-    const name = (m.name || '').toLowerCase()
     const cqid = (m.cqid || '').toLowerCase()
-    if ((name && lower.includes(`@${name}`)) || (cqid && lower.includes(`@${cqid}`))) {
+    if (cqid && lower.includes(`@${cqid}`)) {
       hit.add(m.employeeId)
     }
   }
@@ -470,7 +471,7 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
     .from('conversations')
     .select(`
       id, type, name, topic, is_private, category, created_at, archived_at, created_by, client_id${withDept ? ', department_id, posting' : ''},
-      members:conversation_members(employee_id, role, employee:employee_id(id, name, cqid))
+      members:conversation_members(employee_id, role, employee:employee_id(id, cqid))
     `)
     .or(orFilter)
     .is('archived_at', null)
@@ -616,7 +617,7 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
             kind: r.last_kind ?? null,
             deletedAt: r.last_deleted_at ?? null,
             createdAt: r.last_created_at ?? null,
-            senderName: r.last_sender_name ?? null,
+            senderName: null,
             senderCqid: r.last_sender_cqid ?? null,
             unread: (r.unread_count as number | null) ?? 0,
           })
@@ -633,7 +634,7 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
               // falls back to showing the raw name whenever cqid is empty, so
               // dropping cqid from this select silently leaked real names into every
               // DM's last-message preview regardless of the reveal-names toggle.
-              .select('body, kind, deleted_at, created_at, sender:sender_id(name, cqid)')
+              .select('body, kind, deleted_at, created_at, sender:sender_id(cqid)')
               .eq('conversation_id', id)
               .order('created_at', { ascending: false })
               .limit(1).maybeSingle(),
@@ -654,7 +655,7 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
             kind: l?.kind ?? null,
             deletedAt: l?.deleted_at ?? null,
             createdAt: l?.created_at ?? null,
-            senderName: ls?.name ?? null,
+            senderName: null,
             senderCqid: ls?.cqid ?? null,
             unread: ('count' in unreadRes ? unreadRes.count : 0) ?? 0,
           })
@@ -677,14 +678,14 @@ export async function listConversations(): Promise<Result<ChatConversation[]>> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const members: ChatMember[] = ((c as any).members ?? []).map((m: any) => {
       const emp = Array.isArray(m.employee) ? m.employee[0] : m.employee
-      return { employeeId: m.employee_id, role: m.role, name: emp?.name ?? '', cqid: emp?.cqid ?? '' }
+      return { employeeId: m.employee_id, role: m.role, name: '', cqid: emp?.cqid ?? '' }
     })
 
-    // DM display: keep BOTH name and cqid — the client masks per privacy rules.
+    // A DM is titled with the other person's CQID — never their name.
     let name = c.name
     if (c.type === 'dm') {
       const other = members.find(m => m.employeeId !== me.employeeId)
-      name = other ? `${other.cqid}||${other.name}` : 'Direct message' // client splits + masks
+      name = other?.cqid || 'Direct message'
     }
 
     // Entity rooms group under "Discussions" in the sidebar. 'plan' must be
@@ -928,9 +929,9 @@ export async function listChatEmployees(): Promise<Result<{ id: string; name: st
   const admin = createAdminClient()
   const { data, error } = await admin
     .from('employees')
-    .select('id, name, cqid, is_archived')
+    .select('id, cqid, is_archived')
     .or('is_archived.is.null,is_archived.eq.false')
-    .order('name')
+    .order('cqid')
   if (error) return { ok: false, error: error.message }
 
   // The admin's rules decide who you can reach; with no rule for you it is
@@ -939,7 +940,7 @@ export async function listChatEmployees(): Promise<Result<{ id: string; name: st
   return {
     ok: true,
     data: reachable(access, auth.me.employeeId, data ?? [])
-      .map(e => ({ id: e.id, name: e.name ?? '', cqid: e.cqid ?? '' })),
+      .map(e => ({ id: e.id, name: '', cqid: e.cqid ?? '' })),
   }
 }
 
@@ -957,7 +958,7 @@ export async function getMessages(
   const admin = createAdminClient()
   let q = admin
     .from('messages')
-    .select('id, conversation_id, sender_id, parent_id, body, kind, metadata, edited_at, deleted_at, created_at, sender:sender_id(name, cqid)')
+    .select('id, conversation_id, sender_id, parent_id, body, kind, metadata, edited_at, deleted_at, created_at, sender:sender_id(cqid)')
     .eq('conversation_id', conversationId)
     .is('parent_id', null) // thread replies load via getThread
     .order('created_at', { ascending: false })
@@ -988,7 +989,7 @@ export async function getThread(parentId: string): Promise<Result<{ parent: Chat
 
   const { data: parentRow, error: pErr } = await admin
     .from('messages')
-    .select('id, conversation_id, sender_id, parent_id, body, kind, metadata, edited_at, deleted_at, created_at, sender:sender_id(name, cqid)')
+    .select('id, conversation_id, sender_id, parent_id, body, kind, metadata, edited_at, deleted_at, created_at, sender:sender_id(cqid)')
     .eq('id', parentId).maybeSingle()
   if (pErr || !parentRow) return { ok: false, error: 'Message not found.' }
 
@@ -997,7 +998,7 @@ export async function getThread(parentId: string): Promise<Result<{ parent: Chat
 
   const { data: replyRows, error: rErr } = await admin
     .from('messages')
-    .select('id, conversation_id, sender_id, parent_id, body, kind, metadata, edited_at, deleted_at, created_at, sender:sender_id(name, cqid)')
+    .select('id, conversation_id, sender_id, parent_id, body, kind, metadata, edited_at, deleted_at, created_at, sender:sender_id(cqid)')
     .eq('parent_id', parentId)
     .order('created_at', { ascending: true })
     .limit(200)
@@ -1052,14 +1053,14 @@ export async function sendMessage(
   // Mentions: resolved against members server-side (can't ping non-members).
   const { data: memberRows } = await admin
     .from('conversation_members')
-    .select('employee_id, notify_level, employee:employee_id(name, cqid)')
+    .select('employee_id, notify_level, employee:employee_id(cqid)')
     .eq('conversation_id', conversationId)
   const members = (memberRows ?? []).map((m) => {
     const emp = Array.isArray(m.employee) ? m.employee[0] : m.employee
     return {
       employeeId: m.employee_id as string,
       notifyLevel: (m.notify_level as string) ?? 'all',
-      name: (emp as { name?: string } | null)?.name ?? '',
+      name: '',
       cqid: (emp as { cqid?: string } | null)?.cqid ?? '',
     }
   })
@@ -1177,7 +1178,7 @@ export async function sendMessage(
 
   return {
     ok: true,
-    data: { ...mapMessage(data), senderName: me.name, senderCqid: me.cqid, ...(urgentReach ? { urgentReach } : {}) },
+    data: { ...mapMessage(data), senderName: null, senderCqid: me.cqid, ...(urgentReach ? { urgentReach } : {}) },
   }
 }
 
@@ -1298,7 +1299,7 @@ export async function sendFileMessage(input: {
     .then(undefined, () => {})
 
   const [enriched] = await enrichMessages(admin, [mapMessage(msg)], me.employeeId)
-  return { ok: true, data: { ...enriched, senderName: me.name, senderCqid: me.cqid } }
+  return { ok: true, data: { ...enriched, senderName: null, senderCqid: me.cqid } }
 }
 
 /** Fresh signed URL for one attachment (membership-checked). */
@@ -1352,7 +1353,7 @@ export async function searchMessages(query: string): Promise<Result<ChatSearchHi
 
   const { data, error } = await admin
     .from('messages')
-    .select('id, conversation_id, body, created_at, sender:sender_id(name, cqid), conversation:conversation_id(name, type)')
+    .select('id, conversation_id, body, created_at, sender:sender_id(cqid), conversation:conversation_id(name, type)')
     .in('conversation_id', convIds)
     .is('deleted_at', null)
     .textSearch('body_search', q, { type: 'websearch', config: 'english' })
@@ -1370,7 +1371,7 @@ export async function searchMessages(query: string): Promise<Result<ChatSearchHi
         messageId: r.id,
         conversationId: r.conversation_id,
         conversationName: (conv as { name?: string } | null)?.name ?? null,
-        senderName: (sender as { name?: string } | null)?.name ?? null,
+        senderName: null,
         senderCqid: (sender as { cqid?: string } | null)?.cqid ?? null,
         snippet: body.length > 140 ? `${body.slice(0, 140)}…` : body,
         createdAt: r.created_at,
@@ -1534,11 +1535,11 @@ export async function getReadReceipts(messageId: string): Promise<Result<ReadRec
 
   const [{ data: reads }, { data: members }] = await Promise.all([
     admin.from('message_reads')
-      .select('employee_id, read_at, employee:employee_id(name, cqid, designation:designation_id(name))')
+      .select('employee_id, read_at, employee:employee_id(cqid, designation:designation_id(name))')
       .eq('message_id', messageId)
       .order('read_at', { ascending: true }),
     admin.from('conversation_members')
-      .select('employee_id, employee:employee_id(name, cqid, designation:designation_id(name))')
+      .select('employee_id, employee:employee_id(cqid, designation:designation_id(name))')
       .eq('conversation_id', msg.conversation_id),
   ])
 
@@ -1546,7 +1547,7 @@ export async function getReadReceipts(messageId: string): Promise<Result<ReadRec
   const unwrap = (e: any) => {
     const emp = Array.isArray(e) ? e[0] : e
     const des = emp?.designation ? (Array.isArray(emp.designation) ? emp.designation[0] : emp.designation) : null
-    return { name: emp?.name ?? '', cqid: emp?.cqid ?? '', designation: des?.name ?? null }
+    return { name: '', cqid: emp?.cqid ?? '', designation: des?.name ?? null }
   }
 
   const readIds = new Set((reads ?? []).map(r => r.employee_id))
@@ -1658,7 +1659,7 @@ export async function sendVoiceMessage(input: {
   if (replySnapshot) afterReplyHooks(me, replySnapshot, input.conversationId, msg.id)
 
   const [enriched] = await enrichMessages(admin, [mapMessage(msg)], me.employeeId)
-  return { ok: true, data: { ...enriched, senderName: me.name, senderCqid: me.cqid } }
+  return { ok: true, data: { ...enriched, senderName: null, senderCqid: me.cqid } }
 }
 
 /** Internal: download the audio, run Whisper, store the transcript on the message. */
@@ -1702,7 +1703,7 @@ export async function getMessage(messageId: string): Promise<Result<ChatMessage>
   const admin = createAdminClient()
   const { data: row } = await admin
     .from('messages')
-    .select('id, conversation_id, sender_id, parent_id, body, kind, metadata, edited_at, deleted_at, created_at, sender:sender_id(name, cqid)')
+    .select('id, conversation_id, sender_id, parent_id, body, kind, metadata, edited_at, deleted_at, created_at, sender:sender_id(cqid)')
     .eq('id', messageId).maybeSingle()
   if (!row) return { ok: false, error: 'Message not found.' }
   const membership = await requireMembership(row.conversation_id, auth.me.employeeId)

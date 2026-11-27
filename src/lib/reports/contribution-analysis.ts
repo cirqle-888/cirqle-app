@@ -18,6 +18,7 @@ export type EarningSource = 'contribution' | 'manual_override' | 'agreement'
 
 export interface EmployeeColumn {
   id: string
+  /** The column label — always the CQID. Real names are never loaded. */
   name: string
   cqid: string
 }

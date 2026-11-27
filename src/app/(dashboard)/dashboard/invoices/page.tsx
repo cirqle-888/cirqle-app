@@ -5,7 +5,7 @@ import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, stripInvoiceList } from '@/lib/permissions/strip'
 import { getPendingPricing } from '@/lib/pricing/pending'
 import { PricingPendingBanner } from '@/components/pricing/pricing-pending-banner'
-import { getCompanySettings } from '@/lib/settings/company-settings'
+import { getCompanySettings, withoutPrivateSettings } from '@/lib/settings/company-settings'
 import { loadAgreementBreakdowns } from '@/lib/packages/invoice-breakdown'
 import InvoicesClient from './invoices-client'
 import { listPartnerOptions } from '@/lib/partners/list'
@@ -137,7 +137,7 @@ export default async function InvoicesPage() {
       bankAccounts={bankRes.data || []}
       cashbookCategories={categoriesRes.data || []}
       services={servicesRes.data || []}
-      companySettings={settings}
+      companySettings={withoutPrivateSettings(settings)}
       exchangeRates={ratesRes.data || []}
       agreementBreakdowns={agreementBreakdowns}
       visibility={{

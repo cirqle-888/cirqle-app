@@ -5,7 +5,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { coverageTaskColumns } from '@/lib/packages/coverage-select'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
-import { getCompanySettings } from '@/lib/settings/company-settings'
+import { getCompanySettings, pickCompanySettings } from '@/lib/settings/company-settings'
 import { todayISO } from '@/lib/utils/local-date'
 import {
   tallyPlan, pickDefaultPlan, shiftMonthKey, type FocusItem, type PlanTally,
@@ -486,7 +486,13 @@ export default async function SocialCalendarPage({
       employeeServices={employeeServices}
       departments={departments}
       serviceMap={serviceMap}
-      companySettings={companySettings}
+      // Only what the plan PDF and the lead-time field read. The full map also
+      // holds the bank account and the WhatsApp staff phone list, which every
+      // planner opening this page was being sent.
+      companySettings={pickCompanySettings(companySettings, [
+        'company_name', 'company_phone', 'company_website', 'logo_url_light', 'logo_url',
+        'invoice_primary_color', 'invoice_accent_color', 'invoice_font', 'social_lead_days',
+      ])}
       canManage={isAdmin || hasPermission(me, PERMS.SOCIAL_MANAGE)}
     />
   )

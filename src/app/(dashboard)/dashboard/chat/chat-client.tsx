@@ -110,7 +110,7 @@ function formatBytes(n: number | null): string {
   return `${(n / 1048576).toFixed(1)} MB`
 }
 
-type Me = { employeeId: string; name: string; cqid: string }
+type Me = { employeeId: string; cqid: string }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -309,9 +309,9 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
     lastTypingSentRef.current = now
     chatChannelRef.current?.send({
       type: 'broadcast', event: 'typing',
-      payload: { conversationId: activeIdRef.current, employeeId: me.employeeId, name: me.name, cqid: me.cqid },
+      payload: { conversationId: activeIdRef.current, employeeId: me.employeeId, cqid: me.cqid },
     })
-  }, [me.employeeId, me.name, me.cqid])
+  }, [me.employeeId, me.cqid])
   // Expire stale typing entries so the indicator disappears when people stop.
   useEffect(() => {
     const t = setInterval(() => {
@@ -383,7 +383,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
                 id: String(row.id),
                 conversationId: convId,
                 senderId: (row.sender_id as string | null) ?? null,
-                senderName: mine ? me.name : null,
+                senderName: null,
                 senderCqid: mine ? me.cqid : null,
                 body: String(row.body ?? ''),
                 kind: String(row.kind ?? 'text'),
@@ -476,7 +476,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
     chatChannelRef.current = channel
     return () => { chatChannelRef.current = null; void supabase.removeChannel(channel) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me.employeeId, me.name, me.cqid])
+  }, [me.employeeId, me.cqid])
 
   const memberNames = useMemo(() => {
     const map = new Map<string, string>()
@@ -494,7 +494,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
     const tempId = `tmp-${crypto.randomUUID()}`
     const optimistic: ChatMessage = {
       id: tempId, conversationId: activeId, senderId: me.employeeId,
-      senderName: me.name, senderCqid: me.cqid, body: text, kind: 'text',
+      senderName: null, senderCqid: me.cqid, body: text, kind: 'text',
       createdAt: new Date().toISOString(), editedAt: null, deletedAt: null,
       parentId: null,
       metadata: {
@@ -1210,7 +1210,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
                       )}
                       <MessageRow m={m} me={me}
                         senderName={m.senderId === me.employeeId
-                          ? showName(me.name, me.cqid)
+                          ? showName(null, me.cqid)
                           : (m.senderId ? memberNames.get(m.senderId) ?? showName(m.senderName, m.senderCqid) : 'System')}
                         isDm={active.type === 'dm'}
                         memberCount={active.members.length}
@@ -1493,7 +1493,7 @@ function Composer({ placeholder, members, disabled, onSend, onTyping, onVoice, r
   /** Departments that can be mentioned as a group: @social-media. */
   groups?: { slug: string; name: string }[]
 }) {
-  const mask = showName ?? ((name?: string | null, cqid?: string | null) => cqid || name || '—')
+  const mask = showName ?? ((_name?: string | null, cqid?: string | null) => cqid || '—')
   const [urgent, setUrgent] = useState(false)
   const [draft, setDraftState] = useState(() => draftStore.read(draftKey))
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
@@ -1560,7 +1560,7 @@ function Composer({ placeholder, members, disabled, onSend, onTyping, onVoice, r
     const upToCaret = draft.slice(0, caret)
     const at = upToCaret.lastIndexOf('@')
     // CQID-first: never leak names into message bodies via mentions.
-    const next = `${draft.slice(0, at)}@${m.cqid || m.name} ${draft.slice(caret)}`
+    const next = `${draft.slice(0, at)}@${m.cqid} ${draft.slice(caret)}`
     setDraft(next)
     setMentionQuery(null)
     taRef.current?.focus()
@@ -1764,7 +1764,7 @@ function MessageRow({ m, me, senderName, onDelete, onEdit, onPlayVoice, onReact,
   inThread?: boolean
   showName?: (name?: string | null, cqid?: string | null) => string
 }) {
-  const mask = showName ?? ((name?: string | null, cqid?: string | null) => cqid || name || '—')
+  const mask = showName ?? ((_name?: string | null, cqid?: string | null) => cqid || '—')
   const [showEmoji, setShowEmoji] = useState(false)
   const [editingLocal, setEditingLocal] = useState(false)
   const editing = editingProp ?? editingLocal
@@ -2631,7 +2631,7 @@ function WorkNavigatorPanel({
 
 function MembersDialog({ conversation, me, onClose }: {
   conversation: ChatConversation
-  me: { employeeId: string; name: string; cqid: string }
+  me: { employeeId: string; cqid: string }
   onClose: () => void
 }) {
   const { revealNames } = usePermissions()

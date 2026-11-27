@@ -38,7 +38,7 @@ export default async function PayrollPage() {
     fetchAll(stablePaginationQuery(
       supabase
         .from('payroll')
-        .select('*, employee:employees(id, cqid, name)')
+        .select('*, employee:employees(id, cqid)')
         .order('year', { ascending: false })
         .order('month', { ascending: false })
         .limit(60 * 30) // worst-case 30 employees × 60 months
@@ -212,7 +212,9 @@ export default async function PayrollPage() {
   return (
     <PayrollClient
       bankAccounts={bankAccounts}
-      employees={employeesRes.data || []}
+      // Every column is read (pay settings vary by employee), but the real name
+      // is removed here, before anything is handed to the browser.
+      employees={(employeesRes.data || []).map(row => { const out = { ...row }; delete out.name; return out })}
       payrollRecords={payrollRecords}
       advances={advances}
       credits={credits}

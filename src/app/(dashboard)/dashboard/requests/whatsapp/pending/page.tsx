@@ -43,7 +43,7 @@ export default async function WhatsAppPendingPage() {
 
   const staff = new Map<string, { cqid: string | null; name: string | null }>()
   if (ours.length) {
-    const { data } = await admin.from('employees').select('id, cqid, name')
+    const { data } = await admin.from('employees').select('id, cqid')
     for (const e of (data || []) as { id: string; cqid: string | null; name: string | null }[]) staff.set(e.id, e)
   }
   const responsible = (chatId: string) => {

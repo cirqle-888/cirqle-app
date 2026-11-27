@@ -328,7 +328,7 @@ export default async function TasksPage({
       : Promise.resolve({ data: [] as any[], error: null }),
     // Full active employee roster is needed by both admins and employees so
     // task cards can show assignee names and the filter dropdown lists peers.
-    supabase.from('employees').select('id, cqid, name, is_active, performance_rating').eq('is_active', true).order('cqid'),
+    supabase.from('employees').select('id, cqid, is_active, performance_rating').eq('is_active', true).order('cqid'),
     // Global task_assignments so employees can see who is on each task and
     // filter by any teammate. Just (task_id, employee_id) — no extra data.
     // safeQuery short-circuits the round-trip once the table is known missing.

@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { createAdminClient, fetchAll, stablePaginationQuery } from '@/lib/supabase/server'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
-import { getCompanySettings } from '@/lib/settings/company-settings'
+import { getCompanySettings, withoutPrivateSettings } from '@/lib/settings/company-settings'
 import StatementsClient from './statements-client'
 import type { StatementCredit, StatementInvoice } from '@/lib/statements/build'
 
@@ -81,7 +81,7 @@ export default async function StatementsPage() {
       clients={(clientsRes.data || []) as never}
       invoices={invoices as never}
       credits={credits as never}
-      companySettings={companySettings as Record<string, string>}
+      companySettings={withoutPrivateSettings(companySettings as Record<string, string>)}
       canViewAmounts={isAdmin || hasPermission(me, PERMS.BILLING_VIEW_AMOUNTS)}
     />
   )

@@ -96,7 +96,7 @@ export default async function AuthorizePage({ searchParams }: { searchParams: Pr
           <button type="submit" className="w-full px-4 py-2 rounded-lg gradient-bg text-white text-sm font-medium">Allow</button>
         </form>
       </div>
-      <p className="text-[11px] text-muted-foreground">Signed in as {me.name || 'you'}.</p>
+      <p className="text-[11px] text-muted-foreground">Signed in as {me.cqid || 'you'}.</p>
     </Card>
   )
 }

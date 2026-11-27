@@ -270,7 +270,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
   const isAdmin = role === 'super_admin'
   // Employee names are private: show CQID by default and the real name only
   // when an admin has unlocked reveal. The expense-split picker previously
-  // rendered `e.name || e.cqid`, i.e. the name whenever one existed.
+  // rendered `e.cqid`, i.e. the name whenever one existed.
   const { revealNames, user: permissionUser } = usePermissions()
   const maskEmployee = (e: { name?: string | null; cqid?: string | null } | null | undefined) =>
     displayEmployee({ name: e?.name ?? '', cqid: e?.cqid ?? '' }, { revealNames, canReveal: true })

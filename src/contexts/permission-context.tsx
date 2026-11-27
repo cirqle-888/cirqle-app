@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import type { PermKey } from '@/lib/permissions/keys'
 // TEMPORARY — remove with the bypass. See src/lib/permissions/dev-bypass.ts
 import { isDevPermissionBypassActive } from '@/lib/permissions/dev-bypass'
@@ -9,7 +9,7 @@ export interface PermissionUser {
   employeeId: string
   authId: string
   cqid: string
-  name: string
+  // No `name` — real names never reach the browser. See CurrentUser.
   email: string
   designationId: string | null
   designationName: string | null
@@ -23,7 +23,8 @@ export interface PermissionUser {
 interface PermissionContextValue {
   user: PermissionUser
   can: (key: PermKey | string) => boolean
-  /** Admin-only: temporary session toggle to reveal real names instead of CQID. Defaults to OFF on every page load. */
+  /** Always false. Real names are never revealed — to anyone, admins included.
+   *  Kept so older call sites type-check; nothing can switch it on. */
   revealNames: boolean
   setRevealNames: (v: boolean) => void
   /** Workspace-level logo for light mode (from company_settings.logo_url). null = no logo configured; render the default brand mark. */
@@ -47,7 +48,6 @@ export function PermissionProvider(
     children: ReactNode
   },
 ) {
-  const [revealNames, setRevealNames] = useState(false)
   const perms = useMemo(() => new Set(user.permissions), [user.permissions])
 
   // Stable value reference — without useMemo every consumer re-renders on every Provider tick.
@@ -65,13 +65,13 @@ export function PermissionProvider(
       user.isAdmin || (!user.isViewAs && isDevPermissionBypassActive())
         ? true
         : perms.has(key),
-    revealNames: user.isAdmin && revealNames,
-    setRevealNames,
+    revealNames: false,
+    setRevealNames: () => {},
     logoUrl,
     // Dark logo falls back to light logo so workspaces with one logo still look right in both modes.
     logoUrlDark: logoUrlDark || logoUrl,
     faviconUrl,
-  }), [user, perms, revealNames, logoUrl, logoUrlDark, faviconUrl])
+  }), [user, perms, logoUrl, logoUrlDark, faviconUrl])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

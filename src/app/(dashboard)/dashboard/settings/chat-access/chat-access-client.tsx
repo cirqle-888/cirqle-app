@@ -73,7 +73,7 @@ export default function ChatAccessClient({ settings, error }: { settings: ChatAc
 
   const shownEmployees = employees.filter(e => {
     const t = q.trim().toLowerCase()
-    return !t || e.cqid.toLowerCase().includes(t) || (revealNames && e.name.toLowerCase().includes(t))
+    return !t || e.cqid.toLowerCase().includes(t)
   })
 
   // A plain function, not a component: a component declared inside another is

@@ -274,7 +274,7 @@ export function registerAutomationTools(server: McpServer, admin: Admin) {
     const n = parseInt(String(ref).replace(/^REQ-?/i, '').replace(/^#/, ''), 10)
     if (isNaN(n)) return fail('Give the reference like REQ-0058.')
     const { data, error } = await admin.from('task_requests')
-      .select('id, ref_no, title, status, client_status, priority, due_date, description, content_brief, extra_links, is_planned, created_at, client:clients(name), service:services!task_requests_service_id_fkey(name), assigned_employee:employees!task_requests_assigned_employee_id_fkey(name), promoted_task:tasks!task_requests_promoted_task_id_fkey(task_number, title, status)')
+      .select('id, ref_no, title, status, client_status, priority, due_date, description, content_brief, extra_links, is_planned, created_at, client:clients(name), service:services!task_requests_service_id_fkey(name), assigned_employee:employees!task_requests_assigned_employee_id_fkey(name:cqid), promoted_task:tasks!task_requests_promoted_task_id_fkey(task_number, title, status)')
       .eq('ref_no', n).maybeSingle()
     if (error) return fail(error.message)
     if (!data) return fail(`${refOf(n)} not found.`)

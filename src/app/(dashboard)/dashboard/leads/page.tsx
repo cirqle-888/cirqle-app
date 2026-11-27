@@ -61,7 +61,7 @@ export default async function LeadsPage({
   const [leadsRes, clientsRes, employeesRes, rulesRes, recentRes, totalRes] = await Promise.all([
     leadsQuery,
     supabase.from('clients').select('id, name, is_active').order('name'),
-    supabase.from('employees').select('id, cqid, name').eq('is_active', true).order('cqid'),
+    supabase.from('employees').select('id, cqid').eq('is_active', true).order('cqid'),
     supabase
       .from('lead_automation_rules')
       .select('*')

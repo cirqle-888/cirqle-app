@@ -81,7 +81,7 @@ function toSaved(r: any): SavedMessage {
     conversationId: r.conversation_id,
     conversationName: conv?.name ?? null,
     conversationType: conv?.type ?? 'channel',
-    senderName: sender?.name ?? null,
+    senderName: null,
     senderCqid: sender?.cqid ?? null,
     body: r.kind === 'voice' ? ((r.metadata?.transcript as string | undefined) ?? 'Voice message') : (r.body || (r.kind === 'file' ? 'File' : '')),
     kind: r.kind ?? 'text',
@@ -89,7 +89,7 @@ function toSaved(r: any): SavedMessage {
   }
 }
 
-const SAVED_SELECT = 'id, conversation_id, body, kind, metadata, created_at, deleted_at, sender:sender_id(name, cqid), conversation:conversation_id(name, type)'
+const SAVED_SELECT = 'id, conversation_id, body, kind, metadata, created_at, deleted_at, sender:sender_id(cqid), conversation:conversation_id(name, type)'
 
 /** Star a message for myself (or remove the star). Returns the new state. */
 export async function toggleStar(messageId: string): Promise<Result<{ starred: boolean }>> {
@@ -514,7 +514,7 @@ export async function getChatAccessSettings(): Promise<Result<ChatAccessSettings
   const admin = createAdminClient()
   const [departments, employees, deptByEmp, rules, probe] = await Promise.all([
     admin.from('service_categories').select('id, name').order('name'),
-    admin.from('employees').select('id, name, cqid, is_archived, designation:designation_id(is_admin)').order('cqid'),
+    admin.from('employees').select('id, cqid, is_archived, designation:designation_id(is_admin)').order('cqid'),
     loadDepartmentsByEmployee(admin),
     loadChatAccessRules(admin),
     admin.from('chat_access_rules').select('id').limit(1),
@@ -526,7 +526,7 @@ export async function getChatAccessSettings(): Promise<Result<ChatAccessSettings
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       employees: ((employees.data ?? []) as any[]).filter(e => !e.is_archived).map(e => {
         const d = Array.isArray(e.designation) ? e.designation[0] : e.designation
-        return { id: e.id, name: e.name ?? '', cqid: e.cqid ?? '', departmentIds: [...(deptByEmp.get(e.id) ?? [])], isAdmin: d?.is_admin === true }
+        return { id: e.id, name: '', cqid: e.cqid ?? '', departmentIds: [...(deptByEmp.get(e.id) ?? [])], isAdmin: d?.is_admin === true }
       }),
       rules,
       ready: !probe.error,

@@ -2564,8 +2564,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                   }}
                   required className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50">
                   <option value="">Select employee</option>
-                  {/* eslint-disable-next-line no-restricted-syntax -- unlock-gated: the name renders only when `isUnlocked`, which is the sanctioned reveal path. */}
-                  {empList.filter(e => e.is_active).map(e => <option key={e.id} value={e.id}>{e.cqid}{isUnlocked && e.name ? ` — ${e.name}` : ''}</option>)}
+                  {empList.filter(e => e.is_active).map(e => <option key={e.id} value={e.id}>{e.cqid}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2652,8 +2651,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 <label className="block text-xs font-medium text-muted-foreground mb-1.5">Employee *</label>
                 <select value={advForm.employee_id} onChange={e => setAdvForm(p => ({ ...p, employee_id: e.target.value }))} required className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none">
                   <option value="">Select</option>
-                  {/* eslint-disable-next-line no-restricted-syntax -- unlock-gated: the name renders only when `isUnlocked`, which is the sanctioned reveal path. */}
-                  {empList.filter(e => e.is_active).map(e => <option key={e.id} value={e.id}>{e.cqid}{isUnlocked && e.name ? ` — ${e.name}` : ''}</option>)}
+                  {empList.filter(e => e.is_active).map(e => <option key={e.id} value={e.id}>{e.cqid}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2702,8 +2700,7 @@ ${ded > 0 ? `<tr class="red"><td>Deductions (advance + other)</td><td class="red
                 <label className="block text-xs font-medium text-muted-foreground mb-1.5">To / From</label>
                 <select value={creditForm.entity_id} onChange={e => setCreditForm(p => ({ ...p, entity_id: e.target.value }))} required className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm focus:outline-none">
                   <option value="">Select</option>
-                  {/* eslint-disable-next-line no-restricted-syntax -- unlock-gated: the name renders only when `isUnlocked`, which is the sanctioned reveal path. */}
-                  {empList.map(e => <option key={e.id} value={e.id}>{e.cqid}{isUnlocked && e.name ? ` — ${e.name}` : ''}</option>)}
+                  {empList.map(e => <option key={e.id} value={e.id}>{e.cqid}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

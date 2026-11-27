@@ -25,7 +25,7 @@ export default async function AdLibraryPage() {
     admin.from('ad_folders').select('id, name, sort').is('deleted_at', null).order('sort').order('name'),
     admin.from('clients').select('id, name').eq('is_active', true).order('name'),
     admin.from('ad_saver_keys').select('id, key_hint, label, created_at, last_used_at').eq('employee_id', me.employeeId).is('revoked_at', null).order('created_at', { ascending: false }),
-    admin.from('employees').select('id, name'),
+    admin.from('employees').select('id, name:cqid'),
   ])
 
   // Probed, not assumed: safe to deploy before 20261123120000_ad_library runs.

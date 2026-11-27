@@ -5,7 +5,6 @@ import { usePathname, useRouter } from 'next/navigation'
 import { ChevronRight, Home, ChevronDown, UserCircle, Sparkles, MessageCircle, LifeBuoy } from 'lucide-react'
 import { forwardRef, useState, useRef, useEffect, useCallback } from 'react'
 import { usePermissions } from '@/contexts/permission-context'
-import { usePrivacy } from '@/contexts/privacy-context'
 import { CommandPaletteTrigger } from '@/components/ui/command-palette'
 import { NotificationBell } from '@/components/layout/notification-bell'
 import { FiguresToggle } from '@/contexts/privacy-context'
@@ -141,7 +140,6 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
   ref,
 ) {
   const { user, can } = usePermissions()
-  const { isUnlocked } = usePrivacy()
   const { mine, available: presenceAvailable } = usePresence()
   const router = useRouter()
   const isEmployee = !user.isAdmin
@@ -312,8 +310,6 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
             <div className="absolute right-0 top-full mt-2 w-72 max-h-[80vh] overflow-y-auto bg-card border border-border shadow-xl shadow-black/5 rounded-xl p-2 z-50 origin-top-right animate-in fade-in zoom-in-95 duration-200">
               <div className="px-2 py-2 mb-2 border-b border-border/50">
                 <div className="font-semibold text-foreground text-sm truncate tracking-tight">{user.cqid ?? 'Account'}</div>
-                {/* eslint-disable-next-line no-restricted-syntax -- deliberate: the SIGNED-IN user's own name in their own account menu, and only while privacy is unlocked. Never another employee's name. */}
-                {isUnlocked && user.name && <div className="text-xs text-muted-foreground truncate">{user.name}</div>}
                 {(user.designationName || mine.note || mine.emoji) && (
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                     {user.designationName && (

@@ -368,7 +368,7 @@ export default function FieldClient({
           <AppSelect value={assigned} onChange={(e) => setAssigned(e.target.value)} wrapperClassName="w-auto">
             <option value="">Anyone</option>
             <option value="unassigned">Unassigned</option>
-            {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid || e.name}</option>)}
+            {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid}</option>)}
           </AppSelect>
           {regions.length > 0 && (
             <AppSelect value={region} onChange={(e) => { setRegion(e.target.value); setArea(''); setLocality('') }} wrapperClassName="w-auto">
@@ -847,7 +847,7 @@ function PlaceDrawer({
               {canManage ? (
                 <AppSelect value={place.assigned_to ?? ''} onChange={(e) => onAssign(e.target.value || null)}>
                   <option value="">Unassigned</option>
-                  {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid || e.name}</option>)}
+                  {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid}</option>)}
                 </AppSelect>
               ) : place.assigned_to ? <EmployeeName emp={empMap.get(place.assigned_to)} className="text-sm" /> : <span className="text-xs text-muted-foreground">—</span>}
             </div>
@@ -1099,7 +1099,7 @@ function AddPlaceModal({ draft, places, employees, territories, meEmployeeId, on
               <label className={labelCls}>Assign to</label>
               <AppSelect value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
                 <option value="">Unassigned</option>
-                {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid || e.name}</option>)}
+                {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid}</option>)}
               </AppSelect>
             </div>
             <div>
@@ -1182,7 +1182,7 @@ function TerritoriesModal({ territories, employees, empMap, onClose, onSave, onD
               </div>
               <AppSelect value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
                 <option value="">Unassigned</option>
-                {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid || e.name}</option>)}
+                {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid}</option>)}
               </AppSelect>
             </div>
             <div className="flex justify-end">

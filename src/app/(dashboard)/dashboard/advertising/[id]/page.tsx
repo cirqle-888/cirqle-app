@@ -32,7 +32,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     admin.from('ad_daily_metrics').select('*').eq('project_id', id).order('metric_date', { ascending: false }),
     admin.from('ad_project_tasks')
       .select('created_at, task:tasks(id, task_number, title, status, billing_amount)').eq('project_id', id).order('created_at', { ascending: true }),
-    admin.from('ad_notes').select('*, author:employees(id, cqid, name)').eq('project_id', id).order('created_at', { ascending: false }),
+    admin.from('ad_notes').select('*, author:employees(id, cqid)').eq('project_id', id).order('created_at', { ascending: false }),
     // ad_events fetch removed with the Notes tab's inline timeline — the
     // Timeline tab reads the universal activity feed instead.
     admin.from('invoices').select('id, invoice_number, status, total_amount').eq('ad_project_id', id).order('created_at', { ascending: false }).limit(1).maybeSingle(),
@@ -41,7 +41,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
     // Campaign allocations = wallet ledger debits for this project
     // (best-effort — ledger may not be migrated yet).
     admin.from('ad_wallet_ledger')
-      .select('id, amount, amount_inr, notes, created_at, creator:employees(id, name, cqid)')
+      .select('id, amount, amount_inr, notes, created_at, creator:employees(id, cqid)')
       .eq('ad_project_id', id).eq('direction', 'debit').is('deleted_at', null)
       .order('created_at', { ascending: false }),
   ])

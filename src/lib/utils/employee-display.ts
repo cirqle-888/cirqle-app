@@ -1,33 +1,34 @@
 /**
- * CQID-first employee display.
+ * CQID-only employee display.
  *
- * Default: show `CQID00X` everywhere.
- * Admin reveal toggle is the only way to expose real names, and only in admin-side views.
- * Non-admin viewers never see names regardless of toggle state.
+ * An employee's real name is private and is never shown anywhere in the app:
+ * people are identified by `CQID00X`, for every viewer, admins included. There
+ * is no reveal — the options below are accepted so older call sites keep
+ * type-checking, and are ignored.
+ *
+ * The strongest protection is upstream: do not load `name` from the database
+ * at all (scripts/check-name-privacy.mjs fails the build on a new read). This
+ * helper is the second line — if a name does arrive, it still is not shown.
  */
 export interface EmployeeLike {
   cqid?: string | null
+  /** Accepted for compatibility with older row shapes. Never read. */
   name?: string | null
 }
 
 export function displayEmployee(
   emp: EmployeeLike | null | undefined,
-  opts: { revealNames?: boolean; canReveal?: boolean } = {}
+  _opts?: { revealNames?: boolean; canReveal?: boolean },
 ): string {
-  if (!emp) return '—'
-  const cqid = emp.cqid ?? ''
-  const name = emp.name ?? ''
-  if (opts.revealNames && opts.canReveal && name) return name
-  return cqid || name || '—'
+  void _opts // accepted for older call sites; there is no reveal
+  return emp?.cqid || '—'
 }
 
-/**
- * For UI chips where we want both — CQID prominent, name as a hover tooltip (admin only).
- */
+/** Kept for older call sites. A name is never offered, not even on hover. */
 export function employeeTooltip(
-  emp: EmployeeLike | null | undefined,
-  opts: { revealNames?: boolean; canReveal?: boolean } = {}
+  _emp: EmployeeLike | null | undefined,
+  _opts?: { revealNames?: boolean; canReveal?: boolean },
 ): string {
-  if (!emp || !opts.canReveal) return ''
-  return opts.revealNames ? (emp.cqid ?? '') : (emp.name ?? '')
+  void _emp; void _opts // accepted for older call sites; a name is never offered
+  return ''
 }

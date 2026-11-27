@@ -44,7 +44,7 @@ export async function fetchEmployeeCostSplits(
     .from('cashbook_entry_employee_splits')
     .select(`
       amount_inr,
-      employee:employees(id, name, cqid),
+      employee:employees(id, cqid),
       entry:cashbook_entries(
         id, entry_date, description, deleted_at,
         category:cashbook_categories(statement_section)
@@ -77,7 +77,8 @@ export async function fetchEmployeeCostSplits(
     .filter((r: any) => !filter.to || r.entry.entry_date <= filter.to)
     .map((r: any) => ({
       employeeId: r.employee.id as string,
-      employeeName: (r.employee.name as string) || 'Unknown',
+      // The label for a person is their CQID — no name is loaded.
+      employeeName: (r.employee.cqid as string) || 'Unknown',
       employeeCqid: (r.employee.cqid as string) || '—',
       amountInr: Number(r.amount_inr || 0),
       entryId: r.entry.id as string,

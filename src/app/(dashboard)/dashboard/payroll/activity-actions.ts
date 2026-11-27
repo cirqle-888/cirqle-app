@@ -31,7 +31,7 @@ export async function fetchEmployeeActivity(
   const admin = createAdminClient()
   const { data, error } = await admin
     .from('activity_logs')
-    .select('*, actor:actor_id(cqid, name)')
+    .select('*, actor:actor_id(cqid)')
     .eq('subject_id', employeeId)
     .order('created_at', { ascending: false })
     .limit(limit)

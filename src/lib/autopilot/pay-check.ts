@@ -39,8 +39,8 @@ export async function buildPayCheck(admin: Admin, today: string, period: CheckPe
 
   // salary_day came with the payroll screens; without it everyone is paid on the 1st.
   const readEmployees = async () => {
-    const r = await admin.from('employees').select('id, name, phone, salary_day, is_active, is_archived')
-    return r.error && /salary_day/.test(r.error.message) ? admin.from('employees').select('id, name, phone, is_active, is_archived') : r
+    const r = await admin.from('employees').select('id, cqid, phone, salary_day, is_active, is_archived')
+    return r.error && /salary_day/.test(r.error.message) ? admin.from('employees').select('id, cqid, phone, is_active, is_archived') : r
   }
   const [clientsRes, empRes, settingsRes, tasksRes] = await Promise.all([
     fetchAll(admin.from('clients').select('id, name')),
@@ -54,7 +54,8 @@ export async function buildPayCheck(admin: Admin, today: string, period: CheckPe
   const clients = (clientsRes.data || []) as { id: string; name: string }[]
   const clientName = new Map(clients.map(c => [c.id, c.name]))
   const employees = ((empRes.data || []) as any[])
-  const empName = new Map(employees.map(e => [e.id as string, (e.name as string) || 'Someone']))
+  // People are labelled by CQID in every message this check sends — never by name.
+  const empName = new Map(employees.map(e => [e.id as string, (e.cqid as string) || 'Someone']))
   const byPhone = new Map<string, string>()
   for (const e of employees) { const k = phoneMatchKey(e.phone); if (k && e.is_active && !e.is_archived) byPhone.set(k, e.id) }
 
@@ -132,7 +133,7 @@ export async function buildPayCheck(admin: Admin, today: string, period: CheckPe
   const payRes = await admin.from('payroll').select('employee_id, status, net_salary')
     .eq('month', prev.getUTCMonth() + 1).eq('year', prev.getUTCFullYear())
   const pay = payRes.error ? [] : payReminders(
-    employees.filter(e => e.is_active && !e.is_archived).map(e => ({ id: e.id, name: e.name || 'Someone', salary_day: e.salary_day ?? null })),
+    employees.filter(e => e.is_active && !e.is_archived).map(e => ({ id: e.id, name: e.cqid || 'Someone', salary_day: e.salary_day ?? null })),
     ((payRes.data || []) as any[]).map(p => ({ employee_id: p.employee_id, status: p.status || 'pending', net_salary: Number(p.net_salary ?? 0) })),
     today,
   )

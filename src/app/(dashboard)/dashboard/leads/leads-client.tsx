@@ -242,7 +242,7 @@ export default function LeadsClient({
               <AppSelect value={assigned} onChange={(e) => setAssigned(e.target.value)} wrapperClassName="w-auto">
                 <option value="">Anyone</option>
                 <option value="unassigned">Unassigned</option>
-                {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid || e.name}</option>)}
+                {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid}</option>)}
               </AppSelect>
             </div>
 
@@ -313,7 +313,7 @@ export default function LeadsClient({
                                 className="text-xs rounded-md px-2 py-1 bg-secondary border border-border cursor-pointer max-w-[130px]"
                               >
                                 <option value="">Unassigned</option>
-                                {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid || e.name}</option>)}
+                                {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid}</option>)}
                               </select>
                             ) : l.assigned_to ? (
                               <EmployeeName emp={empName.get(l.assigned_to)} className="text-xs" />
@@ -511,7 +511,7 @@ function LeadDrawer({
               {canManage ? (
                 <AppSelect value={lead.assigned_to ?? ''} onChange={(e) => onAssign(e.target.value || null)} className="mt-1">
                   <option value="">Unassigned</option>
-                  {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid || e.name}</option>)}
+                  {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid}</option>)}
                 </AppSelect>
               ) : <div className="mt-1 text-sm">{lead.assigned_to ? <EmployeeName emp={empName.get(lead.assigned_to)} /> : '—'}</div>}
             </div>
@@ -759,7 +759,7 @@ function RuleModal({
             <Field label={action === 'assign_employee' ? 'Assign to' : 'Assign task to (optional)'}>
               <AppSelect value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
                 <option value="">{action === 'assign_employee' ? 'Select…' : 'No one'}</option>
-                {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid || e.name}</option>)}
+                {employees.map((e) => <option key={e.id} value={e.id}>{e.cqid}</option>)}
               </AppSelect>
             </Field>
           )}
@@ -776,7 +776,7 @@ function RuleModal({
                       checked={employeeIds.includes(e.id)}
                       onChange={(ev) => setEmployeeIds((prev) => ev.target.checked ? [...prev, e.id] : prev.filter((x) => x !== e.id))}
                     />
-                    {e.cqid || e.name}
+                    {e.cqid}
                   </label>
                 ))}
               </div>

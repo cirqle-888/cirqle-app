@@ -80,7 +80,7 @@ export async function refreshPayrollRecord(
   // Fetch the existing record (with employee for the audit log).
   const { data: record, error: fetchErr } = await admin
     .from('payroll')
-    .select('*, employee:employees(id, cqid, name)')
+    .select('*, employee:employees(id, cqid)')
     .eq('id', input.id)
     .single()
 
@@ -113,7 +113,7 @@ export async function refreshPayrollRecord(
       net_salary:        live.net,
     })
     .eq('id', input.id)
-    .select('*, employee:employees(id, cqid, name)')
+    .select('*, employee:employees(id, cqid)')
     .single()
 
   if (error) return { ok: false, error: error.message }
@@ -372,7 +372,7 @@ export async function bulkGeneratePayroll(
   const { data: inserted, error } = await admin
     .from('payroll')
     .insert(records)
-    .select('*, employee:employees(id, cqid, name)')
+    .select('*, employee:employees(id, cqid)')
   if (error) return { ok: false, error: error.message }
   const data = await withComputedExtras(admin, inserted ?? [])
 
@@ -413,7 +413,7 @@ export async function createPayrollRecord(
   const { data: inserted, error } = await admin
     .from('payroll')
     .insert({ ...input, status: 'pending' })
-    .select('*, employee:employees(id, cqid, name)')
+    .select('*, employee:employees(id, cqid)')
     .single()
   if (error) return { ok: false, error: error.message }
   const [data] = await withComputedExtras(admin, [inserted])

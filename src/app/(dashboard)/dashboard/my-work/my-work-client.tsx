@@ -11,6 +11,7 @@ import {
 import dynamicImport from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { OverflowMenu } from '@/components/ui/overflow-menu'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import {
   WORK_STAGES, STAGE_LABEL, STAGE_HINT, STAGE_CHIP, stageOf, stageOfPlan, canMove,
@@ -39,7 +40,6 @@ function rowStage(r: MyWorkRow): WorkStage {
 
 interface Props {
   initialRows: MyWorkRow[]
-  firstName: string
   /** Managers only: who has work on their board (busiest-late first). Empty = no team switch. */
   team?: TeamMemberLoad[]
   /** Whose board this is when a manager opened someone else's; null = my own. */
@@ -282,7 +282,7 @@ function Column({ stage, rows, busyId, totalCount, footer, onOpen, onMove }: {
   )
 }
 
-export default function MyWorkClient({ initialRows, firstName, team = [], viewing = null, myEmployeeId, myCqid }: Props) {
+export default function MyWorkClient({ initialRows, team = [], viewing = null, myEmployeeId, myCqid }: Props) {
   const router = useRouter()
   const toast = useToast()
   const [rows, setRows] = useState(initialRows)
@@ -391,38 +391,44 @@ export default function MyWorkClient({ initialRows, firstName, team = [], viewin
         subtitle={viewing ? `Moving a card here updates it for ${viewing.cqid}` : undefined}
       />
 
-      {/* Team switch — for whoever runs the work. Pick a person to see their
-          board and move their cards when they have not. Busiest-late first. */}
-      {team.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-muted-foreground mr-1 inline-flex items-center gap-1"><Users className="w-3.5 h-3.5" /> Team</span>
-          {[...team.filter(t => t.employeeId === myEmployeeId), ...team.filter(t => t.employeeId !== myEmployeeId)].map(t => {
-            const mine = t.employeeId === myEmployeeId
-            const active = viewing ? viewing.employeeId === t.employeeId : mine
-            return (
-              <button
-                key={t.employeeId}
-                onClick={() => router.push(mine ? '/dashboard/my-work' : `/dashboard/my-work?for=${t.employeeId}`)}
-                className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border text-xs font-medium transition-colors ${
-                  active ? 'bg-primary/15 text-primary border-primary/30' : 'bg-secondary text-muted-foreground border-border hover:text-foreground'}`}
-              >
-                {mine ? 'Me' : t.cqid}
-                {t.open > 0 && <span className="tabular-nums opacity-70">{t.open}</span>}
-                {t.overdue > 0 && (
-                  <span className="inline-flex items-center gap-0.5 rounded-full bg-red-500/15 px-1.5 text-[10px] font-semibold text-red-500 tabular-nums" title={`${t.overdue} overdue`}>
-                    {t.overdue}
-                  </span>
-                )}
-              </button>
-            )
-          })}
-        </div>
-      )}
-
       {/* One row: how to look at it, how much is on the plate, and is any of it
           late. The four counts used to be four large tiles — a quarter of the
           screen spent on four numbers, before a single card. */}
       <div className="flex flex-wrap items-center gap-2">
+        {/* Whose board — for whoever runs the work. It used to be a row of its
+            own above everything, on a page called My Work; it is one control
+            now, sitting with the others. Pick a person to see their board and
+            move their cards when they have not. The button says how many
+            cards across the team are late, so that is visible without opening it. */}
+        {team.length > 0 && (() => {
+          const others = team.filter(t => t.employeeId !== myEmployeeId)
+          const teamLate = others.reduce((n, t) => n + t.overdue, 0)
+          const ordered = [...team.filter(t => t.employeeId === myEmployeeId), ...others]
+          return (
+            <div className="flex items-center gap-1.5">
+              <OverflowMenu
+                icon={Users}
+                text={viewing ? viewing.cqid : 'Me'}
+                label="Whose work to show"
+                align="left"
+                items={ordered.map(t => {
+                  const mine = t.employeeId === myEmployeeId
+                  return {
+                    label: mine ? 'Me' : t.cqid,
+                    badge: t.overdue > 0 ? `${t.open} · ${t.overdue} late` : (t.open || undefined),
+                    onClick: () => router.push(mine ? '/dashboard/my-work' : `/dashboard/my-work?for=${t.employeeId}`),
+                  }
+                })}
+              />
+              {teamLate > 0 && (
+                <span title={`${teamLate} late across the team`}
+                  className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs text-red-600 dark:text-red-400">
+                  <Users className="w-3 h-3" /> <b className="font-semibold tabular-nums">{teamLate}</b> late
+                </span>
+              )}
+            </div>
+          )
+        })()}
         <div className="flex items-center gap-1 rounded-lg border border-border bg-secondary p-0.5 w-fit">
           {VIEWS.map(({ key, label, Icon }) => (
             <button
@@ -486,7 +492,7 @@ export default function MyWorkClient({ initialRows, firstName, team = [], viewin
       {rows.length === 0 ? (
         <div className="rounded-2xl border border-border bg-card px-5 py-12 text-center">
           <Check className="w-8 h-8 text-green-500 mx-auto mb-3" />
-          <p className="font-medium">{viewing ? `Nothing assigned to ${viewing.cqid}` : `Nothing assigned to you yet, ${firstName}`}</p>
+          <p className="font-medium">{viewing ? `Nothing assigned to ${viewing.cqid}` : 'Nothing assigned to you yet'}</p>
         </div>
       ) : view === 'board' ? (
         <>

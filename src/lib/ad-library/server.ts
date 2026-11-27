@@ -39,9 +39,9 @@ export async function keyOwner(admin: SupabaseClient, authHeader: string | null)
     .eq('key_hash', hashKey(key))
     .maybeSingle()
   if (!data || data.revoked_at) return null
-  const { data: emp } = await admin.from('employees').select('name').eq('id', data.employee_id).maybeSingle()
+  const { data: emp } = await admin.from('employees').select('cqid').eq('id', data.employee_id).maybeSingle()
   await admin.from('ad_saver_keys').update({ last_used_at: new Date().toISOString() }).eq('id', data.id)
-  return { keyId: data.id as string, employeeId: data.employee_id as string, name: (emp?.name as string) || 'Cirqle' }
+  return { keyId: data.id as string, employeeId: data.employee_id as string, name: (emp?.cqid as string) || 'Cirqle' }
 }
 
 /** path → signed link (1 hour) for every picture, video, poster and page photo of these ads. */

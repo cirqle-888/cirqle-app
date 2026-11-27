@@ -117,7 +117,7 @@ export default async function ContributionsPage() {
     timed('tasks',                  fetchAllParallel(tasksQuery)),
     // Employee roster: both roles get the full active list so the UI can
     // resolve names on contributor chips and offer the assignee filter.
-    timed('employees',              supabase.from('employees').select('id, cqid, name, performance_rating, role').eq('is_active', true).order('cqid')),
+    timed('employees',              supabase.from('employees').select('id, cqid, performance_rating, role').eq('is_active', true).order('cqid')),
     timed('groups',                 supabase.from('contribution_groups').select('*').eq('is_active', true).order('display_order')),
     timed('parameters',             supabase.from('parameters').select('*').eq('is_active', true).order('display_order')),
     timed('tools',                  supabase.from('tools').select('*').eq('is_active', true).order('name')),

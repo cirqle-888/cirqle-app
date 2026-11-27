@@ -74,7 +74,6 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
         // A new board per person — the card state must not carry across.
         key={viewing?.employeeId ?? 'me'}
         initialRows={rows}
-        firstName={(me.name || '').split(' ')[0] || 'there'}
         team={canManageTeam ? team : []}
         viewing={viewing ? { employeeId: viewing.employeeId, cqid: viewing.cqid } : null}
         myEmployeeId={me.employeeId}

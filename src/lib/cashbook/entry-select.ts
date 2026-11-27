@@ -21,6 +21,6 @@ export const ENTRY_SELECT = `
   ),
   payroll_allocations:cashbook_payroll_allocations!cashbook_entry_id(
     id, payroll_id, allocated_amount, deleted_at,
-    payroll:payroll(net_salary, status, employee:employees(name, cqid))
+    payroll:payroll(net_salary, status, employee:employees(cqid))
   )
 `.trim()

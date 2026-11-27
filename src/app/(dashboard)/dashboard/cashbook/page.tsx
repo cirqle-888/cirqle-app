@@ -5,6 +5,7 @@ import { financialVisibility, stripCashbookList } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
 import CashBookClient from './cashbook-client'
 import { listPartnerOptions } from '@/lib/partners/list'
+import { withoutPrivateSettings } from '@/lib/settings/company-settings'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,7 +28,7 @@ const CORE_JOINS = `
     payroll_id,
     allocated_amount,
     deleted_at,
-    payroll:payroll(employee_id, net_salary, status, employee:employees(cqid, name))
+    payroll:payroll(employee_id, net_salary, status, employee:employees(cqid))
   ),
   expense_billings:invoice_expense_items(
     id,
@@ -42,7 +43,7 @@ const CORE_JOINS = `
 // relation in it doesn't exist.
 const TAGS_AND_SPLITS_JOINS = `
   tags:cashbook_entry_tags(tag:cashbook_tags(id, name)),
-  employee_splits:cashbook_entry_employee_splits(id, employee_id, amount, amount_inr, employee:employees(id, name, cqid))
+  employee_splits:cashbook_entry_employee_splits(id, employee_id, amount, amount_inr, employee:employees(id, cqid))
 `.trim()
 
 // Both branches are cast to `string` for `.select()` — Supabase's literal-string
@@ -103,7 +104,7 @@ export default async function CashBookPage() {
           .in('status', ['draft', 'reviewed', 'sent', 'partial', 'overdue'])
           .order('due_date', { ascending: true })
       : Promise.resolve({ data: [] as unknown[] }),
-    supabase.from('employees').select('id, cqid, name, role').eq('is_active', true).order('cqid'),
+    supabase.from('employees').select('id, cqid, role').eq('is_active', true).order('cqid'),
     supabase.from('clients').select('id, name, code, business_partner_id').eq('is_active', true).order('name'),
     vis.payrollAmounts
       ? supabase.from('credit_ledger').select('*, employee:employees(cqid)').eq('credit_type', 'given').order('credit_date', { ascending: false })
@@ -115,7 +116,7 @@ export default async function CashBookPage() {
     vis.payrollAmounts
       ? supabase
           .from('payroll')
-          .select('id, employee_id, month, year, payslip_number, net_salary, status, employee:employees(cqid, name)')
+          .select('id, employee_id, month, year, payslip_number, net_salary, status, employee:employees(cqid)')
           .eq('status', 'pending')
           .order('year', { ascending: false })
           .order('month', { ascending: false })
@@ -182,7 +183,7 @@ export default async function CashBookPage() {
       partners={await partnersP}
       outstandingCredits={(creditsRes.data || []) as any[]}
       pendingPayrolls={(pendingPayrollsRes.data || []) as any[]}
-      companySettings={companySettings}
+      companySettings={withoutPrivateSettings(companySettings)}
       showAmounts={vis.cashbookAmounts}
       showTotals={vis.cashbookTotals}
       markupAvailable={markupAvailable}

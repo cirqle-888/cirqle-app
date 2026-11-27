@@ -355,8 +355,8 @@ export function Composer({
               <input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} className="mt-1 w-full h-9 px-3 rounded-lg bg-secondary text-sm border border-border" />
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <div><label className="text-xs text-muted-foreground">Designer</label><AppSelect value={designerId} onChange={(e) => setDesignerId(e.target.value)} className="mt-1"><option value="">—</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.cqid || e.name}</option>)}</AppSelect></div>
-              <div><label className="text-xs text-muted-foreground">Assigned</label><AppSelect value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className="mt-1"><option value="">—</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.cqid || e.name}</option>)}</AppSelect></div>
+              <div><label className="text-xs text-muted-foreground">Designer</label><AppSelect value={designerId} onChange={(e) => setDesignerId(e.target.value)} className="mt-1"><option value="">—</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.cqid}</option>)}</AppSelect></div>
+              <div><label className="text-xs text-muted-foreground">Assigned</label><AppSelect value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className="mt-1"><option value="">—</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.cqid}</option>)}</AppSelect></div>
             </div>
           </div>
         </div>

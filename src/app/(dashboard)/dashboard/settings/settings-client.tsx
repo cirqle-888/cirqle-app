@@ -1867,10 +1867,6 @@ export default function SettingsClient(props: Props) {
                       <div>
                         <div className="flex items-center gap-2 mb-0.5">
                           <p className="font-semibold text-sm tracking-tight text-foreground">{emp.cqid}</p>
-                          {isUnlocked && emp.name && (
-                            // eslint-disable-next-line no-restricted-syntax -- deliberate: name shown only when privacy is unlocked, on the admin Employees settings page
-                            <span className="text-[13px] text-foreground/80 font-medium">— {emp.name}</span>
-                          )}
                           {emp.auth_id
                             ? <span className="text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1"><span className="w-1 h-1 rounded-full bg-emerald-500"></span>Has Access</span>
                             : <span className="text-[10px] font-medium bg-secondary/50 text-muted-foreground border border-border px-2 py-0.5 rounded-full">No Login</span>
@@ -3848,8 +3844,7 @@ export default function SettingsClient(props: Props) {
                               title={`Included automatically — member of the ${deptName} department. Manage in Employees → Edit.`}
                               className="px-2.5 py-1 rounded-full text-xs font-medium border bg-violet-500/10 text-violet-500 dark:text-violet-400 border-violet-500/30 cursor-default inline-flex items-center gap-1">
                               <Lock className="w-3 h-3" />
-                              {/* eslint-disable-next-line no-restricted-syntax -- deliberate: name shown only when privacy is unlocked, on the admin settings employee picker */}
-                              {emp.cqid}{isUnlocked && emp.name ? ` · ${emp.name}` : ''}
+                              {emp.cqid}
                               <span className="opacity-70">· dept</span>
                             </span>
                           )
@@ -3866,8 +3861,7 @@ export default function SettingsClient(props: Props) {
                                   ? 'bg-primary/15 text-primary border-primary/30'
                                   : 'bg-secondary text-muted-foreground border-transparent hover:border-border hover:text-foreground'
                               }`}>
-                              {/* eslint-disable-next-line no-restricted-syntax -- deliberate: name shown only when privacy is unlocked, on the admin settings employee picker */}
-                              {isSelected ? '✓ ' : ''}{emp.cqid}{isUnlocked && emp.name ? ` · ${emp.name}` : ''}
+                              {isSelected ? '✓ ' : ''}{emp.cqid}
                             </button>
                           )
                         })

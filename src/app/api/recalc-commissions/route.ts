@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     const [
       employeesRes, groupsRes, parametersRes, toolsRes, toolServicesRes, groupServicesRes, pricingRes, historyRes, ratesRes, agreementsRes
     ] = await Promise.all([
-      supabase.from('employees').select('id, cqid, name, performance_rating, role'),
+      supabase.from('employees').select('id, cqid, performance_rating, role'),
       // Active-only — must match the scoring UIs and recalcTaskCommissions
       // (integrity.ts), which all operate on active groups/params/tools.
       supabase.from('contribution_groups').select('*').eq('is_active', true),

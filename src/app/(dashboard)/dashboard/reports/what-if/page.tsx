@@ -33,7 +33,7 @@ export default async function WhatIfPage() {
   const planningScoreWindow = scoreWindowFor(planningWindow)
 
   const [employeesRes, clientsRes, servicesRes, pricingRes, tasksRes, scoresRes, ratingsRes, taskToolsRes, toolsRes] = await Promise.all([
-    supabase.from('employees').select('id, cqid, name, base_salary').eq('is_active', true).order('cqid'),
+    supabase.from('employees').select('id, cqid, base_salary').eq('is_active', true).order('cqid'),
     supabase.from('clients').select('id, name').order('name'),
     supabase.from('services').select('id, name').order('name'),
     fetchAll(supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage, price').order('id', { ascending: true })),
@@ -63,8 +63,8 @@ export default async function WhatIfPage() {
     supabase.from('tools').select('id, fixed_percentage, is_active'),
   ])
 
-  const employees: EmployeeColumn[] = ((employeesRes.data || []) as { id: string; cqid: string; name: string }[])
-    .map(e => ({ id: e.id, cqid: e.cqid, name: e.name }))
+  const employees: EmployeeColumn[] = ((employeesRes.data || []) as { id: string; cqid: string }[])
+    .map(e => ({ id: e.id, cqid: e.cqid, name: e.cqid }))
 
   const baseSalaries: Record<string, number> | null = canSeeSalaries
     ? Object.fromEntries(

@@ -443,7 +443,7 @@ export default async function DashboardPage() {
     isAdmin
       ? fetchAll(stablePaginationQuery(supabase
           .from('employees')
-          .select('id, cqid, name, performance_rating, role')
+          .select('id, cqid, performance_rating, role')
           .eq('is_active', true)
           .order('cqid')))
       : Promise.resolve({ data: [] }),

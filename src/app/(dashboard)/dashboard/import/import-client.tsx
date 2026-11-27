@@ -19,7 +19,7 @@ import { notifyAnalyticsBulkChange } from '../analytics-actions'
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface RefClient    { id: string; name: string; code: string }
 interface RefService   { id: string; name: string }
-interface RefEmployee  { id: string; cqid: string; name: string }
+interface RefEmployee  { id: string; cqid: string }
 interface RefGroup     { id: string; name: string; weight: number }
 interface RefParameter { id: string; name: string; group_id: string; weight: number; display_order: number }
 
@@ -1903,7 +1903,7 @@ export default function ImportClient({ clients, services, employees, groups, par
         .limit(500))
     } else if (m === 'contributions') {
       q = viaPriced(src => supabase.from(src.scores)
-        .select('id, score_percentage, earnings_inr, calculated_at, tasks(title, task_date), employees!employee_id(name, cqid)')
+        .select('id, score_percentage, earnings_inr, calculated_at, tasks(title, task_date), employees!employee_id(cqid)')
         .order('calculated_at', { ascending: false })
         .limit(500))
     } else {
@@ -2184,7 +2184,7 @@ export default function ImportClient({ clients, services, employees, groups, par
           <CheckTd id={r.id}/>
           <td className={tdCls+' max-w-[140px] truncate'} title={(r.tasks as any)?.title}>{(r.tasks as any)?.title || '—'}</td>
           <td className={tdCls+' font-mono text-[11px]'}>{(r.tasks as any)?.task_date || '—'}</td>
-          <td className={tdCls}>{(r.employees as any)?.cqid} · {(r.employees as any)?.name}</td>
+          <td className={tdCls}>{(r.employees as any)?.cqid}</td>
           <td className={tdCls+' text-right font-mono'}>{r.score_percentage}%</td>
           <td className={tdCls+' text-right font-mono'}>{r.earnings_inr ? `₹${Number(r.earnings_inr).toLocaleString('en-IN')}` : '—'}</td>
         </tr>))}</tbody></table>

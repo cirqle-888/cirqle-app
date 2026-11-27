@@ -86,7 +86,7 @@ export async function getTimeline(
     const admin = createAdminClient()
     let q = admin
       .from('activity_logs')
-      .select('id, actor_id, entity_type, entity_id, action, category, detail, note, created_at, actor:actor_id(id, cqid, name)')
+      .select('id, actor_id, entity_type, entity_id, action, category, detail, note, created_at, actor:actor_id(id, cqid)')
       .order('created_at', { ascending: false })
       .order('id', { ascending: false }) // stable tiebreak for cursor pagination
       .limit(PAGE_SIZE + 1)
@@ -126,7 +126,7 @@ async function legacyFallback(scope: TimelineScope, cursor: string | null): Prom
     const admin = createAdminClient()
     let q = admin
       .from('activity_logs')
-      .select('id, actor_id, entity_type, entity_id, action, detail, note, created_at, actor:actor_id(id, cqid, name)')
+      .select('id, actor_id, entity_type, entity_id, action, detail, note, created_at, actor:actor_id(id, cqid)')
       .order('created_at', { ascending: false })
       .limit(PAGE_SIZE + 1)
 

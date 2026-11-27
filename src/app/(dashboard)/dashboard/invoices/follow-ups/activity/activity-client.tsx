@@ -51,7 +51,8 @@ export default function ActivityClient({ rows, setupNeeded }: { rows: ActivityRo
 
   const employees = useMemo(() => {
     const m = new Map<string, string>()
-    for (const r of rows) if (r.employee) m.set(r.employee.cqid, r.employee.name)
+    // People are listed by CQID; no name is loaded for this screen.
+    for (const r of rows) if (r.employee) m.set(r.employee.cqid, r.employee.cqid)
     return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1]))
   }, [rows])
 
@@ -80,7 +81,7 @@ export default function ActivityClient({ rows, setupNeeded }: { rows: ActivityRo
     const byEmployee = new Map<string, { cqid: string; name: string; count: number }>()
     for (const r of rows) {
       if (!r.employee) continue
-      const e = byEmployee.get(r.employee.cqid) ?? { cqid: r.employee.cqid, name: r.employee.name, count: 0 }
+      const e = byEmployee.get(r.employee.cqid) ?? { cqid: r.employee.cqid, name: r.employee.cqid, count: 0 }
       e.count++
       byEmployee.set(r.employee.cqid, e)
     }

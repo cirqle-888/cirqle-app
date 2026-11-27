@@ -231,7 +231,6 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
   const pathname = usePathname()
   const router = useRouter()
   const { user, can, logoUrl, logoUrlDark, faviconUrl } = usePermissions()
-  const { isUnlocked } = usePrivacy()
   const { current: activeWorkspace } = useWorkspace()
   // Local state so a broken/expired logo URL can fall back to the brand mark
   // without leaving a broken-image placeholder visible.
@@ -405,7 +404,6 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
                 : 'bg-secondary text-muted-foreground border-border'
             }`}>
               {user.designationName || (user.isAdmin ? 'Admin' : 'Member')}
-              {isUnlocked && user.name ? ` · ${user.name.split(' ')[0]}` : ''}
             </span>
           </div>
         )}
@@ -559,7 +557,6 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
 // ─────────────────────────────────────────────────────
 function EmployeeProfileSheet({ onClose, onChangePassword }: { onClose: () => void; onChangePassword: () => void }) {
   const { user } = usePermissions()
-  const { isUnlocked } = usePrivacy()
   // The sheet draws a grab handle, so it can be grabbed: drag or flick it down
   // to close, and tapping the backdrop slides it out the way it came in.
   const { sheetRef, backdropRef, sheetProps, dismiss } = useSheetDismiss(onClose)
@@ -610,8 +607,6 @@ function EmployeeProfileSheet({ onClose, onChangePassword }: { onClose: () => vo
           )}
           <div className="min-w-0">
             <div className="text-sm font-semibold text-foreground truncate">{user.cqid ?? 'Account'}</div>
-            {/* eslint-disable-next-line no-restricted-syntax -- deliberate: the SIGNED-IN user's own name in their own account panel, and only while privacy is unlocked. Never another employee's name. */}
-            {isUnlocked && user.name && <div className="text-xs text-muted-foreground truncate">{user.name}</div>}
             {user.designationName && (
               <span className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border whitespace-nowrap mt-0.5">
                 {user.designationName}

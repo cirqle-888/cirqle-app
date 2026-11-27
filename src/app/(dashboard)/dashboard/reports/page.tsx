@@ -38,8 +38,8 @@ export default async function ReportsPage() {
   const taskWindowFromStr =toISODate( taskWindowFrom)
 
   const employeesQuery = isAdmin || !employeeId
-    ? supabase.from('employees').select('id, cqid, name, performance_rating').eq('is_active', true).order('cqid')
-    : supabase.from('employees').select('id, cqid, name, performance_rating').eq('id', employeeId)
+    ? supabase.from('employees').select('id, cqid, performance_rating').eq('is_active', true).order('cqid')
+    : supabase.from('employees').select('id, cqid, performance_rating').eq('id', employeeId)
 
   // Inner join + filter score > 0. NO date cap here — "All dates" must mean
   // all-time. The !inner join ensures orphaned rows (no matching task) are

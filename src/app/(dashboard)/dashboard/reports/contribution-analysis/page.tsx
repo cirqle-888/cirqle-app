@@ -51,7 +51,7 @@ export default async function ContributionAnalysisPage({
 
   const [employeesRes, clientsRes, servicesRes, pricingRes, tasksRes, scoresRes, invoiceItemsRes, invoicesRes, ratingsRes, taskToolsRes, toolsRes, agreementsRes, ratesRes] = await Promise.all([
     // Active employees define the dynamic columns (ordered by CQID for stability).
-    supabase.from('employees').select('id, cqid, name').eq('is_active', true).order('cqid'),
+    supabase.from('employees').select('id, cqid').eq('is_active', true).order('cqid'),
     supabase.from('clients').select('id, name').order('name'),
     supabase.from('services').select('id, name, category_id').order('name'),
     fetchAll(supabase.from('client_service_pricing').select('client_id, service_id, commission_percentage').order('id', { ascending: true })),
@@ -95,7 +95,9 @@ export default async function ContributionAnalysisPage({
     supabase.from('exchange_rates').select('currency, rate_to_inr'),
   ])
 
-  const employees: EmployeeColumn[] = (employeesRes.data || []) as EmployeeColumn[]
+  // `name` is the column label, and the label for a person is their CQID.
+  const employees: EmployeeColumn[] = ((employeesRes.data || []) as { id: string; cqid: string }[])
+    .map(e => ({ id: e.id, cqid: e.cqid, name: e.cqid }))
   const clients = (clientsRes.data || []) as { id: string; name: string }[]
   const serviceRows = (servicesRes.data || []) as { id: string; name: string; category_id?: string | null }[]
   const services = serviceRows.map(s => ({ id: s.id, name: s.name }))

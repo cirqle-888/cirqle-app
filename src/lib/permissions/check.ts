@@ -8,7 +8,11 @@ export interface CurrentUser {
   authId: string
   employeeId: string
   cqid: string
-  name: string
+  // NO `name`. An employee's real name is private and the app shows CQIDs
+  // only, so the signed-in person's record deliberately does not carry one:
+  // code that cannot read a name cannot leak it. Do not add it back — a
+  // feature that truly needs a name (a payslip, the HR record) reads it itself
+  // and is listed in scripts/check-name-privacy.mjs.
   email: string
   designationId: string | null
   designationName: string | null
@@ -59,7 +63,7 @@ async function resolveViewAs(
 
     const { data: target } = await db
       .from('employees')
-      .select('id, cqid, name, email, is_archived, date_of_birth, designation:designation_id ( id, name, is_admin )')
+      .select('id, cqid, email, is_archived, date_of_birth, designation:designation_id ( id, name, is_admin )')
       .eq('id', targetEmployeeId)
       .maybeSingle()
     if (!target) return null
@@ -88,7 +92,6 @@ async function resolveViewAs(
       authId,
       employeeId: (target as any).id,
       cqid: (target as any).cqid ?? '',
-      name: (target as any).name ?? '',
       email: (target as any).email ?? '',
       designationId: d?.id ?? null,
       designationName: d?.name ?? null,
@@ -275,7 +278,7 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     const { data } = await db
       .from('employees')
       .select(`
-        id, cqid, name, email, is_archived, date_of_birth,
+        id, cqid, email, is_archived, date_of_birth,
         designation:designation_id ( id, name, is_admin )
       `)
       .eq('auth_id', user.id)
@@ -289,7 +292,7 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   if (!emp) {
     const { data } = await db
       .from('employees')
-      .select('id, cqid, name, email, role')
+      .select('id, cqid, email, role')
       .eq('auth_id', user.id)
       .maybeSingle()
     if (!data) return cacheAndReturn(null)
@@ -297,7 +300,6 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
       authId: user.id,
       employeeId: data.id,
       cqid: data.cqid ?? '',
-      name: data.name ?? '',
       email: data.email ?? '',
       designationId: null,
       designationName: null,
@@ -320,7 +322,6 @@ export const loadCurrentUser = cache(async (): Promise<CurrentUser | null> => {
     authId: user.id,
     employeeId: emp.id,
     cqid: emp.cqid ?? '',
-    name: emp.name ?? '',
     email: emp.email ?? '',
     designationId: designation?.id ?? null,
     designationName: designation?.name ?? null,

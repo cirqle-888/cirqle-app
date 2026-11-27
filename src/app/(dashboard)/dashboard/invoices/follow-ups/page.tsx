@@ -89,7 +89,7 @@ export default async function FollowUpsPage() {
       try {
         const { data, error } = await supabase
           .from('invoice_followups')
-          .select('id, invoice_id, note, outcome, promised_date, next_followup_date, created_by, created_at, creator:created_by(cqid, name)')
+          .select('id, invoice_id, note, outcome, promised_date, next_followup_date, created_by, created_at, creator:created_by(cqid)')
           .in('invoice_id', ids)
           .order('created_at', { ascending: false })
         if (error) {

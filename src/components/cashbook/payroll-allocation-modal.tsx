@@ -61,7 +61,7 @@ export default function PayrollAllocationModal({ entryId, amountInr, employees, 
         id, 
         payroll_id, 
         allocated_amount,
-        payroll:payroll(net_salary, status, month, year, payslip_number, employee:employees(name, cqid))
+        payroll:payroll(net_salary, status, month, year, payslip_number, employee:employees(cqid))
       `)
       .eq('cashbook_entry_id', entryId)
       .is('deleted_at', null)

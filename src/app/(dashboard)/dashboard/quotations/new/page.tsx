@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { getCompanySettings } from '@/lib/settings/company-settings'
+import { getCompanySettings, withoutPrivateSettings } from '@/lib/settings/company-settings'
 import QuotationEditor from '../quotation-editor'
 
 export const dynamic = 'force-dynamic'
@@ -11,5 +11,5 @@ export default async function NewQuotationPage() {
     supabase.from('clients').select('id, name, code, phone, email, address').eq('is_active', true).order('name'),
     getCompanySettings(),
   ])
-  return <QuotationEditor quotation={null} clients={clientsRes.data || []} companySettings={companySettings} />
+  return <QuotationEditor quotation={null} clients={clientsRes.data || []} companySettings={withoutPrivateSettings(companySettings)} />
 }
