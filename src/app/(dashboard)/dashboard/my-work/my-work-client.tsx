@@ -50,11 +50,27 @@ interface Props {
 }
 
 
-function dueLabel(due: string | null): { text: string; tone: string } | null {
+/** The one-click next step for a stage, in the words you would say out loud. */
+const NEXT_VERB: Partial<Record<WorkStage, string>> = {
+  working: 'Start',
+  delivered: 'Send for review',
+  done: 'Mark done',
+}
+
+/** The stage a card moves to next, or null when it has nowhere left to go. */
+function nextStage(stage: WorkStage): WorkStage | null {
+  const next = WORK_STAGES[WORK_STAGES.indexOf(stage) + 1]
+  return next && canMove(stage, next) ? next : null
+}
+
+function dueLabel(due: string | null, stage?: WorkStage): { text: string; tone: string } | null {
   if (!due) return null
   const today = todayISO()
-  if (due < today) return { text: 'Overdue', tone: 'bg-red-500/15 text-red-400 border-red-500/25' }
-  if (due === today) return { text: 'Due today', tone: 'bg-amber-500/15 text-amber-500 border-amber-500/25' }
+  // "Overdue" is a call to act. Work that is finished, or already with the
+  // client, has nothing left for its owner to do — there the date is a date.
+  const settled = stage === 'done' || stage === 'delivered'
+  if (!settled && due < today) return { text: 'Overdue', tone: 'bg-red-500/15 text-red-400 border-red-500/25' }
+  if (!settled && due === today) return { text: 'Due today', tone: 'bg-amber-500/15 text-amber-500 border-amber-500/25' }
   const d = new Date(`${due}T00:00:00`)
   return {
     text: d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
@@ -62,41 +78,45 @@ function dueLabel(due: string | null): { text: string; tone: string } | null {
   }
 }
 
-function Card({ row, dragging }: { row: MyWorkRow; dragging?: boolean }) {
-  const due = dueLabel(row.due_date)
+function Card({ row, dragging, onNext, busy }: {
+  row: MyWorkRow; dragging?: boolean
+  /** Moves the card one stage on. Absent = read-only card. */
+  onNext?: (to: WorkStage) => void
+  busy?: boolean
+}) {
+  const stage = rowStage(row)
+  // A finished card carries no date at all — it is history, not a deadline.
+  const due = stage === 'done' ? null : dueLabel(row.due_date, stage)
+  const next = nextStage(stage)
   return (
     <div className={`rounded-xl border border-border bg-card p-3 space-y-2 ${dragging ? 'shadow-xl' : 'shadow-sm'}`}>
       <p className="text-sm font-semibold leading-snug break-words">{row.title}</p>
-      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-        {/* Where it came from. Not needed to DO the work — the board treats
-            both identically — but a designer glancing at a card should be able
-            to tell a client request from something planned on the calendar.
-            The WORD carries that; it does not need a colour to shout it. A
-            reference number is something you quote when asking about a card,
-            not something you read the card by. */}
-        <span className="font-medium text-muted-foreground/70 tabular-nums">
-          {row.source === 'plan' ? 'Plan' : row.ref_no ? `REQ-${String(row.ref_no).padStart(4, '0')}` : 'Request'}
-        </span>
-        {/* Complimentary work still has to be done and still has a deadline —
-            it just never becomes a billable task. Saying so on the card stops
-            anyone wondering where its task number went. */}
+      {/* The card says only what you need to pick it up: whose it is and when
+          it is wanted. The service, the reference number and where it came
+          from are one tap away in the brief — on the card they were five
+          things to read before the one that mattered. */}
+      <div className="flex items-center gap-1.5 text-[11px]">
+        {row.client_name && <span className="min-w-0 truncate text-muted-foreground">{row.client_name}</span>}
         {row.checklist && (
           <span title={CHECKLIST_HINT}
-            className="px-1.5 py-0.5 rounded font-medium bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">
+            className="shrink-0 px-1.5 py-0.5 rounded font-medium bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">
             {CHECKLIST_LABEL}
           </span>
         )}
-        {row.client_name && (
-          <span className="px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">{row.client_name}</span>
+        {due && <span className={`shrink-0 px-1.5 py-0.5 rounded-full border ${due.tone}`}>{due.text}</span>}
+        {/* One click instead of a drag. The drag still works; this is for
+            everyone who never found it, and for every phone. */}
+        {onNext && next && (
+          <button
+            type="button" disabled={busy}
+            onMouseDown={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onNext(next) }}
+            title={`Move to ${STAGE_LABEL[next]}`}
+            className="ml-auto shrink-0 inline-flex items-center gap-0.5 rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+          >
+            {NEXT_VERB[next]} <ChevronRight className="w-3 h-3" />
+          </button>
         )}
-        {/* The service was the loudest thing on the card, in the accent colour
-            no less — so five cards in a column read as five coloured chips
-            before they read as five pieces of work. It says what KIND of thing
-            this is, which the title already says better. */}
-        {row.service_name && (
-          <span className="text-muted-foreground/70">{row.service_name}</span>
-        )}
-        {due && <span className={`px-1.5 py-0.5 rounded-full border ${due.tone}`}>{due.text}</span>}
       </div>
     </div>
   )
@@ -112,7 +132,7 @@ function Card({ row, dragging }: { row: MyWorkRow; dragging?: boolean }) {
  * they CAN do is say something, via Discuss.
  */
 function CardDetail({ row, onClose }: { row: MyWorkRow; onClose: () => void }) {
-  const due = dueLabel(row.due_date)
+  const due = dueLabel(row.due_date, rowStage(row))
   // Any http(s) URL in the brief is a reference worth showing as a link rather
   // than as raw text buried in a paragraph.
   const links = useMemo(() => {
@@ -137,6 +157,9 @@ function CardDetail({ row, onClose }: { row: MyWorkRow; onClose: () => void }) {
               {row.client_name && <span className="text-muted-foreground">{row.client_name}</span>}
               {row.service_name && <span className="text-muted-foreground/70">{row.service_name}</span>}
               {due && <span className={`px-1.5 py-0.5 rounded-full border ${due.tone}`}>{due.text}</span>}
+              <span className="font-medium text-muted-foreground/70 tabular-nums">
+                {row.source === 'plan' ? 'Plan' : row.ref_no ? `REQ-${String(row.ref_no).padStart(4, '0')}` : 'Request'}
+              </span>
             </div>
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground shrink-0">
@@ -196,8 +219,9 @@ function CardDetail({ row, onClose }: { row: MyWorkRow; onClose: () => void }) {
   )
 }
 
-function DraggableCard({ row, disabled, onOpen }: {
+function DraggableCard({ row, disabled, onOpen, onMove }: {
   row: MyWorkRow; disabled?: boolean; onOpen: (r: MyWorkRow) => void
+  onMove: (id: string, to: WorkStage) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: row.id, disabled })
   return (
@@ -210,16 +234,17 @@ function DraggableCard({ row, disabled, onOpen }: {
       style={transform ? { transform: `translate(${transform.x}px, ${transform.y}px)`, zIndex: 60, position: 'relative' } : undefined}
       className={`${isDragging ? 'opacity-90 cursor-grabbing' : disabled ? '' : 'cursor-grab'} touch-manipulation`}
     >
-      <Card row={row} dragging={isDragging} />
+      <Card row={row} dragging={isDragging} busy={disabled} onNext={to => onMove(row.id, to)} />
     </div>
   )
 }
 
-function Column({ stage, rows, busyId, totalCount, footer, onOpen }: {
+function Column({ stage, rows, busyId, totalCount, footer, onOpen, onMove }: {
   stage: WorkStage
   rows: MyWorkRow[]
   busyId: string | null
   onOpen: (r: MyWorkRow) => void
+  onMove: (id: string, to: WorkStage) => void
   /** Set when `rows` is a capped preview — the badge must show the real total. */
   totalCount?: number
   footer?: React.ReactNode
@@ -231,15 +256,16 @@ function Column({ stage, rows, busyId, totalCount, footer, onOpen }: {
       className={`flex flex-col rounded-2xl border p-3 min-w-[240px] flex-1 transition-colors
         ${isOver ? 'border-primary bg-primary/5' : 'border-border bg-secondary/30'}`}
     >
-      <div className="flex items-center justify-between mb-1">
+      {/* What the column means is in its tooltip — four sentences across the
+          top of the board were read once and then scrolled past forever. */}
+      <div className="flex items-center justify-between mb-2.5" title={STAGE_HINT[stage]}>
         <span className="text-sm font-semibold">{STAGE_LABEL[stage]}</span>
         <span className={`text-[11px] px-1.5 py-0.5 rounded-full border ${STAGE_CHIP[stage]}`}>{totalCount ?? rows.length}</span>
       </div>
-      <p className="text-[11px] text-muted-foreground mb-3">{STAGE_HINT[stage]}</p>
       <div className="space-y-2 flex-1">
         {rows.map(r => (
           <div key={r.id} className="relative">
-            <DraggableCard row={r} disabled={busyId === r.id} onOpen={onOpen} />
+            <DraggableCard row={r} disabled={busyId === r.id} onOpen={onOpen} onMove={onMove} />
             {busyId === r.id && (
               <div className="absolute inset-0 grid place-items-center rounded-xl bg-card/70">
                 <Loader2 className="w-4 h-4 animate-spin text-primary" />
@@ -248,7 +274,7 @@ function Column({ stage, rows, busyId, totalCount, footer, onOpen }: {
           </div>
         ))}
         {rows.length === 0 && (
-          <p className="text-[11px] text-muted-foreground/60 py-6 text-center">Nothing here</p>
+          <p className="text-[11px] text-muted-foreground/50 py-4 text-center">—</p>
         )}
       </div>
       {footer}
@@ -362,9 +388,7 @@ export default function MyWorkClient({ initialRows, firstName, team = [], viewin
     <div className="space-y-5 pb-10">
       <Header
         title={viewing ? `${viewing.cqid} — Work` : 'My Work'}
-        subtitle={viewing
-          ? `${pendingCount} still to do · moving a card here updates it for ${viewing.cqid}`
-          : pendingCount === 0 ? 'Nothing pending — you are all caught up' : `${pendingCount} still to do`}
+        subtitle={viewing ? `Moving a card here updates it for ${viewing.cqid}` : undefined}
       />
 
       {/* Team switch — for whoever runs the work. Pick a person to see their
@@ -395,91 +419,84 @@ export default function MyWorkClient({ initialRows, firstName, team = [], viewin
         </div>
       )}
 
-      {/* The whole point of the page, answered before anything else: how much
-          is on my plate, and is any of it late. */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="rounded-2xl border border-border bg-card p-4">
-          <p className="text-3xl font-bold">{pendingCount}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">Still to do</p>
-        </div>
-        <div className={`rounded-2xl border p-4 ${overdueCount > 0 ? 'border-red-500/30 bg-red-500/5' : 'border-border bg-card'}`}>
-          <p className={`text-3xl font-bold ${overdueCount > 0 ? 'text-red-400' : ''}`}>{overdueCount}</p>
-          <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-            {overdueCount > 0 && <CircleAlert className="w-3 h-3 text-red-400" />} Overdue
-          </p>
-        </div>
-        <div className="rounded-2xl border border-border bg-card p-4">
-          <p className="text-3xl font-bold text-purple-400">{byStage.delivered.length}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">With the client</p>
-        </div>
-        <div className="rounded-2xl border border-border bg-card p-4">
-          <p className="text-3xl font-bold text-green-500">{byStage.done.length}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">Done</p>
-        </div>
-      </div>
-
+      {/* One row: how to look at it, how much is on the plate, and is any of it
+          late. The four counts used to be four large tiles — a quarter of the
+          screen spent on four numbers, before a single card. */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1.5 rounded-lg border border-border bg-secondary p-1 w-fit">
+        <div className="flex items-center gap-1 rounded-lg border border-border bg-secondary p-0.5 w-fit">
           {VIEWS.map(({ key, label, Icon }) => (
             <button
-              key={key} onClick={() => setView(key)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors
-                ${view === key ? 'gradient-bg text-white' : 'text-muted-foreground hover:text-foreground'}`}
+              key={key} onClick={() => setView(key)} title={label} aria-pressed={view === key}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm transition-colors
+                ${view === key ? 'bg-card font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
             >
-              <Icon className="w-4 h-4" /> {label}
+              <Icon className="w-4 h-4" /> <span className="hidden sm:inline">{label}</span>
             </button>
           ))}
         </div>
 
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1">
+            <b className="font-semibold tabular-nums">{pendingCount}</b> to do
+          </span>
+          {overdueCount > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2.5 py-1 text-red-600 dark:text-red-400">
+              <CircleAlert className="w-3 h-3" /> <b className="font-semibold tabular-nums">{overdueCount}</b> overdue
+            </span>
+          )}
+          {byStage.delivered.length > 0 && (
+            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-muted-foreground">
+              <b className="font-semibold tabular-nums text-foreground">{byStage.delivered.length}</b> with client
+            </span>
+          )}
+          <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-muted-foreground">
+            <b className="font-semibold tabular-nums text-foreground">{byStage.done.length}</b> done
+          </span>
+        </div>
+
         {/* Send this board's pending work to WhatsApp — as an image card or a
             list, to a group or to the person themself. */}
-        <SharePendingButton
-          rows={rows}
-          owner={viewing ? viewing.cqid : (myCqid || 'My work')}
-          employeeId={viewing ? viewing.employeeId : myEmployeeId}
-          recipientLabel={viewing ? viewing.cqid : null}
-        />
-
-        {/* Client chips — only when there is actually a choice to make. One
-            client means one chip that does nothing, which is worse than none. */}
-        {clients.length > 1 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              onClick={() => setClientFilter(null)}
-              className={`px-2.5 py-1.5 rounded-lg text-xs border transition-colors
-                ${clientFilter === null ? 'bg-primary/15 text-primary border-primary/30' : 'bg-secondary text-muted-foreground border-border hover:text-foreground'}`}
-            >
-              All clients
-            </button>
-            {clients.map(c => (
-              <button
-                key={c} onClick={() => setClientFilter(clientFilter === c ? null : c)}
-                className={`px-2.5 py-1.5 rounded-lg text-xs border transition-colors
-                  ${clientFilter === c ? 'bg-primary/15 text-primary border-primary/30' : 'bg-secondary text-muted-foreground border-border hover:text-foreground'}`}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="ml-auto">
+          <SharePendingButton
+            rows={rows}
+            owner={viewing ? viewing.cqid : (myCqid || 'My work')}
+            employeeId={viewing ? viewing.employeeId : myEmployeeId}
+            recipientLabel={viewing ? viewing.cqid : null}
+          />
+        </div>
       </div>
+
+      {/* Client chips — only when there is actually a choice to make. One
+          client means one chip that does nothing, which is worse than none.
+          One line that scrolls, so ten clients cost no more room than two. */}
+      {clients.length > 1 && (
+        <div className="-mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:thin]">
+          {[null, ...clients].map(c => (
+            <button
+              key={c ?? 'all'} onClick={() => setClientFilter(c === clientFilter ? null : c)}
+              className={`shrink-0 px-2.5 py-1 rounded-lg text-xs border transition-colors
+                ${clientFilter === c ? 'bg-primary/15 text-primary border-primary/30' : 'bg-secondary text-muted-foreground border-border hover:text-foreground'}`}
+            >
+              {c ?? 'All'}
+            </button>
+          ))}
+        </div>
+      )}
 
       {rows.length === 0 ? (
         <div className="rounded-2xl border border-border bg-card px-5 py-12 text-center">
           <Check className="w-8 h-8 text-green-500 mx-auto mb-3" />
           <p className="font-medium">{viewing ? `Nothing assigned to ${viewing.cqid}` : `Nothing assigned to you yet, ${firstName}`}</p>
-          <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
-            When someone assigns you a request it appears here. Nothing to do until then.
-          </p>
         </div>
       ) : view === 'board' ? (
         <>
-          <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
+          <DndContext id="my-work-dnd" sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
             <div className="flex gap-3 overflow-x-auto pb-2 items-stretch">
               {WORK_STAGES.map(s => (
                 <Column
                   key={s} stage={s}
                   onOpen={setOpenRow}
+                  onMove={(id, to) => void apply(id, to)}
                   rows={s === 'done' ? doneShown : byStage[s]}
                   totalCount={s === 'done' ? byStage.done.length : undefined}
                   busyId={busyId}
@@ -495,9 +512,6 @@ export default function MyWorkClient({ initialRows, firstName, team = [], viewin
               ))}
             </div>
           </DndContext>
-          <p className="text-[11px] text-muted-foreground">
-            Drag a card to the next column to update it. On a phone, press and hold a card first.
-          </p>
         </>
       ) : view === 'calendar' ? (
         <CalendarView rows={visibleRows} />
@@ -602,7 +616,7 @@ function ListView({ rows, onMove, busyId, onOpen }: {
       {ordered.map(r => {
         const stage = rowStage(r)
         const next = WORK_STAGES[WORK_STAGES.indexOf(stage) + 1]
-        const due = dueLabel(r.due_date)
+        const due = dueLabel(r.due_date, stage)
         return (
           <div key={r.id} className="rounded-xl border border-border bg-card p-3 flex items-center gap-3 flex-wrap">
             <div className="min-w-0 flex-1 cursor-pointer" onClick={() => onOpen(r)}>
@@ -620,7 +634,7 @@ function ListView({ rows, onMove, busyId, onOpen }: {
                 className="inline-flex items-center gap-1.5 rounded-lg gradient-bg text-white px-3 py-2 text-xs font-medium disabled:opacity-50 shrink-0"
               >
                 {busyId === r.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                {STAGE_LABEL[next]}
+                {NEXT_VERB[next] ?? STAGE_LABEL[next]}
               </button>
             )}
           </div>

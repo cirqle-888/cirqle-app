@@ -14,6 +14,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { OverflowMenu } from '@/components/ui/overflow-menu'
 import { ActiveFilterChips } from '@/components/ui/active-filter-chips'
 import { TokenizedSearch, type SearchFacet } from '@/components/ui/tokenized-search'
 import { recordMatchesFacets, type FacetFieldDef } from '@/lib/search/match-facets'
@@ -1222,81 +1223,67 @@ export default function RequestsClient({
           Title on the left, the page's actions on the right — kept OUT of the
           status tabs so the primary button never scrolls away with them.
           pl-12 on mobile clears the fixed global sidebar hamburger. */}
-      <div className="flex items-start gap-3 flex-wrap pl-12 md:pl-0">
-        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-          <Inbox className="w-5 h-5 text-primary" />
-        </div>
-        <div className="flex-1 min-w-[220px]">
-          <h1 className="text-xl font-bold tracking-tight leading-tight">Requests</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Client &amp; agency submissions — they stay out of Tasks until you start them.
-          </p>
-        </div>
-        {migrated && (
-          <Link href="/dashboard/requests/pending"
-            title="Who is waiting on us, by client"
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-medium border border-border bg-card hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors shrink-0">
-            <Inbox className="w-3.5 h-3.5" /><span className="hidden sm:inline">Pending by client</span>
-          </Link>
+      {/* One line. The counts sit where a sentence of description used to be —
+          the page says what is open instead of what the page is — and the
+          links used a few times a week live behind the "…". */}
+      <div className="flex items-center gap-x-3 gap-y-2 flex-wrap pl-12 md:pl-0">
+        <h1 className="text-xl font-bold tracking-tight leading-tight">Requests</h1>
+        {/* At-a-glance: what's open, what it's worth, and the pile nobody owns.
+            "Unassigned" is a shortcut straight into that filter. */}
+        {migrated && (pipeline.count > 0 || openLoad.unassigned > 0) && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {pipeline.count > 0 && (
+              <span className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium bg-secondary/70 border border-border/60 text-foreground/80">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />{pipeline.count} open
+              </span>
+            )}
+            {perms.value && pipeline.count > 0 && (
+              <span title={`Estimated value of open requests (staff estimate, else Pricing Matrix price)${pipeline.pendingValue > 0 ? ` · ${inrFmt(pipeline.pendingValue)} not started` : ''}`}
+                className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium bg-violet-500/8 border border-violet-500/20 text-violet-700 dark:text-violet-300">
+                <b className="font-semibold">{inrFmt(pipeline.value)}</b>
+              </span>
+            )}
+            {openLoad.unassigned > 0 && (
+              <button onClick={() => setAssigneeFilter(assigneeFilter === 'unassigned' ? '' : 'unassigned')}
+                title="Show only open requests nobody is assigned to"
+                className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium border transition-colors ${
+                  assigneeFilter === 'unassigned'
+                    ? 'bg-amber-500 text-white border-amber-500'
+                    : 'bg-amber-500/10 border-amber-500/25 text-amber-700 dark:text-amber-300 hover:bg-amber-500/15'}`}>
+                <UserRound className="w-3 h-3" />{openLoad.unassigned} unassigned
+              </button>
+            )}
+          </div>
         )}
         {migrated && (
-          <Link href="/dashboard/requests/whatsapp"
-            title="Read the client WhatsApp chats (read-only)"
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-medium border border-border bg-card hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors shrink-0">
-            <MessageCircle className="w-3.5 h-3.5" /><span className="hidden sm:inline">WhatsApp chats</span>
-          </Link>
-        )}
-        {perms.manage && migrated && (
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={() => { setShowShare(true); setShareClientId(clientFilter || ''); setShareIncludeCompleted(false) }}
-              title="Share a client's request status as an image"
-              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-medium border border-border bg-card hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
-              <Share2 className="w-3.5 h-3.5" /><span className="hidden sm:inline">Share</span>
-            </button>
-            {can('capture.use') && (
+          <div className="flex items-center gap-2 shrink-0 ml-auto">
+            {perms.manage && can('capture.use') && (
               <button onClick={handleAiCaptureClick}
                 title="Create a new request from clipboard — same as the Cirqle Desktop toolbar's New Request button"
                 className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-medium border border-violet-500/30 bg-violet-500/5 hover:bg-violet-500/10 text-violet-700 dark:text-violet-300 transition-colors">
                 <Sparkles className="w-3.5 h-3.5" /><span className="hidden sm:inline">AI Capture</span>
               </button>
             )}
-            <button onClick={() => setShowNewMenu(true)}
-              className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-xs font-semibold gradient-bg text-white shadow-sm hover:opacity-90 transition-opacity">
-              <Plus className="w-4 h-4" /> New Request <ChevronDown className="w-3 h-3 opacity-80" />
-            </button>
+            {perms.manage && (
+              <button onClick={() => setShowNewMenu(true)}
+                className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-xs font-semibold gradient-bg text-white shadow-sm hover:opacity-90 transition-opacity">
+                <Plus className="w-4 h-4" /> New Request <ChevronDown className="w-3 h-3 opacity-80" />
+              </button>
+            )}
+            <OverflowMenu
+              label="More"
+              items={[
+                { label: 'Pending by client', icon: Inbox, onClick: () => router.push('/dashboard/requests/pending') },
+                { label: 'WhatsApp chats', icon: MessageCircle, onClick: () => router.push('/dashboard/requests/whatsapp') },
+                ...(perms.manage ? [{
+                  label: 'Share status as image', icon: Share2,
+                  onClick: () => { setShowShare(true); setShareClientId(clientFilter || ''); setShareIncludeCompleted(false) },
+                }] : []),
+              ]}
+            />
           </div>
         )}
       </div>
-
-      {/* At-a-glance: what's open, what it's worth, and the pile nobody owns.
-          "Unassigned" is a shortcut straight into that filter. */}
-      {migrated && (pipeline.count > 0 || openLoad.unassigned > 0) && (
-        <div className="flex items-center gap-2 flex-wrap mt-3">
-          {pipeline.count > 0 && (
-            <span className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium bg-secondary/70 border border-border/60 text-foreground/80">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />{pipeline.count} open
-            </span>
-          )}
-          {perms.value && pipeline.count > 0 && (
-            <span title="Estimated value of open requests (staff estimate, else Pricing Matrix price)"
-              className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium bg-violet-500/8 border border-violet-500/20 text-violet-700 dark:text-violet-300">
-              Pipeline <b className="font-semibold">{inrFmt(pipeline.value)}</b>
-              {pipeline.pendingValue > 0 && <span className="text-violet-700/70 dark:text-violet-300/70">· {inrFmt(pipeline.pendingValue)} not started</span>}
-            </span>
-          )}
-          {openLoad.unassigned > 0 && (
-            <button onClick={() => setAssigneeFilter(assigneeFilter === 'unassigned' ? '' : 'unassigned')}
-              title="Show only open requests nobody is assigned to"
-              className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium border transition-colors ${
-                assigneeFilter === 'unassigned'
-                  ? 'bg-amber-500 text-white border-amber-500'
-                  : 'bg-amber-500/10 border-amber-500/25 text-amber-700 dark:text-amber-300 hover:bg-amber-500/15'}`}>
-              <UserRound className="w-3 h-3" />{openLoad.unassigned} unassigned
-            </button>
-          )}
-        </div>
-      )}
 
       {!migrated && (
         <div className="mt-4 flex items-start gap-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
@@ -1531,9 +1518,9 @@ export default function RequestsClient({
       {/* ── Search + filters ────────────────────────────────────────────────
           Filters wrap onto a second line instead of scrolling sideways, so
           none of them is ever clipped. View toggle + Select sit at the end. */}
-      <div className="flex flex-col gap-2 mb-3">
+      <div className="flex flex-col lg:flex-row lg:items-center gap-2 mb-3">
         <TokenizedSearch
-          className="w-full"
+          className="w-full lg:flex-1 lg:min-w-0"
           facets={searchFacets}
           onFacetsChange={setSearchFacets}
           draft={searchDraft}
@@ -1548,7 +1535,7 @@ export default function RequestsClient({
             { key: 'ref', label: 'REQ #', type: 'text' },
           ]}
         />
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap lg:flex-nowrap lg:shrink-0">
           <select value={clientFilter} onChange={e => setClientFilter(e.target.value)}
             title="Filter by client"
             className={`${FILTER_SELECT} ${clientFilter ? FILTER_SELECT_ON : ''}`}>
@@ -1639,11 +1626,6 @@ export default function RequestsClient({
           onDragStart={e => setBoardDragId(String(e.active.id))}
           onDragCancel={() => setBoardDragId(null)}
           onDragEnd={handleBoardDrop}>
-        {canBoardDrag && (
-          <p className="text-[11px] text-muted-foreground -mt-1 mb-2">
-            Drag a card to another column to move it. Once a request has a task, the move changes the task.
-          </p>
-        )}
         <div className="flex gap-3 overflow-x-auto pb-4 items-start">
           {boardCols.map(col => {
             const pending = col.rows.filter(r => PENDING_STATUSES.includes(r.status)).length
@@ -1760,8 +1742,8 @@ export default function RequestsClient({
           <div className="flex items-center justify-between px-1 pb-0.5 text-[11px] text-muted-foreground">
             <span>{rows.length} request{rows.length === 1 ? '' : 's'}</span>
             {isDraggableTab && rows.length > 1 && (
-              <span className="flex items-center gap-1 text-muted-foreground/70">
-                <GripVertical className="w-3.5 h-3.5" /> Drag to set priority · tap #N to type it
+              <span className="flex items-center gap-1 text-muted-foreground/70" title="Drag a row to set its priority, or tap its #N to type one">
+                <GripVertical className="w-3.5 h-3.5" /> Priority order
               </span>
             )}
           </div>

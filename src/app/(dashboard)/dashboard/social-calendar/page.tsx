@@ -1,10 +1,16 @@
 import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers'
 import { withDraftFlag } from '@/lib/clients/draft'
 import { createAdminClient } from '@/lib/supabase/server'
 import { coverageTaskColumns } from '@/lib/packages/coverage-select'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { getCompanySettings } from '@/lib/settings/company-settings'
+import { todayISO } from '@/lib/utils/local-date'
+import {
+  tallyPlan, pickDefaultPlan, shiftMonthKey, type FocusItem, type PlanTally,
+} from '@/lib/social/plan-focus'
+import { LAST_PLAN_COOKIE } from '@/lib/social/last-plan'
 import SocialCalendarClient from './social-calendar-client'
 
 export const dynamic = 'force-dynamic'
@@ -108,6 +114,36 @@ export default async function SocialCalendarPage({
   // the base64 logo blobs in this table.
   const companySettingsP: Promise<Record<string, string>> = early(getCompanySettings())
 
+  // ── Where every current plan stands ────────────────────────────────────────
+  // The page has to answer "which plan needs me" before anyone picks one: it
+  // chooses the plan to open on, and feeds the needs-attention strip that
+  // stays on screen. That takes each item's date and pipeline state, which the
+  // plan list below does not carry — so it is read here for the three months
+  // that can still need work (last, this, next) and for nothing older.
+  // Independent of every other read, so it starts with them.
+  const thisMonth = todayISO().slice(0, 7)
+  const focusItemsP: Promise<(FocusItem & { calendar_id: string })[]> = early((async () => {
+    const REQ = `request:task_requests!social_calendar_items_request_id_fkey(
+          status, promoted_task_id,
+          promoted_task:tasks!task_requests_promoted_task_id_fkey(status, deleted_at)
+        )`
+    const run = (cols: string) => admin
+      .from('social_calendar_items')
+      .select(`${cols}, calendar:social_calendars!inner(month, status)`)
+      .gte('calendar.month', `${shiftMonthKey(thisMonth, -1)}-01`)
+      .lte('calendar.month', `${shiftMonthKey(thisMonth, 1)}-01`)
+      .neq('calendar.status', 'archived')
+      .limit(3000)
+    try {
+      // The fuller read needs the direct-task and campaign-range migrations;
+      // a database without them is asked again for what it does have.
+      let res = await run(`calendar_id, scheduled_date, scheduled_end_date, status, request_id, task_id, ${REQ},
+        task:tasks!social_calendar_items_task_id_fkey(status, deleted_at)`)
+      if (res.error) res = await run(`calendar_id, scheduled_date, status, request_id, ${REQ}`)
+      return res.error ? [] : (res.data || []) as unknown as (FocusItem & { calendar_id: string })[]
+    } catch { return [] /* the strip falls back to the plan list's own counts */ }
+  })())
+
   // All plans, newest month first, with just enough embedded item data for
   // the picker's progress counts. Plans are few (one per client per month).
   let calendars: any[] = []
@@ -132,10 +168,38 @@ export default async function SocialCalendarPage({
     calendars = res.data || []
   } catch { migrated = false }
 
+  const focusItems = await focusItemsP
+  const planTallies: Record<string, PlanTally> = {}
+  {
+    const today = todayISO()
+    const byPlan = new Map<string, FocusItem[]>()
+    for (const it of focusItems) {
+      const list = byPlan.get(it.calendar_id)
+      if (list) list.push(it)
+      else byPlan.set(it.calendar_id, [it])
+    }
+    for (const [id, list] of byPlan) planTallies[id] = tallyPlan(list, today)
+  }
+
+  // A link that names a plan wins. Otherwise: the plan this person last
+  // opened, or — when that has gone stale or there is none — whichever plan
+  // most needs attention this month. It used to be simply the newest month,
+  // which from the 20th onward meant opening on next month's untouched plan
+  // while this month's work sat one dropdown away.
+  let lastOpenedId: string | null = null
+  try { lastOpenedId = (await cookies()).get(LAST_PLAN_COOKIE)?.value ?? null } catch { /* no request scope */ }
   const selectedId =
     (requestedCalendarId && calendars.some(c => c.id === requestedCalendarId))
       ? requestedCalendarId
-      : (calendars.find(c => c.status !== 'archived')?.id ?? calendars[0]?.id ?? null)
+      : pickDefaultPlan({
+          plans: calendars.map(c => ({
+            id: c.id, month: String(c.month), status: c.status,
+            clientName: (Array.isArray(c.client) ? c.client[0]?.name : c.client?.name) ?? '',
+          })),
+          tallies: planTallies,
+          lastOpenedId,
+          thisMonth,
+        })
 
   // Full items for the selected plan, with the live pipeline join:
   // item → request → promoted task. The calendar displays this chain's
@@ -410,6 +474,7 @@ export default async function SocialCalendarPage({
       calendars={calendars}
       selectedId={selectedId}
       initialItems={items}
+      planTallies={planTallies}
       packages={packages}
       packageTasks={packageTasks}
       deliveredTasks={deliveredTasks}

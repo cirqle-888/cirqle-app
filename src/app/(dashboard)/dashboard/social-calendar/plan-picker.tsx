@@ -34,6 +34,8 @@ export interface PlanOption {
   total: number
   /** Items already handed on (a request or a task holds them). */
   sent: number
+  /** Items whose date has passed unfinished — known for recent months only. */
+  late?: number
 }
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -51,8 +53,10 @@ const shiftMonth = (key: string, by: number) => {
 }
 
 /** Plain-words state of a plan, and the tone it is drawn in. */
-function planState(p: PlanOption): { label: string; tone: 'muted' | 'amber' | 'green' | 'blue' } {
+function planState(p: PlanOption): { label: string; tone: 'muted' | 'amber' | 'green' | 'blue' | 'red' } {
   if (p.status === 'archived') return { label: 'Archived', tone: 'muted' }
+  // Late outranks every other state: it is the one that is already costing something.
+  if (p.late) return { label: `${p.late} late`, tone: 'red' }
   if (p.total === 0) return { label: 'Empty', tone: 'muted' }
   if (p.status === 'draft') return { label: `Draft · ${p.total}`, tone: 'amber' }
   const left = p.total - p.sent
@@ -61,11 +65,12 @@ function planState(p: PlanOption): { label: string; tone: 'muted' | 'amber' | 'g
   return { label: `${left} to send`, tone: 'amber' }
 }
 
-const TONE: Record<'muted' | 'amber' | 'green' | 'blue', string> = {
+const TONE: Record<'muted' | 'amber' | 'green' | 'blue' | 'red', string> = {
   muted: 'text-muted-foreground',
   amber: 'text-amber-600 dark:text-amber-400',
   green: 'text-emerald-600 dark:text-emerald-400',
   blue: 'text-blue-600 dark:text-blue-400',
+  red: 'text-red-600 dark:text-red-400',
 }
 
 type Row =

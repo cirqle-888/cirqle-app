@@ -72,9 +72,9 @@ export function DiscussButton({ entityType, entityId, label = 'Discuss', variant
   }
   return (
     <>
-      <button onClick={open} disabled={pending}
+      <button onClick={open} disabled={pending} title={label ? undefined : 'Discuss'} aria-label={label ? undefined : 'Discuss'}
         className={className ?? 'inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50'}>
-        <MessageSquare className={className ? 'h-4 w-4' : 'h-3.5 w-3.5'} /> {pending ? 'Opening…' : label}
+        <MessageSquare className={className ? 'h-4 w-4' : 'h-3.5 w-3.5'} />{label ? <> {pending ? 'Opening…' : label}</> : null}
       </button>
       {panel}
     </>

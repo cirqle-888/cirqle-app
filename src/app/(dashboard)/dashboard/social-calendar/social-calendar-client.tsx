@@ -25,6 +25,10 @@ import { DiscussButton } from '@/components/chat/discuss-button'
 import { OverflowMenu, type OverflowItem } from '@/components/ui/overflow-menu'
 import { PlanPicker, type PlanOption } from './plan-picker'
 import {
+  itemBucket, openCount, urgency, shiftMonthKey, EMPTY_TALLY, type Bucket, type PlanTally,
+} from '@/lib/social/plan-focus'
+import { LAST_PLAN_COOKIE, LAST_PLAN_PATH, LAST_PLAN_MAX_AGE } from '@/lib/social/last-plan'
+import {
   DndContext, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable,
   pointerWithin, type DragEndEvent,
 } from '@dnd-kit/core'
@@ -112,6 +116,9 @@ interface Props {
   calendars: CalendarRow[]
   selectedId: string | null
   initialItems: ItemRow[]
+  /** Where each plan of last / this / next month stands, by plan id — the
+   *  needs-attention strip. A plan outside those months has no entry. */
+  planTallies?: Record<string, PlanTally>
   /** Packages this client has committed to, with their included lines. */
   packages?: (PackageRow & { items: PackageItemRow[] })[]
   /** Tasks already linked to those packages — what has actually been delivered. */
@@ -273,28 +280,8 @@ function DroppableZone({ id, className, activeClassName, disabled, children }: {
   )
 }
 
-// ── Where an item stands ─────────────────────────────────────────────────────
-// The pipeline has six states, which is right for the Board but too many to
-// read off a month at a glance. On the calendar they fold into the four things
-// a planner asks: is it done, is someone on it, is it still to come, and has
-// its day passed without it being finished.
-type Bucket = 'done' | 'active' | 'planned' | 'late'
-
-function itemBucket(
-  progress: ItemProgress,
-  it: { scheduled_date: string | null; scheduled_end_date?: string | null },
-  today: string,
-): Bucket | null {
-  if (progress === 'cancelled') return null
-  // Delivered counts as done, as it does for the monthly report: the client
-  // has the work, whatever their review still says.
-  if (progress === 'done' || progress === 'delivered') return 'done'
-  const start = it.scheduled_date
-  // A campaign is late only once its LAST day has gone.
-  const due = it.scheduled_end_date && start && it.scheduled_end_date > start ? it.scheduled_end_date : start
-  if (due && due < today) return 'late'
-  return progress === 'planned' ? 'planned' : 'active'
-}
+// Where an item stands — done / active / planned / late — is worked out in
+// lib/social/plan-focus, shared with the server so both mean the same by "late".
 
 const BUCKETS: { key: Bucket; label: string; hint: string; Icon: LucideIcon; text: string; bar: string }[] = [
   { key: 'done',    label: 'Done',        hint: 'Finished, or delivered to the client',          Icon: CheckCircle2, text: 'text-emerald-600 dark:text-emerald-400', bar: 'bg-emerald-500' },
@@ -378,7 +365,7 @@ function PlanCard({ it, progress, bucket, compact, dimmed, showStatus = true, sh
 }
 
 export default function SocialCalendarClient({
-  migrated, calendars, selectedId, initialItems, clients, services = [], serviceMap = {}, companySettings = {}, canManage,
+  migrated, calendars, selectedId, initialItems, planTallies = {}, clients, services = [], serviceMap = {}, companySettings = {}, canManage,
   knownVariants = [], employees = [], packages = [], packageTasks = [], deliveredTasks = [],
   employeeDepartments = {}, employeeServices = {}, departments = [],
 }: Props) {
@@ -614,6 +601,10 @@ export default function SocialCalendarClient({
   // Deleting a plan now sits in the "…" menu, one mis-click from Archive, so it
   // asks first.
   const [confirmDeletePlan, setConfirmDeletePlan] = useState(false)
+  // Package commitments show as one line each until opened — the full panel is
+  // four rows of figures, which is right when you are planning against the
+  // retainer and too much to sit above the calendar the rest of the time.
+  const [openPackages, setOpenPackages] = useState<Record<string, boolean>>({})
 
   // ── Delivered overlay ──────────────────────────────────────────────────────
   // OFF by default: the calendar's job is planning, and every month's finished
@@ -1089,6 +1080,53 @@ export default function SocialCalendarClient({
 
   const thisMonth = todayISO().slice(0, 7)
 
+  // Remember the plan this person OPENED, so the section returns to it. Only
+  // a plan named in the link counts — picking one here, or arriving from a
+  // task or a notification. The plan the page chose by itself is not written
+  // back: that would freeze "most urgent" on whatever was urgent the first
+  // time, instead of re-asking on every visit.
+  useEffect(() => {
+    if (!selectedId) return
+    try {
+      if (new URLSearchParams(window.location.search).get('calendar') !== selectedId) return
+      document.cookie = `${LAST_PLAN_COOKIE}=${encodeURIComponent(selectedId)}; path=${LAST_PLAN_PATH}; max-age=${LAST_PLAN_MAX_AGE}; samesite=lax`
+    } catch { /* cookies blocked — the page still opens on the most urgent plan */ }
+  }, [selectedId])
+
+  /**
+   * The plans that can still need work, most urgent first: everything for this
+   * month, last month's only while something in it is unfinished, and next
+   * month's after those. The plan on screen uses the figures from its loaded
+   * items, so the strip moves the moment a card is sent or dragged.
+   */
+  const focusPlans = useMemo(() => {
+    const lastMonth = shiftMonthKey(thisMonth, -1)
+    const nextMonth = shiftMonthKey(thisMonth, 1)
+    const rows = calendars
+      .filter(c => c.status !== 'archived')
+      .map(c => {
+        const key = c.month.slice(0, 7)
+        let tally = planTallies[c.id]
+        if (c.id === selectedId) {
+          tally = {
+            ...summary.counts, total: summary.total,
+            toSend: items.filter(i => i.scheduled_date && isUnrouted(i)).length,
+          }
+        } else if (!tally) {
+          // No tally (an empty plan, or the fuller read failed): fall back to
+          // what the plan list knows — how many items, how many unsent.
+          const live = (c.items ?? []).filter(i => i.status !== 'cancelled')
+          const unsent = live.filter(i => !i.request_id && !i.task_id && i.status === 'planned').length
+          tally = { ...EMPTY_TALLY, total: live.length, planned: unsent, active: live.length - unsent, toSend: unsent }
+        }
+        return { id: c.id, key, name: c.client?.name ?? 'Client', status: c.status, tally }
+      })
+      .filter(r => r.key === thisMonth || r.key === nextMonth || (r.key === lastMonth && openCount(r.tally) > 0))
+    const rank = (r: (typeof rows)[number]) => (r.key === nextMonth ? 1 : 0)
+    return rows.sort((a, b) =>
+      rank(a) - rank(b) || urgency(b.tally) - urgency(a.tally) || a.name.localeCompare(b.name))
+  }, [calendars, planTallies, selectedId, summary, items, thisMonth])
+
   /** Every plan as the picker shows it. The list query carries only each
    *  item's status and links, so "sent" is a count of items something already
    *  holds; the plan on screen uses the exact figure from its loaded items. */
@@ -1098,12 +1136,13 @@ export default function SocialCalendarClient({
     return {
       id: c.id, clientId: c.client_id, clientName: c.client?.name ?? 'Client',
       month: c.month, title: c.title, status: c.status,
+      late: exact ? summary.counts.late : (planTallies[c.id]?.late ?? 0),
       total: exact ? items.filter(i => i.status !== 'cancelled').length : live.length,
       sent: exact
         ? items.filter(i => i.status !== 'cancelled' && !isUnrouted(i)).length
         : live.filter(i => i.request_id || i.task_id || i.status !== 'planned').length,
     }
-  }), [calendars, selectedId, items])
+  }), [calendars, selectedId, items, planTallies, summary])
 
   function openPlan(id: string) {
     router.push(`/dashboard/social-calendar?calendar=${id}`)
@@ -1122,6 +1161,7 @@ export default function SocialCalendarClient({
   ]
 
   const moreItems: OverflowItem[] = !selected || !canManage ? [] : [
+    { label: 'New plan', icon: Plus, onClick: () => openNewPlan() },
     ...(services.length > 0 ? [{
       label: 'Service defaults', icon: Settings2,
       onClick: () => { setServiceMapDraft({ ...serviceMap }); setShowServiceDefaults(true) },
@@ -1231,21 +1271,71 @@ export default function SocialCalendarClient({
     <>
       <Header
         title="Social Calendar"
-        subtitle="Plan each client's month, then send it to Requests"
       />
       <div className="p-4 md:p-6 space-y-5">
 
       <SocialTabs />
 
       {/*
+        ── Needs attention ──
+        Always here, whichever plan is open: every plan that can still need
+        work, most urgent first, each one click away. One line that scrolls
+        sideways, so a dozen clients cost no more height than two.
+      */}
+      {focusPlans.length > 1 && (() => {
+        const pending = focusPlans.filter(r => r.key !== shiftMonthKey(thisMonth, 1) && openCount(r.tally) > 0).length
+        return (
+          <div className="flex items-center gap-3 rounded-xl border border-border bg-card py-2 pl-3">
+            <div className="shrink-0 leading-tight">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{monthLabel(`${thisMonth}-01`).split(' ')[0]}</div>
+              <div className={`text-xs font-medium ${pending ? '' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                {pending ? `${pending} plan${pending === 1 ? '' : 's'} open` : 'All done'}
+              </div>
+            </div>
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pr-3 [scrollbar-width:thin]">
+              {focusPlans.map(r => {
+                const t = r.tally
+                const on = r.id === selectedId
+                const open = openCount(t)
+                const dot = t.late > 0 ? 'bg-red-500' : t.toSend > 0 ? 'bg-amber-500' : open > 0 ? 'bg-blue-500'
+                  : t.total > 0 ? 'bg-emerald-500' : 'bg-foreground/25'
+                return (
+                  <button key={r.id} type="button" onClick={() => { if (!on) openPlan(r.id) }}
+                    aria-current={on ? 'true' : undefined}
+                    title={`${r.name} — ${monthLabel(`${r.key}-01`)}: ${t.done} of ${t.total} done`}
+                    className={`inline-flex shrink-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+                      on ? 'border-primary/40 bg-primary/[0.07]' : 'border-border hover:bg-secondary'}`}>
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />
+                    <span className={`max-w-[180px] truncate ${on ? 'font-semibold' : 'font-medium'}`}>{r.name}</span>
+                    {r.key !== thisMonth && (
+                      <span className="rounded bg-foreground/[0.07] px-1 text-[10px] text-muted-foreground">{monthLabel(`${r.key}-01`).slice(0, 3)}</span>
+                    )}
+                    {r.status === 'draft' && <span className="text-amber-600 dark:text-amber-400">Draft</span>}
+                    {t.late > 0 && <span className="font-medium tabular-nums text-red-600 dark:text-red-400">{t.late} late</span>}
+                    {t.toSend > 0 && <span className="tabular-nums text-amber-600 dark:text-amber-400">{t.toSend} to send</span>}
+                    {t.active > 0 && <span className="tabular-nums text-blue-600 dark:text-blue-400">{t.active} in progress</span>}
+                    {open === 0 && (t.total > 0
+                      ? <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="h-3 w-3" /> Done</span>
+                      : <span className="text-muted-foreground">Empty</span>)}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/*
         ── Toolbar ──
-        Two rows with two different jobs. The top row is the plan itself: which
-        one, and the one thing to do with it next. The second row is how you are
-        looking at it and the tools around it. Anything done once a month or less
-        (service defaults, archive, delete) lives behind the "…".
+        Two thin rows in one card. The top row is the plan and what you do with
+        it: which one, the tools, and the one filled button. The second row is
+        how you are looking at it and where the month stands — done, late, and
+        what is next — so that answer costs no row of its own. Anything done
+        once a month or less (new plan, service defaults, archive, delete) is
+        behind the picker or the "…".
       */}
       <div className="rounded-xl border border-border bg-card">
-        <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2">
           <PlanPicker
             plans={planOptions}
             selectedId={selected?.id ?? null}
@@ -1271,14 +1361,43 @@ export default function SocialCalendarClient({
           )}
 
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-            {canManage && (
-              // The page's one filled button is whatever comes next: sending
-              // what is planned, or — with nothing waiting — starting a plan.
+            {selected && (
+              <>
+                <CopyForAi clientId={selected.client_id} align="right" compact />
+                {canManage && (
+                  <ImportPlanButton
+                    clientId={selected.client_id}
+                    clientName={selected.client?.name}
+                    month={selected.month.slice(0, 7)}
+                    label="Import"
+                    onDone={() => router.refresh()}
+                  />
+                )}
+                {items.length > 0 && (
+                  <OverflowMenu
+                    items={exportItems}
+                    icon={exporting ? Loader2 : Download}
+                    text="Export"
+                    label="Export this plan"
+                  />
+                )}
+                {/* Plan discussion — chatter side panel, one room per plan */}
+                <DiscussButton
+                  entityType="plan"
+                  entityId={selected.id}
+                  label=""
+                  panelTitle={`${selected.client?.name ?? 'Plan'} — ${monthLabel(selected.month)}`}
+                  className="inline-flex shrink-0 items-center justify-center rounded-lg border border-border bg-secondary px-2.5 py-2 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+                />
+                <OverflowMenu items={moreItems} label="More plan actions" />
+              </>
+            )}
+            {/* With no plan open there is nothing else to do, so New Plan is
+                the button. With one open it lives in the picker and the "…". */}
+            {canManage && !selected && (
               <button
                 onClick={() => openNewPlan()}
-                className={unpushed.length > 0 && selected
-                  ? 'inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium transition-colors hover:border-primary/40'
-                  : 'inline-flex items-center gap-1.5 rounded-lg gradient-bg px-3 py-2 text-sm font-medium text-white hover:opacity-90'}
+                className="inline-flex items-center gap-1.5 rounded-lg gradient-bg px-3 py-2 text-sm font-medium text-white hover:opacity-90"
               >
                 <Plus className="h-4 w-4" /> New Plan
               </button>
@@ -1298,25 +1417,69 @@ export default function SocialCalendarClient({
         </div>
 
         {selected && (
-          <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border px-3 py-1.5">
             <div className="inline-flex rounded-lg border border-border bg-secondary p-0.5" role="group" aria-label="View">
               {([['calendar', 'Calendar', CalendarDays], ['board', 'Board', LayoutGrid]] as const).map(([key, label, Icon]) => (
-                <button key={key} onClick={() => setViewMode(key)} aria-pressed={viewMode === key}
-                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors ${
+                <button key={key} onClick={() => setViewMode(key)} aria-pressed={viewMode === key} title={label}
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
                     viewMode === key ? 'bg-card font-medium text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-                  <Icon className="h-4 w-4" /> {label}
+                  <Icon className="h-3.5 w-3.5" /> {label}
                 </button>
               ))}
             </div>
+
+            {/* Where the month stands. The counts double as a spotlight — pick
+                one and every other card fades back. */}
+            {summary.total > 0 && (
+              <>
+                <div className="flex w-36 items-center gap-2" title={`${summary.counts.done} of ${summary.total} done`}>
+                  <div className="flex h-1.5 flex-1 overflow-hidden rounded-full bg-foreground/10"
+                    role="img" aria-label={`${summary.counts.done} of ${summary.total} done`}>
+                    {(['done', 'active', 'late'] as const).map(k => summary.counts[k] > 0 && (
+                      <div key={k} className={BUCKETS.find(b => b.key === k)!.bar}
+                        style={{ width: `${(summary.counts[k] / summary.total) * 100}%` }} />
+                    ))}
+                  </div>
+                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                    <span className="font-semibold text-foreground">{summary.counts.done}</span>/{summary.total}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Highlight by status">
+                  {BUCKETS.filter(b => summary.counts[b.key] > 0).map(b => {
+                    const on = focus === b.key
+                    return (
+                      <button key={b.key} type="button" aria-pressed={on}
+                        onClick={() => setFocus(on ? null : b.key)}
+                        title={on ? 'Show everything again' : `${b.hint} — click to highlight`}
+                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors ${
+                          on ? 'border-foreground/30 bg-secondary font-medium text-foreground'
+                            : focus ? 'border-transparent text-muted-foreground opacity-60 hover:opacity-100'
+                            : 'border-transparent text-foreground hover:bg-secondary'}`}>
+                        <b.Icon className={`h-3.5 w-3.5 ${b.text}`} />
+                        <span className="tabular-nums font-semibold">{summary.counts[b.key]}</span>
+                        <span className="text-muted-foreground">{b.label}</span>
+                      </button>
+                    )
+                  })}
+                  {focus && (
+                    <button type="button" onClick={() => setFocus(null)} title="Show everything again" aria-label="Clear highlight"
+                      className="inline-flex items-center p-1 text-muted-foreground hover:text-foreground">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+
             {moveHistory.length > 0 && (() => {
               const last = moveHistory[moveHistory.length - 1]
               return (
                 <button
                   onClick={() => void undoMove()}
                   title={`Put "${last.title}" back on ${dayLabel(last.from)} (Ctrl/Cmd+Z)`}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-sm font-medium text-amber-600 transition-colors hover:bg-amber-500/15 dark:text-amber-400">
-                  <Undo2 className="h-4 w-4" />
-                  Undo move{moveHistory.length > 1 ? ` (${moveHistory.length})` : ''}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600 transition-colors hover:bg-amber-500/15 dark:text-amber-400">
+                  <Undo2 className="h-3.5 w-3.5" />
+                  Undo{moveHistory.length > 1 ? ` (${moveHistory.length})` : ''}
                 </button>
               )
             })()}
@@ -1326,44 +1489,26 @@ export default function SocialCalendarClient({
               <button
                 onClick={toggleDelivered} aria-pressed={showDelivered}
                 title="Work delivered for this client this month that was not on the plan"
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-sm transition-colors ${
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs transition-colors ${
                   showDelivered
                     ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                     : 'border-border bg-card text-muted-foreground hover:text-foreground'}`}>
-                <CheckCircle2 className="h-4 w-4" />
-                Off-plan work
-                <span className="rounded-full bg-foreground/10 px-1.5 text-[11px] tabular-nums">{deliveredTasks.length}</span>
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Off-plan
+                <span className="tabular-nums">{deliveredTasks.length}</span>
               </button>
             )}
 
-            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-              <CopyForAi clientId={selected.client_id} align="right" />
-              {canManage && (
-                <ImportPlanButton
-                  clientId={selected.client_id}
-                  clientName={selected.client?.name}
-                  month={selected.month.slice(0, 7)}
-                  onDone={() => router.refresh()}
-                />
-              )}
-              {items.length > 0 && (
-                <OverflowMenu
-                  items={exportItems}
-                  icon={exporting ? Loader2 : Download}
-                  text="Export"
-                  label="Export this plan"
-                />
-              )}
-              {/* Plan discussion — chatter side panel, one room per plan */}
-              <DiscussButton
-                entityType="plan"
-                entityId={selected.id}
-                label="Discuss"
-                panelTitle={`${selected.client?.name ?? 'Plan'} — ${monthLabel(selected.month)}`}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-              />
-              <OverflowMenu items={moreItems} label="More plan actions" />
-            </div>
+            {summary.next && (
+              <button type="button" onClick={() => openEdit(summary.next!)}
+                title={`Next up: ${summary.next.title} — ${untilLabel(summary.next.scheduled_date!)}`}
+                className="group ml-auto flex min-w-0 max-w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-xs transition-colors hover:bg-secondary">
+                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Next</span>
+                <span className="shrink-0 font-medium tabular-nums">{dayLabel(summary.next.scheduled_date)}</span>
+                <span className="min-w-0 truncate text-muted-foreground group-hover:text-foreground sm:max-w-[220px]">{summary.next.title}</span>
+                <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1377,78 +1522,6 @@ export default function SocialCalendarClient({
         </div>
       ) : (
         <>
-          {/*
-            ── Where the month stands ──
-            The answer to "what have we done and what is next", before a single
-            cell is read: how much is finished, how much is late, and the next
-            piece on the schedule. The four counts double as a spotlight — pick
-            one and every other card fades back.
-          */}
-          {summary.total > 0 && (
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-2.5 rounded-xl border border-border bg-card px-3 py-2.5">
-              <div className="flex min-w-[200px] flex-1 items-center gap-3 sm:max-w-[280px]">
-                <div className="flex h-2 flex-1 overflow-hidden rounded-full bg-foreground/10"
-                  role="img" aria-label={`${summary.counts.done} of ${summary.total} done`}>
-                  {(['done', 'active', 'late'] as const).map(k => summary.counts[k] > 0 && (
-                    <div key={k} className={BUCKETS.find(b => b.key === k)!.bar}
-                      style={{ width: `${(summary.counts[k] / summary.total) * 100}%` }} />
-                  ))}
-                </div>
-                <span className="shrink-0 text-xs tabular-nums">
-                  <span className="font-semibold">{summary.counts.done}</span>
-                  <span className="text-muted-foreground"> of {summary.total} done</span>
-                </span>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Highlight by status">
-                {BUCKETS.filter(b => summary.counts[b.key] > 0).map(b => {
-                  const on = focus === b.key
-                  return (
-                    <button key={b.key} type="button" aria-pressed={on}
-                      onClick={() => setFocus(on ? null : b.key)}
-                      title={on ? 'Show everything again' : `${b.hint} — click to highlight`}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
-                        on ? 'border-foreground/30 bg-secondary font-medium text-foreground'
-                          : focus ? 'border-border text-muted-foreground opacity-60 hover:opacity-100'
-                          : 'border-border text-foreground hover:bg-secondary'}`}>
-                      <b.Icon className={`h-3.5 w-3.5 ${b.text}`} />
-                      {b.label}
-                      <span className="tabular-nums font-semibold">{summary.counts[b.key]}</span>
-                    </button>
-                  )
-                })}
-                {focus && (
-                  <button type="button" onClick={() => setFocus(null)}
-                    className="inline-flex items-center gap-1 px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground">
-                    <X className="h-3 w-3" /> Clear
-                  </button>
-                )}
-                {summary.cancelled > 0 && (
-                  <span className="px-1 text-[11px] text-muted-foreground">{summary.cancelled} cancelled</span>
-                )}
-              </div>
-
-              <div className="ml-auto min-w-0 text-xs">
-                {summary.next ? (
-                  <button type="button" onClick={() => openEdit(summary.next!)}
-                    className="group flex max-w-full items-center gap-2 rounded-lg px-2 py-1 text-left transition-colors hover:bg-secondary">
-                    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Next up</span>
-                    <span className="shrink-0 font-medium tabular-nums">{dayLabel(summary.next.scheduled_date)}</span>
-                    <span className="min-w-0 truncate text-muted-foreground group-hover:text-foreground sm:max-w-[260px]">{summary.next.title}</span>
-                    <span className="hidden shrink-0 text-muted-foreground sm:inline">· {untilLabel(summary.next.scheduled_date!)}</span>
-                    <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  </button>
-                ) : (
-                  <span className="px-2 text-muted-foreground">
-                    {summary.counts.late > 0 ? 'Nothing else scheduled — only the late items are left'
-                      : summary.counts.done === summary.total ? 'Everything on this plan is done'
-                      : 'Nothing left on the schedule'}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-
           {/*
             ── Package commitment ──
             What this client is owed under a package, and whether the month on
@@ -1485,12 +1558,42 @@ export default function SocialCalendarClient({
             const pct = pp.included > 0 ? Math.min(100, Math.round((pp.delivered / pp.included) * 100)) : 0
             const plannedPct = pp.included > 0 ? Math.min(100 - pct, Math.round((pp.planned / pp.included) * 100)) : 0
             const cadence = cadenceLabel(pp.cadence)
+            const pkgOpen = !!openPackages[pp.packageId]
 
             return (
-              <div key={pp.packageId} className="rounded-xl border border-border bg-card px-4 py-3">
+              <div key={pp.packageId} className={`rounded-xl border border-border bg-card px-3 ${pkgOpen ? 'py-3' : 'py-1.5'}`}>
                 <div className="flex items-center gap-2 flex-wrap">
                   <PackageIcon className="w-3.5 h-3.5 text-primary shrink-0" />
                   <span className="text-xs font-semibold">{pp.name}</span>
+                  {!pkgOpen && (
+                    <>
+                      <span className="flex h-1.5 w-20 overflow-hidden rounded-full bg-secondary" aria-hidden>
+                        <span className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
+                        <span className="h-full bg-emerald-500/35" style={{ width: `${plannedPct}%` }} />
+                      </span>
+                      <span className="text-[11px] tabular-nums">
+                        <span className="font-semibold">{pp.delivered}</span>
+                        <span className="text-muted-foreground">/{pp.included} delivered</span>
+                      </span>
+                      {pp.unplanned > 0 && (
+                        <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400 tabular-nums">{pp.unplanned} to plan</span>
+                      )}
+                      {pp.pace === 'behind' && (
+                        <span className="text-[11px] text-amber-600 dark:text-amber-400 tabular-nums">{pp.behind} behind</span>
+                      )}
+                    </>
+                  )}
+                  <button type="button" aria-expanded={pkgOpen}
+                    onClick={() => setOpenPackages(o => ({ ...o, [pp.packageId]: !pkgOpen }))}
+                    title={pkgOpen ? 'Show less' : 'Show the full package progress'}
+                    className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground">
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${pkgOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                </div>
+
+                {pkgOpen && (
+                <>
+                <div className="mt-1 flex items-center gap-2 flex-wrap">
                   <span className="text-[11px] text-muted-foreground">
                     {pp.deadline
                       ? `${pp.isFirstCycle ? 'first cycle' : 'this cycle'} · ${fmtDay(pp.windowStart)} → ${fmtDay(pp.deadline)}`
@@ -1500,7 +1603,7 @@ export default function SocialCalendarClient({
                   </span>
                   <Link href="/dashboard/packages"
                     className="text-[11px] text-muted-foreground hover:text-foreground hover:underline ml-auto">
-                    Package
+                    Open package
                   </Link>
                 </div>
 
@@ -1594,6 +1697,8 @@ export default function SocialCalendarClient({
                       </div>
                     ))}
                   </div>
+                )}
+                </>
                 )}
               </div>
             )
@@ -1777,10 +1882,6 @@ export default function SocialCalendarClient({
               return <span key={k} className="inline-flex items-center gap-1"><Icon className={`h-3 w-3 ${cls}`} /> {label}</span>
             })}
             <span className="inline-flex items-center gap-1"><AlertCircle className="h-3 w-3 text-red-500" /> Late</span>
-            <span className="ml-auto">
-              {canManage ? 'Click a day to add · drag a card to move it · ' : ''}
-              sent items show in <Link href="/dashboard/requests" className="text-primary hover:underline">Requests</Link>
-            </span>
           </div>
         </>
       )}
