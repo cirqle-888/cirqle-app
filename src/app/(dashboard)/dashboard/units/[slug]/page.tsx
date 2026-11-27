@@ -23,7 +23,7 @@ const TABS = [
 type Tab = typeof TABS[number]['key']
 
 const HOW: Record<string, string> = {
-  tagged: 'Tagged', service: 'By service', reversal: 'Reversal', category: 'By category',
+  tagged: 'Tagged', service: 'By service', reversal: 'Reversal', category: 'By category', split: 'Split',
 }
 
 const money = (n: number) => <span className={n < 0 ? 'text-red-600 dark:text-red-400' : ''}>{inr(n)}</span>
@@ -322,9 +322,11 @@ function CashBook({ ledger, untagged, figures, periodLabel, readOnly }: {
                 <td className={td}>{e.date}</td>
                 <td className={td}>{e.description ?? '—'}</td>
                 <td className={td}>{e.categoryName ?? '—'}</td>
-                <td className={tdNum}>{amount(e.type, e.amountInr)}</td>
+                <td className={tdNum}>{amount(e.type, e.shareInr)}{e.splitPct != null && <div className="text-[11px] text-muted-foreground">{e.splitPct}% of {inr(e.amountInr)}</div>}</td>
                 <td className={td}><span className="text-xs text-muted-foreground">{HOW[e.how] ?? e.how}</span></td>
-                {!readOnly && <td className={td}><EntryActions entryId={e.entryId} departmentId={d.id} departmentName={d.name} mode={e.how === 'tagged' ? 'direct-tagged' : 'direct-auto'} /></td>}
+                {!readOnly && <td className={td}>{e.how === 'split'
+                  ? <Link href={`${ROOT}/allocate?month=${e.date.slice(0, 7)}`} className="text-[11px] font-medium text-primary hover:underline">Change split</Link>
+                  : <EntryActions entryId={e.entryId} departmentId={d.id} departmentName={d.name} mode={e.how === 'tagged' ? 'direct-tagged' : 'direct-auto'} />}</td>}
               </tr>
             ))}
           </Table>
@@ -351,7 +353,10 @@ function CashBook({ ledger, untagged, figures, periodLabel, readOnly }: {
 
       {!readOnly && <Card title="Company entries in no unit"
         subtitle="Cash Book payments and receipts that are not invoice payments, transfers or rebilled costs. Tag what belongs to this unit, or mark shared costs General."
-        actions={<BulkTagger entryIds={untagged.map(e => e.id)} departmentId={d.id} departmentName={d.name} />}>
+        actions={<span className="flex flex-wrap items-center gap-2">
+          <Link href={`${ROOT}/allocate`} className="text-xs font-medium text-primary hover:underline">Split or allocate with suggestions →</Link>
+          <BulkTagger entryIds={untagged.map(e => e.id)} departmentId={d.id} departmentName={d.name} />
+        </span>}>
         {untagged.length === 0 ? <Empty>Nothing waiting — every entry is in a unit, General, or left out.</Empty> : (
           <Table head={['Date', 'Description', 'Category', 'Amount', '']}>
             {untagged.map(e => (

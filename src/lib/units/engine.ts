@@ -113,6 +113,8 @@ export interface EngineEntry {
   /** The service category of the entry's service, if it carries one. */
   serviceCategoryId: string | null
   clientId: string | null
+  /** The person a payment was for (salary, advance), when the entry names one. */
+  employeeId?: string | null
   reversalOf: string | null
   /** Internal transfer between Cirqle's own accounts — never income or cost. */
   isTransfer: boolean
@@ -128,8 +130,15 @@ export interface EntryTag {
   isExcluded: boolean
 }
 
+/** One unit's part of a split entry: a percentage or an amount — only the proportions matter. */
+export interface SplitPart {
+  unitId: string
+  share: number
+}
+
 export type EntryKind =
   | { kind: 'dept'; departmentId: string; how: 'tagged' | 'service' | 'reversal' }
+  | { kind: 'split'; parts: SplitPart[]; how: 'split' | 'reversal' }
   | { kind: 'general'; how: 'tagged' | 'category' | 'reversal' }
   | { kind: 'none'; how: 'excluded' | 'untagged' | 'transfer' | 'invoice_receipt' | 'pass_through' | 'reversal' }
 
@@ -179,6 +188,8 @@ export interface DeptEntryRow {
   /** For a General entry: this department's part of it. Equal to amountInr for a direct entry. */
   shareInr: number
   general: boolean
+  /** For a split entry: this unit's percentage of it. */
+  splitPct?: number
 }
 
 export interface DeptLedger {
@@ -207,6 +218,8 @@ export interface EngineInput {
   entries: EngineEntry[]
   tags: Map<string, EntryTag>
   generalCategoryIds: Set<string>
+  /** Entries split across units by share (percent or amount). Wins over a tag. */
+  splits?: Map<string, SplitPart[]>
 }
 
 export interface EngineResult {
@@ -276,7 +289,10 @@ export function classifyEntry(
   catToDept: Map<string, string>,
   generalCategoryIds: Set<string>,
   original?: EntryKind,
+  splits?: Map<string, SplitPart[]>,
 ): EntryKind {
+  const split = splits?.get(e.id)
+  if (split?.length) return { kind: 'split', parts: split, how: 'split' }
   const tag = tags.get(e.id)
   if (tag) {
     if (tag.isExcluded) return { kind: 'none', how: 'excluded' }
@@ -289,6 +305,7 @@ export function classifyEntry(
   if (e.reversalOf && original) {
     if (original.kind === 'dept') return { kind: 'dept', departmentId: original.departmentId, how: 'reversal' }
     if (original.kind === 'general') return { kind: 'general', how: 'reversal' }
+    if (original.kind === 'split') return { kind: 'split', parts: original.parts, how: 'reversal' }
     return { kind: 'none', how: 'reversal' }
   }
   if (e.isPassThrough) return { kind: 'none', how: 'pass_through' }
@@ -320,7 +337,7 @@ export function computeDepartmentShares(input: EngineInput): EngineResult {
     const done = classified.get(e.id)
     if (done) return done
     const orig = e.reversalOf && depth < 5 && byId.has(e.reversalOf) ? classify(byId.get(e.reversalOf)!, depth + 1) : undefined
-    const k = classifyEntry(e, input.tags, anyCat, input.generalCategoryIds, orig)
+    const k = classifyEntry(e, input.tags, anyCat, input.generalCategoryIds, orig, input.splits)
     classified.set(e.id, k)
     return k
   }
@@ -409,6 +426,14 @@ export function computeDepartmentShares(input: EngineInput): EngineResult {
         if (e.type === 'inflow' && !e.reversalOf) addTo(otherIncome, m, Math.abs(e.amountInr))
         else addTo(direct, m, signed(e))
         entries.push(row(e, k.how, Math.abs(e.amountInr), false))
+      } else if (k?.kind === 'split') {
+        const i = k.parts.findIndex(p => p.unitId === dept.id)
+        if (i < 0) continue
+        const part = splitByWeight(Math.abs(e.amountInr), k.parts.map(p => p.share))[i]
+        if (e.type === 'inflow' && !e.reversalOf) addTo(otherIncome, m, part)
+        else addTo(direct, m, (e.type === 'outflow' ? 1 : -1) * part)
+        const total = k.parts.reduce((t, p) => t + Math.max(0, p.share), 0)
+        entries.push({ ...row(e, k.how, part, false), splitPct: total > 0 ? Math.round((k.parts[i].share / total) * 10000) / 100 : 0 })
       } else if (k?.kind === 'general') {
         const sharing = input.departments.filter(d => d.sharesGeneralCosts && runsIn(d, m))
         const i = sharing.findIndex(d => d.id === dept.id)

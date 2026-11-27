@@ -20,7 +20,7 @@ import type { Composition, InvoiceAllocation, InvoiceRaw } from '@/lib/profit-sh
 import { lastDayOfMonthISO, monthStartISO } from '@/lib/utils/local-date'
 import {
   computeDepartmentShares, monthsBetween, type DeptConfig, type EngineCollection, type EngineEntry,
-  type EngineInvoice, type EngineResult, type EntryTag, type RevenueBasis,
+  type EngineInvoice, type EngineResult, type EntryTag, type RevenueBasis, type SplitPart,
 } from './engine'
 
 type Admin = SupabaseClient<any, any, any>
@@ -103,6 +103,28 @@ export interface SharesData {
   generalCategoryIds: string[]
   /** Invoice id → assignment, for the controls. */
   assignments: Map<string, string | null>
+  /** Every Cash Book entry read (the range, plus originals of reversals). */
+  entries: EngineEntry[]
+  /** Entry → its split across units, with how the shares were entered. */
+  splits: Map<string, { parts: SplitPart[]; basis: 'percent' | 'amount' }>
+  /** Entry → its tag (one unit / General / left out). */
+  tags: Map<string, EntryTag>
+}
+
+/** Entry splits; none before migration 20261128120000_unit_entry_splits. */
+export async function loadSplits(admin: Admin): Promise<Map<string, { parts: SplitPart[]; basis: 'percent' | 'amount' }>> {
+  const { data, error } = await admin.from('business_unit_entry_splits').select('entry_id, unit_id, share, basis').order('entry_id')
+  const out = new Map<string, { parts: SplitPart[]; basis: 'percent' | 'amount' }>()
+  if (error) {
+    if (error.code === 'PGRST205' || error.code === '42P01' || /does not exist|schema cache/i.test(error.message ?? '')) return out
+    throw new Error(`Could not read Cash Book splits: ${error.message}`)
+  }
+  for (const r of (data ?? []) as { entry_id: string; unit_id: string; share: number | string; basis: string }[]) {
+    const cur = out.get(r.entry_id) ?? { parts: [], basis: r.basis === 'amount' ? 'amount' as const : 'percent' as const }
+    cur.parts.push({ unitId: r.unit_id, share: num(r.share) })
+    out.set(r.entry_id, cur)
+  }
+  return out
 }
 
 /**
@@ -120,12 +142,13 @@ export async function loadShares(admin: Admin, opts: { fromMonth?: string; toMon
   const [ty, tm] = toMonth.split('-').map(Number)
   const end = lastDayOfMonthISO(ty, tm)
 
-  const [generalCategoryIds, tagRows, assignRows, services, cbCats] = await Promise.all([
+  const [generalCategoryIds, tagRows, assignRows, services, cbCats, splits] = await Promise.all([
     loadGeneralCategoryIds(admin),
     rows(fetchAll(admin.from('business_unit_entries').select('entry_id, unit_id, is_general, is_excluded').order('entry_id')), 'Cash Book tags'),
     rows(fetchAll(admin.from('business_unit_invoices').select('invoice_id, unit_id').order('invoice_id')), 'invoice assignments'),
     rows(fetchAll(admin.from('services').select('id, category_id').order('id')), 'services'),
     rows(fetchAll(admin.from('cashbook_categories').select('id, name').order('id')), 'Cash Book categories'),
+    loadSplits(admin),
   ])
   const serviceCategory = new Map(services.map(s => [s.id as string, (s.category_id as string | null) ?? null]))
   const cbCatName = new Map(cbCats.map(c => [c.id as string, c.name as string]))
@@ -204,11 +227,11 @@ export async function loadShares(admin: Admin, opts: { fromMonth?: string; toMon
     }
   })
 
-  const splits = splitAllocations(allocations.filter(a => compositions.has(a.invoiceId)), receiptDate, compositions)
-  const collections: EngineCollection[] = splits.map(s => ({ invoiceId: s.invoiceId, entryId: s.entryId, on: s.recognisedOn, ownInr: s.ownInr }))
+  const paymentParts = splitAllocations(allocations.filter(a => compositions.has(a.invoiceId)), receiptDate, compositions)
+  const collections: EngineCollection[] = paymentParts.map(s => ({ invoiceId: s.invoiceId, entryId: s.entryId, on: s.recognisedOn, ownInr: s.ownInr }))
 
   // ── Cash Book entries in the range, and the originals of any reversals ──
-  const ENTRY_COLS = 'id, entry_date, type, amount_inr, description, category_id, client_id, service_id, transfer_ref, reversal_of, is_billable, scope'
+  const ENTRY_COLS = 'id, entry_date, type, amount_inr, description, category_id, client_id, employee_id, service_id, transfer_ref, reversal_of, is_billable, scope'
   const entryRows = await rows(fetchAll(admin.from('cashbook_entries').select(ENTRY_COLS)
     .is('deleted_at', null).gte('entry_date', start).lte('entry_date', end).order('id')), 'Cash Book')
   const missing = [...new Set(entryRows.map(e => e.reversal_of).filter((id): id is string => !!id && !entryRows.some(x => x.id === id)))]
@@ -230,15 +253,16 @@ export async function loadShares(admin: Admin, opts: { fromMonth?: string; toMon
     description: e.description ?? null, categoryId: e.category_id ?? null,
     categoryName: e.category_id ? cbCatName.get(e.category_id) ?? null : null,
     serviceCategoryId: e.service_id ? serviceCategory.get(e.service_id) ?? null : null,
-    clientId: e.client_id ?? null, reversalOf: e.reversal_of ?? null, isTransfer: !!e.transfer_ref,
+    clientId: e.client_id ?? null, employeeId: e.employee_id ?? null, reversalOf: e.reversal_of ?? null, isTransfer: !!e.transfer_ref,
     isInvoiceReceipt: receiptSet.has(e.id) || (e.type === 'inflow' && !!e.client_id && e.scope === 'client'),
     isPassThrough: passIds.has(e.id) || !!e.is_billable,
   }))
 
   const result = computeDepartmentShares({
     departments, months, invoices, collections, entries, tags, generalCategoryIds: new Set(generalCategoryIds),
+    splits: new Map([...splits].map(([id, s]) => [id, s.parts])),
   })
-  return { departments, months, result, generalCategoryIds, assignments }
+  return { departments, months, result, generalCategoryIds, assignments, entries, splits, tags }
 }
 
 /** Invoices an admin can assign to a department, newest first (search by number or client name). */

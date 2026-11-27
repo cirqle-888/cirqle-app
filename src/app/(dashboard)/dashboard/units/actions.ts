@@ -17,6 +17,8 @@ import { round2 } from '@/lib/calculations/currency'
 import { slugify, validateDepartment, type RevenueBasis } from '@/lib/units/engine'
 import { loadDepartments, searchInvoices } from '@/lib/units/load'
 import { unitsOfEmployee } from '@/lib/units/membership'
+import { loadAllocation } from '@/lib/units/allocate-load'
+import { validateSplit, type Allocation } from '@/lib/units/suggest'
 import { loadServiceScope } from '@/lib/scope/service-scope'
 import { isNavItemVisible, navSections } from '@/lib/nav-sections'
 import type { CurrentUser } from '@/lib/permissions/check'
@@ -222,6 +224,9 @@ export async function tagEntries(entryIds: string[], choice: EntryTagChoice): Pr
   if (typeof choice === 'object' && !UUID.test(choice.departmentId)) return { ok: false, error: 'Unknown department.' }
   try {
     const admin = createAdminClient()
+    // A tag replaces any split (and "automatic" clears both).
+    const { error: splitErr } = await admin.from('business_unit_entry_splits').delete().in('entry_id', ids)
+    if (splitErr && !missingTable(splitErr)) return fail(splitErr)
     if (choice === 'auto') {
       const { error } = await admin.from('business_unit_entries').delete().in('entry_id', ids)
       if (error) return fail(error)
@@ -374,5 +379,122 @@ export async function checkPerson(employeeId: string): Promise<Result<PersonChec
     return { ok: true, data: { cqid: e.cqid ?? '', designation: d?.name ?? null, reach, pages, clients, clientCount } }
   } catch (err) {
     return fail(err)
+  }
+}
+
+// ═══ Cash Book allocation ═══════════════════════════════════════════════════
+
+export type EntryAllocationChoice =
+  | { kind: 'unit'; unitId: string }
+  | { kind: 'general' }
+  | { kind: 'exclude' }
+  | { kind: 'auto' }
+  | { kind: 'split'; basis: 'percent' | 'amount'; parts: { unitId: string; value: number }[] }
+
+const missingTable = (e: { code?: string; message?: string } | null) =>
+  !!e && (e.code === 'PGRST205' || e.code === '42P01' || /does not exist|schema cache/i.test(e.message ?? ''))
+
+/** Write one entry's allocation. Assumes the caller is an Admin. */
+async function writeAllocation(
+  admin: ReturnType<typeof createAdminClient>, actor: string, entryId: string, choice: EntryAllocationChoice,
+): Promise<Result> {
+  const { data: entry, error: eErr } = await admin.from('cashbook_entries')
+    .select('id, amount_inr, deleted_at').eq('id', entryId).maybeSingle()
+  if (eErr) return fail(eErr)
+  if (!entry || (entry as { deleted_at: string | null }).deleted_at) return { ok: false, error: 'That Cash Book entry no longer exists.' }
+  const { data: allocated } = await admin.from('cashbook_invoice_allocations')
+    .select('cashbook_entry_id').is('deleted_at', null).eq('cashbook_entry_id', entryId).limit(1)
+  if ((allocated ?? []).length) return { ok: false, error: 'An invoice payment is already counted through its invoice. Assign the invoice instead.' }
+
+  if (choice.kind === 'split') {
+    const amount = Number((entry as { amount_inr: number | string }).amount_inr) || 0
+    const problem = validateSplit(choice.parts, choice.basis, amount)
+    if (problem) return { ok: false, error: problem }
+    const { data: units } = await admin.from('business_units').select('id').eq('is_active', true).in('id', choice.parts.map(p => p.unitId))
+    if ((units ?? []).length !== choice.parts.length) return { ok: false, error: 'A unit in the split is unknown or inactive.' }
+    const { error: delSplit } = await admin.from('business_unit_entry_splits').delete().eq('entry_id', entryId)
+    if (delSplit) return missingTable(delSplit)
+      ? { ok: false, error: 'Splitting needs its database migration first (supabase/migrations/20261128120000_unit_entry_splits.sql).' }
+      : fail(delSplit)
+    const { error: delTag } = await admin.from('business_unit_entries').delete().eq('entry_id', entryId)
+    if (delTag) return fail(delTag)
+    const { error } = await admin.from('business_unit_entry_splits').insert(choice.parts.map(p => ({
+      entry_id: entryId, unit_id: p.unitId, share: Math.round(p.value * 10000) / 10000, basis: choice.basis, created_by: actor,
+    })))
+    if (error) return fail(error)
+    return { ok: true }
+  }
+
+  // Not a split: clear any split (before the migration there is none to clear).
+  const { error: delSplit } = await admin.from('business_unit_entry_splits').delete().eq('entry_id', entryId)
+  if (delSplit && !missingTable(delSplit)) return fail(delSplit)
+  if (choice.kind === 'auto') {
+    const { error } = await admin.from('business_unit_entries').delete().eq('entry_id', entryId)
+    return error ? fail(error) : { ok: true }
+  }
+  if (choice.kind === 'unit') {
+    const { data: unit } = await admin.from('business_units').select('id').eq('id', choice.unitId).eq('is_active', true).maybeSingle()
+    if (!unit) return { ok: false, error: 'That unit is unknown or inactive.' }
+  }
+  const { error } = await admin.from('business_unit_entries').upsert({
+    entry_id: entryId,
+    unit_id: choice.kind === 'unit' ? choice.unitId : null,
+    is_general: choice.kind === 'general',
+    is_excluded: choice.kind === 'exclude',
+    created_by: actor,
+    created_at: new Date().toISOString(),
+  }, { onConflict: 'entry_id' })
+  return error ? fail(error) : { ok: true }
+}
+
+/** Allocate one Cash Book entry: one unit, General, a split by % or ₹, left out, or back to automatic. */
+export async function allocateEntry(entryId: string, choice: EntryAllocationChoice): Promise<Result> {
+  const g = await requireAdmin()
+  if (!g.ok) return g
+  if (!UUID.test(entryId)) return { ok: false, error: 'Unknown entry.' }
+  try {
+    const r = await writeAllocation(createAdminClient(), g.employeeId, entryId, choice)
+    if (r.ok) done()
+    return r
+  } catch (e) {
+    return fail(e)
+  }
+}
+
+/** A suggestion as a choice; an equal or learned split is stored as percentages that total exactly 100. */
+function choiceFor(a: Allocation): EntryAllocationChoice {
+  if (a.kind !== 'split') return a.kind === 'unit' ? { kind: 'unit', unitId: a.unitId } : { kind: a.kind }
+  const total = a.parts.reduce((t, p) => t + p.share, 0) || 1
+  const raw = a.parts.map(p => (p.share / total) * 100)
+  const cents = raw.map(v => Math.floor(v * 100))
+  let left = 10000 - cents.reduce((t, v) => t + v, 0)
+  const order = raw.map((v, i) => [v * 100 - Math.floor(v * 100), i] as const).sort((x, y) => y[0] - x[0])
+  for (let k = 0; left > 0 && k < order.length; k++, left--) cents[order[k][1]]++
+  return { kind: 'split', basis: 'percent', parts: a.parts.map((p, i) => ({ unitId: p.unitId, value: cents[i] / 100 })) }
+}
+
+/**
+ * Apply the suggestions for a month — for the listed entries, or for every
+ * waiting entry that has one. Suggestions are worked out again here; nothing
+ * the browser sends is trusted as an allocation.
+ */
+export async function applySuggestions(month: string, entryIds: string[] = []): Promise<Result<{ applied: number; failed: number }>> {
+  const g = await requireAdmin()
+  if (!g.ok) return g
+  if (!/^\d{4}-\d{2}$/.test(month)) return { ok: false, error: 'Pick a month.' }
+  try {
+    const admin = createAdminClient()
+    const data = await loadAllocation(admin, month)
+    const wanted = new Set(entryIds.filter(id => UUID.test(id)))
+    const todo = data.rows.filter(r => r.status === 'waiting' && r.suggestion && (!wanted.size || wanted.has(r.entry.id)))
+    let applied = 0, failed = 0
+    for (const r of todo) {
+      const res = await writeAllocation(admin, g.employeeId, r.entry.id, choiceFor(r.suggestion!.allocation))
+      if (res.ok) applied++; else failed++
+    }
+    done()
+    return { ok: true, data: { applied, failed } }
+  } catch (e) {
+    return fail(e)
   }
 }
