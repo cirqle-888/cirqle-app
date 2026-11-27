@@ -239,17 +239,17 @@ const DOC_LABELS: Record<DocumentKind, { title: string; number: string; due: str
 type LayerPos = 'fixed' | 'absolute'
 
 /**
- * Route a remote logo through our own origin (see src/app/api/invoice-logo).
- * The logo is the one asset that needs this: it lives on cirqle.work, which
- * sends no CORS header, so a crossorigin="anonymous" request there fails and
- * the canvas rasterisation loses it. Other branding assets sit in the public
- * `company-branding` bucket (allow-origin: *) and load directly once
- * resolveBrandingUrl has expanded their `storage:` ref. data: URIs are already
- * inline and are returned untouched.
+ * Route the company logo through our own origin (see src/app/api/invoice-logo).
+ * A logo on cirqle.work sends no CORS header, so a crossorigin="anonymous"
+ * request there fails and the canvas rasterisation loses it. The route also
+ * falls through to the next configured logo when one is a dead link. Uploaded
+ * logos are stored as `storage:` refs, which an <img> cannot load as-is, so
+ * they take the same route. data: URIs are already inline and are returned
+ * untouched.
  */
 function resolveLogoUrl(url: string): string {
   if (!url) return ''
-  return /^https?:\/\//.test(url) ? '/api/invoice-logo' : url
+  return url.startsWith('data:image/') ? url : '/api/invoice-logo'
 }
 
 export interface InvoiceRenderParts {
@@ -312,8 +312,10 @@ export function buildInvoiceParts(
     // A remote logo is served through our own origin — the <img> below carries
     // crossorigin="anonymous" for the PDF canvas, and a CORS request to the
     // asset host fails, which is what left the preview and the downloaded PDF
-    // with no logo. A data: URI needs no request and is used as-is.
-    logoUrl: resolveLogoUrl(companySettings.logo_url_light || companySettings.logo_url || ''),
+    // with no logo. A data: URI needs no request and is used as-is. The
+    // dark-mode logo is the last resort, so an invoice never prints the
+    // placeholder mark while a real logo is uploaded.
+    logoUrl: resolveLogoUrl(companySettings.logo_url_light || companySettings.logo_url || companySettings.logo_url_dark || ''),
     footerText: companySettings.invoice_footer_text || 'Thank you for your Business!',
   }
   // One of Cirqle's brands (Cirqle Flyers, Memoura, …) when EVERY line is a
