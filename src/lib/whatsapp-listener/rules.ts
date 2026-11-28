@@ -142,6 +142,8 @@ export const LISTENER_KEYS = {
   staffNumbers: 'whatsapp_listener_staff_numbers',
   /** JSON of chat id → WhatsApp group name, shown in the Settings table. Display only. */
   groupNames: 'whatsapp_listener_group_names',
+  /** 'off' = do not copy the photos Cirqle sends a client into that client's chat channel. On by default. */
+  outputsToChat: 'whatsapp_listener_outputs_to_chat',
 } as const
 
 /** Rows the listener writes itself. The Settings page must never save its stale copy over them. */

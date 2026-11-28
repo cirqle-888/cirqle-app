@@ -23,6 +23,8 @@ import {
   parseSessionStatus, phoneMatchKey, shouldWriteHeard, verifySignature,
   BURST_MINUTES, LISTENER_KEYS, type ListenerMessage,
 } from '@/lib/whatsapp-listener/rules'
+import { isClientOutput, outputsToChatOn } from '@/lib/whatsapp-listener/outputs'
+import { postOutputToClientChannel } from '@/lib/whatsapp-listener/outputs-run'
 
 /**
  * WhatsApp listener webhook — receives messages from a self-hosted OpenWA
@@ -113,6 +115,16 @@ async function recordChatMessage(
   if (!error && media.file) {
     const text = await mediaText().catch(() => null)
     if (text) await admin.from(CHAT_LOG_TABLE).update({ media_text: text.slice(0, 8000) }).eq('message_id', m.id).then(() => {}, () => {})
+  }
+  // A finished design Cirqle sent the client: also into the client's chat
+  // channel, so every delivery is in one place (lib/whatsapp-listener/outputs).
+  // Only on the first delivery of this message (a retry returned above).
+  const clientName = parseGroupList(settings[LISTENER_KEYS.groups]).get(m.chatId) ?? ''
+  if (!error && mediaPath && outputsToChatOn(settings) && isClientOutput({ fromCirqle, type: m.type, mediaPath, clientName })) {
+    await postOutputToClientChannel(admin, {
+      whatsappMessageId: m.id, chatId: m.chatId, clientName, caption: m.body, senderPhone: m.senderPhone ?? null,
+      mediaPath, mime: media.file?.mime ?? null, sizeBytes: media.file?.bytes.byteLength ?? null, sentAtIso: row.sent_at,
+    }).catch(err => console.warn('[whatsapp-listener] output to client channel failed:', err))
   }
   return mediaPath
 }

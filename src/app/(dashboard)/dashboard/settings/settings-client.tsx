@@ -47,6 +47,7 @@ import { todayISO } from '@/lib/utils/local-date'
 import { OWNER_ALERT_SWITCHES, ownerAlertOn } from '@/lib/owner-alerts/switches'
 import { AUTOPILOT_SWITCHES, autopilotOn } from '@/lib/autopilot/switches'
 import { LISTENER_KEYS, LISTENER_SERVER_KEYS, aiFilterOn, listenerEnabled, listenerHealth } from '@/lib/whatsapp-listener/rules'
+import { outputsToChatOn } from '@/lib/whatsapp-listener/outputs'
 import WhatsAppListenerMap from '@/components/settings/whatsapp-listener-map'
 
 const AllocationRebuildPanel = dynamic(
@@ -3160,6 +3161,29 @@ export default function SettingsClient(props: Props) {
                         onClick={() => setCompanySettings(p => ({ ...p, [LISTENER_KEYS.aiFilter]: val }))}
                         className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                           (aiFilterOn(companySettings) ? 'on' : 'off') === val
+                            ? 'bg-primary/20 border-primary/50 text-primary'
+                            : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
+                        }`}
+                      >{lbl}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-0.5">Finished work into client chat</label>
+                  <p className="text-[11px] text-muted-foreground/60 mb-1.5">
+                    On: a photo Cirqle sends into a listed client&apos;s group is also posted in that client&apos;s channel in Chat (made if there is none), marked &quot;Sent to the client on WhatsApp&quot;. Photos up to 4 MB; videos and PDFs are not passed on.
+                  </p>
+                  <div className="flex gap-1.5">
+                    {([
+                      { val: 'on', lbl: 'On' },
+                      { val: 'off', lbl: 'Off' },
+                    ] as const).map(({ val, lbl }) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setCompanySettings(p => ({ ...p, [LISTENER_KEYS.outputsToChat]: val }))}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                          (outputsToChatOn(companySettings) ? 'on' : 'off') === val
                             ? 'bg-primary/20 border-primary/50 text-primary'
                             : 'bg-secondary border-border text-muted-foreground hover:text-foreground'
                         }`}
