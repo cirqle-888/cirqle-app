@@ -184,7 +184,10 @@ export interface DeptEntryRow {
   description: string | null
   categoryName: string | null
   amountInr: number
-  how: EntryKind['how']
+  /** 'combined' = several confidential staff entries shown as one line (lib/units/confidential). */
+  how: EntryKind['how'] | 'combined'
+  /** The person the entry was for, when it names one (salary, advance). */
+  employeeId?: string | null
   /** For a General entry: this department's part of it. Equal to amountInr for a direct entry. */
   shareInr: number
   general: boolean
@@ -502,7 +505,7 @@ export function computeDepartmentShares(input: EngineInput): EngineResult {
 function row(e: EngineEntry, how: EntryKind['how'], shareInr: number, isGeneral: boolean): DeptEntryRow {
   return {
     entryId: e.id, date: e.date, type: e.type, description: e.description, categoryName: e.categoryName,
-    amountInr: Math.abs(e.amountInr), how, shareInr, general: isGeneral,
+    amountInr: Math.abs(e.amountInr), how, shareInr, general: isGeneral, employeeId: e.employeeId ?? null,
   }
 }
 

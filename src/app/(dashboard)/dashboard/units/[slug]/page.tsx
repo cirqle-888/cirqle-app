@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import Header from '@/components/layout/header'
 import { loadDeptTasks, loadLookups, loadShares } from '@/lib/units/load'
 import type { DeptLedger, DeptMonth } from '@/lib/units/engine'
+import { confidentialRows } from '@/lib/units/confidential'
 import { lastDayOfMonthISO, monthStartISO } from '@/lib/utils/local-date'
 import { Badge, Card, Empty, Stat, Table } from '../../finance/profit-sharing/_components'
 import { inr, td, tdNum } from '../../finance/profit-sharing/_format'
@@ -23,7 +24,7 @@ const TABS = [
 type Tab = typeof TABS[number]['key']
 
 const HOW: Record<string, string> = {
-  tagged: 'Tagged', service: 'By service', reversal: 'Reversal', category: 'By category', split: 'Split',
+  tagged: 'Tagged', service: 'By service', reversal: 'Reversal', category: 'By category', split: 'Split', combined: 'Combined',
 }
 
 const money = (n: number) => <span className={n < 0 ? 'text-red-600 dark:text-red-400' : ''}>{inr(n)}</span>
@@ -106,7 +107,8 @@ export default async function DepartmentPage({ params, searchParams }: {
         categories={dept.categoryIds.map(c => categoryName.get(c) ?? '').filter(Boolean)}
         generalSplit={(all ? null : period.result.general[0]?.splitBetween.length) ?? null} />}
       {tab === 'invoices' && <Invoices ledger={detail} assignments={history.assignments} departments={otherDepts} periodLabel={periodLabel} readOnly={viewOnly} />}
-      {tab === 'cashbook' && <CashBook ledger={detail} untagged={viewOnly ? [] : period.result.untagged} figures={figures} periodLabel={periodLabel} readOnly={viewOnly} />}
+      {/* Staff outside this unit's team stay confidential: their costs show as one line under the owner (lib/units/confidential). */}
+      {tab === 'cashbook' && <CashBook ledger={{ ...detail, entries: confidentialRows(detail.entries, dept) }} untagged={viewOnly ? [] : period.result.untagged} figures={figures} periodLabel={periodLabel} readOnly={viewOnly} />}
       {tab === 'work' && <Work ledger={detail} tasks={tasks} periodLabel={periodLabel} />}
     </div>
   )
@@ -233,6 +235,7 @@ function Overview({ ledger, figures, periodLabel, all, month, categories, genera
           <Row label="Work that counts">{categories.join(', ') || '—'}</Row>
           <Row label="Team">{d.members.map(m => m.role === 'lead' ? `${m.cqid} (lead)` : m.cqid).join(', ') || '—'}</Row>
           <Row label="Agreement">{d.partners.length ? d.partners.map(p => `${p.cqid} ${p.sharePct}%`).join(' · ') : 'None — the result stays with Cirqle'}</Row>
+          <Row label="Opening balance">₹0 — the agreement starts fresh in {monthName(d.startsOn.slice(0, 7))}; nothing before it is carried in</Row>
           <Row label="Results from">{monthName(d.startsOn.slice(0, 7))}{d.endsOn ? ` · ends ${monthName(d.endsOn.slice(0, 7))}` : ''}</Row>
           <Row label="Income counted">{d.revenueBasis === 'collected' ? 'When payment is collected' : 'When the invoice is issued'} — own revenue only, never ad spend, rebilled costs or tax</Row>
           <Row label="General costs">{d.sharesGeneralCosts ? 'Carries an equal part' : 'Does not carry any'}</Row>
@@ -324,8 +327,8 @@ function CashBook({ ledger, untagged, figures, periodLabel, readOnly }: {
                 <td className={td}>{e.categoryName ?? '—'}</td>
                 <td className={tdNum}>{amount(e.type, e.shareInr)}{e.splitPct != null && <div className="text-[11px] text-muted-foreground">{e.splitPct}% of {inr(e.amountInr)}</div>}</td>
                 <td className={td}><span className="text-xs text-muted-foreground">{HOW[e.how] ?? e.how}</span></td>
-                {!readOnly && <td className={td}>{e.how === 'split'
-                  ? <Link href={`${ROOT}/allocate?month=${e.date.slice(0, 7)}`} className="text-[11px] font-medium text-primary hover:underline">Change split</Link>
+                {!readOnly && <td className={td}>{e.how === 'split' || e.how === 'combined'
+                  ? <Link href={`${ROOT}/allocate?month=${e.date.slice(0, 7)}`} className="text-[11px] font-medium text-primary hover:underline">{e.how === 'combined' ? 'Details' : 'Change split'}</Link>
                   : <EntryActions entryId={e.entryId} departmentId={d.id} departmentName={d.name} mode={e.how === 'tagged' ? 'direct-tagged' : 'direct-auto'} />}</td>}
               </tr>
             ))}
@@ -341,10 +344,12 @@ function CashBook({ ledger, untagged, figures, periodLabel, readOnly }: {
                 <td className={td}>{e.date}</td>
                 <td className={td}>{e.description ?? '—'}</td>
                 <td className={td}>{e.categoryName ?? '—'}</td>
-                <td className={tdNum}>{amount(e.type, e.amountInr)}</td>
+                <td className={tdNum}>{e.how === 'combined' ? '—' : amount(e.type, e.amountInr)}</td>
                 <td className={`${tdNum} font-medium`}>{amount(e.type, e.shareInr)}</td>
                 <td className={td}><span className="text-xs text-muted-foreground">{HOW[e.how] ?? e.how}</span></td>
-                {!readOnly && <td className={td}><EntryActions entryId={e.entryId} departmentId={d.id} departmentName={d.name} mode={e.how === 'tagged' ? 'general-tagged' : 'general-auto'} /></td>}
+                {!readOnly && <td className={td}>{e.how === 'combined'
+                  ? <Link href={`${ROOT}/allocate?month=${e.date.slice(0, 7)}`} className="text-[11px] font-medium text-primary hover:underline">Details</Link>
+                  : <EntryActions entryId={e.entryId} departmentId={d.id} departmentName={d.name} mode={e.how === 'tagged' ? 'general-tagged' : 'general-auto'} />}</td>}
               </tr>
             ))}
           </Table>
