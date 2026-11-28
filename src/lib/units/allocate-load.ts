@@ -14,7 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAll, fetchAllIn } from '@/lib/supabase/server'
 import type { EngineEntry, EntryKind, SplitPart } from './engine'
 import { loadShares, type SharesData } from './load'
-import { normaliseDescription, phrasesFor, suggestAllocation, type Allocation, type SuggestContext, type Suggestion } from './suggest'
+import { normaliseDescription, phrasesFor, salaryByParts, suggestAllocation, type Allocation, type PayrollParts, type SuggestContext, type Suggestion } from './suggest'
 
 type Admin = SupabaseClient<any, any, any>
 
@@ -132,10 +132,16 @@ export async function loadAllocation(admin: Admin, month: string): Promise<Alloc
     learned.set(key, { allocation: a, count: (cur?.count ?? 0) + 1 })
   }
 
+  // ── Salaries paid through payroll: split by pay part ──
+  const generalUnitIds = units.filter(u => u.sharesGeneralCosts).map(u => u.id)
+  const monthEntries = shares.entries.filter(e => e.date.slice(0, 7) === month && e.type === 'outflow')
+  const salaryParts = await loadSalaryParts(admin, monthEntries, cqidOf, serviceDept, unitOfCategory, unitsOfEmployee, assignedUnitsOfEmployee, generalUnitIds, unitName)
+
   const ctx: SuggestContext = {
     unitName, unitsOfEmployee, cqidOf, unitsOfClient, clientName, learned,
     assignedUnitsOfEmployee, generalUnitIds: units.filter(u => u.sharesGeneralCosts).map(u => u.id),
     unitPhrases: new Map(units.map(u => [u.id, phrasesFor([u.name, ...u.categoryIds.map(c => departmentName.get(c) ?? '')])])),
+    salaryParts,
   }
   const rows: AllocationRow[] = shares.entries
     .filter(e => e.date.slice(0, 7) === month && !e.isTransfer && !e.isInvoiceReceipt && !(e.isPassThrough && !shares.tags.has(e.id) && !shares.splits.has(e.id)))
@@ -172,4 +178,108 @@ export async function loadAllocation(admin: Admin, month: string): Promise<Alloc
     rows,
     shares,
   }
+}
+
+const MONTH_INDEX: Record<string, number> = {
+  january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+}
+
+/**
+ * For salary payments: the payroll each one paid — through its payroll
+ * allocation, else "Salary — CQID004 — October 2026" in its description — and
+ * that payroll's pay divided between units by part (suggest.salaryByParts).
+ */
+async function loadSalaryParts(
+  admin: Admin,
+  entries: EngineEntry[],
+  cqidOf: Map<string, string>,
+  serviceDept: Map<string, string | null>,
+  unitOfCategory: Map<string, string>,
+  unitsOfEmployee: Map<string, string[]>,
+  assignedUnitsOfEmployee: Map<string, string[]>,
+  generalUnitIds: string[],
+  unitName: Map<string, string>,
+): Promise<Map<string, { weights: Map<string, number>; reason: string }>> {
+  const out = new Map<string, { weights: Map<string, number>; reason: string }>()
+  if (!entries.length) return out
+  type Pay = { id: string; employee_id: string; month: number; year: number; base_salary: number | null; commission_earned: number | null; bonus: number | null; adjustment_earned: number | null; ownership_earned: number | null }
+  const PAY_COLS = 'id, employee_id, month, year, base_salary, commission_earned, bonus, adjustment_earned, ownership_earned'
+
+  // 1. Linked through the payment's payroll allocation.
+  const links = await fetchAllIn((chunk: string[]) => admin.from('cashbook_payroll_allocations')
+    .select('cashbook_entry_id, payroll_id').is('deleted_at', null).in('cashbook_entry_id', chunk), entries.map(e => e.id))
+  const payrollOfEntry = new Map<string, string>()
+  for (const l of (links.data ?? []) as any[]) if (!payrollOfEntry.has(l.cashbook_entry_id)) payrollOfEntry.set(l.cashbook_entry_id, l.payroll_id)
+
+  // 2. Else read "CQID004 … October 2026" from the description.
+  const idOfCqid = new Map([...cqidOf].map(([id, c]) => [c.replace(/\D/g, ''), id]))
+  const wanted: { entryId: string; employeeId: string; month: number; year: number }[] = []
+  for (const e of entries) {
+    if (payrollOfEntry.has(e.id)) continue
+    const m = (e.description ?? '').match(/CQID\s*-?\s*(\d{3})[\s\S]*?\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})/i)
+    if (!m || !/salary/i.test(`${e.description} ${e.categoryName}`)) continue
+    const employeeId = idOfCqid.get(m[1])
+    if (employeeId) wanted.push({ entryId: e.id, employeeId, month: MONTH_INDEX[m[2].toLowerCase()], year: Number(m[3]) })
+  }
+
+  const linkedIds = [...new Set(payrollOfEntry.values())]
+  const [linked, byPerson] = await Promise.all([
+    linkedIds.length ? fetchAllIn((chunk: string[]) => admin.from('payroll').select(PAY_COLS).in('id', chunk), linkedIds) : Promise.resolve({ data: [] }),
+    wanted.length ? fetchAllIn((chunk: string[]) => admin.from('payroll').select(PAY_COLS).in('employee_id', chunk), [...new Set(wanted.map(w => w.employeeId))]) : Promise.resolve({ data: [] }),
+  ])
+  const payById = new Map(((linked.data ?? []) as Pay[]).map(p => [p.id, p]))
+  for (const w of wanted) {
+    const p = ((byPerson.data ?? []) as Pay[]).find(x => x.employee_id === w.employeeId && x.month === w.month && x.year === w.year)
+    if (p) { payById.set(p.id, p); payrollOfEntry.set(w.entryId, p.id) }
+  }
+  if (!payById.size) return out
+
+  // Contribution earnings by unit, per person and payroll month (task date).
+  const periods = [...new Set([...payById.values()].map(p => `${p.year}-${String(p.month).padStart(2, '0')}`))]
+  const people = [...new Set([...payById.values()].map(p => p.employee_id))]
+  const earned = new Map<string, Map<string, number>>()  // `${emp}|${YYYY-MM}` → unit → ₹
+  for (const period of periods) {
+    const [y, mo] = period.split('-').map(Number)
+    const next = mo === 12 ? `${y + 1}-01-01` : `${y}-${String(mo + 1).padStart(2, '0')}-01`
+    const tasks = await fetchAll(admin.from('tasks').select('id, service_id').is('deleted_at', null).gte('task_date', `${period}-01`).lt('task_date', next).order('id'))
+    const unitOfTask = new Map(((tasks.data ?? []) as any[]).map(t => {
+      const dept = t.service_id ? serviceDept.get(t.service_id) : null
+      return [t.id as string, dept ? unitOfCategory.get(dept) ?? null : null]
+    }))
+    if (!unitOfTask.size) continue
+    const scores = await fetchAllIn((chunk: string[]) => admin.from('contribution_scores')
+      .select('task_id, employee_id, earnings_inr').in('task_id', chunk), [...unitOfTask.keys()])
+    for (const sc of (scores.data ?? []) as any[]) {
+      if (!people.includes(sc.employee_id)) continue
+      const u = unitOfTask.get(sc.task_id)
+      if (!u) continue
+      const key = `${sc.employee_id}|${period}`
+      const m = earned.get(key) ?? new Map<string, number>()
+      m.set(u, (m.get(u) ?? 0) + (Number(sc.earnings_inr) || 0))
+      earned.set(key, m)
+    }
+  }
+
+  for (const [entryId, payrollId] of payrollOfEntry) {
+    const p = payById.get(payrollId)
+    if (!p) continue
+    const commission = Number(p.commission_earned) || 0
+    const placed = earned.get(`${p.employee_id}|${p.year}-${String(p.month).padStart(2, '0')}`) ?? new Map<string, number>()
+    const placedTotal = [...placed.values()].reduce((t, v) => t + v, 0)
+    // Payroll's commission is the truth; task scores only say WHERE it was earned.
+    const scale = placedTotal > 0 ? Math.min(1, commission / placedTotal) : 0
+    const commissionByUnit = new Map([...placed].map(([u, v]) => [u, v * scale]))
+    const parts: PayrollParts = {
+      cqid: cqidOf.get(p.employee_id) ?? 'This person',
+      base: Number(p.base_salary) || 0,
+      extra: (Number(p.bonus) || 0) + (Number(p.adjustment_earned) || 0),
+      ownership: Number(p.ownership_earned) || 0,
+      commissionByUnit,
+      commissionUnplaced: Math.max(0, commission - [...commissionByUnit.values()].reduce((t, v) => t + v, 0)),
+    }
+    const home = unitsOfEmployee.get(p.employee_id) ?? assignedUnitsOfEmployee.get(p.employee_id) ?? []
+    const split = salaryByParts(parts, home, generalUnitIds, unitName)
+    if (split.weights.size) out.set(entryId, split)
+  }
+  return out
 }

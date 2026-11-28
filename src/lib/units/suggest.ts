@@ -8,13 +8,16 @@
  * rules below look at what the entry already says, strongest signal first:
  *
  *   1. not a cost        — loan, credit, capital or personal-withdrawal categories → left out
- *   2. a person          — a salary or payment to someone on a unit's team → that unit
+ *   2. a salary by parts — when the payment is linked to a payroll: base pay to the person's
+ *                          unit(s), contribution earnings where their tasks were, ownership
+ *                          equally between the units that carry general costs
+ *   3. a person          — a salary or payment to someone on a unit's team → that unit
  *                          (several units → split equally); someone on no team goes by the
  *                          departments assigned to them; working for every unit → General
- *   3. a client          — a cost for a client → the unit(s) that client belongs to
- *   4. like before       — the same description was allocated before → the same again
- *   5. names a unit      — "Social Media team meeting" → Social Media & Creative
- *   6. a shared tool     — subscriptions, AI tools, domains, hosting, phone, internet, rent → General
+ *   4. a client          — a cost for a client → the unit(s) that client belongs to
+ *   5. like before       — the same description was allocated before → the same again
+ *   6. names a unit      — "Social Media team meeting" → Social Media & Creative
+ *   7. a shared tool     — subscriptions, AI tools, domains, hosting, phone, internet, rent → General
  *
  * Nothing is applied by this module; it only proposes, with the reason shown
  * to the admin. People are named by CQID only.
@@ -53,6 +56,8 @@ export interface SuggestContext {
   generalUnitIds?: readonly string[]
   /** unit → the names it goes by (its own, its departments'), already normalised */
   unitPhrases?: ReadonlyMap<string, readonly string[]>
+  /** salary entry → its split by pay part, worked out from the payroll it paid (see salaryByParts) */
+  salaryParts?: ReadonlyMap<string, { weights: ReadonlyMap<string, number>; reason: string }>
   /** employee id → CQID, for reasons and for spotting a CQID in a description */
   cqidOf: ReadonlyMap<string, string>
   /** client → the units it belongs to (its pin, else what it buys) */
@@ -106,7 +111,18 @@ export function suggestAllocation(e: SuggestEntry, ctx: SuggestContext): Suggest
     return { allocation: { kind: 'exclude' }, reason: `${e.categoryName} is money moving, not a cost of running a unit`, confidence: 'high' }
   }
 
-  // 2. A person: the entry's employee, else a CQID written in the description.
+  // 2. A salary paid through payroll: split by its parts.
+  const parts = ctx.salaryParts?.get(e.id)
+  if (parts && parts.weights.size) {
+    const ids = [...parts.weights.keys()]
+    return {
+      allocation: ids.length === 1 ? { kind: 'unit', unitId: ids[0] } : { kind: 'split', parts: ids.map(unitId => ({ unitId, share: parts.weights.get(unitId)! })) },
+      reason: parts.reason,
+      confidence: 'high',
+    }
+  }
+
+  // 3. A person: the entry's employee, else a CQID written in the description.
   let employeeId = e.employeeId
   if (!employeeId) {
     const m = (e.description ?? '').match(/CQID\s*-?\s*(\d{3})/i)
@@ -136,7 +152,7 @@ export function suggestAllocation(e: SuggestEntry, ctx: SuggestContext): Suggest
     }
   }
 
-  // 3. A client's cost belongs to that client's unit(s).
+  // 4. A client's cost belongs to that client's unit(s).
   if (e.clientId) {
     const units = ctx.unitsOfClient.get(e.clientId) ?? []
     const client = ctx.clientName.get(e.clientId) ?? 'This client'
@@ -149,13 +165,13 @@ export function suggestAllocation(e: SuggestEntry, ctx: SuggestContext): Suggest
     }
   }
 
-  // 4. Allocated the same way before.
+  // 5. Allocated the same way before.
   const seen = ctx.learned.get(normaliseDescription(e.description))
   if (seen && normaliseDescription(e.description)) {
     return { allocation: seen.allocation, reason: `Same as ${seen.count} earlier ${seen.count === 1 ? 'entry' : 'entries'} like this`, confidence: seen.count > 1 ? 'high' : 'medium' }
   }
 
-  // 5. The description names a unit (or one of its departments).
+  // 6. The description names a unit (or one of its departments).
   const said = ` ${normaliseDescription(e.description)} `
   if (ctx.unitPhrases && said.trim()) {
     const hits = [...ctx.unitPhrases].filter(([, phrases]) => phrases.some(p => p && said.includes(` ${p} `))).map(([id]) => id)
@@ -164,7 +180,7 @@ export function suggestAllocation(e: SuggestEntry, ctx: SuggestContext): Suggest
     }
   }
 
-  // 6. A tool or cost every unit shares.
+  // 7. A tool or cost every unit shares.
   if (e.type === 'outflow' && SHARED_TOOL.test(text)) {
     return { allocation: { kind: 'general' }, reason: 'A shared tool or office cost — split equally', confidence: 'medium' }
   }
@@ -183,6 +199,45 @@ export function describeAllocation(a: Allocation, unitName: ReadonlyMap<string, 
       return a.parts.map(p => `${unitName.get(p.unitId) ?? 'A unit'} ${Math.round((p.share / total) * 1000) / 10}%`).join(' · ')
     }
   }
+}
+
+export interface PayrollParts {
+  cqid: string
+  base: number
+  /** bonus + adjustment: paid like base pay */
+  extra: number
+  ownership: number
+  /** contribution earnings by unit; anything not tied to a unit's task goes with base pay */
+  commissionByUnit: ReadonlyMap<string, number>
+  commissionUnplaced: number
+}
+
+/**
+ * How one payroll's pay divides between units, by part:
+ *   base + bonus + adjustment → the person's home units (equally)
+ *   contribution earnings     → the units their tasks were in
+ *   ownership                 → equally between the units that carry general costs
+ * Returns weights in rupees (only their proportions are used) and a reason.
+ */
+export function salaryByParts(
+  p: PayrollParts, homeUnits: readonly string[], generalUnits: readonly string[], unitName: ReadonlyMap<string, string>,
+): { weights: Map<string, number>; reason: string } {
+  const w = new Map<string, number>()
+  const add = (u: string, v: number) => { if (v > 0) w.set(u, Math.round(((w.get(u) ?? 0) + v) * 100) / 100) }
+  const spread = (units: readonly string[], v: number) => { if (units.length) for (const u of units) add(u, v / units.length) }
+  const home = homeUnits.length ? homeUnits : generalUnits
+  spread(home, p.base + p.extra + p.commissionUnplaced)
+  for (const [u, v] of p.commissionByUnit) add(u, v)
+  spread(generalUnits.length ? generalUnits : home, p.ownership)
+
+  const nm = (ids: readonly string[]) => ids.map(id => unitName.get(id) ?? 'a unit').join(' & ')
+  const bits: string[] = []
+  const baseTotal = p.base + p.extra + p.commissionUnplaced
+  if (Math.round(baseTotal) > 0) bits.push(`base ₹${Math.round(baseTotal)} → ${home.length ? nm(home) : 'equally'}`)
+  const comm = [...p.commissionByUnit].filter(([, v]) => v > 0)
+  if (comm.length) bits.push(`contribution ${comm.map(([u, v]) => `₹${Math.round(v)} ${unitName.get(u) ?? 'a unit'}`).join(', ')}`)
+  if (p.ownership > 0) bits.push(`ownership ₹${Math.round(p.ownership)} → equally`)
+  return { weights: w, reason: `${p.cqid}'s pay by parts: ${bits.join('; ') || 'nothing to split'}` }
 }
 
 /**

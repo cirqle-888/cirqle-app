@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeAllocation, normaliseDescription, percentsByWeight, phrasesFor, suggestAllocation, validateSplit, type SuggestContext, type SuggestEntry } from './suggest'
+import { describeAllocation, normaliseDescription, percentsByWeight, phrasesFor, salaryByParts, suggestAllocation, validateSplit, type SuggestContext, type SuggestEntry } from './suggest'
 import { computeDepartmentShares, type DeptConfig, type EngineEntry } from './engine'
 
 const SOCIAL = 'u-social', FLYERS = 'u-flyers', MEMOURA = 'u-memoura'
@@ -143,5 +143,27 @@ describe('percentsByWeight', () => {
   })
   it('splits equally when every weight is zero', () => {
     expect(percentsByWeight([0, 0, 0])).toEqual([33.34, 33.33, 33.33])
+  })
+})
+
+describe('salary by parts', () => {
+  const names = ctx().unitName
+  it('base to the person\'s unit, contribution where the tasks were, ownership equally', () => {
+    const r = salaryByParts({
+      cqid: 'CQID004', base: 3000, extra: 0, ownership: 900,
+      commissionByUnit: new Map([[SOCIAL, 1500], [FLYERS, 500]]), commissionUnplaced: 0,
+    }, [SOCIAL], [SOCIAL, FLYERS, MEMOURA], names)
+    expect(Object.fromEntries(r.weights)).toEqual({ [SOCIAL]: 3000 + 1500 + 300, [FLYERS]: 500 + 300, [MEMOURA]: 300 })
+    expect(r.reason).toContain('ownership ₹900 → equally')
+  })
+  it('someone on no unit has their base pay split across the units that carry general costs', () => {
+    const r = salaryByParts({ cqid: 'CQID001', base: 1500, extra: 0, ownership: 0, commissionByUnit: new Map(), commissionUnplaced: 0 }, [], [SOCIAL, FLYERS], names)
+    expect(Object.fromEntries(r.weights)).toEqual({ [SOCIAL]: 750, [FLYERS]: 750 })
+  })
+  it('becomes the suggestion for a salary payment, ahead of the plain person rule', () => {
+    const salaryParts = new Map([['pay', { weights: new Map([[SOCIAL, 4800], [FLYERS, 800]]), reason: 'CQID004\'s pay by parts' }]])
+    const s = suggestAllocation(entry({ id: 'pay', description: 'Salary — CQID004 — November 2026', employeeId: 'e4' }), ctx({ salaryParts }))
+    expect(s?.allocation).toEqual({ kind: 'split', parts: [{ unitId: SOCIAL, share: 4800 }, { unitId: FLYERS, share: 800 }] })
+    expect(s?.confidence).toBe('high')
   })
 })
