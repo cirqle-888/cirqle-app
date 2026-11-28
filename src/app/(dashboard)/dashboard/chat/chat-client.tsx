@@ -1009,6 +1009,10 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
                               <span className={`flex items-center gap-1.5 text-sm`}>
                                 <span className={`truncate ${g.unreadTotal > 0 ? 'font-semibold text-foreground' : ''}`}>{g.name}</span>
                               </span>
+                              {/* Not a chat: this client's work threads, gathered. Nothing here to delete. */}
+                              <span className="block truncate text-xs text-muted-foreground">
+                                {g.threads.length} work {g.threads.length === 1 ? 'thread' : 'threads'} · no channel yet
+                              </span>
                             </span>
                             {g.unreadTotal > 0 && (
                               <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
@@ -2305,7 +2309,10 @@ function ConversationRow({ conv, active, onClick, onDelete, onMenu, displayName,
           onClick={() => onDelete(conv, displayName)}
           aria-label={`Delete ${displayName}`}
           title="Delete chat"
-          className="mr-2 shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-red-500 focus:opacity-100 group-hover/row:opacity-100">
+          // Shown on hover with a mouse. A touch screen has no hover, so an
+          // invisible button would still take taps — there, press and hold
+          // the chat instead (the menu has Delete chat).
+          className="mr-2 shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-red-500 focus:opacity-100 group-hover/row:opacity-100 pointer-coarse:hidden">
           <Trash2 className="h-3.5 w-3.5" />
         </button>
       )}
@@ -2502,14 +2509,16 @@ function WorkNavigatorRow({ conv, active, onClick, isPinned, togglePin, onDelete
         </div>
       </button>
       <button onClick={togglePin} title={isPinned ? 'Unpin' : 'Pin to top'}
-        className={`shrink-0 rounded p-1.5 transition-opacity hover:text-foreground ${isPinned ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-0 group-hover/row:opacity-100 focus:opacity-100'}`}>
+        className={`shrink-0 rounded p-1.5 transition-opacity hover:text-foreground ${isPinned ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-0 group-hover/row:opacity-100 focus:opacity-100 pointer-coarse:opacity-70'}`}>
         <Pin className={`h-3.5 w-3.5 ${isPinned ? 'fill-current' : ''}`} />
       </button>
       {onDelete && (
         <button
           onClick={e => { e.stopPropagation(); onDelete(conv, displayName) }}
           title="Close this discussion"
-          className="mr-2 shrink-0 rounded p-1.5 text-muted-foreground opacity-0 transition-opacity hover:text-red-500 group-hover/row:opacity-100 focus:opacity-100">
+          aria-label={`Close ${displayName}`}
+          // Visible on touch screens: there is no hover there, and this row has no press-and-hold menu.
+          className="mr-2 shrink-0 rounded p-1.5 text-muted-foreground opacity-0 transition-opacity hover:text-red-500 group-hover/row:opacity-100 focus:opacity-100 pointer-coarse:opacity-70">
           <Trash2 className="h-3.5 w-3.5" />
         </button>
       )}
