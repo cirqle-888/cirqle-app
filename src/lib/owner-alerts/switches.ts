@@ -34,6 +34,12 @@ export const OWNER_ALERT_SWITCHES = [
     defaultOn: true,
   },
   {
+    key: 'owner_alert_feature_usage',
+    label: 'Unused features reminder',
+    hint: 'Every Monday, three features nobody has used yet (or hardly uses), each with how to start it. From Insights → Feature Usage.',
+    defaultOn: true,
+  },
+  {
     key: 'owner_alert_weekly_email',
     label: 'Email the Monday owner check',
     hint: 'Also email it to admins. Needs email sending (Resend) configured on the server.',

@@ -19,7 +19,7 @@
  * with no data migration: the row keeps its key and simply resolves now.
  */
 import {
-  Activity, Award, BadgeCheck, BadgePercent, BarChart3, Blocks, BookOpen, Bookmark,
+  Activity, Award, BadgeCheck, BadgePercent, BarChart3, Blocks, BookOpen, Bookmark, Compass,
   Briefcase, Building2, Calculator, CalendarClock, CalendarRange, CheckSquare, CreditCard,
   ClipboardCheck, ClipboardList, FileText, Gauge, Handshake, HardHat, History,
   Images, Inbox, Landmark, LayoutDashboard, LayoutGrid, MapPin, Megaphone, MessageSquare,
@@ -33,7 +33,7 @@ import {
 } from 'lucide-react'
 
 export const FAVORITE_ICON_MAP: Record<string, LucideIcon> = {
-  Activity, Award, BadgeCheck, BadgePercent, BarChart3, Blocks, BookOpen, Bookmark,
+  Activity, Award, BadgeCheck, BadgePercent, BarChart3, Blocks, BookOpen, Bookmark, Compass,
   Briefcase, Building2, Calculator, CalendarClock, CalendarDays, CalendarRange, CheckSquare, CreditCard,
   ClipboardCheck, ClipboardList, FileText, Gauge, Handshake, HardHat, History,
   Images, Inbox, Landmark, LayoutDashboard, LayoutGrid, MapPin, Megaphone, MessageSquare,

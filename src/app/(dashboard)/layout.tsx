@@ -17,6 +17,7 @@ import { HelpGuide } from '@/components/help/help-guide'
 import { BirthdayCelebration } from '@/components/ui/birthday-celebration'
 import { FxRatesAutoSync } from './fx-rates-auto-sync'
 import { LastPageRestorer } from '@/components/layout/last-page-restorer'
+import { FeatureVisitTracker } from '@/components/layout/feature-visit-tracker'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { ViewAsBanner } from '@/components/layout/view-as-banner'
 import { isBirthdayToday } from '@/lib/utils/birthday'
@@ -238,6 +239,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <HelpGuide />
             <FxRatesAutoSync />
             <LastPageRestorer />
+            {/* One row per person per sidebar page per day, for Insights →
+                Feature Usage. Off during view-as. */}
+            <FeatureVisitTracker />
             {showBirthday && me && (
               <BirthdayCelebration
                 employeeId={me.employeeId}
