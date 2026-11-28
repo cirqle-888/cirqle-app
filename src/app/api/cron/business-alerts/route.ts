@@ -4,7 +4,7 @@ import { createAdminClient, fetchAll } from '@/lib/supabase/server'
 import { classifyInvoice, latestByInvoice, type ClassifiableInvoice, type FollowupRow } from '@/lib/followups/grouping'
 import { notifyAdmins, notifyAdminsBatch } from '@/lib/notifications/create'
 import { logCronRun } from '@/lib/cron/log'
-import { todayISO } from '@/lib/utils/local-date'
+import { addDaysISO, todayISO } from '@/lib/utils/local-date'
 import { loadOwnerCheckInput } from '@/lib/owner-alerts/load'
 import { ownerAlertOn } from '@/lib/owner-alerts/switches'
 import {
@@ -13,6 +13,8 @@ import {
 } from '@/lib/owner-alerts/rules'
 import { sendOwnerCheckEmail } from '@/lib/owner-alerts/email'
 import { listenerHealth } from '@/lib/whatsapp-listener/rules'
+import { loadFeatureUsageInput } from '@/lib/feature-usage/load'
+import { buildFeatureUsage, pickReminderFeatures, reminderText } from '@/lib/feature-usage/report'
 
 /**
  * Daily business-health alerts (09:00 IST).
@@ -40,6 +42,9 @@ import { listenerHealth } from '@/lib/whatsapp-listener/rules'
 
 /** Per-run cap for escalation and quiet-client alerts, so a backlog drains over a few days instead of in one burst. */
 const MAX_PER_RUN = 5
+
+/** Days of page visits needed before the unused-features reminder says anything. */
+const MIN_TRACKED_DAYS = 7
 
 function authorized(req: NextRequest): boolean {
   const token = process.env.CRON_SECRET
@@ -197,6 +202,42 @@ export async function GET(req: NextRequest) {
         if (ownerAlertOn(settings, 'owner_alert_weekly_email')) {
           summary.weeklyEmail = await sendOwnerCheckEmail(admin, check, lines)
         }
+      }
+    }
+  }
+
+  // Monday: a few features nobody uses yet, each with its "how to start" line
+  // (lib/feature-usage). Rotates weekly; one notification per Monday.
+  if (ownerAlertOn(settings, 'owner_alert_feature_usage') && isMondayISO(today)) {
+    const key = `feature_usage_weekly:${today}`
+    const { data: already } = await admin.from('notifications').select('id').eq('source_key', key).limit(1)
+    if (already?.length) {
+      summary.featureUsage = 'already sent'
+    } else {
+      try {
+        const usage = await loadFeatureUsageInput(admin, today)
+        if (usage.warnings.length) {
+          // A failed read would call used features unused. Skip rather than mislead.
+          summary.featureUsage = 'skipped: incomplete data'
+        } else if (!usage.trackingSince || usage.trackingSince > addDaysISO(today, -MIN_TRACKED_DAYS)) {
+          // Page visits not set up, or counted for under a week: most features
+          // would look unused only because counting has just begun.
+          summary.featureUsage = 'skipped: page visits counted for under a week'
+        } else {
+          const text = reminderText(pickReminderFeatures(buildFeatureUsage({ ...usage, today }).rows, today))
+          if (text) {
+            await notifyAdmins({
+              type: 'feature_usage_weekly',
+              title: text.title,
+              message: text.message,
+              link: '/dashboard/reports/feature-usage',
+              sourceKey: key,
+            })
+          }
+          summary.featureUsage = text ? text.title : 'nothing to suggest'
+        }
+      } catch (err) {
+        problems.push(`feature usage: ${err instanceof Error ? err.message : String(err)}`)
       }
     }
   }

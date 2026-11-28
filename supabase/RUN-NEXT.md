@@ -31,7 +31,10 @@ select 'D  month draft reuses reviewed',
              limit 1), false)
 union all
 select 'E  client packages',
-  to_regclass('public.client_packages') is not null;
+  to_regclass('public.client_packages') is not null
+union all
+select 'F  feature usage page visits',
+  to_regclass('public.feature_visits') is not null;
 ```
 
 ### Step 2: run the file for each `false`
@@ -43,6 +46,7 @@ select 'E  client packages',
 | C | `20261011120000_client_department.sql` | Optional department override on a client | The override stays hidden |
 | D | `20261111120000_month_draft_reuses_reviewed.sql` | A month's draft invoice reuses a reviewed one instead of starting `-2` | Resync has to merge stray `-2` drafts |
 | E | `20260813100000_package_coverage.sql`, then `20260814110000_client_packages.sql`, `20260814120000_package_invoice_suppression.sql`, `20260814130000_package_first_cycle.sql`, `20260826140000_packages_view_pricing.sql`, `20260829170000_package_counts_as.sql` | Client packages | Package screens show nothing |
+| F | `20261128220000_feature_visits.sql` | Counts which sidebar pages each person opens (one row per person per page per day) for Insights → Feature Usage | Feature Usage only knows Quick Actions (⌘K) opens, so most features look never used |
 
 "Success. No rows returned" means it worked. Then run Step 1 again: the row
 should now say `true`. Add a line to `supabase/APPLIED.md` for each one.
