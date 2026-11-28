@@ -41,9 +41,9 @@ export default async function ProfitSharingOverview() {
   const checklist: { done: boolean; label: string; href: string; note?: string }[] = [
     { done: !!founder, label: 'Add yourself as founder, then any other investors', href: 'investors' },
     { done: founderCapital, label: 'Record and approve the founder’s opening capital, with its effective date', href: 'investors' },
-    { done: !!firstRun?.openingLossEntered || confirmed.length > 0, label: 'Create the first period and enter the opening accumulated loss (D7)', href: 'periods' },
+    { done: !!firstRun?.openingLossEntered || confirmed.length > 0, label: 'Create the first period and enter the opening accumulated loss', href: 'periods' },
     { done: withdrawals === 0 || reviewedWithdrawals >= withdrawals, label: `Review historical Personal Withdrawals one by one (${reviewedWithdrawals} of ${withdrawals})`, href: 'investors#withdrawals' },
-    { done: !!approvedDevicePolicy(state.settings), label: 'Approve a device policy before confirming any device valuation (D11)', href: 'settings', note: 'Only needed for devices' },
+    { done: !!approvedDevicePolicy(state.settings), label: 'Approve a device policy before confirming any device valuation', href: 'settings', note: 'Only needed for devices' },
   ]
 
   return (
@@ -74,9 +74,9 @@ export default async function ProfitSharingOverview() {
 
       <Card title="Still open" subtitle="Decisions you have not made yet. The app applies the conservative behaviour until you do.">
         <ul className="space-y-1.5 text-sm">
-          <li className="flex gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /><span><b>D1 GST/TDS:</b> invoices carrying tax go to review; no tax treatment is applied automatically.</span></li>
-          <li className="flex gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /><span><b>D7 Start and opening loss:</b> required on the first period before it can be confirmed.</span></li>
-          <li className="flex gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /><span><b>D17 Payroll “other deductions”:</b> shown as a warning; pay is counted in full and no other treatment is assumed.</span></li>
+          <li className="flex gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /><span><b>GST/TDS:</b> invoices carrying tax go to review; no tax treatment is applied automatically.</span></li>
+          <li className="flex gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /><span><b>Start and opening loss:</b> required on the first period before it can be confirmed.</span></li>
+          <li className="flex gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /><span><b>Payroll “other deductions”:</b> shown as a warning; pay is counted in full and no other treatment is assumed.</span></li>
         </ul>
       </Card>
 

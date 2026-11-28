@@ -9,7 +9,6 @@ import { useMemo, useState, useTransition } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
-import { SocialTabs } from '@/components/social-hub/social-tabs'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import AppSelect from '@/components/ui/app-select'
@@ -127,13 +126,12 @@ export default function CalendarClient({
   return (
     <>
       <Header
-        title="Content calendar"
-        subtitle="Schedule and publish to Facebook & Instagram"
+        title="Compose"
+        subtitle="Schedule and publish posts"
         actions={canPublish ? <Button size="sm" onClick={() => setComposer({ post: null })}><Plus className="w-4 h-4 mr-1.5" /> New post</Button> : undefined}
       />
 
-      <div className="px-4 sm:px-6 pb-16 max-w-[1400px] mx-auto w-full">
-        <div className="mb-4"><SocialTabs /></div>
+      <div className="px-4 sm:px-6 pt-4 pb-16 max-w-[1400px] mx-auto w-full">
         {/* Toolbar */}
         <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
           <div className="flex items-center gap-2">

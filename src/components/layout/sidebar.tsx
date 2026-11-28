@@ -25,7 +25,7 @@ import {
   UserCircle,
   ChevronDown,
 } from 'lucide-react'
-import { navSections, isNavItemVisible, resolveActiveHref, canOpenHref } from '@/lib/nav-sections'
+import { navSections, isNavItemVisible, resolveActiveHref, canOpenHref, buildNavRows, activeRowKey } from '@/lib/nav-sections'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { useRequestsBadge } from '@/contexts/requests-badge-context'
 import { WorkspaceSwitcher } from '@/components/layout/workspace-switcher'
@@ -272,21 +272,26 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
   // reveal anything the viewer's permissions don't already allow. A workspace
   // with sidebarModuleHrefs=null (e.g. "All Workspace") applies no restriction.
   const workspaceHrefs = activeWorkspace.sidebarModuleHrefs
+  // Rows, not items: a module's tab pages (lib/nav-sections `tabOf`) fold into
+  // its one row and are reached from the tab bar on the page itself.
   const visibleNavSections = useMemo(
     () =>
       navSections
         .map(s => ({
           ...s,
-          items: s.items.filter(i =>
+          rows: buildNavRows(s.items, i =>
             isNavItemVisible(i, can, user.isAdmin, (user.unitRoutesOnly ?? false)) &&
             (!workspaceHrefs || workspaceHrefs.includes(i.href))
           ),
         }))
-        .filter(s => s.items.length > 0),
+        .filter(s => s.rows.length > 0),
     [can, user.isAdmin, user.unitRoutesOnly, workspaceHrefs],
   )
 
-  const activeHref = useMemo(() => resolveActiveHref(visibleNavSections, pathname), [visibleNavSections, pathname])
+  // The exact page (for pinned Favorites) and the row that holds it (for the
+  // sidebar: a tab page lights its module's row).
+  const activeHref = useMemo(() => resolveActiveHref(navSections, pathname), [pathname])
+  const activeKey = useMemo(() => activeRowKey(pathname), [pathname])
 
   // ── Accordion state ─────────────────────────────────
   // Labeled sections collapse to keep the sidebar short. First paint uses each
@@ -311,8 +316,8 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
   // Never let the active route hide inside a closed group: opening happens in
   // state only (not persisted), so the user's saved preference is untouched.
   const activeSectionLabel = useMemo(
-    () => visibleNavSections.find(s => s.items.some(i => i.href === activeHref))?.label ?? null,
-    [visibleNavSections, activeHref],
+    () => visibleNavSections.find(s => s.rows.some(r => r.key === activeKey))?.label ?? null,
+    [visibleNavSections, activeKey],
   )
   useEffect(() => {
     if (!activeSectionLabel) return
@@ -435,14 +440,14 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
       <nav className={`flex-1 min-h-0 overscroll-contain pt-4 pb-[calc(var(--bottom-nav-h,0px)+1rem)] overflow-y-auto ${isCollapsed ? 'px-2' : 'px-3'}`}>
         <FavoritesSection isCollapsed={isCollapsed} activeHref={activeHref} onNavClick={onNavClick} />
         {visibleNavSections.map((section, sIdx) => {
-          const visibleItems = section.items
+          const rows = section.rows
           const open = isSectionOpen(section.label, section.defaultOpen)
-          const sectionHasActive = visibleItems.some(i => i.href === activeHref)
-          const sectionHasBadge = visibleItems.some(i => i.href === '/dashboard/requests') && requestsBadge > 0
+          const sectionHasActive = rows.some(r => r.key === activeKey)
+          const sectionHasBadge = rows.some(r => r.item.href === '/dashboard/requests') && requestsBadge > 0
           const itemsBlock = (
             <div className="space-y-px">
-              {visibleItems.map(({ label, href, icon: Icon }) => {
-                const active = href === activeHref
+              {rows.map(({ key, item: { label, href, icon: Icon } }) => {
+                const active = key === activeKey
                 // iconKeyFor, NOT Icon.displayName: displayName is lucide's
                 // CURRENT name for an icon, while this codebase imports the
                 // older alias — so favouriting Tasks stored "SquareCheckBig"
@@ -763,23 +768,29 @@ export default function Sidebar() {
               Two, not three: at 375px a sixth tab leaves ~62px each, and
               favourite labels ("Contributions", "Social Calendar") truncate to
               nonsense at that width. */}
-          {(favorites.length
-            ? favorites.slice(0, 3).map((f: FavoriteEntry) => ({
-                href: f.href,
-                label: f.label,
-                icon: resolveFavoriteIcon(f.iconKey),
-              }))
-            // Never favourited anything: the original three, so the bar is
-            // still useful on day one and nothing regresses for people who
-            // have not discovered Favorites.
-            : [
-                { href: '/dashboard',               label: 'Home',     icon: LayoutDashboard },
-                { href: '/dashboard/tasks',         label: 'Tasks',    icon: CheckSquare },
-                { href: '/dashboard/contributions', label: 'Activity', icon: TrendingUp },
-              ]
+          {[
+            // Home really is fixed now. The bar used to take the first THREE
+            // favourites instead, so anyone who had pinned a page lost Home.
+            { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
+            ...(favorites.length
+              ? favorites
+                  .filter((f: FavoriteEntry) => f.href !== '/dashboard')
+                  .map((f: FavoriteEntry) => ({
+                    href: f.href,
+                    label: f.label,
+                    icon: resolveFavoriteIcon(f.iconKey),
+                  }))
+              // Never favourited anything: the original pair, so the bar is
+              // still useful on day one. Named for the page it opens — this
+              // one used to say "Activity" and open Contributions.
+              : [
+                  { href: '/dashboard/tasks',         label: 'Tasks',         icon: CheckSquare },
+                  { href: '/dashboard/contributions', label: 'Contributions', icon: TrendingUp },
+                ]),
+          ]
           // Only pages this person can open — a business-unit team member
           // (lib/units/access) must not be offered Home or a stale favourite.
-          ).filter(item => canOpenHref(item.href, can, user.isAdmin, (user.unitRoutesOnly ?? false))).map(item => {
+          .filter(item => canOpenHref(item.href, can, user.isAdmin, (user.unitRoutesOnly ?? false))).slice(0, 3).map(item => {
             // Dashboard root: exact match only so Tasks/Contributions don't highlight it
             const active = item.href === '/dashboard'
               ? pathname === '/dashboard'

@@ -91,125 +91,128 @@ export default function AccessPreviewClient({ employees }: { employees: Employee
       <Header
         title="Access Preview"
         subtitle="See exactly what another employee can open — without signing in as them"
+        // The crumb would otherwise read the folder name, "Access preview".
+        crumbLabel="Access Preview"
       />
+      <div className="space-y-5 px-4 sm:px-6">
+        <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
+          <label className="block text-xs font-medium text-muted-foreground">Employee</label>
+          <div className="max-w-sm">
+            <Combobox
+              options={employees.map(e => ({
+                id: e.id,
+                label: e.cqid,
+                sub: [e.designationName ?? 'no designation', e.isArchived ? 'archived' : null].filter(Boolean).join(' · '),
+              }))}
+              value={selected}
+              onChange={pick}
+              placeholder="Search by CQID…"
+              sortKey="employees"
+            />
+          </div>
+          <p className="text-[11px] text-muted-foreground flex items-start gap-1.5">
+            <ShieldCheck className="w-3.5 h-3.5 shrink-0 mt-px" />
+            Read-only. This resolves their designation and permissions the same way sign-in does;
+            your own session is untouched and nothing can be done as them.
+          </p>
 
-      <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
-        <label className="block text-xs font-medium text-muted-foreground">Employee</label>
-        <div className="max-w-sm">
-          <Combobox
-            options={employees.map(e => ({
-              id: e.id,
-              label: e.cqid,
-              sub: [e.designationName ?? 'no designation', e.isArchived ? 'archived' : null].filter(Boolean).join(' · '),
-            }))}
-            value={selected}
-            onChange={pick}
-            placeholder="Search by CQID…"
-            sortKey="employees"
-          />
+          {preview && (
+            <div className="pt-1 border-t border-border/60">
+              <button
+                onClick={enterViewAs}
+                disabled={entering}
+                className="inline-flex items-center gap-1.5 rounded-lg gradient-bg text-white px-3 py-2 text-sm font-medium disabled:opacity-50"
+              >
+                {entering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
+                Browse the app as {preview.cqid}
+              </button>
+              <p className="text-[11px] text-muted-foreground mt-1.5">
+                Opens the real app through their permissions so you can see their actual screens and data.
+                Still read-only — every save, edit and delete is refused while previewing, and a banner
+                stays on screen until you exit.
+              </p>
+            </div>
+          )}
         </div>
-        <p className="text-[11px] text-muted-foreground flex items-start gap-1.5">
-          <ShieldCheck className="w-3.5 h-3.5 shrink-0 mt-px" />
-          Read-only. This resolves their designation and permissions the same way sign-in does;
-          your own session is untouched and nothing can be done as them.
-        </p>
 
-        {preview && (
-          <div className="pt-1 border-t border-border/60">
-            <button
-              onClick={enterViewAs}
-              disabled={entering}
-              className="inline-flex items-center gap-1.5 rounded-lg gradient-bg text-white px-3 py-2 text-sm font-medium disabled:opacity-50"
-            >
-              {entering ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
-              Browse the app as {preview.cqid}
-            </button>
-            <p className="text-[11px] text-muted-foreground mt-1.5">
-              Opens the real app through their permissions so you can see their actual screens and data.
-              Still read-only — every save, edit and delete is refused while previewing, and a banner
-              stays on screen until you exit.
-            </p>
+        {loading && (
+          <div className="rounded-2xl border border-border bg-card p-8 text-center">
+            <Loader2 className="w-5 h-5 animate-spin mx-auto text-primary" />
+          </div>
+        )}
+
+        {error && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div>
+        )}
+
+        {preview && nav && (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <Stat value={preview.designationName ?? '—'} label="Designation" small />
+              <Stat value={preview.isAdmin ? 'Yes' : 'No'} label="Admin" tone={preview.isAdmin ? 'amber' : undefined} />
+              <Stat value={`${preview.permissionKeys.length} / ${preview.catalogSize}`} label="Permissions held" />
+              <Stat value={String(nav.visible.length)} label="Pages they can open" tone="green" />
+            </div>
+
+            {preview.isAdmin && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-600 dark:text-amber-400">
+                This designation is marked <strong>admin</strong>, which bypasses every permission check —
+                they hold all {preview.catalogSize} keys regardless of what is granted explicitly.
+              </div>
+            )}
+            {preview.isArchived && (
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-400">
+                This employee is <strong>archived</strong>. Archived accounts are denied everything at sign-in,
+                so in practice they can open nothing — whatever the list below says.
+              </div>
+            )}
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Panel title="Can open" count={nav.visible.length} tone="green">
+                {nav.visible.map(i => (
+                  <Row key={i.href} icon={<Check className="w-3.5 h-3.5 text-green-500 shrink-0" />}
+                       label={i.label} meta={i.section} />
+                ))}
+              </Panel>
+              <Panel title="Hidden from them" count={nav.hidden.length} tone="muted">
+                {nav.hidden.map(i => (
+                  <Row key={`${i.section}-${i.label}`} icon={<XIcon className="w-3.5 h-3.5 text-muted-foreground/50 shrink-0" />}
+                       label={i.label} meta={i.reason} dim />
+                ))}
+              </Panel>
+            </div>
+
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <p className="text-sm font-semibold mb-3">Permission keys held</p>
+              {byModule.length === 0 ? (
+                <p className="text-xs text-muted-foreground">None — this employee holds no permissions at all.</p>
+              ) : (
+                <div className="space-y-3">
+                  {byModule.map(([mod, keys]) => (
+                    <div key={mod}>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">{mod}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {keys.map(k => (
+                          <span key={k} className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
+                            {k.split('.').slice(1).join('.')}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {!preview && !loading && !error && (
+          <div className="rounded-2xl border border-border bg-card px-5 py-12 text-center">
+            <Eye className="w-7 h-7 text-muted-foreground/40 mx-auto mb-3" />
+            <p className="text-sm text-muted-foreground">Pick an employee to see what they can reach.</p>
           </div>
         )}
       </div>
-
-      {loading && (
-        <div className="rounded-2xl border border-border bg-card p-8 text-center">
-          <Loader2 className="w-5 h-5 animate-spin mx-auto text-primary" />
-        </div>
-      )}
-
-      {error && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div>
-      )}
-
-      {preview && nav && (
-        <>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Stat value={preview.designationName ?? '—'} label="Designation" small />
-            <Stat value={preview.isAdmin ? 'Yes' : 'No'} label="Admin" tone={preview.isAdmin ? 'amber' : undefined} />
-            <Stat value={`${preview.permissionKeys.length} / ${preview.catalogSize}`} label="Permissions held" />
-            <Stat value={String(nav.visible.length)} label="Pages they can open" tone="green" />
-          </div>
-
-          {preview.isAdmin && (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-600 dark:text-amber-400">
-              This designation is marked <strong>admin</strong>, which bypasses every permission check —
-              they hold all {preview.catalogSize} keys regardless of what is granted explicitly.
-            </div>
-          )}
-          {preview.isArchived && (
-            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-400">
-              This employee is <strong>archived</strong>. Archived accounts are denied everything at sign-in,
-              so in practice they can open nothing — whatever the list below says.
-            </div>
-          )}
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Panel title="Can open" count={nav.visible.length} tone="green">
-              {nav.visible.map(i => (
-                <Row key={i.href} icon={<Check className="w-3.5 h-3.5 text-green-500 shrink-0" />}
-                     label={i.label} meta={i.section} />
-              ))}
-            </Panel>
-            <Panel title="Hidden from them" count={nav.hidden.length} tone="muted">
-              {nav.hidden.map(i => (
-                <Row key={`${i.section}-${i.label}`} icon={<XIcon className="w-3.5 h-3.5 text-muted-foreground/50 shrink-0" />}
-                     label={i.label} meta={i.reason} dim />
-              ))}
-            </Panel>
-          </div>
-
-          <div className="rounded-2xl border border-border bg-card p-4">
-            <p className="text-sm font-semibold mb-3">Permission keys held</p>
-            {byModule.length === 0 ? (
-              <p className="text-xs text-muted-foreground">None — this employee holds no permissions at all.</p>
-            ) : (
-              <div className="space-y-3">
-                {byModule.map(([mod, keys]) => (
-                  <div key={mod}>
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1.5">{mod}</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {keys.map(k => (
-                        <span key={k} className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
-                          {k.split('.').slice(1).join('.')}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {!preview && !loading && !error && (
-        <div className="rounded-2xl border border-border bg-card px-5 py-12 text-center">
-          <Eye className="w-7 h-7 text-muted-foreground/40 mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">Pick an employee to see what they can reach.</p>
-        </div>
-      )}
     </div>
   )
 }

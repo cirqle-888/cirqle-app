@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isHidden } from '@/lib/requests/my-work'
+import { isLiveTask, requestDeleteBlocker } from '@/lib/requests/delete-rules'
 import { isChecklistRequest } from '@/lib/requests/kind'
 import { columnExists } from '@/lib/supabase/server'
 import { captionHtmlToText } from '@/lib/social/plan'
@@ -38,6 +39,8 @@ export interface RawMyWorkRow {
   client_name: string | null
   service_name: string | null
   task_number: number | null
+  /** No work record stands behind it, so an admin may delete it. */
+  removable?: boolean
 }
 
 export async function loadMyWork(
@@ -56,7 +59,7 @@ export async function loadMyWork(
       .select('id, ref_no, title, description, status, due_date, priority, created_at, ' +
         (hasKind ? 'kind, ' : '') +
         'client:clients(name), service:services(name), ' +
-        'promoted_task:tasks!task_requests_promoted_task_id_fkey(task_number)')
+        'promoted_task:tasks!task_requests_promoted_task_id_fkey(task_number, status, deleted_at)')
       .eq('assigned_employee_id', employeeId)
       .order('due_date', { ascending: true, nullsFirst: false })
     for (const r of (data ?? []) as unknown as Row[]) {
@@ -71,6 +74,7 @@ export async function loadMyWork(
         client_name: c?.name ?? null, service_name: s?.name ?? null,
         task_number: t?.task_number ?? null,
         checklist: isChecklistRequest(r as { kind?: string | null }),
+        removable: !requestDeleteBlocker({ status: r.status, task: t }),
       })
     }
   } catch { /* portal not migrated */ }
@@ -112,6 +116,8 @@ export async function loadMyWork(
           due_date: it.scheduled_date, priority: null, created_at: it.created_at,
           client_name: cl?.name ?? null, service_name: s?.name ?? null,
           task_number: live?.task_number ?? null,
+          // Without the task columns there is no telling what stands behind it.
+          removable: withTask && !isLiveTask(live),
         })
       }
       break

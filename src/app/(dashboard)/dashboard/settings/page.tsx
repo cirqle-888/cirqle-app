@@ -1,15 +1,14 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { CRITICAL_PERMS } from '@/lib/permissions/keys'
 import SettingsClient from './settings-client'
-
-const ALL_TABS = ['Company', 'Privacy & Security', 'Employees', 'Services', 'Departments', 'Groups & Params', 'Tools', 'Bank Accounts', 'Cash Categories', 'Exchange Rates']
-const normalizeTab = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+import { resolveSettingsTab } from './settings-tabs'
 
 export const dynamic = 'force-dynamic'
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string; editClient?: string; editService?: string; returnTo?: string }> }) {
   const { tab: rawTab, editClient, editService, returnTo } = await searchParams
-  const initialTab = ALL_TABS.find(t => normalizeTab(t) === normalizeTab(rawTab ?? '')) ?? 'Company'
+  // The same list the client draws its tabs from (settings-tabs.ts).
+  const initialTab = resolveSettingsTab(rawTab)
 
   // Service role, like every other data-heavy dashboard page (cashbook,
   // invoices, tasks). Two reasons, and the first is a hard requirement:

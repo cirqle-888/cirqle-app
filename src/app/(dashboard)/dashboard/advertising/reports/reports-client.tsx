@@ -10,9 +10,10 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  FileText, Plus, Calendar, Download, Clock, CheckCircle, XCircle, Loader2,
+  Plus, Calendar, Download, Clock, CheckCircle, XCircle, Loader2,
   BarChart2,
 } from 'lucide-react'
+import Header from '@/components/layout/header'
 import { ReportComposer } from '@/components/reporting/report-composer'
 import type { ClientReportPreferences } from '@/lib/reporting/preferences'
 
@@ -107,20 +108,11 @@ export default function ReportsClient({ reports, schedules, projects, initialCli
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Page header */}
-      <div className="border-b border-border bg-card/50 px-6 py-5">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
-            <FileText className="h-4 w-4 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold text-foreground">Reports</h1>
-            <p className="text-sm text-muted-foreground">Prepare client reports, schedule them, and download past ones</p>
-          </div>
-        </div>
+      <Header title="Ad Reports" subtitle="Prepare client reports, schedule them, and download past ones" />
 
-        {/* Tabs */}
-        <div className="mt-4 flex gap-0 border-b border-border -mb-[1px]">
+      {/* Tabs */}
+      <div className="px-4 sm:px-6 pt-4">
+        <div className="flex gap-0 border-b border-border">
           {tabs.map(t => (
             <button
               key={t.key}
@@ -141,7 +133,7 @@ export default function ReportsClient({ reports, schedules, projects, initialCli
         </div>
       </div>
 
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         {tab === 'history' && <div className="space-y-4">
           <form action="/dashboard/advertising/reports" className="flex flex-wrap gap-3">
             <input name="q" aria-label="Search report campaign" placeholder="Search campaign…" defaultValue={pagination.query} className="rounded-lg border bg-background px-3 py-2 text-sm" />

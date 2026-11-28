@@ -15,6 +15,7 @@
 import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { loadCurrentUser, hasPermission, type CurrentUser } from '@/lib/permissions/check'
+import { hasAssignment, visibleWorkspaces } from './visibility'
 
 export interface Workspace {
   id: string
@@ -71,12 +72,12 @@ function mapWorkspace(r: any, memberIds: string[] = []): Workspace {
 
 /**
  * Workspaces the caller may see: managers get all (they administer them).
- * Everyone else gets exactly the workspaces they are assigned to — including
- * NOT the "All Workspace" system row once they have at least one assignment.
- * An employee with a curated workspace should live in it, not next to an
- * everything-view that defeats the curation; the system row remains only as
- * the fallback for employees no one has assigned anywhere yet (without it
- * they would have no nav config at all).
+ * Everyone else gets the workspaces they are assigned to — NOT the "All
+ * Workspace" system row once someone has assigned them anywhere. An employee
+ * with a curated workspace should live in it, not next to an everything-view
+ * that defeats the curation; the system row remains for employees no one has
+ * assigned anywhere yet (without it they would have no nav config at all).
+ * The full rule is in ./visibility.
  *
  * Membership ids are part of the workspace's configuration, so they only ride
  * along for managers; a plain member has no business seeing who else is in.
@@ -106,20 +107,7 @@ export async function listWorkspaces(): Promise<Result<Workspace[]>> {
     membersByWs.get(m.workspace_id)!.push(m.employee_id)
   }
 
-  // Another employee's PERSONAL workspace is their private UI arrangement —
-  // it appears in nobody else's list, not even a manager's (managers
-  // administer the SHARED workspaces; personal ones have their own owner).
-  const notOthersPersonal = (r: { owner_employee_id?: string | null }) =>
-    (r.owner_employee_id ?? null) === null || r.owner_employee_id === auth.me.employeeId
-
-  const mine = (rows ?? []).filter(r =>
-    notOthersPersonal(r) && (membersByWs.get(r.id) ?? []).includes(auth.me.employeeId))
-  const visible = manager
-    ? (rows ?? []).filter(notOthersPersonal)
-    // Assigned somewhere → only those. Assigned nowhere → the system fallback.
-    : mine.length > 0
-      ? mine
-      : (rows ?? []).filter(r => r.is_system)
+  const visible = visibleWorkspaces(rows ?? [], membersByWs, auth.me.employeeId, manager)
 
   return { ok: true, data: visible.map(r => mapWorkspace(r, manager ? membersByWs.get(r.id) ?? [] : [])) }
 }
@@ -305,10 +293,13 @@ export async function switchWorkspace(workspaceId: string | null): Promise<Resul
   // Enforced here too so a stale switcher can't route around the list filter.
   const systemAllowed = async (): Promise<boolean> => {
     if (canManage(me)) return true
-    const { count } = await admin.from('workspace_members')
-      .select('workspace_id', { count: 'exact', head: true })
-      .eq('employee_id', me.employeeId)
-    return (count ?? 0) === 0
+    const { data: memberships } = await admin.from('workspace_members')
+      .select('workspace_id').eq('employee_id', me.employeeId)
+    const ids = (memberships ?? []).map(m => m.workspace_id)
+    if (ids.length === 0) return true
+    // '*' for the same reason as listWorkspaces: the owner column may not exist yet.
+    const { data: joined } = await admin.from('workspaces').select('*').in('id', ids)
+    return !hasAssignment(joined ?? [])
   }
 
   if (workspaceId === null) {

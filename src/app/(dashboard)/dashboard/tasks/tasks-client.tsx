@@ -222,6 +222,8 @@ function BillingChip({ status, reason }: { status: TaskBillingStatus; reason?: s
 }
 
 interface Props {
+  /** A page alert (unpriced clients/services), drawn under the page title rather than above it. */
+  notice?: React.ReactNode
   /** Set when arriving via /dashboard/tasks?fromRequest=<id> — opens the Add
    *  Task modal prefilled from the external request (promotion flow). */
   promotionRequest?: {
@@ -462,7 +464,7 @@ function SortablePanelRow({ id, label, onUp, onDown, isFirst, isLast }: {
   )
 }
 
-export default function TasksClient({ promotionRequest, promotionSocialItem, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', focusTaskMissing = false, initialClient = '', initialService = '', initialDateRange = null, dbTaskTotal, fullHistory = false, initialTasks, initialTrash, clients, services: initialServices, departments = [], clientPricings: initialClientPricings, packages = [], packageItems = [], employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags, brandLens = null }: Props) {
+export default function TasksClient({ notice, promotionRequest, promotionSocialItem, requestRefByTaskId = {}, pendingRequestCount = 0, initialSearch = '', focusTaskMissing = false, initialClient = '', initialService = '', initialDateRange = null, dbTaskTotal, fullHistory = false, initialTasks, initialTrash, clients, services: initialServices, departments = [], clientPricings: initialClientPricings, packages = [], packageItems = [], employees, taskAssignments: initialTaskAssignments, groups, parameters, groupServices, parameterServices, taskGroups: initialTaskGroups, taskGroupAssignments: initialTaskGroupAssignments, taskParamAssignments: initialTaskParamAssignments, myTaskIds, visibilitySettings, permissionFlags, brandLens = null }: Props) {
   // Coming back from a record lands where the list was left, not at the top.
   // See lib/lists/scroll-restore for the rules.
   useScrollRestore('tasks')
@@ -2637,6 +2639,7 @@ export default function TasksClient({ promotionRequest, promotionSocialItem, req
           </div>
         }
       />
+      {notice}
 
       {/* ── Trash View ── */}
       {showTrash && (

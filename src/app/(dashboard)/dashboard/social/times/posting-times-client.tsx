@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
-import { SocialTabs } from '@/components/social-hub/social-tabs'
+import Header from '@/components/layout/header'
 import {
   Clock, Plus, Trash2, Loader2, CalendarRange, Check, AlertTriangle,
   Sparkles, ChevronRight, Info, RefreshCw, ClipboardPaste,
@@ -64,45 +64,41 @@ export default function PostingTimesClient({ clients, ready, canManage, canPubli
 
   if (!ready) {
     return (
-      <div className="p-4 sm:p-6 space-y-5">
-        <SocialTabs />
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 flex items-start gap-2.5">
-          <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
-          <div>
-            <p className="text-sm font-medium text-amber-500">Posting times are not switched on yet</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              The database migration <code>20261017090000_social_posting_times</code> has not been
-              applied. Everything else keeps working; this page fills in once it runs.
-            </p>
+      <>
+        <Header title="Posting Times" />
+        <div className="p-4 sm:p-6 space-y-5">
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 flex items-start gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-amber-500">Posting times are not switched on yet</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                The database migration <code>20261017090000_social_posting_times</code> has not been
+                applied. Everything else keeps working; this page fills in once it runs.
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      </>
     )
   }
 
   return (
+    <>
+    <Header
+      title="Posting Times"
+      subtitle="Each client's weekly posting slots, and a planner to fill them"
+      actions={clients.length > 0 ? (
+        <select
+          value={clientId}
+          onChange={e => setClientId(e.target.value)}
+          className="h-9 rounded-lg border border-border bg-secondary px-3 text-sm min-w-[200px]"
+          aria-label="Client"
+        >
+          {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      ) : undefined}
+    />
     <div className="p-4 sm:p-6 space-y-5">
-      <SocialTabs />
-
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">Posting Times</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            The times you&apos;ve decided for each client, and a way to put a month of posts into them.
-          </p>
-        </div>
-        {clients.length > 0 && (
-          <select
-            value={clientId}
-            onChange={e => setClientId(e.target.value)}
-            className="h-9 rounded-lg border border-border bg-secondary px-3 text-sm min-w-[200px]"
-            aria-label="Client"
-          >
-            {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        )}
-      </div>
-
       {error && <p className="text-sm text-red-400">{error}</p>}
 
       {!clients.length ? (
@@ -134,6 +130,7 @@ export default function PostingTimesClient({ clients, ready, canManage, canPubli
         </>
       )}
     </div>
+    </>
   )
 }
 

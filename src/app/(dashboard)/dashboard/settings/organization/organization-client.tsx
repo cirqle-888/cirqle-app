@@ -12,6 +12,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, Trash2, ChevronDown, Crown, Loader2 } from 'lucide-react'
+import Header from '@/components/layout/header'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -58,154 +59,156 @@ export default function OrganizationClient(p: Props) {
     : `Service: ${p.services.find(x => x.id === s.service_id)?.name ?? '—'}`
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 space-y-6">
-      <div className="pl-14 md:pl-0 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Organization</h1>
-          <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-            Departments, teams, branches, regions and client groups. Add one only when you
-            actually need it — nothing here is required, and ownership rules can target the
-            whole company, a client or a service without any of it.
-          </p>
-        </div>
-        <button onClick={() => setUnitModal('new')}
-          className="inline-flex items-center gap-1.5 rounded-lg gradient-bg px-3 py-2 text-sm font-medium text-white hover:opacity-90">
-          <Plus className="h-4 w-4" /> New unit
-        </button>
-      </div>
+    <div>
+      <Header
+        title="Organization"
+        subtitle="Departments, teams, branches, regions and client groups"
+        actions={
+          <button onClick={() => setUnitModal('new')}
+            className="inline-flex items-center gap-1.5 rounded-lg gradient-bg px-3 py-2 text-sm font-medium text-white hover:opacity-90">
+            <Plus className="h-4 w-4" /> New unit
+          </button>
+        }
+      />
+      <div className="mx-auto max-w-4xl px-4 sm:px-6 py-6 space-y-6">
+        <p className="text-sm text-muted-foreground max-w-2xl">
+          Add a unit only when you actually need it — nothing here is required, and ownership
+          rules can target the whole company, a client or a service without any of it.
+        </p>
 
-      {p.units.length === 0 && (
-        <div className="rounded-xl border border-dashed border-border bg-card p-10 text-center">
-          <p className="text-sm font-medium">No units yet — and that is fine</p>
-          <p className="mt-1 text-xs text-muted-foreground max-w-md mx-auto">
-            Create one when you have a real team or branch to model. A unit becomes useful once
-            you map revenue to it, which lets an ownership rule pay a percentage of that unit&rsquo;s billing.
-          </p>
-        </div>
-      )}
+        {p.units.length === 0 && (
+          <div className="rounded-xl border border-dashed border-border bg-card p-10 text-center">
+            <p className="text-sm font-medium">No units yet — and that is fine</p>
+            <p className="mt-1 text-xs text-muted-foreground max-w-md mx-auto">
+              Create one when you have a real team or branch to model. A unit becomes useful once
+              you map revenue to it, which lets an ownership rule pay a percentage of that unit&rsquo;s billing.
+            </p>
+          </div>
+        )}
 
-      <div className="space-y-3">
-        {p.units.map(u => {
-          const unitMembers = p.members.filter(m => m.unitId === u.id)
-          const unitScopes = p.scopeRows.filter(s => s.unit_id === u.id)
-          const open = expanded === u.id
-          const parent = u.parentId ? p.units.find(x => x.id === u.parentId) : null
-          return (
-            <div key={u.id} className="rounded-xl border border-border bg-card overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-3">
-                <button onClick={() => setExpanded(open ? null : u.id)} className="flex items-center gap-2 min-w-0 text-left">
-                  <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? '' : '-rotate-90'}`} />
-                  <span className="font-semibold truncate">{u.name}</span>
-                  <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">
-                    {ORG_UNIT_TYPE_LABEL[u.type]}
-                  </span>
-                  {parent && <span className="text-xs text-muted-foreground">in {parent.name}</span>}
-                  <span className="text-xs text-muted-foreground">
-                    · {unitMembers.length} member{unitMembers.length === 1 ? '' : 's'} · {unitScopes.length} scope{unitScopes.length === 1 ? '' : 's'}
-                  </span>
-                </button>
-                <div className="flex items-center gap-1.5">
-                  <button onClick={() => setUnitModal(u)}
-                    className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium hover:bg-secondary">Edit</button>
-                  <button onClick={() => setDeleteUnitTarget(u)} disabled={busy === u.id}
-                    className="rounded-md p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 disabled:opacity-50">
-                    {busy === u.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+        <div className="space-y-3">
+          {p.units.map(u => {
+            const unitMembers = p.members.filter(m => m.unitId === u.id)
+            const unitScopes = p.scopeRows.filter(s => s.unit_id === u.id)
+            const open = expanded === u.id
+            const parent = u.parentId ? p.units.find(x => x.id === u.parentId) : null
+            return (
+              <div key={u.id} className="rounded-xl border border-border bg-card overflow-hidden">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-3">
+                  <button onClick={() => setExpanded(open ? null : u.id)} className="flex items-center gap-2 min-w-0 text-left">
+                    <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? '' : '-rotate-90'}`} />
+                    <span className="font-semibold truncate">{u.name}</span>
+                    <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">
+                      {ORG_UNIT_TYPE_LABEL[u.type]}
+                    </span>
+                    {parent && <span className="text-xs text-muted-foreground">in {parent.name}</span>}
+                    <span className="text-xs text-muted-foreground">
+                      · {unitMembers.length} member{unitMembers.length === 1 ? '' : 's'} · {unitScopes.length} scope{unitScopes.length === 1 ? '' : 's'}
+                    </span>
                   </button>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => setUnitModal(u)}
+                      className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium hover:bg-secondary">Edit</button>
+                    <button onClick={() => setDeleteUnitTarget(u)} disabled={busy === u.id}
+                      className="rounded-md p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 disabled:opacity-50">
+                      {busy === u.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
                 </div>
+
+                {open && (
+                  <div className="grid gap-4 p-4 sm:grid-cols-2">
+                    {/* Members — several managers per unit are expected. */}
+                    <div>
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">People</h3>
+                      <div className="space-y-1.5">
+                        {unitMembers.length === 0 && <p className="text-xs text-muted-foreground">Nobody assigned.</p>}
+                        {unitMembers.map(m => (
+                          <div key={m.employeeId} className="flex items-center justify-between gap-2 rounded-lg border border-border px-2.5 py-1.5 text-sm">
+                            <span className="inline-flex items-center gap-1.5 min-w-0">
+                              {m.isManager && <Crown className="h-3 w-3 text-amber-500 shrink-0" aria-label="Manager" />}
+                              <span className="truncate">{cqid(m.employeeId)}</span>
+                              {m.roleLabel && <span className="text-xs text-muted-foreground truncate">· {m.roleLabel}</span>}
+                            </span>
+                            <button onClick={async () => {
+                              const res = await removeMember(u.id, m.employeeId)
+                              if (!res.ok) { toastError('Could not remove', res.error); return }
+                              refresh()
+                            }} className="rounded p-1 text-muted-foreground hover:text-red-500 shrink-0">
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <AddMember unitId={u.id} employees={p.employees} taken={unitMembers.map(m => m.employeeId)}
+                        onDone={refresh} onError={m => toastError('Could not add', m)} />
+                    </div>
+
+                    {/* Revenue scopes — what makes a unit-scoped rule computable. */}
+                    <div>
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Revenue it owns</h3>
+                      <div className="space-y-1.5">
+                        {unitScopes.length === 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            Nothing mapped — a rule scoped to this unit would pay nothing.
+                          </p>
+                        )}
+                        {unitScopes.map(s => (
+                          <div key={s.id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-2.5 py-1.5 text-sm">
+                            <span className="truncate">{scopeLabel(s)}</span>
+                            <button onClick={async () => {
+                              const res = await removeScope(s.id)
+                              if (!res.ok) { toastError('Could not remove', res.error); return }
+                              refresh()
+                            }} className="rounded p-1 text-muted-foreground hover:text-red-500 shrink-0">
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <AddScope unitId={u.id} clients={p.clients} services={p.services} categories={p.categories}
+                        onDone={refresh} onError={m => toastError('Could not add', m)} />
+                    </div>
+                  </div>
+                )}
               </div>
+            )
+          })}
+        </div>
 
-              {open && (
-                <div className="grid gap-4 p-4 sm:grid-cols-2">
-                  {/* Members — several managers per unit are expected. */}
-                  <div>
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">People</h3>
-                    <div className="space-y-1.5">
-                      {unitMembers.length === 0 && <p className="text-xs text-muted-foreground">Nobody assigned.</p>}
-                      {unitMembers.map(m => (
-                        <div key={m.employeeId} className="flex items-center justify-between gap-2 rounded-lg border border-border px-2.5 py-1.5 text-sm">
-                          <span className="inline-flex items-center gap-1.5 min-w-0">
-                            {m.isManager && <Crown className="h-3 w-3 text-amber-500 shrink-0" aria-label="Manager" />}
-                            <span className="truncate">{cqid(m.employeeId)}</span>
-                            {m.roleLabel && <span className="text-xs text-muted-foreground truncate">· {m.roleLabel}</span>}
-                          </span>
-                          <button onClick={async () => {
-                            const res = await removeMember(u.id, m.employeeId)
-                            if (!res.ok) { toastError('Could not remove', res.error); return }
-                            refresh()
-                          }} className="rounded p-1 text-muted-foreground hover:text-red-500 shrink-0">
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <AddMember unitId={u.id} employees={p.employees} taken={unitMembers.map(m => m.employeeId)}
-                      onDone={refresh} onError={m => toastError('Could not add', m)} />
-                  </div>
-
-                  {/* Revenue scopes — what makes a unit-scoped rule computable. */}
-                  <div>
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Revenue it owns</h3>
-                    <div className="space-y-1.5">
-                      {unitScopes.length === 0 && (
-                        <p className="text-xs text-muted-foreground">
-                          Nothing mapped — a rule scoped to this unit would pay nothing.
-                        </p>
-                      )}
-                      {unitScopes.map(s => (
-                        <div key={s.id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-2.5 py-1.5 text-sm">
-                          <span className="truncate">{scopeLabel(s)}</span>
-                          <button onClick={async () => {
-                            const res = await removeScope(s.id)
-                            if (!res.ok) { toastError('Could not remove', res.error); return }
-                            refresh()
-                          }} className="rounded p-1 text-muted-foreground hover:text-red-500 shrink-0">
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <AddScope unitId={u.id} clients={p.clients} services={p.services} categories={p.categories}
-                      onDone={refresh} onError={m => toastError('Could not add', m)} />
-                  </div>
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-
-      {unitModal && (
-        <UnitModal
-          initial={unitModal === 'new' ? null : unitModal}
-          units={p.units}
-          onClose={() => setUnitModal(null)}
-          onSaved={() => { setUnitModal(null); success('Unit saved'); refresh() }}
-          onError={m => toastError('Could not save', m)}
-        />
-      )}
-      {deleteUnitTarget && (() => {
-        const u = deleteUnitTarget
-        const memberCount = p.members.filter(m => m.unitId === u.id).length
-        const scopeCount = p.scopeRows.filter(s => s.unit_id === u.id).length
-        return (
-          <ConfirmDialog
-            title={`Delete the "${u.name}" unit?`}
-            body={`Its ${memberCount} ${memberCount === 1 ? 'person' : 'people'} and ${scopeCount} revenue mapping${scopeCount === 1 ? '' : 's'} are removed with it. Any ownership rule that pays out on this unit's billing stops matching.`}
-            confirmLabel="Delete unit"
-            danger
-            onConfirm={async () => {
-              setDeleteUnitTarget(null)
-              setBusy(u.id)
-              const res = await deleteUnit(u.id)
-              setBusy(null)
-              if (!res.ok) { toastError('Could not delete', res.error); return }
-              success('Unit deleted'); refresh()
-            }}
-            onCancel={() => setDeleteUnitTarget(null)}
+        {unitModal && (
+          <UnitModal
+            initial={unitModal === 'new' ? null : unitModal}
+            units={p.units}
+            onClose={() => setUnitModal(null)}
+            onSaved={() => { setUnitModal(null); success('Unit saved'); refresh() }}
+            onError={m => toastError('Could not save', m)}
           />
-        )
-      })()}
-      <ToastContainer toasts={toasts} onDismiss={dismiss} />
+        )}
+        {deleteUnitTarget && (() => {
+          const u = deleteUnitTarget
+          const memberCount = p.members.filter(m => m.unitId === u.id).length
+          const scopeCount = p.scopeRows.filter(s => s.unit_id === u.id).length
+          return (
+            <ConfirmDialog
+              title={`Delete the "${u.name}" unit?`}
+              body={`Its ${memberCount} ${memberCount === 1 ? 'person' : 'people'} and ${scopeCount} revenue mapping${scopeCount === 1 ? '' : 's'} are removed with it. Any ownership rule that pays out on this unit's billing stops matching.`}
+              confirmLabel="Delete unit"
+              danger
+              onConfirm={async () => {
+                setDeleteUnitTarget(null)
+                setBusy(u.id)
+                const res = await deleteUnit(u.id)
+                setBusy(null)
+                if (!res.ok) { toastError('Could not delete', res.error); return }
+                success('Unit deleted'); refresh()
+              }}
+              onCancel={() => setDeleteUnitTarget(null)}
+            />
+          )
+        })()}
+        <ToastContainer toasts={toasts} onDismiss={dismiss} />
+      </div>
     </div>
   )
 }

@@ -14,7 +14,7 @@ export default async function ProfitSharingLayout({ children }: { children: Reac
     <div className="space-y-0">
       <Header
         title="Profit Sharing"
-        subtitle="Cirqle's own cash profit, the Capital Share and Business Reserve, investors' capital, and device valuations. Admin only."
+        subtitle="Cash profit, Capital Share, Business Reserve, investors' capital and devices"
       />
       <ProfitSharingTabs />
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 md:px-6">{children}</div>

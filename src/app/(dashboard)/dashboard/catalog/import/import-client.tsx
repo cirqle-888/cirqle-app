@@ -2,8 +2,9 @@
 
 import { useState, useRef, useCallback } from 'react'
 import Link from 'next/link'
+import Header from '@/components/layout/header'
 import {
-  ArrowLeft, Upload, FileSpreadsheet, ImageIcon, Package,
+  Upload, FileSpreadsheet, ImageIcon, Package,
   Check, X, AlertCircle, Loader2, ChevronDown, ChevronUp,
   FileArchive, Info, Trash2,
 } from 'lucide-react'
@@ -391,19 +392,20 @@ export default function ImportClient() {
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
+    // The top bar and the steps stay put; only the body scrolls. The column is
+    // exactly <main>'s height, so <main> itself never scrolls.
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="px-6 pt-6 pb-4 border-b border-border">
-        <div className="flex items-center gap-3 mb-1">
-          <Link href="/dashboard/catalog" className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
-          <h1 className="text-xl font-bold">Bulk Import</h1>
-        </div>
-        <p className="text-sm text-muted-foreground ml-9">Upload a spreadsheet + images to add products to the global catalog</p>
-
+      {/* The breadcrumb leads back to the catalog. Left to itself the last
+          crumb would read "Bulk Import" (every "import" folder gets the name of
+          /dashboard/import), so it is named here. */}
+      <Header
+        title="Catalog Import"
+        subtitle="Upload a spreadsheet + images to add products to the global catalog"
+        crumbLabel="Catalog Import"
+      />
+      <div className="px-4 sm:px-6 py-4 border-b border-border">
         {/* Steps */}
-        <div className="flex items-center gap-4 mt-4 ml-9 flex-wrap">
+        <div className="flex items-center gap-4 flex-wrap">
           <Step n={1} label="Upload spreadsheet" active={stage === 'upload'} done={stage !== 'upload'} />
           <div className="h-px w-6 bg-border" />
           <Step n={2} label="Match images" active={stage === 'preview'} done={stage === 'importing' || stage === 'done'} />
@@ -413,7 +415,7 @@ export default function ImportClient() {
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto px-6 py-6 max-w-4xl">
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 w-full max-w-4xl mx-auto">
 
         {/* ── Stage: upload ─────────────────────────────────────────────────── */}
         {stage === 'upload' && (

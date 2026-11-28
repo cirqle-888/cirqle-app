@@ -307,13 +307,17 @@ export function FiguresToggle() {
       title={figuresHidden
         ? 'Amounts are blurred for screen sharing — click, or press Cmd/Ctrl+Shift+H, to show them'
         : 'Blur every amount on screen for sharing (Cmd/Ctrl+Shift+H)'}
-      className={`flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors ${
+      aria-label={figuresHidden ? 'Figures hidden — show them' : 'Figures visible — blur them'}
+      aria-pressed={figuresHidden}
+      className={`flex items-center justify-center gap-1.5 text-[11px] font-medium h-8 min-w-8 px-2.5 rounded-full border transition-colors ${
         figuresHidden
           ? 'bg-amber-500/10 border-amber-500/25 text-amber-400 hover:bg-amber-500/20'
           : 'bg-secondary border-border text-muted-foreground hover:border-primary/30 hover:text-foreground'
       }`}>
       {figuresHidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-      {figuresHidden ? 'Figures hidden' : 'Figures visible'}
+      {/* The label stays while figures are blurred — that state must be
+          unmistakable before sharing a screen. */}
+      <span className={figuresHidden ? 'inline' : 'hidden 2xl:inline'}>{figuresHidden ? 'Figures hidden' : 'Figures visible'}</span>
     </button>
   )
 }

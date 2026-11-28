@@ -78,7 +78,7 @@ export default async function DepartmentCardsPage({
   return (
     <div className="space-y-6">
       <Header
-        title="Departments"
+        title="Department Growth"
         subtitle="One card per discipline — open any of them for its full growth analysis"
       />
 

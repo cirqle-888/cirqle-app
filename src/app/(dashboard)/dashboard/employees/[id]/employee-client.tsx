@@ -1,13 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import Link from 'next/link'
 import { createClient as createSupabaseClient } from '@/lib/supabase/client'
 import Header from '@/components/layout/header'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import AppSelect from '@/components/ui/app-select'
-import { ChevronLeft, Plus, Edit2 } from 'lucide-react'
+import { Plus, Edit2 } from 'lucide-react'
 import type { CommissionAgreement } from '@/lib/agreements/resolve-earning'
 import { saveCommissionAgreement } from './actions'
 import { PresenceAvatar, PresenceBadge } from '@/components/ui/presence-dot'
@@ -101,17 +100,19 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
     setShowForm(false)
   }
 
+  // Deliberate: the HR record page is the one place the real name is shown
+  // (allow-listed in scripts/check-name-privacy.mjs), so it is the title and
+  // the last breadcrumb. The breadcrumb leads back to HR & Payroll.
+  const personLabel = employee.name || employee.cqid
+
   return (
-    <main className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background">
+      <Header title={personLabel} crumbLabel={personLabel} />
       <ToastContainer toasts={toast.toasts} onDismiss={toast.dismiss} />
-      <Header title="Employee Profile" />
-      
-      <div className="max-w-6xl mx-auto px-4 py-8">
+
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
         <div className="mb-6 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link href="/dashboard/settings" className="p-2 -ml-2 rounded-lg hover:bg-secondary text-muted-foreground transition-colors">
-              <ChevronLeft className="w-5 h-5" />
-            </Link>
             <PresenceAvatar
               employeeId={employee.id}
               avatarUrl={employee.avatar_url}
@@ -121,8 +122,6 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
               rounded="xl"
             />
             <div>
-              {/* eslint-disable-next-line no-restricted-syntax -- deliberate: showing name on the dedicated employee profile page */}
-              <h1 className="text-2xl font-bold">{employee.name}</h1>
               <p className="text-sm text-muted-foreground">{employee.cqid} • {employee.role}</p>
               <PresenceBadge presence={presence} className="mt-1" />
             </div>
@@ -383,6 +382,6 @@ export default function EmployeeProfileClient({ employee, agreements: initialAgr
           </div>
         </ModalOverlay>
       )}
-    </main>
+    </div>
   )
 }

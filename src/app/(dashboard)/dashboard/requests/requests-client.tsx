@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import Header from '@/components/layout/header'
 import {
   DndContext, DragOverlay, closestCenter, pointerWithin, MouseSensor, TouchSensor, useSensor, useSensors,
   useDraggable, useDroppable, type DragEndEvent,
@@ -37,7 +38,7 @@ import {
   CalendarDays, Save, CheckCircle2, X, Flag,
   Search, Plus, UserRound, List, LayoutGrid, Link as LinkIcon, ExternalLink, GripVertical, Share2, RefreshCw, Sparkles,
   BadgePercent, Megaphone, ChevronDown, ListChecks, Building2, Tag,
-  FolderOpen, MoreHorizontal, Send, Pencil, MessageCircle,
+  FolderOpen, MoreHorizontal, Send, Pencil, MessageCircle, Trash2,
 } from 'lucide-react'
 import { TitleAutocomplete } from '@/components/tasks/title-autocomplete'
 import {
@@ -48,13 +49,14 @@ import {
   postExternalUpdate, updateInternalNotes, markRevisionAddressed, postRequestNote,
   assignRequestEmployee, createManualRequest, searchTasksForLink, linkRequestToTask,
   reorderStaffPriority, bulkSetRequestStatus, bulkAssignRequestEmployee,
-  updateRequestTitle, moveRequestTaskOnBoard,
+  updateRequestTitle, moveRequestTaskOnBoard, deleteRequests,
 } from './actions'
 import { DiscussButton } from '@/components/chat/discuss-button'
 import { CampaignCard } from '@/components/campaigns/campaign-card'
 import { useBatchSelection } from '@/lib/hooks/use-batch-selection'
 import { BatchActionBar, type BatchAction } from '@/components/ui/batch-action-bar'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { requestDeleteBlocker, deleteRequestsWarning, DELETE_LIMIT, type LinkedTaskFacts } from '@/lib/requests/delete-rules'
 import { BulkOutcomeBar } from '@/components/ui/bulk-outcome-bar'
 import { describeBulkPlan, summariseBulkOutcome, type BulkReport } from '@/lib/bulk/outcome'
 import { listTemplates, previewTemplateRun, runTemplate } from '@/lib/templates/actions'
@@ -87,6 +89,9 @@ const SORTABLE_TABS = new Set(['new', 'ongoing'])
 // Reject / Cancel tucked into the request popup's ⋯ menu, so the visible
 // buttons only ever move work forward.
 const DESTRUCTIVE = new Set<string>(['rejected', 'cancelled'])
+// Where someone expects to find Delete: a closed request that has to be kept
+// still shows it, greyed out, with the reason.
+const CLOSED = new Set<string>(['rejected', 'cancelled', 'archived'])
 const SECTION_LABEL = 'text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 mb-1.5'
 
 // Filter dropdowns share one look; a filter that's narrowing the list gets a
@@ -389,12 +394,12 @@ function getShareStatusStyle(status: string): React.CSSProperties {
 
 export default function RequestsClient({
   migrated, initialRequests, perms, clients: clientsProp = [], employees = [], services = [],
-  servicePricing = [], offerCampaigns = [], initialFocusId = null,
+  servicePricing = [], offerCampaigns = [], initialFocusId = null, canOpenWhatsApp = false,
 }: {
   migrated: boolean
   initialRequests: any[]
   /** value = may see money (billing.view_amounts): pipeline value, estimated values. */
-  perms: { review: boolean; start: boolean; manage: boolean; activity: boolean; value?: boolean }
+  perms: { review: boolean; start: boolean; manage: boolean; activity: boolean; value?: boolean; delete?: boolean }
   clients?: { id: string; name: string; code?: string | null; drive_folder_link?: string | null; is_draft?: boolean | null }[]
   employees?: { id: string; cqid?: string | null }[]
   services?: { id: string; name: string }[]
@@ -402,6 +407,8 @@ export default function RequestsClient({
   /** Offer-campaign submissions — shown in the same inbox as a different request type. */
   offerCampaigns?: any[]
   initialFocusId?: string | null
+  /** May open WhatsApp chats — an admin, or someone a chat is shared with (same rule as whatsapp/page.tsx). */
+  canOpenWhatsApp?: boolean
 }) {
   const router = useRouter()
   // Assigned-employee names respect the global privacy lock — name only when unlocked, else CQID.
@@ -539,6 +546,8 @@ export default function RequestsClient({
   const [bulkAssignEmpId, setBulkAssignEmpId] = useState<string>('')
   /** Confirmation shown BEFORE a bulk action writes anything. */
   const [bulkConfirm, setBulkConfirm] = useState<{ verb: string; run: () => void } | null>(null)
+  /** A permanent delete waiting to be confirmed. */
+  const [deleteAsk, setDeleteAsk] = useState<{ ids: string[]; title: string | null; keeping: number } | null>(null)
   // Board drag-and-drop (managers, status board only).
   const [boardDragId, setBoardDragId] = useState<string | null>(null)
   const [boardConfirm, setBoardConfirm] = useState<{ message: string; run: () => void } | null>(null)
@@ -884,6 +893,49 @@ export default function RequestsClient({
     setBulkConfirm({ verb, run: () => void runBulkStatus(ids, status) })
   }
 
+  /** Why a row must be kept, as far as this screen knows; the server decides. */
+  function deleteBlockerFor(r: {
+    status: string; promoted_task_id?: string | null; promoted_task?: LinkedTaskFacts | null
+  }): string | null {
+    // A task linked a moment ago has an id but no details yet: it counts.
+    return requestDeleteBlocker({ status: r.status, task: r.promoted_task_id ? (r.promoted_task ?? {}) : null })
+  }
+
+  function askDelete(ids: string[]) {
+    const picked = requests.filter(r => ids.includes(r.id))
+    const going = picked.filter(r => !deleteBlockerFor(r))
+    if (!going.length) {
+      const why = picked[0] ? deleteBlockerFor(picked[0]) : null
+      toastError('Nothing to delete', why ? `Kept because ${why}.` : undefined)
+      return
+    }
+    if (going.length > DELETE_LIMIT) {
+      toastError('Too many at once', `Delete up to ${DELETE_LIMIT} at a time.`)
+      return
+    }
+    setDeleteAsk({
+      ids: going.map(r => r.id),
+      title: going.length === 1 ? going[0].title : null,
+      keeping: picked.length - going.length,
+    })
+  }
+
+  async function runDelete(ids: string[]) {
+    setBusy(true); setBulkBusy(true)
+    const res = await deleteRequests(ids)
+    setBusy(false); setBulkBusy(false)
+    if (!res.ok || !res.data) { toastError('Could not delete', res.error); return }
+    const { deleted, kept, warning } = res.data
+    const gone = new Set(deleted)
+    setRequests(prev => prev.filter(x => !gone.has(x.id)))
+    setOpen((o: typeof open) => (o && gone.has(o.id) ? null : o))
+    batchSel.clear()
+    if (gone.size) success(`Deleted ${gone.size} request${gone.size === 1 ? '' : 's'}`)
+    if (kept.length) toastError(`${kept.length} kept`, kept.slice(0, 3).map(k => `${k.label}: ${k.reason}`).join(' · '))
+    if (warning) toastError('Check the social calendar', warning)
+    router.refresh()
+  }
+
   async function runBulkAssign(ids: string[], employeeId: string) {
     if (!ids.length) return
     const emp = employees.find(e => e.id === employeeId) || null
@@ -909,19 +961,6 @@ export default function RequestsClient({
     // confirms through the modal's own Apply rather than a second dialog.
     setBulkAssignOpen(false)
     void runBulkAssign(ids, empId)
-  }
-
-  // ── AI Capture ──────────────────────────────────────────────────────────
-  async function handleAiCaptureClick() {
-    try {
-      const text = await navigator.clipboard.readText()
-      if (text) {
-        window.__pendingCirqleCapture = { text }
-      }
-    } catch {
-      // Ignore clipboard errors
-    }
-    router.push('/dashboard/capture')
   }
 
   async function doCreate() {
@@ -1219,20 +1258,17 @@ export default function RequestsClient({
     : r.submitter_name ? `${r.submitter_name} (guest)` : 'Guest'
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
-      {/* ── Header ──────────────────────────────────────────────────────────
-          Title on the left, the page's actions on the right — kept OUT of the
-          status tabs so the primary button never scrolls away with them.
-          pl-12 on mobile clears the fixed global sidebar hamburger. */}
-      {/* One line. The counts sit where a sentence of description used to be —
-          the page says what is open instead of what the page is — and the
-          links used a few times a week live behind the "…". */}
-      <div className="flex items-center gap-x-3 gap-y-2 flex-wrap pl-12 md:pl-0">
-        <h1 className="text-xl font-bold tracking-tight leading-tight">Requests</h1>
-        {/* At-a-glance: what's open, what it's worth, and the pile nobody owns.
-            "Unassigned" is a shortcut straight into that filter. */}
-        {migrated && (pipeline.count > 0 || openLoad.unassigned > 0) && (
-          <div className="flex items-center gap-2 flex-wrap">
+    <>
+      {/* The counts sit where a sentence of description used to be — the page
+          says what is open instead of what the page is — and the links used a
+          few times a week live behind the "…". AI Capture is the top bar's own
+          button. Each chip is its own child so the bar can wrap them on a phone. */}
+      <Header
+        title="Requests"
+        actions={migrated ? (
+          <>
+            {/* At-a-glance: what's open, what it's worth, and the pile nobody owns.
+                "Unassigned" is a shortcut straight into that filter. */}
             {pipeline.count > 0 && (
               <span className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium bg-secondary/70 border border-border/60 text-foreground/80">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />{pipeline.count} open
@@ -1254,17 +1290,6 @@ export default function RequestsClient({
                 <UserRound className="w-3 h-3" />{openLoad.unassigned} unassigned
               </button>
             )}
-          </div>
-        )}
-        {migrated && (
-          <div className="flex items-center gap-2 shrink-0 ml-auto">
-            {perms.manage && can('capture.use') && (
-              <button onClick={handleAiCaptureClick}
-                title="Create a new request from clipboard — same as the Cirqle Desktop toolbar's New Request button"
-                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-medium border border-violet-500/30 bg-violet-500/5 hover:bg-violet-500/10 text-violet-700 dark:text-violet-300 transition-colors">
-                <Sparkles className="w-3.5 h-3.5" /><span className="hidden sm:inline">AI Capture</span>
-              </button>
-            )}
             {perms.manage && (
               <button onClick={() => setShowNewMenu(true)}
                 className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-xs font-semibold gradient-bg text-white shadow-sm hover:opacity-90 transition-opacity">
@@ -1275,16 +1300,21 @@ export default function RequestsClient({
               label="More"
               items={[
                 { label: 'Pending by client', icon: Inbox, onClick: () => router.push('/dashboard/requests/pending') },
-                { label: 'WhatsApp chats', icon: MessageCircle, onClick: () => router.push('/dashboard/requests/whatsapp') },
+                // Only for people the chats page lets in — it sends everyone
+                // else back to the dashboard.
+                ...(canOpenWhatsApp ? [{
+                  label: 'WhatsApp chats', icon: MessageCircle, onClick: () => router.push('/dashboard/requests/whatsapp'),
+                }] : []),
                 ...(perms.manage ? [{
                   label: 'Share status as image', icon: Share2,
                   onClick: () => { setShowShare(true); setShareClientId(clientFilter || ''); setShareIncludeCompleted(false) },
                 }] : []),
               ]}
             />
-          </div>
-        )}
-      </div>
+          </>
+        ) : undefined}
+      />
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-6">
 
       {!migrated && (
         <div className="mt-4 flex items-start gap-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
@@ -1989,7 +2019,9 @@ export default function RequestsClient({
                         ...(!open.promoted_task_id ? (TRANSITIONS[open.status] || []).filter(t => DESTRUCTIVE.has(t.to) && (t.to === 'rejected' ? perms.review : perms.manage)) : []),
                         ...(perms.manage && open.status !== 'archived' ? [{ to: 'archived' as RequestStatus, label: 'Archive' }] : []),
                       ]
-                      if (!menu.length) return null
+                      const keptBecause = perms.delete ? deleteBlockerFor(open) : null
+                      const offerDelete = !!perms.delete && (!keptBecause || CLOSED.has(open.status))
+                      if (!menu.length && !offerDelete) return null
                       return (
                         <div className="relative">
                           <button onClick={() => setMoreOpen(v => !v)} title="More actions" aria-label="More actions"
@@ -1999,7 +2031,7 @@ export default function RequestsClient({
                           {moreOpen && (
                             <>
                               <div className="fixed inset-0 z-10" onClick={() => setMoreOpen(false)} />
-                              <div className="absolute right-0 top-full mt-1 z-20 w-44 bg-card border border-border rounded-xl shadow-xl p-1">
+                              <div className={`absolute right-0 top-full mt-1 z-20 ${offerDelete ? 'w-56' : 'w-44'} bg-card border border-border rounded-xl shadow-xl p-1`}>
                                 {menu.map(t => (
                                   <button key={t.to} disabled={busy}
                                     onClick={() => { setMoreOpen(false); doStatus(open, t.to) }}
@@ -2008,6 +2040,18 @@ export default function RequestsClient({
                                     {t.label === 'Cancel' ? 'Cancel request' : t.label === 'Reject' ? 'Reject request' : t.label}
                                   </button>
                                 ))}
+                                {offerDelete && (
+                                  <div className={menu.length ? 'mt-1 border-t border-border pt-1' : ''}>
+                                    <button disabled={busy || !!keptBecause}
+                                      onClick={() => { setMoreOpen(false); askDelete([open.id]) }}
+                                      className="flex w-full items-center gap-2 px-3 py-2 rounded-lg text-left text-sm text-red-600 dark:text-red-400 transition-colors hover:bg-red-500/10 disabled:opacity-50 disabled:hover:bg-transparent">
+                                      <Trash2 className="w-3.5 h-3.5 shrink-0" /> Delete permanently
+                                    </button>
+                                    {keptBecause && (
+                                      <p className="px-3 pb-1.5 text-[11px] leading-snug text-muted-foreground">Kept because {keptBecause}.</p>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             </>
                           )}
@@ -2543,6 +2587,10 @@ export default function RequestsClient({
             { key: 'archived', label: 'Archive', icon: <Inbox className="w-3.5 h-3.5" />, tint: 'amber', onClick: () => doBulkStatus('archived', 'archive') },
             { key: 'cancelled', label: 'Cancel', icon: <X className="w-3.5 h-3.5" />, tint: 'red', onClick: () => doBulkStatus('cancelled', 'cancel') },
             { key: 'assign', label: 'Assign', icon: <UserRound className="w-3.5 h-3.5" />, tint: 'cyan', onClick: () => setBulkAssignOpen(true) },
+            // Clearing out is done from the two closed tabs, where nothing is under way.
+            ...(perms.delete && (tab === 'rejected' || tab === 'archived')
+              ? [{ key: 'delete', label: 'Delete', icon: <Trash2 className="w-3.5 h-3.5" />, tint: 'red', onClick: () => askDelete([...batchSel.selected]) }]
+              : []),
           ] as BatchAction[]}
         />
       )}
@@ -2555,6 +2603,18 @@ export default function RequestsClient({
           confirmLabel="Apply"
           onConfirm={() => { const run = bulkConfirm.run; setBulkConfirm(null); run() }}
           onCancel={() => setBulkConfirm(null)}
+        />
+      )}
+
+      {deleteAsk && (
+        <ConfirmDialog
+          danger
+          title={deleteAsk.ids.length === 1 ? 'Delete this request for good?' : `Delete ${deleteAsk.ids.length} requests for good?`}
+          body={deleteRequestsWarning({ count: deleteAsk.ids.length, title: deleteAsk.title, keeping: deleteAsk.keeping })}
+          confirmLabel="Delete"
+          requireTypedText={deleteAsk.ids.length > 1 ? 'delete' : undefined}
+          onConfirm={() => { const { ids } = deleteAsk; setDeleteAsk(null); void runDelete(ids) }}
+          onCancel={() => setDeleteAsk(null)}
         />
       )}
 
@@ -2599,6 +2659,7 @@ export default function RequestsClient({
         />
       )}
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
-    </div>
+      </div>
+    </>
   )
 }

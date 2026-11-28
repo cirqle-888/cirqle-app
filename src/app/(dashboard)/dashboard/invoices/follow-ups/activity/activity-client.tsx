@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
-import { History, Search, ExternalLink, Users, BarChart3 } from 'lucide-react'
+import { Search, ExternalLink, Users, BarChart3 } from 'lucide-react'
 import { usePrivacy } from '@/contexts/privacy-context'
 import { formatDate } from '@/lib/utils/format-date'
 
@@ -104,13 +104,7 @@ export default function ActivityClient({ rows, setupNeeded }: { rows: ActivityRo
     <div className="min-h-screen">
       <Header
         title="Follow-up Activity Log"
-        subtitle="Every follow-up logged across all invoices — who chased what, and what clients said"
-        actions={
-          <Link href="/dashboard/invoices/follow-ups"
-            className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-border/80 transition-colors">
-            <History className="w-3.5 h-3.5" /> Back to Follow-ups
-          </Link>
-        }
+        subtitle="Who chased which invoice, and what the client said"
       />
 
       <div className="px-4 sm:px-6 lg:px-8 pb-16 max-w-6xl mx-auto">
@@ -226,7 +220,7 @@ export default function ActivityClient({ rows, setupNeeded }: { rows: ActivityRo
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
                       {r.invoice && (
-                        <Link href="/dashboard/invoices" className="text-xs font-semibold text-foreground hover:text-primary flex items-center gap-1">
+                        <Link href={`/dashboard/invoices?id=${r.invoice.id}`} className="text-xs font-semibold text-foreground hover:text-primary flex items-center gap-1">
                           {r.invoice.invoice_number} <ExternalLink className="w-2.5 h-2.5" />
                         </Link>
                       )}

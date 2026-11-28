@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState, useTransition } from 'react'
 import { RefreshCw, Plus, Inbox } from 'lucide-react'
+import Header from '@/components/layout/header'
 import { getApprovals, type ApprovalSummary } from '@/lib/approvals/actions'
 import { usePermissions } from '@/contexts/permission-context'
 import { displayEmployee } from '@/lib/utils/employee-display'
@@ -47,24 +48,25 @@ export function ApprovalsClient({ meId }: { meId: string }) {
   }, [tab, load])
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
-      {/* pl-12 on mobile clears the fixed global sidebar hamburger. */}
-      <div className="mb-6 flex items-center justify-between pl-12 md:pl-0">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Approvals</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Sign-offs for designs, invoices, tasks, expenses and more.</p>
-        </div>
-        <div className="flex items-center gap-2">
+    <>
+    <Header
+      title="Approvals"
+      subtitle="Sign-offs for designs, invoices, tasks, expenses and more."
+      actions={
+        <>
           <button onClick={() => load(tab)} className="rounded-lg border border-border p-2 text-muted-foreground hover:text-foreground" aria-label="Refresh">
             <RefreshCw className={`h-4 w-4 ${pending ? 'animate-spin' : ''}`} />
           </button>
+          {/* "Ask for approval", not "New request": Requests has its own
+              "New Request", and the two are different things. */}
           <button onClick={() => setShowDialog(true)}
             className="inline-flex items-center gap-1.5 rounded-lg bg-foreground px-3 py-2 text-sm font-medium text-background">
-            <Plus className="h-4 w-4" /> New request
+            <Plus className="h-4 w-4" /> Ask for approval
           </button>
-        </div>
-      </div>
-
+        </>
+      }
+    />
+    <div className="mx-auto max-w-3xl px-4 sm:px-6 py-6">
       <div className="mb-4 flex gap-1 rounded-lg bg-muted p-0.5 w-fit">
         {([['awaiting_me', 'Awaiting me'], ['my_requests', 'My requests']] as [Tab, string][]).map(([key, label]) => (
           <button key={key} onClick={() => { setTab(key); setExpanded(null) }}
@@ -118,5 +120,6 @@ export function ApprovalsClient({ meId }: { meId: string }) {
         />
       )}
     </div>
+    </>
   )
 }

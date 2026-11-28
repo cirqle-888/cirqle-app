@@ -60,9 +60,6 @@ export default async function WhatsAppChatsPage({ searchParams }: { searchParams
     <div className="min-h-screen">
       <Header title="WhatsApp chats" subtitle="Read-only view of the client chats the listener reads" />
       <div className="px-4 sm:px-6 lg:px-8 pb-16 max-w-6xl mx-auto mt-2 space-y-4">
-        <Link href="/dashboard/requests" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="w-3.5 h-3.5" /> Back to Requests
-        </Link>
         <WhatsAppTabs active="chats" />
         {body}
       </div>

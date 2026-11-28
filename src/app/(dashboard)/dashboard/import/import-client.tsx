@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { Download } from 'lucide-react'
+import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { viaPriced } from '@/lib/supabase/priced'
 import {
@@ -2451,17 +2452,12 @@ export default function ImportClient({ clients, services, employees, groups, par
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="p-4 md:p-6 max-w-6xl mx-auto space-y-5">
-      <ToastContainer toasts={toasts} onDismiss={dismiss} />
-
-      {/* Header. pl-12 on mobile clears the fixed global sidebar hamburger
-          (top-left, 16-52px) that would otherwise cover 'Bulk Import'. */}
-      <div className="flex items-start justify-between gap-4 pl-12 md:pl-0">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Bulk Import</h1>
-          <p className="text-sm text-muted-foreground mt-1">Import data or clean up incorrectly added records</p>
-        </div>
-        {/* Page tab switcher */}
+    <>
+    <Header
+      title="Bulk Import"
+      subtitle="Import data or clean up incorrectly added records"
+      actions={
+        // Page tab switcher
         <div className="flex gap-1 bg-card border border-border rounded-lg p-1 shrink-0">
           <button
             onClick={() => setPageTab('import')}
@@ -2476,7 +2472,10 @@ export default function ImportClient({ clients, services, employees, groups, par
             🗑️ Clean Up
           </button>
         </div>
-      </div>
+      }
+    />
+    <div className="px-4 sm:px-6 py-4 md:py-6 max-w-6xl mx-auto space-y-5">
+      <ToastContainer toasts={toasts} onDismiss={dismiss} />
 
       {/* Mode selector — tiered for import, flat for cleanup */}
       <div className="space-y-3">
@@ -2808,5 +2807,6 @@ export default function ImportClient({ clients, services, employees, groups, par
       )}
       {confirmModal && <ConfirmDialog {...confirmModal} />}
     </div>
+    </>
   )
 }

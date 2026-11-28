@@ -23,6 +23,7 @@ import {
   Bookmark, AlertTriangle, ClipboardList, MessageSquarePlus,
 } from 'lucide-react'
 import Link from 'next/link'
+import Header from '@/components/layout/header'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/contexts/permission-context'
 import { displayEmployee } from '@/lib/utils/employee-display'
@@ -849,7 +850,12 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
   }, [activeId, active, clientGroups])
 
   return (
-    <div className="flex h-full">
+    // The app's top bar, then the messenger in the rest of the height. The
+    // column is exactly <main>'s height, so <main> never scrolls: each pane
+    // keeps its own scroller and the composer stays on screen.
+    <div className="flex h-full flex-col">
+    <Header title="Chat" />
+    <div className="flex min-h-0 flex-1">
       {/* ── Delete confirmation ── */}
       {deleteTarget && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4"
@@ -880,10 +886,8 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
 
       {/* ── Pane 1: list + search ── */}
       <aside className={`${activeId ? 'hidden md:flex' : 'flex'} relative w-full md:w-72 shrink-0 flex-col border-r border-border bg-background`}>
-        {/* pl-14 on mobile clears the fixed global sidebar hamburger (see the
-            thread header below); md:px-4 restores normal desktop padding. */}
-        <div className="flex items-center justify-between pl-14 pr-4 md:px-4 py-3 border-b border-border">
-          <h1 className="text-base font-semibold">Chat</h1>
+        {/* The list's own tools. The page title is in the top bar above. */}
+        <div className="flex items-center justify-end px-4 py-3 border-b border-border">
           <div className="flex items-center gap-1">
             {isAdmin && (
               <Link href="/dashboard/settings/chat-access" className="rounded p-1.5 text-muted-foreground hover:text-foreground"
@@ -1110,13 +1114,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
           )
         ) : (
           <>
-            {/* pl-14 on mobile: the app's global sidebar hamburger is fixed at
-                the top-left corner (16–52px), which sat directly on top of this
-                Back button — a mobile user literally could not tap 'back' to
-                return to the conversation list. Padding shifts the header
-                content clear of it. md:px-4 restores normal padding on desktop
-                where the hamburger is md:hidden. */}
-            <div className="flex items-center gap-2 border-b border-border pl-14 pr-4 md:px-4 py-3">
+            <div className="flex items-center gap-2 border-b border-border px-4 py-3">
               <button onClick={() => setActiveId(null)} className="md:hidden rounded p-1 text-muted-foreground" aria-label="Back">
                 <ArrowLeft className="h-4 w-4" />
               </button>
@@ -1445,6 +1443,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
           <span className="rounded-full bg-foreground px-4 py-2 text-sm text-background shadow-xl">{toast}</span>
         </div>
       )}
+    </div>
     </div>
   )
 }

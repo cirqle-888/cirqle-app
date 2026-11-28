@@ -14,7 +14,8 @@ import { UNIT_TEAM_HOME, unitTeamMayOpen } from '@/lib/units/access'
  * hold view_all WITHOUT view_own — a single-key rule would have bounced the
  * very people who can see everyone's contributions.
  */
-const ROUTE_PERMS: Array<[RegExp, string | string[]]> = [
+/** A key, any one of several keys, or null for every signed-in employee. */
+const ROUTE_PERMS: Array<[RegExp, string | string[] | null]> = [
   [/^\/dashboard\/prompt-studio/, 'prompt_studio.view'],
   [/^\/dashboard\/activity/,                'timeline.view_all'],
   [/^\/dashboard\/leads/,                   'leads.view'],
@@ -68,11 +69,14 @@ const ROUTE_PERMS: Array<[RegExp, string | string[]]> = [
   [/^\/dashboard\/quotations/,              'billing.view_quotations'],
   [/^\/dashboard\/settings\/designations/,  'settings.manage_designations'],
   [/^\/dashboard\/settings\/change-requests/, 'employees.review_change_requests'],
-  // Lives under /settings but is its own permission — the page checks
-  // `workspaces.manage` and nothing else. Without this line the general
-  // settings rule below caught it first, so anyone holding workspaces.manage
-  // without settings.access saw the sidebar link and was bounced on click.
-  [/^\/dashboard\/settings\/workspaces/,   'workspaces.manage'],
+  // Lives under /settings but is open to EVERY signed-in employee: managers
+  // run the shared workspaces there, everyone else designs their own personal
+  // ones (settings/workspaces/page.tsx; listWorkspaces scopes each person's
+  // list and the actions enforce ownership). It used to require
+  // workspaces.manage, which bounced every non-manager who chose "My
+  // workspaces" in the sidebar's workspace menu. It still has to sit above
+  // the general settings rule, which would otherwise catch it first.
+  [/^\/dashboard\/settings\/workspaces/,   null],
   [/^\/dashboard\/settings/,                'settings.access'],
   [/^\/dashboard\/import/,                  'tasks.create'],
   // Note: /dashboard (root) is intentionally NOT gated here.
@@ -571,7 +575,7 @@ export async function updateSession(request: NextRequest) {
 
     // Regular designation → check route permission
     const matched = ROUTE_PERMS.find(([re]) => re.test(pathname))
-    if (!matched) return supabaseResponse
+    if (!matched || matched[1] === null) return supabaseResponse
     const requiredKeys = Array.isArray(matched[1]) ? matched[1] : [matched[1]]
 
     if (!requiredKeys.some(k => profile.allowedPerms.includes(k))) {

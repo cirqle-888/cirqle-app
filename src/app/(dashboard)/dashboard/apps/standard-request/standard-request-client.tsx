@@ -1,12 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import Link from 'next/link'
+import Header from '@/components/layout/header'
 import Combobox from '@/components/ui/combobox'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
-  ArrowLeft, Plus, Copy, Check, Ban, RefreshCw, Link2, Building2, Megaphone,
+  Plus, Copy, Check, Ban, RefreshCw, Building2, Megaphone,
   Globe, AlertTriangle, Loader2, Pencil, X,
 } from 'lucide-react'
 import {
@@ -137,18 +137,10 @@ export default function StandardRequestClient({
   const revokedLinks = links.filter(l => !l.is_active)
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6">
-      <Link href="/dashboard/apps" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-3">
-        <ArrowLeft className="w-4 h-4" /> Back to Apps Directory
-      </Link>
-      <div className="flex items-center gap-2.5 mb-1">
-        <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center"><Link2 className="w-4.5 h-4.5 text-primary" /></div>
-        <div>
-          <h1 className="text-lg font-bold">Standard Request Configuration</h1>
-          <p className="text-xs text-muted-foreground">Manage client &amp; agency intake links for standard requests.</p>
-        </div>
-      </div>
-
+    <>
+    {/* The breadcrumb leads back to the Apps Directory. */}
+    <Header title="Standard Request" subtitle="Manage client & agency intake links for standard requests." crumbLabel="Standard Request" />
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 pb-6">
       {!migrated && (
         <div className="mt-4 flex items-start gap-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
           <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
@@ -346,5 +338,6 @@ export default function StandardRequestClient({
       )}
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
+    </>
   )
 }

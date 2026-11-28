@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { AlertTriangle, ArrowRight } from 'lucide-react'
+import { usePermissions } from '@/contexts/permission-context'
+import { canOpenHref } from '@/lib/nav-sections'
 
 interface Props {
   clients: { id: string; name: string }[]
@@ -23,11 +25,19 @@ interface Props {
  */
 export function PricingPendingBanner({ clients, services, href }: Props) {
   const pathname = usePathname()
+  const { user, can } = usePermissions()
   const total = clients.length + services.length
   if (total === 0) return null
+  // Every place a price is set is in Settings (or the Pricing Matrix, which
+  // needs the same key). Someone who sees prices but cannot open Settings
+  // gets the list without links — each link would only have bounced them.
+  const canFix = canOpenHref(href ?? '/dashboard/settings', can, user.isAdmin, user.unitRoutesOnly ?? false)
 
   const ret = `&returnTo=${encodeURIComponent(pathname || '/dashboard')}`
-  const clientHref  = (id: string) => `/dashboard/settings?tab=Clients&editClient=${id}${ret}`
+  // No tab: Clients left Settings long ago (`?tab=Clients` quietly opened
+  // Company). `editClient` alone opens the client's form, its service pricing
+  // included, over the default tab, and closing it returns to `returnTo`.
+  const clientHref  = (id: string) => `/dashboard/settings?editClient=${id}${ret}`
   const serviceHref = (id: string) => `/dashboard/settings?tab=Services&editService=${id}${ret}`
 
   // "Set pricing" target: jump straight to the single item, otherwise the most
@@ -52,17 +62,21 @@ export function PricingPendingBanner({ clients, services, href }: Props) {
           </p>
           {/* Each item is a direct link to its own pricing field. */}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
-            {clients.map(c => (
-              <Link key={c.id} href={clientHref(c.id)} className={itemLinkCls}>{c.name}</Link>
-            ))}
-            {services.map(s => (
-              <Link key={s.id} href={serviceHref(s.id)} className={itemLinkCls}>{s.name}</Link>
-            ))}
+            {clients.map(c => canFix
+              ? <Link key={c.id} href={clientHref(c.id)} className={itemLinkCls}>{c.name}</Link>
+              : <span key={c.id} className="text-xs text-red-700/80 dark:text-red-300/80">{c.name}</span>)}
+            {services.map(s => canFix
+              ? <Link key={s.id} href={serviceHref(s.id)} className={itemLinkCls}>{s.name}</Link>
+              : <span key={s.id} className="text-xs text-red-700/80 dark:text-red-300/80">{s.name}</span>)}
           </div>
         </div>
-        <Link href={primaryHref} className="shrink-0 inline-flex items-center gap-1 text-xs font-semibold text-red-700 hover:text-red-800 transition-colors dark:text-red-700 dark:text-red-300 dark:hover:text-red-700 dark:text-red-200">
-          Set pricing <ArrowRight className="w-3 h-3" />
-        </Link>
+        {canFix ? (
+          <Link href={primaryHref} className="shrink-0 inline-flex items-center gap-1 text-xs font-semibold text-red-700 hover:text-red-800 transition-colors dark:text-red-700 dark:text-red-300 dark:hover:text-red-700 dark:text-red-200">
+            Set pricing <ArrowRight className="w-3 h-3" />
+          </Link>
+        ) : (
+          <span className="shrink-0 text-xs text-red-700/80 dark:text-red-300/80">Settings access needed to set prices</span>
+        )}
       </div>
     </div>
   )

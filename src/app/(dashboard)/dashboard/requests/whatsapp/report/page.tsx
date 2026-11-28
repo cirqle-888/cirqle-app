@@ -1,6 +1,5 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { ArrowLeft } from 'lucide-react'
 import Header from '@/components/layout/header'
 import { createAdminClient } from '@/lib/supabase/server'
 import { indiaDay, isMissingTable } from '@/lib/whatsapp-listener/chat-log'
@@ -44,9 +43,6 @@ export default async function WhatsAppReportPage({ searchParams }: { searchParam
     <div className="min-h-screen">
       <Header title="WhatsApp daily report" subtitle="What happened in each chat, day by day" />
       <div className="px-4 sm:px-6 lg:px-8 pb-16 max-w-5xl mx-auto mt-2 space-y-4">
-        <Link href="/dashboard/requests" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="w-3.5 h-3.5" /> Back to Requests
-        </Link>
         <WhatsAppTabs active="report" />
 
         {missing ? (
@@ -104,8 +100,7 @@ export default async function WhatsAppReportPage({ searchParams }: { searchParam
               </>
             )}
             <p className="text-[11px] text-muted-foreground/70">
-              Summaries are written by AI and can miss or misread things, especially in voice notes. Open the chat to check.
-              The items shown are what was open when that day was last read.
+              Summaries are written by AI and can miss or misread things, especially in voice notes, so open the chat to check.
             </p>
           </>
         )}

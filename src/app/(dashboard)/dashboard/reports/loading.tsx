@@ -1,9 +1,12 @@
+import Header from '@/components/layout/header'
+
 export default function ReportsLoading() {
   return (
     <div>
-      <div className="h-[68px] sm:h-[72px] border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-30 px-4 md:px-6 flex items-center">
-        <div className="h-5 w-40 bg-secondary/60 rounded animate-pulse" />
-      </div>
+      {/* The real top bar, so nothing jumps when the page arrives. No title:
+          this loading screen also covers this folder's other pages, and a
+          fixed one flashed the wrong name over them. */}
+      <Header title="" />
       <div className="p-6 space-y-5">
         <div className="flex gap-2 flex-wrap">
           {Array.from({ length: 5 }).map((_, i) => (

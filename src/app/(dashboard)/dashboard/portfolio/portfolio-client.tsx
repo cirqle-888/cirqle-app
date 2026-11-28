@@ -12,6 +12,7 @@ import {
 import { SortableContext, arrayMove, rectSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Button } from '@/components/ui/button'
+import Header from '@/components/layout/header'
 import { Input } from '@/components/ui/input'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -169,12 +170,15 @@ export default function PortfolioClient({
   // ─── Setup states ──────────────────────────────────────────────────────────
   if (!configured) {
     return (
-      <div className="p-6">
-        <Notice
-          title="Website project not connected"
-          body="Portfolio content lives in the website's own Supabase project. Add WEBSITE_SUPABASE_URL and WEBSITE_SUPABASE_SERVICE_ROLE_KEY to this app's environment, then reload. Setup steps are in cirqle-website/supabase/README.md."
-        />
-      </div>
+      <>
+        <Header title="Portfolio" subtitle="What cirqle.work shows" />
+        <div className="p-4 sm:p-6">
+          <Notice
+            title="Website project not connected"
+            body="Portfolio content lives in the website's own Supabase project. Add WEBSITE_SUPABASE_URL and WEBSITE_SUPABASE_SERVICE_ROLE_KEY to this app's environment, then reload. Setup steps are in cirqle-website/supabase/README.md."
+          />
+        </div>
+      </>
     )
   }
 
@@ -577,16 +581,13 @@ export default function PortfolioClient({
   const brandUrl = brand ? `${siteUrl}/portfolio/${collection.slug}/${brand.slug}` : null
 
   return (
-    <div className="p-4 sm:p-6 space-y-6">
-      {/* ─── Header ─────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">Website Portfolio</h1>
-          <p className="text-xs text-muted-foreground mt-1">
-            Work published on cirqle.work. Uploads are resized in your browser and go live immediately.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <>
+    <Header
+      title="Portfolio"
+      subtitle="What cirqle.work shows"
+      // Both actions need one of these; with neither, no empty actions row.
+      actions={(tab === 'presentation' || collection) ? (
+        <>
           {(tab === 'presentation' || collection) && <a
             href={tab === 'presentation' ? `${siteUrl}/portfolio` : `${siteUrl}/portfolio/${collection!.slug}`}
             target="_blank"
@@ -600,9 +601,10 @@ export default function PortfolioClient({
               <Plus className="w-3.5 h-3.5" /> New brand
             </Button>
           )}
-        </div>
-      </div>
-
+        </>
+      ) : undefined}
+    />
+    <div className="p-4 sm:p-6 space-y-6">
       {/* Work and flyers are both published to the website, so they live
           behind one nav entry rather than two. */}
       <div className="flex items-center gap-1 border-b border-border">
@@ -1413,6 +1415,7 @@ export default function PortfolioClient({
 
       <ToastContainer toasts={toast.toasts} onDismiss={toast.dismiss} />
     </div>
+    </>
   )
 }
 

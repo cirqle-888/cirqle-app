@@ -164,6 +164,32 @@ function zoneOffsetMs(at: Date): number {
 }
 
 /**
+ * The queue's order within a lane: by planned day, then by time of day.
+ *
+ * Both can be missing. An idea saved without a day (Social's Idea Board) has
+ * no planned date, and sorting used to call `.localeCompare` on that null —
+ * one such item crashed the whole To Post page (and My Work's list). Undated
+ * posts go last. A post with no time goes last within its day: letting
+ * "unreadable" (-1 minutes) win would put every undecided post ahead of the
+ * one actually going out at 9am.
+ */
+export function comparePostingOrder(
+  a: { plannedDate: string | null; postingTime: string | null },
+  b: { plannedDate: string | null; postingTime: string | null },
+): number {
+  if (a.plannedDate !== b.plannedDate) {
+    if (!a.plannedDate) return 1
+    if (!b.plannedDate) return -1
+    return a.plannedDate.localeCompare(b.plannedDate)
+  }
+  const minutes = (t: string | null) => {
+    const m = timeToMinutes(t)
+    return m < 0 ? Number.MAX_SAFE_INTEGER : m
+  }
+  return minutes(a.postingTime) - minutes(b.postingTime)
+}
+
+/**
  * The real instant a 'YYYY-MM-DD' + 'HH:MM' plan happens.
  *
  * Two passes. The first treats the wall clock as UTC to find roughly which

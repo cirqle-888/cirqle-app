@@ -16,7 +16,7 @@ import { usePermissions } from '@/contexts/permission-context'
 import { useFavorites } from '@/contexts/favorites-context'
 import { useRequestsBadge } from '@/contexts/requests-badge-context'
 import { resolveFavoriteIcon } from '@/lib/favorites/icon-map'
-import { navSections, isNavItemVisible, resolveActiveHref } from '@/lib/nav-sections'
+import { navSections, isNavItemVisible, resolveActiveHref, buildNavRows, activeRowKey, type NavItem } from '@/lib/nav-sections'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -102,16 +102,24 @@ export function AppLauncherTrigger() {
   }, [open])
 
   // Same permission/admin gate as the Sidebar — no separate visibility rules.
+  // Unsearched, the grid shows the sidebar's rows (a module's tab pages fold
+  // into it, lib/nav-sections `tabOf`); a search also finds the tab pages, so
+  // typing "statements" still lands on Statements in one step.
   const visibleSections = useMemo(
     () =>
       navSections
-        .map(s => ({ label: s.label, items: s.items.filter(i => isNavItemVisible(i, can, user.isAdmin, (user.unitRoutesOnly ?? false))) }))
+        .map(s => {
+          const shown = (i: NavItem) => isNavItemVisible(i, can, user.isAdmin, (user.unitRoutesOnly ?? false))
+          return { label: s.label, rows: buildNavRows(s.items, shown), items: s.items.filter(shown) }
+        })
         .filter(s => s.items.length > 0),
     [can, user.isAdmin, user.unitRoutesOnly],
   )
 
   const activeHref = useMemo(() => resolveActiveHref(visibleSections, pathname), [visibleSections, pathname])
+  const activeKey = useMemo(() => activeRowKey(pathname), [pathname])
 
+  const q = query.trim().toLowerCase()
   const allGroups = useMemo<TileGroup[]>(() => {
     const groups: TileGroup[] = []
     if (favorites.length > 0) {
@@ -125,13 +133,17 @@ export function AppLauncherTrigger() {
       groups.push({
         key: s.label ?? `__section-${i}`,
         label: s.label ?? 'Home',
-        items: s.items.map(i => ({ key: i.href, href: i.href, label: i.label, icon: i.icon, keywords: i.keywords })),
+        items: q
+          ? s.items.map(i => ({ key: i.href, href: i.href, label: i.label, icon: i.icon, keywords: i.keywords }))
+          : s.rows.map(({ key, item: i, members }) => ({
+              key, href: i.href, label: i.label, icon: i.icon,
+              keywords: members.flatMap(m => [m.label, ...(m.keywords ?? [])]),
+            })),
       })
     })
     return groups
-  }, [favorites, visibleSections])
+  }, [favorites, visibleSections, q])
 
-  const q = query.trim().toLowerCase()
   const filteredGroups = useMemo(() => {
     if (!q) return allGroups
     return allGroups
@@ -242,7 +254,9 @@ export function AppLauncherTrigger() {
                       <TileButton
                         key={tile.key}
                         tile={tile}
-                        active={tile.href === activeHref}
+                        // A row tile lights for any of its tab pages; a
+                        // search result only for its own page.
+                        active={q ? tile.href === activeHref : tile.key === activeKey || tile.href === activeHref}
                         badge={tile.href === '/dashboard/requests' ? requestsBadge : undefined}
                         onNavigate={close}
                         setRef={el => {

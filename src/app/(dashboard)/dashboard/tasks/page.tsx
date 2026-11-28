@@ -613,8 +613,8 @@ export default async function TasksPage({
   // page exactly as it was.
   return (
     <>
-    {vis.tasksPricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
     <TasksClient
+      notice={vis.tasksPricing ? <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} /> : null}
       promotionRequest={promotionRequest}
       promotionSocialItem={promotionSocialItem}
       requestRefByTaskId={requestRefByTaskId}

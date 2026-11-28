@@ -128,6 +128,7 @@ export default function AccountDashboardClient({ account, rangeKey, days, kpis, 
     <>
       <Header
         title={account.name}
+        crumbLabel={account.name}
         subtitle={
           <span className="flex items-center gap-1.5">
             <PlatformIcon platform={account.platform} className="w-3.5 h-3.5" />
