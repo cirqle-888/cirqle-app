@@ -8,7 +8,7 @@
  * in localStorage; the section holding the active route auto-opens).
  */
 import {
-  LayoutDashboard, CheckSquare, Users2, FileText, BookOpen, Wallet, BarChart3, Sheet,
+  Compass, LayoutDashboard, CheckSquare, Users2, FileText, BookOpen, Wallet, BarChart3, Sheet,
   Settings, TrendingUp, Upload, Inbox, PhoneCall, Award, Activity, Blocks, Megaphone, Handshake,
   SlidersHorizontal, MessageSquare, ClipboardCheck, NotebookPen, LayoutGrid,
   Briefcase, ClipboardList, CalendarClock, BadgeCheck, PieChart, Building2, Tags, History, Sparkles,
@@ -260,6 +260,10 @@ export const navSections: NavSection[] = [
       { label: 'Client Analytics',     href: '/dashboard/client-analytics', icon: TrendingUp, requiredAnyPerm: ['reports.view_client_financials', 'reports.view'], keywords: ['per client', 'trend', 'compare', 'month', 'week', 'quarter', 'year', 'growth', 'chart', 'graph', 'how is this client doing'] },
       { label: 'Cost & Tags',          href: '/dashboard/reports/cost-attribution', icon: Tags, requiredAnyPerm: ['reports.view_company_financials', 'reports.view'], keywords: ['spend', 'attribution'] },
       { label: 'Client Ranking',       href: '/dashboard/clients/ranking', icon: Award, requiredAnyPerm: ['reports.view_client_financials', 'reports.view'], keywords: ['reliability', 'scoring'] },
+      // Which features nobody (or one person) uses, what each is for and how
+      // to start it. Built from this very list, so a new page shows up on its
+      // own (words in lib/feature-usage/catalogue.ts). The page re-checks admin.
+      { label: 'Feature Usage',        href: '/dashboard/reports/feature-usage', icon: Compass, adminOnly: true, keywords: ['unused', 'never used', 'adoption', 'how to use', 'features', 'training', 'who uses', 'not using'] },
     ],
   },
   {

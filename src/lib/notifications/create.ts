@@ -42,6 +42,8 @@ export type NotificationType =
   | 'invoice_unsent'
   | 'client_quiet'
   | 'owner_weekly_check'
+  /** Monday: a few features nobody uses yet, with how to start (lib/feature-usage). */
+  | 'feature_usage_weekly'
   // Autopilot (lib/autopilot)
   | 'autopilot_posts_sent'
   | 'autopilot_trend_slots'
