@@ -27,7 +27,7 @@ import {
   URGENCY_CHIP, cycleProgress, type PostStage,
 } from '@/lib/social-hub/post-queue'
 import type { QueueEntry } from '@/lib/social-hub/post-queue-load'
-import { postTiming, formatTime12, timeToMinutes, TIMING_LABEL } from '@/lib/social/posting-time'
+import { postTiming, formatTime12, comparePostingOrder, TIMING_LABEL } from '@/lib/social/posting-time'
 import { savePostContent, markAsPosted, unmarkPosted, myCalendarFeed, revokeMyCalendarFeed } from './actions'
 import { CalendarSubscribe } from '@/components/social-hub/calendar-subscribe'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -64,19 +64,10 @@ export default function PostQueueClient({
   )
 
   const attention = visible.filter(r => r.attention)
-  // Within a lane: by day, then by the time of day. Sorting by date alone put
-  // a 9am post below a 9pm one on the same day, which is the wrong order for
-  // the one screen whose job is "what goes out next".
-  // A post with no time sorts LAST within its day, not first: timeToMinutes
-  // returns -1 for "unreadable", and letting that win would put every
-  // undecided post ahead of the one actually going out at 9am.
-  const ofDay = (r: QueueEntry) => {
-    const m = timeToMinutes(r.postingTime)
-    return m < 0 ? Number.MAX_SAFE_INTEGER : m
-  }
+  // Within a lane: by day, then by the time of day (comparePostingOrder —
+  // undated ideas last).
   const byStage = (s: PostStage) =>
-    visible.filter(r => r.stage === s).sort((a, b) =>
-      a.plannedDate.localeCompare(b.plannedDate) || ofDay(a) - ofDay(b))
+    visible.filter(r => r.stage === s).sort(comparePostingOrder)
 
   /** Replace one row in place after an action, keeping scroll and filters. */
   const patch = (itemId: string, next: Partial<QueueEntry>) =>
@@ -273,7 +264,7 @@ function QueueCard({ row, onOpen }: { row: QueueEntry; onOpen: () => void }) {
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="text-[11px] text-muted-foreground flex items-center gap-1 min-w-0">
           <CalendarDays className="w-3 h-3 shrink-0" />
-          <span className="truncate">{formatDay(row.plannedDate)}</span>
+          <span className="truncate">{row.plannedDate ? formatDay(row.plannedDate) : 'No date yet'}</span>
           <PostingClock row={row} />
         </span>
         <ChecklistDots checklist={row.checklist} />
@@ -380,7 +371,7 @@ function PostEditor({ row, canPublishApi, onClose, onSaved }: {
           <div className="min-w-0">
             <h2 className="text-base font-semibold leading-snug">{row.title}</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {row.clientName} · planned {formatDay(row.plannedDate)}
+              {row.clientName} · {row.plannedDate ? `planned ${formatDay(row.plannedDate)}` : 'no date yet'}
               {row.refNo && ` · REQ-${String(row.refNo).padStart(4, '0')}`}
             </p>
           </div>
@@ -395,7 +386,7 @@ function PostEditor({ row, canPublishApi, onClose, onSaved }: {
             clean off the bottom of the sheet. That is the whole reason modal
             buttons go missing on a phone. */}
         <div className="p-4 space-y-4 overflow-y-auto flex-1 min-h-0">
-          {row.urgency.level !== 'none' && !isPosted && (
+          {row.urgency.level !== 'none' && row.plannedDate && !isPosted && (
             <div className={`text-xs px-2.5 py-2 rounded-lg border flex items-center gap-2 ${URGENCY_CHIP[row.urgency.level]}`}>
               <Clock className="w-3.5 h-3.5 shrink-0" />
               {row.urgency.level === 'overdue'
@@ -624,7 +615,7 @@ function PostingClock({ row }: { row: QueueEntry }) {
   }
 
   const timing = postTiming({
-    isoDate: row.plannedDate,
+    isoDate: row.plannedDate ?? '',
     time: row.postingTime,
     asap: row.postAsap,
     posted: !!row.postedAt,
