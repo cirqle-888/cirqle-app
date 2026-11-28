@@ -85,6 +85,8 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
         viewing={viewing ? { employeeId: viewing.employeeId, cqid: viewing.cqid } : null}
         myEmployeeId={me.employeeId}
         myCqid={me.cqid}
+        // Deleting is permanent, so admins only (both delete actions enforce it).
+        canDelete={me.isAdmin}
       />
       {!viewing && canPost && queue.length > 0 && (
         <div className="px-4 sm:px-6 pb-6">

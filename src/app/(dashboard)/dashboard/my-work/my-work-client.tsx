@@ -6,18 +6,21 @@ import {
   DndContext, MouseSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable, closestCorners, type DragEndEvent,
 } from '@dnd-kit/core'
 import {
-  LayoutGrid, CalendarDays, List, Loader2, Check, ChevronRight, CircleAlert, X as XIcon, Users,
+  LayoutGrid, CalendarDays, List, Loader2, Check, ChevronRight, CircleAlert, X as XIcon, Users, Trash2,
 } from 'lucide-react'
 import dynamicImport from 'next/dynamic'
 import Header from '@/components/layout/header'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { OverflowMenu } from '@/components/ui/overflow-menu'
 import { useToast, ToastContainer } from '@/components/ui/toast'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { deleteRequests } from '../requests/actions'
+import { deleteRequestsWarning } from '@/lib/requests/delete-rules'
 import {
   WORK_STAGES, STAGE_LABEL, STAGE_HINT, STAGE_CHIP, stageOf, stageOfPlan, canMove,
   isPending, moveRefusalReason, type WorkStage,
 } from '@/lib/requests/my-work'
-import { moveMyWork, moveTeamWork, type MyWorkRow, type TeamMemberLoad } from './actions'
+import { moveMyWork, moveTeamWork, deletePlanCard, type MyWorkRow, type TeamMemberLoad } from './actions'
 import { CHECKLIST_LABEL, CHECKLIST_HINT } from '@/lib/requests/kind'
 import { todayISO } from '@/lib/utils/local-date'
 import { SharePendingButton } from '@/components/my-work/share-pending'
@@ -47,6 +50,8 @@ interface Props {
   myEmployeeId?: string
   /** The signed-in person's CQID — what a shared summary is labelled with. */
   myCqid?: string
+  /** Admins may delete a card that has no work behind it. */
+  canDelete?: boolean
 }
 
 
@@ -129,9 +134,10 @@ function Card({ row, dragging, onNext, busy }: {
  * want here — reassigning, re-pricing, changing dates, editing the brief — is
  * absent, because a designer opening their own work should be reading it, not
  * navigating around edit controls that would refuse them anyway. The one thing
- * they CAN do is say something, via Discuss.
+ * they CAN do is say something, via Discuss. (An admin also gets Delete here,
+ * for clearing out test and abandoned cards.)
  */
-function CardDetail({ row, onClose }: { row: MyWorkRow; onClose: () => void }) {
+function CardDetail({ row, onClose, onDelete }: { row: MyWorkRow; onClose: () => void; onDelete?: () => void }) {
   const due = dueLabel(row.due_date, rowStage(row))
   // Any http(s) URL in the brief is a reference worth showing as a link rather
   // than as raw text buried in a paragraph.
@@ -203,6 +209,11 @@ function CardDetail({ row, onClose }: { row: MyWorkRow; onClose: () => void }) {
         </div>
 
         <div className="flex items-center gap-2 px-5 py-4 border-t border-border shrink-0">
+          {onDelete && (
+            <button onClick={onDelete} className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-500/10">
+              <Trash2 className="w-3.5 h-3.5" /> Delete
+            </button>
+          )}
           {/* The only write a designer gets here — and it is a conversation,
               not an edit. Suggestions belong beside the work, not in a form. */}
           {row.source === 'request' && (
@@ -282,13 +293,15 @@ function Column({ stage, rows, busyId, totalCount, footer, onOpen, onMove }: {
   )
 }
 
-export default function MyWorkClient({ initialRows, team = [], viewing = null, myEmployeeId, myCqid }: Props) {
+export default function MyWorkClient({ initialRows, team = [], viewing = null, myEmployeeId, myCqid, canDelete = false }: Props) {
   const router = useRouter()
   const toast = useToast()
   const [rows, setRows] = useState(initialRows)
   const [view, setView] = useState<'board' | 'calendar' | 'list'>('board')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [openRow, setOpenRow] = useState<MyWorkRow | null>(null)
+  /** A card whose permanent delete is waiting to be confirmed. */
+  const [deleteRow, setDeleteRow] = useState<MyWorkRow | null>(null)
 
   // A touch sensor with a hold delay, not a raw pointer sensor: on a phone the
   // board scrolls, and without the delay every attempt to scroll a column
@@ -362,13 +375,36 @@ export default function MyWorkClient({ initialRows, team = [], viewing = null, m
     // Trust the status the server actually wrote rather than assuming the
     // stage's default — they agree today, and if they ever stop, the board
     // should show the truth.
-    setRows(prev => prev.map(r => r.id === id ? { ...r, status: res.data!.status } : r))
+    // Moving a card puts work behind it, so it is no longer one to delete.
+    setRows(prev => prev.map(r => r.id === id ? { ...r, status: res.data!.status, removable: false } : r))
     // Say when a task appeared. Starting work silently creating a billable
     // record is exactly the kind of thing people should be told about, not
     // discover later on the Tasks page.
     if (res.data.warning) toast.toastError('Moved, but needs attention', res.data.warning)
     else if (res.data.taskCreated) toast.success(`Moved to ${STAGE_LABEL[to]}`, 'A task was created for this work.')
     else toast.success(`Moved to ${STAGE_LABEL[to]}`)
+    router.refresh()
+  }
+
+  async function runDelete(row: MyWorkRow) {
+    setBusyId(row.id)
+    let problem: string | undefined
+    let warning: string | undefined
+    if (row.source === 'plan') {
+      const res = await deletePlanCard(row.id)
+      if (!res.ok) problem = res.error
+    } else {
+      const res = await deleteRequests([row.id])
+      if (!res.ok || !res.data) problem = res.error
+      else if (!res.data.deleted.includes(row.id)) {
+        problem = res.data.kept[0] ? `Kept because ${res.data.kept[0].reason}.` : 'It is no longer there. Reload the page.'
+      } else warning = res.data.warning
+    }
+    setBusyId(null)
+    if (problem) { toast.toastError('Not deleted', problem); return }
+    setRows(prev => prev.filter(r => r.id !== row.id))
+    toast.success('Deleted')
+    if (warning) toast.toastError('Check the social calendar', warning)
     router.refresh()
   }
 
@@ -525,7 +561,25 @@ export default function MyWorkClient({ initialRows, team = [], viewing = null, m
         <ListView rows={visibleRows} onMove={apply} busyId={busyId} onOpen={setOpenRow} />
       )}
 
-      {openRow && <CardDetail row={openRow} onClose={() => setOpenRow(null)} />}
+      {openRow && (
+        <CardDetail
+          row={openRow}
+          onClose={() => setOpenRow(null)}
+          onDelete={canDelete && openRow.removable ? () => { setDeleteRow(openRow); setOpenRow(null) } : undefined}
+        />
+      )}
+      {deleteRow && (
+        <ConfirmDialog
+          danger
+          title={deleteRow.source === 'plan' ? 'Delete this plan for good?' : 'Delete this request for good?'}
+          body={deleteRow.source === 'plan'
+            ? `“${deleteRow.title}” will be removed from the social calendar. A cancelled or deleted task made from it stays in Tasks. This cannot be undone.`
+            : deleteRequestsWarning({ count: 1, title: deleteRow.title })}
+          confirmLabel="Delete"
+          onConfirm={() => { const row = deleteRow; setDeleteRow(null); void runDelete(row) }}
+          onCancel={() => { setOpenRow(deleteRow); setDeleteRow(null) }}
+        />
+      )}
 
       <ToastContainer toasts={toast.toasts} onDismiss={toast.dismiss} />
     </div>

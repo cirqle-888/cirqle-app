@@ -52,6 +52,8 @@ export type EntityType =
   // itself lives in the website's own Supabase project; this is the audit
   // trail for who put it there.
   | 'portfolio_item'
+  // A request deleted for good: its own timeline is deleted with it.
+  | 'request'
 
 /** Timeline filter groups — mirrors migration 014 backfill mapping. */
 export type ActivityCategory =
@@ -74,6 +76,7 @@ export const DEFAULT_CATEGORY: Record<EntityType, ActivityCategory> = {
   field_place: 'crm',
   social_account: 'crm',
   portfolio_item: 'files',
+  request: 'tasks',
 }
 
 export type ActivityAction =

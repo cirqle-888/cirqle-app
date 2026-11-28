@@ -38,7 +38,7 @@ export default async function RequestsPage({
   try {
     const { data, error } = await admin
       .from('task_requests')
-      .select('*, client:clients(id, name, code), agency:agencies(id, name), service:services(id, name), assigned_employee:employees!task_requests_assigned_employee_id_fkey(id, cqid), promoted_task:tasks!task_requests_promoted_task_id_fkey(id, task_number, title, status)')
+      .select('*, client:clients(id, name, code), agency:agencies(id, name), service:services(id, name), assigned_employee:employees!task_requests_assigned_employee_id_fkey(id, cqid), promoted_task:tasks!task_requests_promoted_task_id_fkey(id, task_number, title, status, deleted_at)')
       .order('created_at', { ascending: false })
       .limit(500)
     if (error) migrated = false
@@ -104,6 +104,8 @@ export default async function RequestsPage({
     start:    isAdmin || !!me?.permissions?.has('requests.start'),
     manage:   isAdmin || !!me?.permissions?.has('requests.manage'),
     activity: isAdmin || !!me?.permissions?.has('requests.activity.view'),
+    // Permanent, so admins only (deleteRequests enforces it).
+    delete: isAdmin,
   }
 
   // Brand workspace / switcher: requests on the brand's services, or from its clients.

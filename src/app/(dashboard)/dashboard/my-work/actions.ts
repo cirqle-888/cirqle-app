@@ -26,6 +26,8 @@ import { isChecklistRequest } from '@/lib/requests/kind'
 import { nextTaskNumber } from '@/lib/utils/task-code'
 import { todayISO } from '@/lib/utils/local-date'
 import { loadMyWork } from '@/lib/requests/my-work-load'
+import { isLiveTask } from '@/lib/requests/delete-rules'
+import { deleteCalendarItem } from '@/app/(dashboard)/dashboard/social-calendar/actions'
 import {
   stageOf, stageOfPlan, canMove, STAGE_TARGET_STATUS, STAGE_LABEL,
   moveRefusalReason, type WorkStage,
@@ -61,6 +63,8 @@ export interface MyWorkRow {
    * task, so it never carries a task number and never reaches an invoice.
    */
   checklist?: boolean
+  /** No work record stands behind it, so an admin may delete it. */
+  removable?: boolean
 }
 
 /**
@@ -68,10 +72,33 @@ export interface MyWorkRow {
  * the signed-in user, so there is no parameter to tamper with.
  */
 export async function fetchMyWork(): Promise<ActionResult<MyWorkRow[]>> {
-  const guard = await requirePermission(PERMS.REQUESTS_WORK_OWN)
+  const guard = await requireReadPermission(PERMS.REQUESTS_WORK_OWN)
   if (!guard.ok) return { ok: false, error: guard.error }
   const rows = await loadMyWork(createAdminClient(), guard.employeeId)
   return { ok: true, data: rows }
+}
+
+/**
+ * Delete a plan card for good (admin only). The calendar's own delete does the
+ * work; this adds the rule that a plan with a standing task stays — including
+ * one started straight from the plan, which the calendar's delete doesn't check.
+ */
+export async function deletePlanCard(itemId: string): Promise<ActionResult> {
+  // Same two steps as deleteRequests: the write guard (read-only during a
+  // "view as" preview), then admins only.
+  const guard = await requirePermission(PERMS.SOCIAL_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!guard.isAdmin) return { ok: false, error: 'Only an admin can delete cards.' }
+  const { data, error } = await createAdminClient().from('social_calendar_items')
+    .select('id, task:tasks!social_calendar_items_task_id_fkey(status, deleted_at)')
+    .eq('id', itemId).maybeSingle()
+  if (error) return { ok: false, error: error.message }
+  if (!data) return { ok: false, error: 'It is no longer there. Reload the page.' }
+  const task = (Array.isArray(data.task) ? data.task[0] : data.task) as { status?: string; deleted_at?: string | null } | null
+  if (isLiveTask(task)) return { ok: false, error: 'It has a task now. Cancel or delete the task first.' }
+  const res = await deleteCalendarItem(itemId)
+  if (res.ok) revalidatePath(REVALIDATE)
+  return { ok: res.ok, error: res.error }
 }
 
 /** " (moved for CQID004)" — appended to a log note when a manager moved the card. */
