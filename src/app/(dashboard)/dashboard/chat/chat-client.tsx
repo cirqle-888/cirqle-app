@@ -18,7 +18,7 @@ import { useSearchParams } from 'next/navigation'
 import {
   Hash, Lock, MessageSquare, Plus, Send, ArrowLeft, Users2,
   Trash2, RefreshCw, X, Paperclip, Search, SmilePlus, Reply, Download, FileText, ClipboardCheck,
-  CornerUpLeft, Mic, Check, CheckCheck, Pencil, Pin, CheckSquare, Megaphone, CalendarDays, Inbox,
+  CornerUpLeft, Mic, Check, CheckCheck, Pencil, Pin, Megaphone,
   MoreHorizontal, Star, Clock, Smile, BarChart3, Copy, Forward, Info, BellOff, ChevronDown, ShieldCheck, PinOff, Bell,
   Bookmark, AlertTriangle, ClipboardList, MessageSquarePlus,
 } from 'lucide-react'
@@ -61,18 +61,11 @@ import {
   ForwardDialog, MessageInfoDialog, ChatDetailsDialog, StarredDialog, ScheduleDialog, PollDialog, RequestFromMessageDialog,
 } from '@/components/chat/plus/dialogs'
 import { MobileChatList } from '@/components/chat/plus/mobile-chat-list'
+import { KindTag, KindTile } from '@/components/chat/plus/kind-tile'
+import { chatKind, KIND_META } from '@/lib/chat/kinds'
 
 const QUICK_EMOJI = ['👍', '❤️', '😂', '🎉', '✅', '👀']
 const NO_FILES: File[] = []
-
-/** What kind of record a discussion room hangs off — shown as a row badge so
- *  a task thread is never mistaken for a plan or a campaign. */
-const ENTITY_BADGE: Record<string, { label: string; cls: string; Icon: React.ElementType }> = {
-  task:    { label: 'Task',     cls: 'bg-blue-500/15 text-blue-600 dark:text-blue-300', Icon: CheckSquare },
-  request: { label: 'Request',  cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-300', Icon: Inbox },
-  plan:    { label: 'Plan',     cls: 'bg-violet-500/15 text-violet-600 dark:text-violet-300', Icon: CalendarDays },
-  project: { label: 'Campaign', cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300', Icon: Megaphone },
-}
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
@@ -962,7 +955,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
               <div className="hidden md:block">
               {pinnedConvs.length > 0 && (
                 <div>
-                  <SectionLabel>Pinned</SectionLabel>
+                  <SectionLabel count={pinnedConvs.length}>Pinned</SectionLabel>
                   {pinnedConvs.map(c => (
                     <ConversationRow key={c.id} conv={c} active={c.id === activeId}
                       displayName={convDisplayName(c)} showName={showName} meId={me.employeeId}
@@ -977,7 +970,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
               ] as [string, ChatConversation[], boolean][]).map(([label, list, always]) => (
                 (always || list.length > 0) && (
                   <div key={label}>
-                    <SectionLabel>{label}</SectionLabel>
+                    <SectionLabel count={list.length}>{label}</SectionLabel>
                     {list.map(c => (
                       <ConversationRow key={c.id} conv={c} active={c.id === activeId}
                         displayName={convDisplayName(c)} showName={showName} meId={me.employeeId}
@@ -997,7 +990,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
               {/* ── Clients: channel + that client's threads underneath ── */}
               {(sortedClientGroups.length > 0 || ungroupedClientChannels.length > 0) && (
                 <div>
-                  <SectionLabel>Clients</SectionLabel>
+                  <SectionLabel count={sortedClientGroups.length + ungroupedClientChannels.length}>Clients</SectionLabel>
                   {sortedClientGroups.map(g => {
                     const rowActive = g.channel?.id === activeId || g.threads.some(t => t.id === activeId) || activeId === `client:${g.clientId}`
                     return (
@@ -1010,15 +1003,15 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
                       ) : (
                         <div className={`group/row flex w-full items-center transition-colors ${rowActive ? 'bg-muted' : 'hover:bg-muted/50'}`}>
                           <button onClick={() => setActiveId(`client:${g.clientId}`)}
-                            className="flex min-w-0 flex-1 items-center gap-2 py-2 pl-4 pr-1 text-left">
-                            <Hash className="h-4 w-4 shrink-0 text-muted-foreground opacity-50" />
+                            className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-4 pr-1 text-left">
+                            <KindTile kind="client" name={g.name} size="sm" />
                             <span className="min-w-0 flex-1">
                               <span className={`flex items-center gap-1.5 text-sm`}>
                                 <span className={`truncate ${g.unreadTotal > 0 ? 'font-semibold text-foreground' : ''}`}>{g.name}</span>
                               </span>
                             </span>
                             {g.unreadTotal > 0 && (
-                              <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1.5 text-[10px] font-semibold text-background">
+                              <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
                                 {g.unreadTotal > 99 ? '99+' : g.unreadTotal}
                               </span>
                             )}
@@ -1038,7 +1031,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
 
               {groups.discussion.length > 0 && (
                 <div>
-                  <SectionLabel>Other discussions</SectionLabel>
+                  <SectionLabel count={groups.discussion.length}>Other work threads</SectionLabel>
                   {groups.discussion.map(c => (
                     <ConversationRow key={c.id} conv={c} active={c.id === activeId}
                       displayName={convDisplayName(c)} showName={showName} meId={me.employeeId}
@@ -1048,7 +1041,7 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
                 </div>
               )}
 
-              <SectionLabel>Direct messages</SectionLabel>
+              <SectionLabel count={groups.dms.length}>Direct messages</SectionLabel>
               {groups.dms.map(c => (
                 <ConversationRow key={c.id} conv={c} active={c.id === activeId}
                   displayName={convDisplayName(c)} showName={showName} meId={me.employeeId}
@@ -2240,8 +2233,13 @@ function ThreadPanel({ rootId, conversationId, me, members, onClose, onReplySent
 
 // ── List row + dialog (unchanged from Phase 1) ───────────────────────────────
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <p className="px-4 pb-1 pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">{children}</p>
+function SectionLabel({ children, count }: { children: React.ReactNode; count?: number }) {
+  return (
+    <p className="flex items-baseline justify-between px-4 pb-1 pt-4 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <span>{children}</span>
+      {count != null && count > 0 && <span className="tabular-nums text-muted-foreground/60">{count}</span>}
+    </p>
+  )
 }
 
 function ConversationRow({ conv, active, onClick, onDelete, onMenu, displayName, showName, indented, meId }: {
@@ -2262,6 +2260,7 @@ function ConversationRow({ conv, active, onClick, onDelete, onMenu, displayName,
   const partner = presenceOf(partnerId)
   const gestures = useMessageGestures({ onHold: onMenu ? point => onMenu(conv, point) : undefined })
   const muted = conv.notifyLevel === 'none'
+  const kind = chatKind(conv)
   // The row and the delete control are SIBLINGS, never nested. A button inside
   // a role="button" row swallows Enter/Space on the inner control (the outer
   // keydown handler preventDefaults it), so the confirm could never be
@@ -2275,27 +2274,14 @@ function ConversationRow({ conv, active, onClick, onDelete, onMenu, displayName,
     } ${indented ? 'pl-4' : ''}`}>
       {indented && <span aria-hidden className="ml-4 mr-1 h-6 w-px shrink-0 bg-border" />}
       <button onClick={onClick}
-        className="flex min-w-0 flex-1 items-center gap-2 py-2 pl-4 pr-1 text-left">
-        {conv.type === 'dm'
-          ? (
-            <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium">
-              {initials(displayName)}
-              <EmployeePresenceDot employeeId={partnerId} size="xs" className="absolute -bottom-0.5 -right-0.5" />
-            </span>
-          )
-          : conv.category === 'self' ? <Bookmark className="h-4 w-4 shrink-0 text-muted-foreground" />
-          : conv.posting === 'admins' ? <Megaphone className="h-4 w-4 shrink-0 text-muted-foreground" />
-          : conv.isPrivate ? <Lock className="h-4 w-4 shrink-0 text-muted-foreground" /> : <Hash className={`${indented ? 'h-3 w-3' : 'h-4 w-4'} shrink-0 text-muted-foreground`} />}
+        className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-4 pr-1 text-left">
+        <KindTile kind={kind} name={displayName} isPrivate={conv.isPrivate} partnerId={partnerId} size="sm" />
         <span className="min-w-0 flex-1">
           <span className={`flex items-center gap-1.5 ${indented ? 'text-xs' : 'text-sm'}`}>
             <span className={`truncate ${conv.unread > 0 ? 'font-semibold' : ''}`}>{displayName}</span>
             {conv.urgentUnread && <span className="shrink-0 rounded bg-red-500 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-white">Urgent</span>}
             {partnerId && <PresenceNote presence={partner} max={14} className="shrink-0" />}
-            {ENTITY_BADGE[conv.type] && (
-              <span className={`shrink-0 rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide ${ENTITY_BADGE[conv.type].cls}`}>
-                {ENTITY_BADGE[conv.type].label}
-              </span>
-            )}
+            {KIND_META[kind].thread && <KindTag kind={kind} />}
           </span>
           {conv.lastMessage && !indented && (
             <span className="block truncate text-xs text-muted-foreground">
@@ -2308,7 +2294,7 @@ function ConversationRow({ conv, active, onClick, onDelete, onMenu, displayName,
         {conv.pinned && <Pin className="h-3 w-3 shrink-0 fill-current text-muted-foreground" aria-label="Pinned" />}
         {muted && <BellOff className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="Muted" />}
         {conv.unread > 0 && (
-          <span className={`ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold ${muted ? 'bg-muted-foreground/40 text-background' : 'bg-foreground text-background'}`}>
+          <span className={`ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold ${muted ? 'bg-muted-foreground/40 text-background' : 'bg-primary text-primary-foreground'}`}>
             {conv.unread > 99 ? '99+' : conv.unread}
           </span>
         )}
@@ -2491,26 +2477,25 @@ function WorkNavigatorRow({ conv, active, onClick, isPinned, togglePin, onDelete
   /** Close this discussion. Omitted when the caller may not delete it. */
   onDelete?: (conv: ChatConversation, label: string) => void;
 }) {
-  const badge = ENTITY_BADGE[conv.type]
-  const Icon = badge?.Icon ?? Hash
+  const kind = chatKind(conv)
   const displayName = conv.name || 'Untitled'
 
   return (
     <div className={`group/row flex w-full items-center transition-colors ${active ? 'bg-muted' : 'hover:bg-muted/50'}`}>
       <button onClick={onClick} className="flex min-w-0 flex-1 items-start gap-3 py-2 pl-4 pr-1 text-left">
-        <div className="mt-0.5"><Icon className={`h-4 w-4 shrink-0 ${badge ? badge.cls.split(' ')[1] : 'text-muted-foreground'}`} /></div>
+        <div className="mt-0.5"><KindTile kind={kind} name={displayName} size="sm" /></div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className={`truncate text-sm ${conv.unread > 0 ? 'font-semibold text-foreground' : 'font-medium text-foreground/90'}`}>{displayName}</span>
             {conv.urgentUnread && <span className="shrink-0 rounded bg-red-500 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-white">Urgent</span>}
             {conv.unread > 0 && (
-              <span className="shrink-0 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[9px] font-semibold text-background">
+              <span className="shrink-0 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-semibold text-primary-foreground">
                 {conv.unread > 99 ? '99+' : conv.unread}
               </span>
             )}
           </div>
           <div className="mt-0.5 flex items-center gap-1.5">
-            {badge && <span className={`shrink-0 rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide ${badge.cls}`}>{badge.label}</span>}
+            <KindTag kind={kind} />
             {conv.topic && <span className="truncate text-xs text-muted-foreground">{conv.topic}</span>}
           </div>
         </div>
@@ -2614,13 +2599,13 @@ function WorkNavigatorPanel({
         {threads.length === 0 && <p className="px-4 py-2 text-xs text-muted-foreground">No discussions found.</p>}
         {pinned.length > 0 && (
           <div className="mb-4">
-            <SectionLabel>📌 Pinned</SectionLabel>
+            <SectionLabel count={pinned.length}>Pinned</SectionLabel>
             {pinned.map(t => <WorkNavigatorRow key={t.id} conv={t} active={t.id === activeId} onClick={() => onSelect(t.id)} isPinned togglePin={e => togglePin(t.id, e)} onDelete={t.canDelete ? onDelete : undefined} />)}
           </div>
         )}
         {Object.entries(grouped).map(([label, list]) => list.length > 0 && (
           <div key={label} className="mb-4">
-            <SectionLabel>{label}</SectionLabel>
+            <SectionLabel count={list.length}>{label}</SectionLabel>
             {list.map(t => <WorkNavigatorRow key={t.id} conv={t} active={t.id === activeId} onClick={() => onSelect(t.id)} isPinned={false} togglePin={e => togglePin(t.id, e)} onDelete={t.canDelete ? onDelete : undefined} />)}
           </div>
         ))}
