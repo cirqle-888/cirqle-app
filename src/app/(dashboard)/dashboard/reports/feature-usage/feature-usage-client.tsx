@@ -51,11 +51,12 @@ export default function FeatureUsageClient({ report, trackingReady, trackingSinc
       }
 
   return (
-    <div className="space-y-5 pb-10">
+    <>
       <Header
         title="Feature Usage"
         subtitle="Which parts of Cirqle are used, which are not, and how to start each one"
       />
+      <div className="p-4 md:p-6 space-y-5 pb-10">
 
       {!trackingReady && (
         <div className="flex gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm">
@@ -88,7 +89,7 @@ export default function FeatureUsageClient({ report, trackingReady, trackingSinc
           aria-label="Person"
           value={person?.cqid ?? ''}
           onChange={e => pick(e.target.value)}
-          className="h-10 rounded-lg border border-border bg-secondary px-3 text-sm"
+          className="h-10 w-full sm:w-auto max-w-full sm:max-w-md rounded-lg border border-border bg-secondary px-3 text-sm"
         >
           <option value="">Everyone</option>
           {report.people.map(p => (
@@ -107,7 +108,7 @@ export default function FeatureUsageClient({ report, trackingReady, trackingSinc
       {person && (
         <div className="rounded-xl border border-border bg-card px-4 py-3">
           <p className="text-sm font-semibold">
-            {person.cqid}{person.role ? ` · ${person.role}` : ''}{person.isAdmin ? ' · Admin' : ''}
+            {[person.cqid, roleLabel(person)].filter(Boolean).join(' · ')}
           </p>
           <p className="text-sm text-muted-foreground mt-0.5">
             Has opened {person.usedCount} of the {person.allowedCount} features their role allows
@@ -164,7 +165,7 @@ export default function FeatureUsageClient({ report, trackingReady, trackingSinc
               >
                 <span className="text-sm font-medium">{p.cqid}{p.cqid === myCqid ? ' (you)' : ''}</span>
                 <span className="text-xs text-muted-foreground order-3 sm:order-none col-span-2 sm:col-span-1 truncate">
-                  {[p.role, p.isAdmin ? 'Admin' : '', p.lastActive ? `last active ${formatISODateShort(p.lastActive)}` : 'not seen yet'].filter(Boolean).join(' · ')}
+                  {[roleLabel(p), p.lastActive ? `last active ${formatISODateShort(p.lastActive)}` : 'not seen yet'].filter(Boolean).join(' · ')}
                 </span>
                 <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap hidden sm:block">
                   used {p.usedCount} of {p.allowedCount}
@@ -196,8 +197,16 @@ export default function FeatureUsageClient({ report, trackingReady, trackingSinc
           </li>
         </ul>
       </details>
-    </div>
+      </div>
+    </>
   )
+}
+
+/** "Designer", "Accounts · Admin", or just "Admin" when the role is already called that. */
+function roleLabel(p: { role: string | null; isAdmin: boolean }): string {
+  const role = p.role?.trim() || ''
+  if (!p.isAdmin || /admin/i.test(role)) return role || (p.isAdmin ? 'Admin' : '')
+  return role ? `${role} · Admin` : 'Admin'
 }
 
 function FeatureCard({ row, forPerson }: { row: FeatureUsageRow; forPerson: boolean }) {
@@ -221,7 +230,7 @@ function FeatureCard({ row, forPerson }: { row: FeatureUsageRow; forPerson: bool
       <p className="text-xs text-muted-foreground">
         {row.lastUsed ? `Last used ${formatISODateShort(row.lastUsed)}` : 'Not opened yet'}
         {row.activeDays30 > 0 && ` · on ${row.activeDays30} day${row.activeDays30 === 1 ? '' : 's'} in the last ${RECENT_DAYS}`}
-        {!forPerson && row.allowed.length > 0 && ` · ${row.usedBy30.length} of ${row.allowed.length} people this month`}
+        {!forPerson && row.allowed.length > 0 && ` · ${row.usedBy30.length} of ${row.allowed.length} ${row.allowed.length === 1 ? 'person' : 'people'} this month`}
       </p>
       {!forPerson && row.notYetBy.length > 0 && (
         <p className="text-xs">
