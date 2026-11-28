@@ -1,10 +1,11 @@
 import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Users } from 'lucide-react'
 import Header from '@/components/layout/header'
 import { fetchAllIn } from '@/lib/supabase/server'
 import { generalUnitsOf, loadAllocation, payOfPeople } from '@/lib/units/allocate-load'
 import { UNIT_KIND_LABEL } from '@/lib/units/engine'
 import { unitAmounts, type PersonPay } from '@/lib/units/hq'
+import { loadOfficeIds } from '@/lib/units/office-load'
 import { monthStartISO } from '@/lib/utils/local-date'
 import { Badge, Card, Empty, Stat, Table } from '../../finance/profit-sharing/_components'
 import { inr, td, tdNum } from '../../finance/profit-sharing/_format'
@@ -31,7 +32,7 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
   const month = MONTH.test(sp.month ?? '') ? sp.month! : thisMonth
   const months = Array.from({ length: 12 }, (_, i) => monthStartISO(-i).slice(0, 7)).reverse()
 
-  const data = await loadAllocation(admin, month)
+  const [data, officeIds] = await Promise.all([loadAllocation(admin, month), loadOfficeIds(admin)])
   const { shares } = data
   const units = shares.departments.filter(d => d.isActive)
   const unitName = new Map(units.map(u => [u.id, u.name]))
@@ -44,8 +45,11 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
     ? await fetchAllIn((chunk: string[]) => admin.from('employees').select('id, performance_rating').in('id', chunk), people.map(p => p.employeeId))
     : { data: [] }
   const ratingOf = new Map(((perf ?? []) as { id: string; performance_rating: number | null }[]).map(e => [e.id, e.performance_rating]))
-  const office = people.filter(p => !p.unitIds.length)
-  const teams = people.filter(p => p.unitIds.length)
+  // Office: the owner's office list, plus anyone on no unit's team (flagged
+  // when not on the list, so nobody paid falls between the two tables).
+  const isOffice = (p: PersonPay) => officeIds?.has(p.employeeId) || !p.unitIds.length
+  const office = people.filter(isOffice)
+  const teams = people.filter(p => !isOffice(p))
 
   // General pool this month.
   const generalRows = data.rows.filter(r => r.status === 'general')
@@ -73,7 +77,10 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
       {list.map(p => (
         <tr key={p.employeeId} className="border-b border-border/60 last:border-0">
           <td className={`${td} font-medium`}>{p.cqid}{p.payMonths.length ? <div className="text-[11px] font-normal text-muted-foreground">for {p.payMonths.map(m => monthName(m)).join(', ')}</div> : null}</td>
-          <td className={td}><span className="text-xs">{p.unitIds.length ? p.unitIds.map(u => unitName.get(u)).join(', ') : 'Office / owner'}</span></td>
+          <td className={td}>
+            <span className="text-xs">{officeIds?.has(p.employeeId) ? 'Office' : p.unitIds.length ? '' : 'No team'}{officeIds?.has(p.employeeId) && p.unitIds.length ? ' · ' : ''}{p.unitIds.map(u => unitName.get(u)).join(', ')}</span>
+            {officeIds && !officeIds.has(p.employeeId) && !p.unitIds.length && <div><Badge tone="warn">not on the office list</Badge></div>}
+          </td>
           <td className={`${tdNum} font-medium`}>{inr(p.paid)}</td>
           <td className={tdNum}>{inr(p.base)}</td>
           <td className={tdNum}>{inr(p.contribution)}</td>
@@ -92,7 +99,10 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
       {header}
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 md:px-6">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <Link href={ROOT} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Departments &amp; Brands</Link>
+          <div className="flex flex-wrap items-center gap-4 text-xs">
+            <Link href={ROOT} className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Departments &amp; Brands</Link>
+            <Link href={`${ROOT}/office`} className="text-primary hover:underline">Office team &amp; permissions →</Link>
+          </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <span>{monthName(month)}</span>
             <MonthPicker months={months} value={month} allLabel={null} />
@@ -135,7 +145,8 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
           </div>
         </Card>
 
-        <Card title="Office and owner's own staff" subtitle="People on no unit's team. Units see their share of these costs only as one line under the owner — never who or how much.">
+        <Card title="Office and owner's own staff" subtitle="The office team and anyone on no unit's team. Units see their share of these costs only as one line under the owner — never who or how much."
+          actions={<Link href={`${ROOT}/office`} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-secondary"><Users className="h-3.5 w-3.5" /> Office team &amp; permissions</Link>}>
           {office.length === 0 ? <Empty>No pay to office staff this month.</Empty> : peopleTable(office)}
         </Card>
 
