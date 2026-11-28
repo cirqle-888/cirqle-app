@@ -42,9 +42,14 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
   // People: every salary payment (or entry naming a person) this month.
   const people = payOfPeople(data)
   const { data: perf } = people.length
-    ? await fetchAllIn((chunk: string[]) => admin.from('employees').select('id, performance_rating').in('id', chunk), people.map(p => p.employeeId))
+    ? await fetchAllIn((chunk: string[]) => admin.from('employees').select('id, performance_rating, designation:designation_id(is_admin)').in('id', chunk), people.map(p => p.employeeId))
     : { data: [] }
-  const ratingOf = new Map(((perf ?? []) as { id: string; performance_rating: number | null }[]).map(e => [e.id, e.performance_rating]))
+  type PerfRow = { id: string; performance_rating: number | null; designation: { is_admin: boolean } | { is_admin: boolean }[] | null }
+  const ratingOf = new Map(((perf ?? []) as PerfRow[]).map(e => [e.id, e.performance_rating]))
+  // The owner / Admin is above the office list: never flagged as missing from it.
+  const adminIds = new Set(((perf ?? []) as PerfRow[])
+    .filter(e => (Array.isArray(e.designation) ? e.designation[0] : e.designation)?.is_admin)
+    .map(e => e.id))
   // Office: the owner's office list, plus anyone on no unit's team (flagged
   // when not on the list, so nobody paid falls between the two tables).
   const isOffice = (p: PersonPay) => officeIds?.has(p.employeeId) || !p.unitIds.length
@@ -78,8 +83,8 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
         <tr key={p.employeeId} className="border-b border-border/60 last:border-0">
           <td className={`${td} font-medium`}>{p.cqid}{p.payMonths.length ? <div className="text-[11px] font-normal text-muted-foreground">for {p.payMonths.map(m => monthName(m)).join(', ')}</div> : null}</td>
           <td className={td}>
-            <span className="text-xs">{officeIds?.has(p.employeeId) ? 'Office' : p.unitIds.length ? '' : 'No team'}{officeIds?.has(p.employeeId) && p.unitIds.length ? ' · ' : ''}{p.unitIds.map(u => unitName.get(u)).join(', ')}</span>
-            {officeIds && !officeIds.has(p.employeeId) && !p.unitIds.length && <div><Badge tone="warn">not on the office list</Badge></div>}
+            <span className="text-xs">{adminIds.has(p.employeeId) ? 'Owner / Admin' : officeIds?.has(p.employeeId) ? 'Office' : p.unitIds.length ? '' : 'No team'}{(adminIds.has(p.employeeId) || officeIds?.has(p.employeeId)) && p.unitIds.length ? ' · ' : ''}{p.unitIds.map(u => unitName.get(u)).join(', ')}</span>
+            {officeIds && !adminIds.has(p.employeeId) && !officeIds.has(p.employeeId) && !p.unitIds.length && <div><Badge tone="warn">not on the office list</Badge></div>}
           </td>
           <td className={`${tdNum} font-medium`}>{inr(p.paid)}</td>
           <td className={tdNum}>{inr(p.base)}</td>
