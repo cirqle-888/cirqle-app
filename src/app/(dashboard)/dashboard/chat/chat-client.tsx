@@ -1204,7 +1204,8 @@ function ChatInner({ me, canCreateChannels, isAdmin = false, initialConversation
                       <MessageRow m={m} me={me}
                         senderName={m.senderId === me.employeeId
                           ? showName(null, me.cqid)
-                          : (m.senderId ? memberNames.get(m.senderId) ?? showName(m.senderName, m.senderCqid) : 'System')}
+                          : (m.senderId ? memberNames.get(m.senderId) ?? showName(m.senderName, m.senderCqid)
+                            : m.metadata?.source === 'whatsapp' ? 'WhatsApp' : 'System')}
                         isDm={active.type === 'dm'}
                         memberCount={active.members.length}
                         highlighted={highlightId === m.id}

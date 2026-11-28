@@ -68,6 +68,13 @@ A message in a listed chat arrives at Cirqle App within seconds and is handled l
 | Other text | AI decides if it is a request. Yes or unsure: filed. No: ignored |
 | Voice note or photo | Always captured: filed, or added to that person's recent request |
 
+**Finished work into client chat (added 28 Nov 2026).** A photo sent from the listener number or a
+Cirqle number into a chat listed for a client is also posted in that client's channel in **Chat** (the
+channel is made if there is none), marked "Sent to the client on WhatsApp", with the sender's CQID when
+their saved phone sent it. Once per WhatsApp message; the same stored file, not a copy. Photos up to
+4 MB only: videos and PDFs are not passed on by the listener. Switch: Settings → WhatsApp Listener →
+**Finished work into client chat** (on by default). It never sends anything to WhatsApp.
+
 A filed request is marked new in **Requests**, admins get a notification, the client comes from the
 allow-list, and the voice note or photo is kept and linked. Voice notes are written out by AI; the same
 caution as the share shortcut applies (Malayalam accuracy untested, always check against the recording).
