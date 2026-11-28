@@ -52,6 +52,8 @@ export interface Feature extends FeatureGuide {
   requiredPerm?: string
   requiredAnyPerm?: string[]
   adminOnly?: boolean
+  /** Admin-only, but open to a unit's team (Departments & Brands). */
+  unitTeams?: boolean
 }
 
 export const FEATURE_GUIDES: Record<string, FeatureGuide> = {
@@ -301,6 +303,7 @@ function toFeature(item: NavItem, section: string, order: number): Feature {
     ...(item.requiredPerm ? { requiredPerm: item.requiredPerm } : {}),
     ...(item.requiredAnyPerm?.length ? { requiredAnyPerm: [...item.requiredAnyPerm] } : {}),
     ...(item.adminOnly ? { adminOnly: true } : {}),
+    ...(item.unitTeams ? { unitTeams: true } : {}),
   }
 }
 

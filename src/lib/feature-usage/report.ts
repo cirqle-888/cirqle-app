@@ -17,6 +17,7 @@
  * People are identified by CQID only.
  */
 import { isNavItemVisible, type NavItem } from '@/lib/nav-sections'
+import type { UnitLock } from '@/lib/units/access'
 import { addDaysISO } from '@/lib/utils/local-date'
 import type { Feature, Rhythm } from './catalogue'
 
@@ -37,6 +38,11 @@ export interface UsagePerson {
   role: string | null
   isAdmin: boolean
   permissions: ReadonlySet<string>
+  /**
+   * On a unit's team (Departments & Brands): only the unit-team pages, or with
+   * 'staff' the shorter staff list — whatever their role allows elsewhere.
+   */
+  unitLock?: UnitLock
 }
 
 /** "This person opened this feature on this day." */
@@ -95,10 +101,12 @@ export function canUseFeature(feature: Feature, person: UsagePerson): boolean {
     requiredPerm: feature.requiredPerm,
     requiredAnyPerm: feature.requiredAnyPerm,
     adminOnly: feature.adminOnly,
+    unitTeams: feature.unitTeams,
   } as NavItem
   // An admin holds every key (loadCurrentUser gives them all), so they pass
-  // even when a key is missing from the permissions table.
-  return isNavItemVisible(item, k => person.isAdmin || person.permissions.has(k), person.isAdmin)
+  // even when a key is missing from the permissions table. A unit team gets
+  // only its unit pages, so the rest are never "unused" for them.
+  return isNavItemVisible(item, k => person.isAdmin || person.permissions.has(k), person.isAdmin, person.unitLock ?? false)
 }
 
 /** Never / rare / well for one feature, from how many recent days it was used. */

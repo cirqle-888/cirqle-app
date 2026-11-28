@@ -59,6 +59,20 @@ describe('canUseFeature — the sidebar gate', () => {
     const owner = person('o', 'CQID001', ['billing.view_invoices'], true)
     expect(canUseFeature(importer, owner)).toBe(true)
   })
+  it('gives a unit team only its unit pages, and unit staff the shorter list', () => {
+    const perms = ['billing.view_invoices', 'social.view']
+    const units = feature('/dashboard/units', { adminOnly: true, unitTeams: true })
+    const calendar = feature('/dashboard/social-calendar')
+    const member = { ...person('m', 'CQID004', perms), unitLock: true as const }
+    const staff = { ...person('s', 'CQID006', perms), unitLock: 'staff' as const }
+    expect(canUseFeature(invoices, member)).toBe(false)          // outside every unit's pages
+    expect(canUseFeature(calendar, member)).toBe(true)
+    expect(canUseFeature(units, member)).toBe(true)
+    expect(canUseFeature(calendar, staff)).toBe(false)           // staff: own work only
+    expect(canUseFeature(units, staff)).toBe(false)
+    expect(canUseFeature(feature('/dashboard/tasks'), staff)).toBe(true)
+    expect(canUseFeature(invoices, person('o2', 'CQID002', perms))).toBe(true)  // office: as before
+  })
 })
 
 describe('buildFeatureUsage', () => {
