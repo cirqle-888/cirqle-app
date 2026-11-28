@@ -1,6 +1,5 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { ArrowLeft } from 'lucide-react'
 import Header from '@/components/layout/header'
 import { createAdminClient } from '@/lib/supabase/server'
 import { indiaDay, isMissingTable } from '@/lib/whatsapp-listener/chat-log'
@@ -77,9 +76,6 @@ export default async function WhatsAppPendingPage() {
     <div className="min-h-screen">
       <Header title="WhatsApp pending" subtitle="What is still open in the client chats, worked out by AI" />
       <div className="px-4 sm:px-6 lg:px-8 pb-16 max-w-5xl mx-auto mt-2 space-y-4">
-        <Link href="/dashboard/requests" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="w-3.5 h-3.5" /> Back to Requests
-        </Link>
         <WhatsAppTabs active="pending" />
 
         {missing ? (
@@ -124,9 +120,7 @@ export default async function WhatsAppPendingPage() {
             </section>
 
             <p className="text-[11px] text-muted-foreground/70">
-              This list is written by AI from the messages, voice notes and photos in each chat, so it can miss or misread things.
-              Open the chat to check. &quot;Done&quot; removes an item here only; nothing is sent to WhatsApp.
-              The person named for an item, or the person responsible for the chat, gets a Cirqle notification when it first appears.
+              Written by AI from the chats and can miss or misread things, so open the chat to check — &quot;Done&quot; only clears an item here.
             </p>
           </>
         )}

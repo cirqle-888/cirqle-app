@@ -1,12 +1,13 @@
 // Skeleton while tasks page server data resolves — replaces the prior "frozen
 // previous page" gap during navigation.
 
+import Header from '@/components/layout/header'
+
 export default function TasksLoading() {
   return (
     <div>
-      <div className="h-[68px] sm:h-[72px] border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-30 px-4 md:px-6 flex items-center">
-        <div className="h-5 w-24 bg-secondary/60 rounded animate-pulse" />
-      </div>
+      {/* The real top bar, so nothing jumps when the page arrives. */}
+      <Header title="Tasks" />
       {/* Toolbar */}
       <div className="border-b border-border/40 px-4 sm:px-6 py-3 sm:py-4 space-y-2">
         <div className="flex gap-2">

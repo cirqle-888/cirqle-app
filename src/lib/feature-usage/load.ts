@@ -20,6 +20,7 @@ import { fetchAll } from '@/lib/supabase/server'
 import { addDaysISO, toISODate } from '@/lib/utils/local-date'
 import { featureForPath, listFeatures, type Feature } from './catalogue'
 import { LOOKBACK_DAYS, type UsageEvent, type UsagePerson } from './report'
+import { unitLockOf } from '@/lib/units/access'
 
 export interface FeatureUsageInput {
   features: Feature[]
@@ -76,6 +77,22 @@ export async function loadFeatureUsageInput(admin: SupabaseClient, today: string
     set.add(key)
   }
 
+  // ── Unit teams: a unit member opens only their unit's pages ──
+  const rolesOf = new Map<string, string[]>()
+  const [memRes, unitRes] = await Promise.all([
+    admin.from('business_unit_members').select('unit_id, employee_id, role'),
+    admin.from('business_units').select('id').eq('is_active', true),
+  ])
+  const unitErr = memRes.error ?? unitRes.error
+  if (unitErr) {
+    if (!MISSING_TABLE.has(unitErr.code ?? '')) warnings.push(`unit teams: ${unitErr.message}`)
+  } else {
+    const active = new Set((unitRes.data ?? []).map((u: { id: string }) => u.id))
+    for (const m of (memRes.data ?? []) as { unit_id: string; employee_id: string; role: string }[]) {
+      if (active.has(m.unit_id)) rolesOf.set(m.employee_id, [...(rolesOf.get(m.employee_id) ?? []), m.role])
+    }
+  }
+
   type EmpRow = { id: string; cqid: string | null; auth_id: string | null; designation_id: string | null }
   const people: UsagePerson[] = (empRes.data as EmpRow[])
     // No login = cannot open anything; listing them would only add noise.
@@ -90,6 +107,7 @@ export async function loadFeatureUsageInput(admin: SupabaseClient, today: string
         isAdmin,
         // Same rule as loadCurrentUser: an admin holds every key.
         permissions: isAdmin ? allKeys : (e.designation_id ? permsByDesignation.get(e.designation_id) : undefined) ?? new Set<string>(),
+        unitLock: isAdmin ? false : unitLockOf(rolesOf.get(e.id) ?? []),
       }
     })
 

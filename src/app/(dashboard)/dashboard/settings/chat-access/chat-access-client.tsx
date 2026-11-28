@@ -65,8 +65,8 @@ export default function ChatAccessClient({ settings, error }: { settings: ChatAc
   if (!settings) {
     return (
       <div className="space-y-5">
-        <Header title="Chat access" subtitle="Who can chat with whom" />
-        <p className="text-sm text-red-500">{error ?? 'Could not load chat access.'}</p>
+        <Header title="Chat Access" subtitle="Who can chat with whom" crumbLabel="Chat Access" />
+        <p className="px-4 sm:px-6 text-sm text-red-500">{error ?? 'Could not load chat access.'}</p>
       </div>
     )
   }
@@ -152,62 +152,76 @@ export default function ChatAccessClient({ settings, error }: { settings: ChatAc
 
   return (
     <div className="space-y-5 pb-10">
-      <Header title="Chat access" subtitle="Decide who can chat with whom — by department, and person by person" />
-      <Link href="/dashboard/chat" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-4 w-4" /> Back to chat
-      </Link>
+      <Header
+        title="Chat Access"
+        subtitle="Decide who can chat with whom — by department, and person by person"
+        // The crumb would otherwise read the folder name, "Chat access".
+        crumbLabel="Chat Access"
+      />
+      <div className="space-y-5 px-4 sm:px-6">
+        <Link href="/dashboard/chat" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-4 w-4" /> Back to chat
+        </Link>
 
-      {!settings.ready && (
-        <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm">
-          The chat upgrade has not been applied to the database yet, so rules cannot be saved.
-        </p>
-      )}
+        {!settings.ready && (
+          <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm">
+            The chat upgrade has not been applied to the database yet, so rules cannot be saved.
+          </p>
+        )}
 
-      <div className="rounded-2xl border border-border bg-card p-4 text-sm leading-relaxed text-muted-foreground">
-        <p className="flex items-center gap-2 font-medium text-foreground"><ShieldCheck className="h-4 w-4 text-violet-500" /> How it works</p>
-        <ul className="mt-2 list-disc space-y-1 pl-5">
-          <li>A rule on a <b className="text-foreground">department</b> applies to everyone in it. A rule on a <b className="text-foreground">person</b> wins over their department.</li>
-          <li>It controls who a person can find, start a direct chat with, keep chatting with, and add to a group.</li>
-          <li>Both sides must be allowed. If Social Media is “own department only”, nobody outside can message them either.</li>
-          <li>Admins are never cut off — anyone can reach an admin and an admin can reach anyone.</li>
-          <li>With no rule, people can reach the colleagues they share work with (as before).</li>
-        </ul>
-      </div>
-
-      {message && (
-        <p className={`flex items-center gap-1.5 text-sm ${message.ok ? 'text-green-500' : 'text-red-500'}`}>
-          {message.ok ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />} {message.text}
-        </p>
-      )}
-
-      <section className="overflow-hidden rounded-2xl border border-border bg-card">
-        <div className="border-b border-border px-4 py-3 text-sm font-semibold">Departments</div>
-        {departments.length === 0 && <p className="px-4 py-6 text-sm text-muted-foreground">No departments are set up yet (Settings → Departments).</p>}
-        {departments.map(d => {
-          const count = employees.filter(e => e.departmentIds.includes(d.id)).length
-          return renderRow({ subject: { type: 'department', id: d.id }, title: d.name, icon: Building2,
-            sub: `${count} ${count === 1 ? 'person' : 'people'}`, defaultLabel: 'Default (shared work)' })
-        })}
-      </section>
-
-      <section className="overflow-hidden rounded-2xl border border-border bg-card">
-        <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
-          <span className="text-sm font-semibold">People</span>
-          <div className="ml-auto flex items-center gap-2 rounded-lg bg-muted/60 px-2.5 py-1.5">
-            <Search className="h-3.5 w-3.5 text-muted-foreground" />
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search" className="w-36 bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
-          </div>
+        <div className="rounded-2xl border border-border bg-card p-4 text-sm leading-relaxed text-muted-foreground">
+          <p className="flex items-center gap-2 font-medium text-foreground"><ShieldCheck className="h-4 w-4 text-violet-500" /> How it works</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            <li>A rule on a <b className="text-foreground">department</b> applies to everyone in it. A rule on a <b className="text-foreground">person</b> wins over their department.</li>
+            <li>It controls who a person can find, start a direct chat with, keep chatting with, and add to a group.</li>
+            <li>Both sides must be allowed. If Social Media is “own department only”, nobody outside can message them either.</li>
+            <li>Admins are never cut off — anyone can reach an admin and an admin can reach anyone.</li>
+            <li>With no rule, people can reach the colleagues they share work with (as before).</li>
+            <li>
+              <b className="text-foreground">Unit teams come first</b> (Departments &amp; Brands): someone on a unit&apos;s team chats only with
+              their own unit, the <b className="text-foreground">office team</b> (Cirqle HQ → Office team) and admins, and does not see group
+              chats or channels that include anyone else. To let someone else talk with a unit across that line, give
+              <b className="text-foreground"> that person</b> a rule of “Everyone”, or name the unit members in their rule. Department rules
+              never cross a unit line.
+            </li>
+          </ul>
         </div>
-        {shownEmployees.map(e => {
-          const eff = effectiveRule(ctx, e.id)
-          const depts = e.departmentIds.map(deptName).join(', ') || 'No department'
-          const follows = e.isAdmin ? 'Admin — always reaches everyone'
-            : eff && eff.source === 'department' ? `From department: ${ACCESS_MODE_LABEL[eff.mode]}` : 'Default (shared work)'
-          return renderRow({ subject: { type: 'employee', id: e.id }, title: label(e), icon: User,
-            sub: depts, defaultLabel: `Follow department — ${follows.replace('From department: ', '')}` })
-        })}
-        {shownEmployees.length === 0 && <p className="px-4 py-6 text-sm text-muted-foreground">Nobody matches.</p>}
-      </section>
+
+        {message && (
+          <p className={`flex items-center gap-1.5 text-sm ${message.ok ? 'text-green-500' : 'text-red-500'}`}>
+            {message.ok ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />} {message.text}
+          </p>
+        )}
+
+        <section className="overflow-hidden rounded-2xl border border-border bg-card">
+          <div className="border-b border-border px-4 py-3 text-sm font-semibold">Departments</div>
+          {departments.length === 0 && <p className="px-4 py-6 text-sm text-muted-foreground">No departments are set up yet (Settings → Departments).</p>}
+          {departments.map(d => {
+            const count = employees.filter(e => e.departmentIds.includes(d.id)).length
+            return renderRow({ subject: { type: 'department', id: d.id }, title: d.name, icon: Building2,
+              sub: `${count} ${count === 1 ? 'person' : 'people'}`, defaultLabel: 'Default (shared work)' })
+          })}
+        </section>
+
+        <section className="overflow-hidden rounded-2xl border border-border bg-card">
+          <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
+            <span className="text-sm font-semibold">People</span>
+            <div className="ml-auto flex items-center gap-2 rounded-lg bg-muted/60 px-2.5 py-1.5">
+              <Search className="h-3.5 w-3.5 text-muted-foreground" />
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search" className="w-36 bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
+            </div>
+          </div>
+          {shownEmployees.map(e => {
+            const eff = effectiveRule(ctx, e.id)
+            const depts = e.departmentIds.map(deptName).join(', ') || 'No department'
+            const follows = e.isAdmin ? 'Admin — always reaches everyone'
+              : eff && eff.source === 'department' ? `From department: ${ACCESS_MODE_LABEL[eff.mode]}` : 'Default (shared work)'
+            return renderRow({ subject: { type: 'employee', id: e.id }, title: label(e), icon: User,
+              sub: depts, defaultLabel: `Follow department — ${follows.replace('From department: ', '')}` })
+          })}
+          {shownEmployees.length === 0 && <p className="px-4 py-6 text-sm text-muted-foreground">Nobody matches.</p>}
+        </section>
+      </div>
     </div>
   )
 }

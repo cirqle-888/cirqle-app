@@ -21,6 +21,7 @@ import { canChat, type ChatAccessMode, type ChatAccessRule } from '@/lib/chat/ac
 import { buildPoll, readPoll, tallyVotes, type PollData } from '@/lib/chat/polls'
 import { extractUrls } from '@/lib/chat/links'
 import { pushToConversation } from '@/lib/chat/notify'
+import { blockedConversationIds } from '@/lib/chat/unit-lines'
 import { logActivity } from '@/lib/activity/log'
 
 type Result<T> = { ok: true; data: T } | { ok: false; error: string }
@@ -136,7 +137,9 @@ export async function listStarred(): Promise<Result<SavedMessage[]>> {
     admin.from('conversation_members').select('conversation_id').eq('employee_id', auth.me.employeeId),
   ])
   if (error || !stars?.length) return { ok: true, data: [] }
-  const mine = new Set((memberships ?? []).map(m => m.conversation_id as string))
+  const memberOf = (memberships ?? []).map(m => m.conversation_id as string)
+  const closed = await blockedConversationIds(admin, auth.me.employeeId, memberOf)
+  const mine = new Set(memberOf.filter(id => !closed.has(id)))
   const { data: rows } = await admin.from('messages').select(SAVED_SELECT).in('id', stars.map(s => s.message_id))
   const byId = new Map((rows ?? []).filter(r => !r.deleted_at && mine.has(r.conversation_id)).map(r => [r.id as string, toSaved(r)]))
   return { ok: true, data: stars.map(s => byId.get(s.message_id as string)).filter((m): m is SavedMessage => !!m) }
@@ -199,7 +202,9 @@ export async function forwardMessages(messageIds: string[], targetConversationId
       .select('id, conversation_id, body, kind, metadata, deleted_at, created_at')
       .in('id', ids).order('created_at', { ascending: true }),
   ])
-  const mine = new Set((memberships ?? []).map(m => m.conversation_id as string))
+  const memberOf = (memberships ?? []).map(m => m.conversation_id as string)
+  const closed = await blockedConversationIds(admin, me.employeeId, memberOf)
+  const mine = new Set(memberOf.filter(id => !closed.has(id)))
   const usable = (sources ?? []).filter(m =>
     !m.deleted_at && mine.has(m.conversation_id) && ['text', 'file', 'voice'].includes(m.kind)
     && !(m.metadata as Record<string, unknown> | null)?.poll)

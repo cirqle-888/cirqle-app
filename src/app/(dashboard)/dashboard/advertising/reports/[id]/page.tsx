@@ -1,4 +1,4 @@
-import Link from 'next/link'
+import Header from '@/components/layout/header'
 import { ReportReview } from '@/components/reporting/report-review'
 import { ManualReportShare } from '@/components/reporting/manual-share'
 import { buildShareCaption } from '@/lib/reporting/share-caption'
@@ -28,22 +28,21 @@ export default async function InteractiveReportPage({ params }: { params: Promis
 
   if (!report) notFound()
   if (!['ready', 'partial'].includes(report.status) || !report.render_data) {
-    return <ReportProgress reportId={id} canRetry={me.isAdmin || hasPermission(me, 'advertising.edit')} />
+    return (
+      <>
+        <Header title="Campaign report" />
+        <div className="p-4 sm:p-6">
+          <ReportProgress reportId={id} canRetry={me.isAdmin || hasPermission(me, 'advertising.edit')} />
+        </div>
+      </>
+    )
   }
 
   const renderData = report.render_data as unknown as RenderData
 
   return (
     <div className="min-h-screen bg-muted/20">
-      <div className="border-b border-border bg-background px-6 py-4 flex items-center justify-between">
-        <h1 className="font-medium text-foreground">Report Interactive View</h1>
-        <Link
-          href="/dashboard/advertising/reports"
-          className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-        >
-          Back to Reports Hub
-        </Link>
-      </div>
+      <Header title="Campaign report" crumbLabel={renderData.project.campaignName} />
       {report.status === 'partial' && <ReportProgress reportId={id} canRetry={me.isAdmin || hasPermission(me, 'advertising.edit')} />}
       {(me.isAdmin || hasPermission(me, 'advertising.edit')) && <ReportReview reportId={id} reviewStatus={report.review_status ?? 'unreviewed'} recipients={(report.config?.recipients ?? []).map((r: { email: string }) => r.email)} delivery={report.delivery_results ?? []} summary={renderData.ai.executiveSummary} />}
       <ManualReportShare reportId={id} caption={buildShareCaption(renderData)} formats={[

@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { safeNextPath } from '@/lib/safe-next-path'
+import { UNIT_TEAM_HOME, unitTeamMayOpen } from '@/lib/units/access'
 
 /**
  * Map of pathname prefix -> required permission key.
@@ -13,7 +14,8 @@ import { safeNextPath } from '@/lib/safe-next-path'
  * hold view_all WITHOUT view_own — a single-key rule would have bounced the
  * very people who can see everyone's contributions.
  */
-const ROUTE_PERMS: Array<[RegExp, string | string[]]> = [
+/** A key, any one of several keys, or null for every signed-in employee. */
+const ROUTE_PERMS: Array<[RegExp, string | string[] | null]> = [
   [/^\/dashboard\/prompt-studio/, 'prompt_studio.view'],
   [/^\/dashboard\/activity/,                'timeline.view_all'],
   [/^\/dashboard\/leads/,                   'leads.view'],
@@ -67,11 +69,14 @@ const ROUTE_PERMS: Array<[RegExp, string | string[]]> = [
   [/^\/dashboard\/quotations/,              'billing.view_quotations'],
   [/^\/dashboard\/settings\/designations/,  'settings.manage_designations'],
   [/^\/dashboard\/settings\/change-requests/, 'employees.review_change_requests'],
-  // Lives under /settings but is its own permission — the page checks
-  // `workspaces.manage` and nothing else. Without this line the general
-  // settings rule below caught it first, so anyone holding workspaces.manage
-  // without settings.access saw the sidebar link and was bounced on click.
-  [/^\/dashboard\/settings\/workspaces/,   'workspaces.manage'],
+  // Lives under /settings but is open to EVERY signed-in employee: managers
+  // run the shared workspaces there, everyone else designs their own personal
+  // ones (settings/workspaces/page.tsx; listWorkspaces scopes each person's
+  // list and the actions enforce ownership). It used to require
+  // workspaces.manage, which bounced every non-manager who chose "My
+  // workspaces" in the sidebar's workspace menu. It still has to sit above
+  // the general settings rule, which would otherwise catch it first.
+  [/^\/dashboard\/settings\/workspaces/,   null],
   [/^\/dashboard\/settings/,                'settings.access'],
   [/^\/dashboard\/import/,                  'tasks.create'],
   // Note: /dashboard (root) is intentionally NOT gated here.
@@ -107,6 +112,13 @@ interface ProfileCachePayload {
   designationId: string | null
   /** Permission keys granted to this designation (empty for admins — they have all). */
   allowedPerms: string[]
+  /**
+   * A non-admin member of a business unit (lib/units): may open only the
+   * unit-team pages (lib/units/access). Missing on cookies signed before this
+   * field existed, which read as false for at most PROFILE_TTL_SEC.
+   */
+  /** On a unit's team: only the unit-team pages; 'staff' = the shorter staff list. */
+  unitRoutesOnly?: boolean | 'staff'
   /** Unix seconds expiry. */
   exp: number
 }
@@ -252,6 +264,11 @@ function checkRateLimit(request: NextRequest): boolean {
 }
 
 export async function updateSession(request: NextRequest) {
+  // The real path, on EVERY request, for the dashboard layout's unit-team
+  // check. (`x-pathname` below is only set when the session cookie is
+  // refreshed, so the layout's older guard usually sees '/dashboard'; a unit
+  // check reading it would bounce a unit member on every page.)
+  request.headers.set('x-request-path', request.nextUrl.pathname)
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -471,12 +488,47 @@ export async function updateSession(request: NextRequest) {
         }
       }
 
+      // Is this person on a unit's team (Social Media, Cirqle Flyers,
+      // Memoura…)? Then they may open only their unit's pages. Asked with
+      // their own session through a function that answers for the caller
+      // alone. Before the migration the function does not exist: nobody is a
+      // unit member yet. Any other failure fails CLOSED, like the profile read
+      // above — a unit member must never be let loose by a hiccup.
+      // Unit STAFF (own work only) get a shorter list; my_unit_route_level()
+      // says which. Before its migration it does not exist and the older
+      // yes/no lock answers instead (nobody can be staff before it anyway).
+      let unitRoutesOnly: boolean | 'staff' = false
+      if (!isAdmin) {
+        const isMissing = (e: { code?: string; message?: string }) =>
+          e.code === 'PGRST202' || e.code === '42883' || /could not find the function|does not exist/i.test(e.message ?? '')
+        const failClosed = () => {
+          const url = request.nextUrl.clone()
+          url.pathname = '/login'
+          url.searchParams.set('error', 'profile')
+          return NextResponse.redirect(url)
+        }
+        const { data: level, error: levelErr } = await supabase.rpc('my_unit_route_level')
+        if (!levelErr) {
+          unitRoutesOnly = level === 'staff' ? 'staff' : level === 'team' || level === true
+        } else if (!isMissing(levelErr)) {
+          return failClosed()
+        } else {
+          const { data: locked, error: lockErr } = await supabase.rpc('my_unit_route_lock')
+          if (lockErr) {
+            if (!isMissing(lockErr)) return failClosed()
+          } else {
+            unitRoutesOnly = locked === true
+          }
+        }
+      }
+
       profile = {
         authId: user.id,
         isAdmin,
         isArchived: emp.is_archived === true,
         designationId: designation?.id ?? null,
         allowedPerms,
+        unitRoutesOnly,
         exp: Math.floor(Date.now() / 1000) + PROFILE_TTL_SEC,
       }
 
@@ -511,9 +563,19 @@ export async function updateSession(request: NextRequest) {
     // Admin designation → no gating
     if (profile.isAdmin) return supabaseResponse
 
+    // A unit team member opens only the unit-team pages — an allow-list, so a
+    // page added later is closed to them until it is made safe for units.
+    if (profile.unitRoutesOnly && !unitTeamMayOpen(pathname, profile.unitRoutesOnly)) {
+      const url = request.nextUrl.clone()
+      url.pathname = UNIT_TEAM_HOME
+      url.search = ''
+      if (pathname !== '/dashboard') url.searchParams.set('denied', '1')
+      return NextResponse.redirect(url)
+    }
+
     // Regular designation → check route permission
     const matched = ROUTE_PERMS.find(([re]) => re.test(pathname))
-    if (!matched) return supabaseResponse
+    if (!matched || matched[1] === null) return supabaseResponse
     const requiredKeys = Array.isArray(matched[1]) ? matched[1] : [matched[1]]
 
     if (!requiredKeys.some(k => profile.allowedPerms.includes(k))) {

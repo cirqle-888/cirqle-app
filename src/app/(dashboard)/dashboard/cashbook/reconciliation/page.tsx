@@ -1,8 +1,9 @@
 import { redirect } from 'next/navigation'
+import Header from '@/components/layout/header'
 import ReconciliationClient from './reconciliation-client'
 import { requireAdmin } from '@/lib/permissions/check'
 
-export const metadata = { title: 'System Reconciliation | Cirqle' }
+export const metadata = { title: 'Cash Book Checks | Cirqle' }
 
 export default async function ReconciliationPage() {
   // These are destructive repair utilities (orphan hunting, allocation rebuilds),
@@ -11,18 +12,18 @@ export default async function ReconciliationPage() {
   const guard = await requireAdmin()
   if (!guard.ok) redirect('/dashboard')
 
+  // "Checks", not "Reconciliation": Bank and Card Statements are the
+  // reconciliations; this page hunts for ledger errors.
   return (
-    <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 pb-24 overflow-y-auto">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl font-bold tracking-tight">System Reconciliation</h2>
-          <p className="text-muted-foreground text-sm mt-1">
-            Admin utilities for identifying orphaned payments and auditing mathematical integrity between cashbook and invoices.
-          </p>
-        </div>
+    <>
+      <Header
+        title="Cash Book Checks"
+        subtitle="Orphaned payments, balance mismatches and deleted entries"
+        crumbLabel="Checks"
+      />
+      <div className="px-4 pb-24 pt-4 sm:px-6 sm:pt-6 md:pb-8">
+        <ReconciliationClient />
       </div>
-      
-      <ReconciliationClient />
-    </div>
+    </>
   )
 }

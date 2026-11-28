@@ -393,6 +393,15 @@ body:has([data-modal-overlay]) [data-chat-launcher] {
   display: none;
 }
 
+/* Field Marketing's phone bar uses the full width just above the bottom nav,
+   right where the chat button floats; the top bar's chat button still opens
+   chat there. Unlayered for the same reason as the rule above. */
+@media (max-width: 1023.98px) {
+  body:has([data-field-bar]) [data-chat-launcher] {
+    display: none;
+  }
+}
+
 @layer utilities {
   .gradient-text {
     background: linear-gradient(135deg, #a78bfa, #60a5fa);

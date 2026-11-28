@@ -9,7 +9,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
-import { SocialTabs } from '@/components/social-hub/social-tabs'
 import { usePermissions } from '@/contexts/permission-context'
 import { PERMS } from '@/lib/permissions/keys'
 import { Badge } from '@/components/ui/badge'
@@ -232,7 +231,7 @@ export default function SocialClient({
   return (
     <>
       <Header
-        title="Social Hub"
+        title="Social Insights"
         subtitle="Connected Facebook Pages & Instagram accounts"
         actions={showConnect ? (
           /* Connecting is owned by Connections — one place holds the tokens,
@@ -245,8 +244,7 @@ export default function SocialClient({
         ) : undefined}
       />
 
-      <div className="p-4 lg:p-6 space-y-6">
-        <SocialTabs />
+      <div className="p-4 sm:p-6 space-y-6">
         {/* ── Summary strip ── */}
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
           {[
@@ -263,14 +261,6 @@ export default function SocialClient({
               <p className={`text-xl font-semibold mt-1 ${k.warn ? 'text-amber-500' : ''}`}>{k.value}</p>
             </div>
           ))}
-        </div>
-
-        {/* ── Quick links ── */}
-        <div className="flex flex-wrap gap-2 text-sm">
-          <Link href="/dashboard/social/calendar"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 hover:bg-secondary/60 transition-colors">
-            <CalendarClock className="w-4 h-4 text-muted-foreground" /> Publishing calendar
-          </Link>
         </div>
 
         {/* ── Accounts grouped by client ── */}

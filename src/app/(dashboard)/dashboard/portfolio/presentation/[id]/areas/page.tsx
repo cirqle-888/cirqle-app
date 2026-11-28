@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import Link from 'next/link'
+import Header from '@/components/layout/header'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
 import { websiteSupabaseConfigured } from '@/lib/supabase/website-admin'
@@ -38,15 +38,16 @@ export default async function PresentationAreasPage({
   const showcase = showcaseRes.ok ? showcaseRes.data?.find(s => s.id === id) : undefined
   if (!showcase) {
     return (
-      <div className="p-6 space-y-3">
-        <h1 className="text-lg font-semibold">Presentation not found</h1>
-        <p className="text-sm text-muted-foreground">
-          {showcaseRes.ok
-            ? 'It may have been deleted since this link was opened.'
-            : showcaseRes.error}
-        </p>
-        <Link href="/dashboard/portfolio" className="text-sm underline">Back to Portfolio</Link>
-      </div>
+      <>
+        <Header title="Presentation not found" crumbLabel="Clickable areas" />
+        <div className="p-4 sm:p-6">
+          <p className="text-sm text-muted-foreground">
+            {showcaseRes.ok
+              ? 'It may have been deleted since this link was opened.'
+              : showcaseRes.error}
+          </p>
+        </div>
+      </>
     )
   }
 

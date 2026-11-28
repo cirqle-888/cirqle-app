@@ -95,9 +95,10 @@ export default async function BrandPage({
           <div className="h-1.5" style={{ background: brand.color || 'var(--primary)' }} />
           <div className="p-4 flex flex-wrap items-center gap-4">
             <BrandMark brand={brand} size={48} />
+            {/* The brand's name is the Header title; this row keeps its mark,
+                contacts and the period switch. */}
             <div className="min-w-0 flex-1">
-              <p className="text-lg font-semibold">{brand.name}</p>
-              <p className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1 mt-0.5">
+              <p className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-1">
                 {brand.whatsapp_number && (
                   <a href={`https://wa.me/${brand.whatsapp_number.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-foreground">
                     <MessageCircle className="h-3.5 w-3.5" /> {brand.whatsapp_number}

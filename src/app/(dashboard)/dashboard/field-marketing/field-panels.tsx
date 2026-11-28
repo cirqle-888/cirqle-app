@@ -17,6 +17,7 @@ import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import AppSelect from '@/components/ui/app-select'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
+import { OverflowMenu, type OverflowItem } from '@/components/ui/overflow-menu'
 import { EmptyState } from '@/components/ui/empty-state'
 import { formatDistanceToNow, isToday, isTomorrow, startOfDay, addDays } from 'date-fns'
 import {
@@ -487,7 +488,7 @@ function BottomBarItem({ icon: Icon, label, onClick }: { icon: typeof Zap; label
 // Mobile bottom bar — the five primary field actions (§19).
 export function FieldBottomBar({ onNearby, onNextBest, onPlan, onOnTheWay, onQuick }: FieldActions) {
   return (
-    <div className="fixed bottom-[var(--bottom-nav-h,0px)] inset-x-0 z-40 lg:hidden bg-card/95 backdrop-blur border-t border-border pb-[var(--bottom-safe-pb,env(safe-area-inset-bottom))]">
+    <div data-field-bar className="fixed bottom-[var(--bottom-nav-h,0px)] inset-x-0 z-40 lg:hidden bg-card/95 backdrop-blur border-t border-border pb-[var(--bottom-safe-pb,env(safe-area-inset-bottom))]">
       <div className="flex items-stretch max-w-lg mx-auto">
         <BottomBarItem icon={Compass} label="Nearby" onClick={onNearby} />
         <BottomBarItem icon={Target} label="Next Best" onClick={onNextBest} />
@@ -499,14 +500,22 @@ export function FieldBottomBar({ onNearby, onNextBest, onPlan, onOnTheWay, onQui
   )
 }
 
-// Desktop toolbar — the five primary actions (shown ≥ lg where the bottom bar hides).
-export function FieldToolbar({ onNearby, onNextBest, onPlan, onOnTheWay, onQuick }: FieldActions) {
+// Desktop toolbar (≥ lg, where the bottom bar hides). Quick Visit — the action
+// a rep takes most — is the one primary button; Nearby, Next Best, Plan, On
+// The Way and the page's extras (Locate me) sit behind the "…".
+export function FieldToolbar({ onNearby, onNextBest, onPlan, onOnTheWay, onQuick, moreItems = [] }: FieldActions & {
+  /** Page-level entries added to the end of the "…". */
+  moreItems?: OverflowItem[]
+}) {
   return (
-    <div className="hidden lg:flex items-center gap-1.5">
-      <Button size="sm" variant="secondary" onClick={onNearby}><Compass className="w-4 h-4 mr-1.5" />Nearby</Button>
-      <Button size="sm" variant="secondary" onClick={onNextBest}><Target className="w-4 h-4 mr-1.5" />Next Best</Button>
-      <Button size="sm" variant="secondary" onClick={onPlan}><RouteIcon className="w-4 h-4 mr-1.5" />Plan</Button>
-      <Button size="sm" variant="secondary" onClick={onOnTheWay}><CornerUpRight className="w-4 h-4 mr-1.5" />On The Way</Button>
+    <div className="hidden lg:flex items-center gap-2">
+      <OverflowMenu label="More field actions" items={[
+        { label: 'Nearby', icon: Compass, onClick: onNearby },
+        { label: 'Next Best', icon: Target, onClick: onNextBest },
+        { label: 'Plan', icon: RouteIcon, onClick: onPlan },
+        { label: 'On The Way', icon: CornerUpRight, onClick: onOnTheWay },
+        ...moreItems,
+      ]} />
       <Button size="sm" onClick={onQuick}><Zap className="w-4 h-4 mr-1.5" />Quick Visit</Button>
     </div>
   )

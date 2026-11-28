@@ -1,5 +1,6 @@
-import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
+import { requireAdmin } from '@/lib/permissions/check'
 import { redirect } from 'next/navigation'
+import Header from '@/components/layout/header'
 import { JobsClient } from './jobs-client'
 import { fetchJobsSummary, fetchRecentJobs } from './actions'
 
@@ -8,10 +9,10 @@ export const metadata = {
 }
 
 export default async function AdminJobsPage() {
-  const user = await loadCurrentUser()
-  if (!user || (!user.isAdmin && !hasPermission(user, 'system.manage_jobs' as any))) {
-    redirect('/dashboard?error=unauthorized')
-  }
+  // Admin-only — the same check every action on this page makes (actions.ts).
+  // It also let in a 'system.manage_jobs' permission, which does not exist.
+  const guard = await requireAdmin()
+  if (!guard.ok) redirect('/dashboard?error=unauthorized')
 
   const [summary, jobs] = await Promise.all([
     fetchJobsSummary(),
@@ -19,15 +20,11 @@ export default async function AdminJobsPage() {
   ])
 
   return (
-    <div className="flex flex-col gap-6 w-full p-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Queue Monitoring</h1>
-        <p className="text-muted-foreground">
-          Monitor enterprise background workers, queue depth, and failed jobs.
-        </p>
+    <>
+      <Header title="Queue Monitoring" subtitle="Monitor enterprise background workers, queue depth, and failed jobs." />
+      <div className="px-4 sm:px-6 py-6">
+        <JobsClient initialSummary={summary} initialJobs={jobs} />
       </div>
-
-      <JobsClient initialSummary={summary} initialJobs={jobs} />
-    </div>
+    </>
   )
 }

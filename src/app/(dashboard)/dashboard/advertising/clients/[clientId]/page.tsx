@@ -1,47 +1,30 @@
 import { notFound, redirect } from 'next/navigation'
-import { createAdminClient } from '@/lib/supabase/server'
-import { loadCurrentUser } from '@/lib/permissions/check'
-import ClientWorkspace from './client-workspace'
-import { clientAdsPerms, loadClientAds } from './_load'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * Client workspace (plan Phase 3): one client's advertising in four tabs —
- * Overview · Campaigns · Funds & billing · Reports. Same data and the same
- * permission gating as the overview (loadAdvertisingData), filtered to the
- * client. The Client Marketing Hub's Ads tab renders this same workspace.
+ * One client's advertising used to have two homes: this page, and the Ads tab
+ * of the Client Marketing Hub — which renders this very workspace
+ * (./client-workspace.tsx, loaded by ./_load.ts) under the same permission
+ * (advertising.view, marketing/_access.ts). Two copies of one screen, and
+ * only one of them showed the client's pages, content and leads beside it.
+ *
+ * Kept as a redirect so bookmarks and old links land on the hub, on the same
+ * inner tab: this page kept its tab in ?tab=, the hub keeps the workspace's
+ * in ?ads= (its own ?tab= picks the hub tab). Other parameters (?period=…)
+ * carry over unchanged.
  */
-export default async function ClientWorkspacePage({ params }: { params: Promise<{ clientId: string }> }) {
+export default async function ClientAdsRedirect({ params, searchParams }: {
+  params: Promise<{ clientId: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
   const { clientId } = await params
   if (!/^[0-9a-f-]{36}$/i.test(clientId)) notFound()
-
-  const me = await loadCurrentUser().catch(() => null)
-  const { view, ...perms } = clientAdsPerms(me)
-  if (me && !view) redirect('/dashboard')
-
-  const admin = createAdminClient()
-  const { data: client } = await admin.from('clients').select('id, name, code').eq('id', clientId).maybeSingle()
-  if (!client) notFound()
-
-  const { data, reports, prefs, adFunds } = await loadClientAds(clientId, perms)
-
-  return (
-    <ClientWorkspace
-      client={client}
-      migrated={data.migrated}
-      projects={data.projects}
-      metricsByProject={data.metricsByProject}
-      benchmarksByProject={data.benchmarksByProject}
-      attention={data.attention}
-      walletSupported={data.walletSupported}
-      ledger={data.ledger}
-      fundCandidates={data.fundCandidates}
-      reports={reports}
-      reportPreferences={prefs.byClient}
-      reportPreferencesSupported={prefs.supported}
-      perms={perms}
-      adFunds={adFunds}
-    />
-  )
+  const sp = await searchParams
+  const q = new URLSearchParams()
+  for (const [key, value] of Object.entries(sp)) {
+    if (typeof value === 'string') q.set(key === 'tab' ? 'ads' : key, value)
+  }
+  q.set('tab', 'ads')
+  redirect(`/dashboard/marketing/${clientId}?${q.toString()}`)
 }

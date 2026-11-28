@@ -35,7 +35,8 @@ export interface QueueEntry {
   clientName: string | null
   driveFolderLink: string | null
   title: string
-  plannedDate: string
+  /** Null for an idea saved without a day (Social's Idea Board). */
+  plannedDate: string | null
   contentType: string | null
   platforms: string[]
   serviceId: string | null
@@ -191,7 +192,7 @@ export async function loadPostQueue(
       clientName: client.name ?? null,
       driveFolderLink: client.drive_folder_link ?? null,
       title: it.title ?? '',
-      plannedDate: it.scheduled_date,
+      plannedDate: it.scheduled_date ?? null,
       contentType: it.content_type ?? null,
       platforms: Array.isArray(it.platforms) ? it.platforms : [],
       serviceId: it.service_id ?? null,

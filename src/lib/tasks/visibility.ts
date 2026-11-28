@@ -8,8 +8,9 @@
  * they migrate to the new API in Phase 2, after which this file is deleted.
  *
  *   'all'      — tasks.view_all / scope.view_all (or admin): every task
- *   'services' — restricted to assigned services, plus tasks personally worked on
- *   'legacy'   — neither: unchanged historical behaviour (all tasks)
+ *   'services' — restricted to assigned services, plus tasks personally worked
+ *                on; also the default when no scope key is held (2026-11-27)
+ *   'legacy'   — scoped by org unit instead (unit-scope narrows)
  */
 
 import type { CurrentUser } from '@/lib/permissions/check'
@@ -59,9 +60,8 @@ export function filterTasksByVisibility<T extends { id?: string; service_id?: st
 ): T[] {
   if (mode !== 'services') return tasks
   const svc = new Set(myServiceIds)
-  // An employee with no assignments sees everything — a half-configured
-  // rollout must never lock anyone out (mirrors isServiceRestricted()).
-  if (svc.size === 0) return tasks
+  // No assignments: only the tasks they personally worked on (mirrors
+  // isServiceRestricted()). It used to be every task.
   const own = new Set(ownTaskIds)
   return tasks.filter(t =>
     (t.service_id != null && svc.has(t.service_id)) || (t.id != null && own.has(t.id)),

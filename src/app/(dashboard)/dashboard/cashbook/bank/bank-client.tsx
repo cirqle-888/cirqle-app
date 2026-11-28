@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import {
-  AlertTriangle, ArrowLeftRight, Check, ClipboardCopy, Copy, FileUp, Landmark,
+  AlertTriangle, ArrowLeftRight, Check, ClipboardCopy, Copy, FileUp,
   Link2, Loader2, RefreshCw, Sparkles, Tags, Unlink, X,
 } from 'lucide-react'
+import Header from '@/components/layout/header'
 import AppSelect from '@/components/ui/app-select'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -821,18 +822,15 @@ function accountMismatch(
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex-1 space-y-4 overflow-y-auto p-4 pb-24 pt-6 md:p-8">
-      <div>
-        <h2 className="flex items-center gap-2 text-3xl font-bold tracking-tight">
-          <Landmark className="h-7 w-7" /> Bank Reconciliation
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Match a bank statement against the cash book, one account and one period at a time —
-          and see exactly which transactions the two disagree about.
-        </p>
+    <>
+      <Header
+        title="Bank Reconciliation"
+        subtitle="Match a bank statement against the cash book, one period at a time"
+      />
+      <div className="space-y-4 px-4 pb-24 pt-4 sm:px-6 sm:pt-6 md:pb-8">
+        {children}
       </div>
-      {children}
-    </div>
+    </>
   )
 }
 

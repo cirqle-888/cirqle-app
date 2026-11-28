@@ -30,6 +30,8 @@ import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { canOpenHref } from '@/lib/nav-sections'
 import { hasPermission } from '@/lib/permissions/check'
+import { unitLockFor } from '@/lib/units/membership'
+import { UNIT_TEAM_HOME } from '@/lib/units/access'
 // Workspace logo URL fetch — pulls both dark and light variants.
 // Service-role client so RLS on company_settings can't block it.
 // Returns nulls on any failure so the Sidebar falls back to the default mark.
@@ -81,12 +83,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // TOGETHER once it is known. This layout wraps every dashboard page, and
   // these used to be awaited one after the other — two extra round trips to
   // the database before any page could start, on every navigation.
-  const [initialFavorites, wsState] = meResult.user
+  const [initialFavorites, wsState, unitOnly] = meResult.user
     ? await Promise.all([
         listFavoritesForEmployee(meResult.user.employeeId).catch(() => []),
         getMyWorkspaceState().catch(() => null),
+        // A business-unit team member: only the unit-team pages (staff: the
+        // shorter staff list). Not caught — a failed read must not quietly
+        // open everything to a unit member.
+        unitLockFor(createAdminClient(), meResult.user),
       ])
-    : [[], null]
+    : [[], null, false]
 
   // Graceful pre-migration fallback: if migration 022 isn't applied yet, the
   // workspaces table doesn't exist — fall back to a single synthetic
@@ -130,6 +136,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         permissions: Array.from(me.permissions),
         dateOfBirth: me.dateOfBirth,
         isViewAs: me.isViewAs,
+        unitRoutesOnly: unitOnly,
       }
     : fallbackUser
 
@@ -148,6 +155,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // this guard would then bounce the user away from.
   if (!canOpenHref(pathname, (key) => hasPermission(me, key), user.isAdmin)) {
     redirect('/dashboard?denied=1')
+  }
+  // A business-unit team member opens only the unit-team pages. Checked
+  // against the real path (x-request-path is set on every request); the
+  // landing page is open to every member, so this can never loop. Also what
+  // makes an admin's view-as preview of a member accurate.
+  const requestPath = headersList.get('x-request-path')
+  if (unitOnly && requestPath && requestPath !== UNIT_TEAM_HOME
+      && !canOpenHref(requestPath, (key) => hasPermission(me, key), user.isAdmin, unitOnly)) {
+    redirect(`${UNIT_TEAM_HOME}?denied=1`)
   }
 
   return (

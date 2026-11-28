@@ -9,6 +9,7 @@ import { listApplications, moveApplicationStage } from '@/lib/recruitment/action
 import { STAGE_ORDER, STAGE_LABELS, type ApplicationStage, type JobApplicationSummary } from '@/lib/recruitment/types'
 import { usePermissions } from '@/contexts/permission-context'
 import { displayEmployee } from '@/lib/utils/employee-display'
+import Header from '@/components/layout/header'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { Loader2 } from 'lucide-react'
 
@@ -129,24 +130,33 @@ export default function ApplicationsClient({ canEdit }: { canEdit: boolean }) {
     })
   }
 
+  const header = (
+    <Header
+      title="Applications"
+      subtitle={canEdit ? 'Drag a card to move it through the pipeline' : undefined}
+    />
+  )
+
   if (loading) {
-    return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+    return <>{header}<div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div></>
   }
 
   return (
-    <div className="p-4 sm:p-6">
-      <div className="mb-4">
-        <h1 className="text-xl font-semibold text-foreground">Applications</h1>
-        <p className="text-sm text-muted-foreground">
-          {canEdit ? 'Drag a card to move it through the pipeline.' : 'View-only — you don’t have permission to move applications.'}
-        </p>
+    <>
+      {header}
+      <div className="p-4 sm:p-6">
+        {/* In the body, not the subtitle: the Header hides its subtitle on
+            narrow screens, where a drag that does nothing needs explaining most. */}
+        {!canEdit && (
+          <p className="mb-4 text-sm text-muted-foreground">View-only — you don’t have permission to move applications.</p>
+        )}
+        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+          <div className="flex gap-3 overflow-x-auto pb-2">
+            {STAGE_ORDER.map(stage => <Column key={stage} stage={stage} apps={byStage[stage]} />)}
+          </div>
+        </DndContext>
+        <ToastContainer toasts={toasts} onDismiss={dismiss} />
       </div>
-      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-        <div className="flex gap-3 overflow-x-auto pb-2">
-          {STAGE_ORDER.map(stage => <Column key={stage} stage={stage} apps={byStage[stage]} />)}
-        </div>
-      </DndContext>
-      <ToastContainer toasts={toasts} onDismiss={dismiss} />
-    </div>
+    </>
   )
 }

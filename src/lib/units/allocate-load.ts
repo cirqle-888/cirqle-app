@@ -1,0 +1,325 @@
+import 'server-only'
+/* eslint-disable @typescript-eslint/no-explicit-any -- rows arrive untyped from PostgREST (see load.ts) */
+
+/**
+ * The Cash Book allocation audit (server-only): every company entry in a month,
+ * how it is allocated to Cirqle's units now, and — for the ones still waiting —
+ * a suggestion with its reason (./suggest).
+ *
+ * Invoice payments, transfers and rebilled/pass-through money are not shown:
+ * they are counted elsewhere or are not a unit's cost. People by CQID only.
+ */
+
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAll, fetchAllIn } from '@/lib/supabase/server'
+import type { EngineEntry, EntryKind, SplitPart } from './engine'
+import { payByPerson, type PayEntry, type PersonPay } from './hq'
+import { loadShares, type SharesData } from './load'
+import { normaliseDescription, phrasesFor, salaryByParts, suggestAllocation, type Allocation, type PayrollParts, type SuggestContext, type Suggestion } from './suggest'
+
+type Admin = SupabaseClient<any, any, any>
+
+export type AllocationStatus = 'unit' | 'split' | 'general' | 'excluded' | 'waiting'
+
+export interface AllocationRow {
+  entry: EngineEntry
+  status: AllocationStatus
+  /** How it is allocated now, in one line. */
+  current: string
+  /** Was it set by hand (tag or split), or worked out automatically? */
+  manual: boolean
+  /** The split as entered, for the editor. */
+  split: { parts: SplitPart[]; basis: 'percent' | 'amount' } | null
+  /** The unit it is tagged to, for the editor. */
+  unitId: string | null
+  suggestion: Suggestion | null
+}
+
+/** A salary payment's payroll, split by part. */
+export interface SalaryPay {
+  weights: Map<string, number>
+  reason: string
+  parts: PayrollParts
+  employeeId: string
+  /** YYYY-MM the payroll was for (a payment made in November is often October's pay). */
+  payMonth: string
+}
+
+export interface AllocationData {
+  month: string
+  /** Salary payments in the month → the payroll they paid, by part. Server-side only. */
+  salaryByEntry: Map<string, SalaryPay>
+  /** employee → the units they are on (non-admin teams). */
+  unitsOfEmployee: Map<string, string[]>
+  cqidOf: Map<string, string>
+  units: { id: string; name: string; color: string | null; sharesGeneralCosts: boolean }[]
+  /** Each unit's own revenue in the month (its income basis), for splitting by revenue. */
+  revenueByUnit: Record<string, number>
+  rows: AllocationRow[]
+  shares: SharesData
+}
+
+function statusOf(k: EntryKind | undefined): AllocationStatus {
+  if (!k) return 'waiting'
+  if (k.kind === 'dept') return 'unit'
+  if (k.kind === 'split') return 'split'
+  if (k.kind === 'general') return 'general'
+  return k.how === 'untagged' ? 'waiting' : 'excluded'
+}
+
+/** How a tag or split reads as an Allocation (for learning from past entries). */
+function allocationOf(entryId: string, shares: SharesData): Allocation | null {
+  const split = shares.splits.get(entryId)
+  if (split?.parts.length) return { kind: 'split', parts: split.parts }
+  const tag = shares.tags.get(entryId)
+  if (!tag) return null
+  if (tag.isExcluded) return { kind: 'exclude' }
+  if (tag.isGeneral) return { kind: 'general' }
+  return tag.departmentId ? { kind: 'unit', unitId: tag.departmentId } : null
+}
+
+export async function loadAllocation(admin: Admin, month: string): Promise<AllocationData> {
+  // ignoreStart: a unit that starts later still has revenue this month, and a
+  // split by revenue needs every unit's figure.
+  const shares = await loadShares(admin, { fromMonth: month, toMonth: month, ignoreStart: true })
+  const units = shares.departments.filter(d => d.isActive)
+  const unitName = new Map(units.map(u => [u.id, u.name]))
+  const unitOfCategory = new Map<string, string>()
+  for (const u of units) for (const c of u.categoryIds) if (!unitOfCategory.has(c)) unitOfCategory.set(c, u.id)
+
+  // Who is on which unit; CQIDs.
+  const unitsOfEmployee = new Map<string, string[]>()
+  for (const u of units) for (const m of u.members) unitsOfEmployee.set(m.employeeId, [...(unitsOfEmployee.get(m.employeeId) ?? []), u.id])
+  const [emps, clients, pricing, services, catAssign, svcAssign, brandAssign, catBrands] = await Promise.all([
+    fetchAll(admin.from('employees').select('id, cqid').order('id')),
+    fetchAll(admin.from('clients').select('id, name, department_id').order('id')),
+    fetchAll(admin.from('client_service_pricing').select('client_id, service_id').eq('is_active', true).order('client_id')),
+    fetchAll(admin.from('services').select('id, category_id').order('id')),
+    fetchAll(admin.from('employee_service_categories').select('employee_id, category_id').order('employee_id')),
+    fetchAll(admin.from('employee_services').select('employee_id, service_id').order('employee_id')),
+    fetchAll(admin.from('employee_brands').select('employee_id, brand_id').order('employee_id')),
+    fetchAll(admin.from('service_categories').select('id, name, brand_id').order('id')),
+  ])
+  const departmentName = new Map(((catBrands.data ?? []) as any[]).map(c => [c.id as string, c.name as string]))
+  const cqidOf = new Map(((emps.data ?? []) as any[]).filter(e => e.cqid).map(e => [e.id as string, e.cqid as string]))
+
+  // Which units a client belongs to: its pin, else what it buys.
+  const serviceDept = new Map(((services.data ?? []) as any[]).map(s => [s.id as string, s.category_id as string | null]))
+  const bought = new Map<string, Set<string>>()
+  for (const p of (pricing.data ?? []) as any[]) {
+    const d = p.service_id ? serviceDept.get(p.service_id) : null
+    if (!p.client_id || !d) continue
+    bought.set(p.client_id, (bought.get(p.client_id) ?? new Set()).add(d))
+  }
+  const unitsOfClient = new Map<string, string[]>()
+  const clientName = new Map<string, string>()
+  for (const c of (clients.data ?? []) as any[]) {
+    clientName.set(c.id, c.name)
+    const depts = c.department_id ? [c.department_id as string] : [...(bought.get(c.id) ?? [])]
+    const ids = [...new Set(depts.map(d => unitOfCategory.get(d)).filter((u): u is string => !!u))]
+    if (ids.length) unitsOfClient.set(c.id, ids)
+  }
+
+  // People on no team: the units their assigned departments fall in.
+  const deptsOfBrand = new Map<string, string[]>()
+  for (const c of (catBrands.data ?? []) as any[]) if (c.brand_id) deptsOfBrand.set(c.brand_id, [...(deptsOfBrand.get(c.brand_id) ?? []), c.id])
+  const assignedDepts = new Map<string, Set<string>>()
+  const addDept = (emp: string, d: string | null | undefined) => { if (emp && d) assignedDepts.set(emp, (assignedDepts.get(emp) ?? new Set()).add(d)) }
+  for (const r of (catAssign.data ?? []) as any[]) addDept(r.employee_id, r.category_id)
+  for (const r of (svcAssign.data ?? []) as any[]) addDept(r.employee_id, serviceDept.get(r.service_id))
+  for (const r of (brandAssign.data ?? []) as any[]) for (const d of deptsOfBrand.get(r.brand_id) ?? []) addDept(r.employee_id, d)
+  const assignedUnitsOfEmployee = new Map<string, string[]>()
+  for (const [emp, depts] of assignedDepts) {
+    const ids = [...new Set([...depts].map(d => unitOfCategory.get(d)).filter((u): u is string => !!u))]
+    if (ids.length) assignedUnitsOfEmployee.set(emp, ids)
+  }
+
+  // Learn from every entry allocated by hand so far (any month).
+  const manualIds = [...new Set([...shares.tags.keys(), ...shares.splits.keys()])]
+  const described = manualIds.length
+    ? await fetchAllIn((chunk: string[]) => admin.from('cashbook_entries').select('id, description').in('id', chunk), manualIds)
+    : { data: [] }
+  const learned = new Map<string, { allocation: Allocation; count: number }>()
+  for (const r of (described.data ?? []) as any[]) {
+    const key = normaliseDescription(r.description)
+    const a = allocationOf(r.id, shares)
+    if (!key || !a) continue
+    const cur = learned.get(key)
+    learned.set(key, { allocation: a, count: (cur?.count ?? 0) + 1 })
+  }
+
+  // ── Salaries paid through payroll: split by pay part ──
+  const generalUnitIds = units.filter(u => u.sharesGeneralCosts).map(u => u.id)
+  const monthEntries = shares.entries.filter(e => e.date.slice(0, 7) === month && e.type === 'outflow')
+  const salaryParts = await loadSalaryParts(admin, monthEntries, cqidOf, serviceDept, unitOfCategory, unitsOfEmployee, assignedUnitsOfEmployee, generalUnitIds, unitName)
+
+  const ctx: SuggestContext = {
+    unitName, unitsOfEmployee, cqidOf, unitsOfClient, clientName, learned,
+    assignedUnitsOfEmployee, generalUnitIds: units.filter(u => u.sharesGeneralCosts).map(u => u.id),
+    unitPhrases: new Map(units.map(u => [u.id, phrasesFor([u.name, ...u.categoryIds.map(c => departmentName.get(c) ?? '')])])),
+    salaryParts,
+  }
+  const rows: AllocationRow[] = shares.entries
+    .filter(e => e.date.slice(0, 7) === month && !e.isTransfer && !e.isInvoiceReceipt && !(e.isPassThrough && !shares.tags.has(e.id) && !shares.splits.has(e.id)))
+    .map(e => {
+      const k = shares.result.classified.get(e.id)
+      const status = statusOf(k)
+      const split = shares.splits.get(e.id) ?? null
+      const tag = shares.tags.get(e.id)
+      const current = status === 'waiting' ? 'Waiting'
+        : status === 'excluded' ? (k?.how === 'pass_through' ? 'Pass-through' : 'Left out')
+        : status === 'general' ? `General${k?.how === 'category' ? ' (by category)' : ''}`
+        : status === 'unit' && k?.kind === 'dept' ? `${unitName.get(k.departmentId) ?? 'A unit'}${k.how === 'service' ? ' (by service)' : ''}`
+        : status === 'split' && k?.kind === 'split'
+          ? k.parts.map(p => `${unitName.get(p.unitId) ?? 'A unit'} ${Math.round((p.share / (k.parts.reduce((t, x) => t + x.share, 0) || 1)) * 1000) / 10}%`).join(' · ')
+          : '—'
+      return {
+        entry: e, status, current,
+        manual: !!tag || !!split,
+        split, unitId: tag?.departmentId ?? null,
+        suggestion: status === 'waiting'
+          ? suggestAllocation({ id: e.id, type: e.type, description: e.description, categoryName: e.categoryName, employeeId: e.employeeId ?? null, clientId: e.clientId }, ctx)
+          : null,
+      }
+    })
+    .sort((a, b) => b.entry.date.localeCompare(a.entry.date))
+
+  const revenueByUnit: Record<string, number> = {}
+  for (const l of shares.result.ledgers) revenueByUnit[l.department.id] = l.months[0]?.incomeInr ?? 0
+
+  return {
+    month,
+    salaryByEntry: salaryParts,
+    unitsOfEmployee,
+    cqidOf,
+    units: units.map(u => ({ id: u.id, name: u.name, color: u.color, sharesGeneralCosts: u.sharesGeneralCosts })),
+    revenueByUnit,
+    rows,
+    shares,
+  }
+}
+
+const MONTH_INDEX: Record<string, number> = {
+  january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+}
+
+/**
+ * For salary payments: the payroll each one paid — through its payroll
+ * allocation, else "Salary — CQID004 — October 2026" in its description — and
+ * that payroll's pay divided between units by part (suggest.salaryByParts).
+ */
+async function loadSalaryParts(
+  admin: Admin,
+  entries: EngineEntry[],
+  cqidOf: Map<string, string>,
+  serviceDept: Map<string, string | null>,
+  unitOfCategory: Map<string, string>,
+  unitsOfEmployee: Map<string, string[]>,
+  assignedUnitsOfEmployee: Map<string, string[]>,
+  generalUnitIds: string[],
+  unitName: Map<string, string>,
+): Promise<Map<string, SalaryPay>> {
+  const out = new Map<string, SalaryPay>()
+  if (!entries.length) return out
+  type Pay = { id: string; employee_id: string; month: number; year: number; base_salary: number | null; commission_earned: number | null; bonus: number | null; adjustment_earned: number | null; ownership_earned: number | null }
+  const PAY_COLS = 'id, employee_id, month, year, base_salary, commission_earned, bonus, adjustment_earned, ownership_earned'
+
+  // 1. Linked through the payment's payroll allocation.
+  const links = await fetchAllIn((chunk: string[]) => admin.from('cashbook_payroll_allocations')
+    .select('cashbook_entry_id, payroll_id').is('deleted_at', null).in('cashbook_entry_id', chunk), entries.map(e => e.id))
+  const payrollOfEntry = new Map<string, string>()
+  for (const l of (links.data ?? []) as any[]) if (!payrollOfEntry.has(l.cashbook_entry_id)) payrollOfEntry.set(l.cashbook_entry_id, l.payroll_id)
+
+  // 2. Else read "CQID004 … October 2026" from the description.
+  const idOfCqid = new Map([...cqidOf].map(([id, c]) => [c.replace(/\D/g, ''), id]))
+  const wanted: { entryId: string; employeeId: string; month: number; year: number }[] = []
+  for (const e of entries) {
+    if (payrollOfEntry.has(e.id)) continue
+    const m = (e.description ?? '').match(/CQID\s*-?\s*(\d{3})[\s\S]*?\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})/i)
+    if (!m || !/salary/i.test(`${e.description} ${e.categoryName}`)) continue
+    const employeeId = idOfCqid.get(m[1])
+    if (employeeId) wanted.push({ entryId: e.id, employeeId, month: MONTH_INDEX[m[2].toLowerCase()], year: Number(m[3]) })
+  }
+
+  const linkedIds = [...new Set(payrollOfEntry.values())]
+  const [linked, byPerson] = await Promise.all([
+    linkedIds.length ? fetchAllIn((chunk: string[]) => admin.from('payroll').select(PAY_COLS).in('id', chunk), linkedIds) : Promise.resolve({ data: [] }),
+    wanted.length ? fetchAllIn((chunk: string[]) => admin.from('payroll').select(PAY_COLS).in('employee_id', chunk), [...new Set(wanted.map(w => w.employeeId))]) : Promise.resolve({ data: [] }),
+  ])
+  const payById = new Map(((linked.data ?? []) as Pay[]).map(p => [p.id, p]))
+  for (const w of wanted) {
+    const p = ((byPerson.data ?? []) as Pay[]).find(x => x.employee_id === w.employeeId && x.month === w.month && x.year === w.year)
+    if (p) { payById.set(p.id, p); payrollOfEntry.set(w.entryId, p.id) }
+  }
+  if (!payById.size) return out
+
+  // Contribution earnings by unit, per person and payroll month (task date).
+  const periods = [...new Set([...payById.values()].map(p => `${p.year}-${String(p.month).padStart(2, '0')}`))]
+  const people = [...new Set([...payById.values()].map(p => p.employee_id))]
+  const earned = new Map<string, Map<string, number>>()  // `${emp}|${YYYY-MM}` → unit → ₹
+  for (const period of periods) {
+    const [y, mo] = period.split('-').map(Number)
+    const next = mo === 12 ? `${y + 1}-01-01` : `${y}-${String(mo + 1).padStart(2, '0')}-01`
+    const tasks = await fetchAll(admin.from('tasks').select('id, service_id').is('deleted_at', null).gte('task_date', `${period}-01`).lt('task_date', next).order('id'))
+    const unitOfTask = new Map(((tasks.data ?? []) as any[]).map(t => {
+      const dept = t.service_id ? serviceDept.get(t.service_id) : null
+      return [t.id as string, dept ? unitOfCategory.get(dept) ?? null : null]
+    }))
+    if (!unitOfTask.size) continue
+    const scores = await fetchAllIn((chunk: string[]) => admin.from('contribution_scores')
+      .select('task_id, employee_id, earnings_inr').in('task_id', chunk), [...unitOfTask.keys()])
+    for (const sc of (scores.data ?? []) as any[]) {
+      if (!people.includes(sc.employee_id)) continue
+      const u = unitOfTask.get(sc.task_id)
+      if (!u) continue
+      const key = `${sc.employee_id}|${period}`
+      const m = earned.get(key) ?? new Map<string, number>()
+      m.set(u, (m.get(u) ?? 0) + (Number(sc.earnings_inr) || 0))
+      earned.set(key, m)
+    }
+  }
+
+  for (const [entryId, payrollId] of payrollOfEntry) {
+    const p = payById.get(payrollId)
+    if (!p) continue
+    const commission = Number(p.commission_earned) || 0
+    const placed = earned.get(`${p.employee_id}|${p.year}-${String(p.month).padStart(2, '0')}`) ?? new Map<string, number>()
+    const placedTotal = [...placed.values()].reduce((t, v) => t + v, 0)
+    // Payroll's commission is the truth; task scores only say WHERE it was earned.
+    const scale = placedTotal > 0 ? Math.min(1, commission / placedTotal) : 0
+    const commissionByUnit = new Map([...placed].map(([u, v]) => [u, v * scale]))
+    const parts: PayrollParts = {
+      cqid: cqidOf.get(p.employee_id) ?? 'This person',
+      base: Number(p.base_salary) || 0,
+      extra: (Number(p.bonus) || 0) + (Number(p.adjustment_earned) || 0),
+      ownership: Number(p.ownership_earned) || 0,
+      commissionByUnit,
+      commissionUnplaced: Math.max(0, commission - [...commissionByUnit.values()].reduce((t, v) => t + v, 0)),
+    }
+    const home = unitsOfEmployee.get(p.employee_id) ?? assignedUnitsOfEmployee.get(p.employee_id) ?? []
+    const split = salaryByParts(parts, home, generalUnitIds, unitName)
+    if (split.weights.size) out.set(entryId, { ...split, parts, employeeId: p.employee_id, payMonth: `${p.year}-${String(p.month).padStart(2, '0')}` })
+  }
+  return out
+}
+
+/** The units that carry General costs in the allocation's month. */
+export function generalUnitsOf(data: AllocationData): string[] {
+  return data.shares.result.general[0]?.splitBetween
+    ?? data.shares.departments.filter(d => d.isActive && d.sharesGeneralCosts).map(d => d.id)
+}
+
+/**
+ * Each person paid in the month: pay by part and where it was allocated
+ * (lib/units/hq). Server-side only — callers show units only what is theirs.
+ */
+export function payOfPeople(data: AllocationData): PersonPay[] {
+  const kindOf = (id: string) => data.shares.result.classified.get(id)
+  const entries: PayEntry[] = data.rows
+    .filter(r => data.salaryByEntry.has(r.entry.id) || r.entry.employeeId || /salary/i.test(`${r.entry.categoryName ?? ''} ${r.entry.description ?? ''}`))
+    .map(r => {
+      const pay = data.salaryByEntry.get(r.entry.id)
+      return { entry: r.entry, kind: kindOf(r.entry.id), pay: pay ? { employeeId: pay.employeeId, parts: pay.parts, payMonth: pay.payMonth } : undefined }
+    })
+  return payByPerson(entries, data.cqidOf, data.unitsOfEmployee, generalUnitsOf(data))
+}

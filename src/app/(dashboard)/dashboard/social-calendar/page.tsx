@@ -11,6 +11,7 @@ import {
   tallyPlan, pickDefaultPlan, shiftMonthKey, type FocusItem, type PlanTally,
 } from '@/lib/social/plan-focus'
 import { LAST_PLAN_COOKIE } from '@/lib/social/last-plan'
+import { unitWorkFilter } from '@/lib/units/work-filter'
 import SocialCalendarClient from './social-calendar-client'
 
 export const dynamic = 'force-dynamic'
@@ -168,7 +169,12 @@ export default async function SocialCalendarPage({
     calendars = res.data || []
   } catch { migrated = false }
 
-  const focusItems = await focusItemsP
+  // A unit team sees only its own unit's clients' plans — never another unit's.
+  const unit = await unitWorkFilter(admin, me)
+  if (unit) calendars = calendars.filter(c => unit.clientIds.has(c.client_id))
+  const visiblePlanIds = new Set(calendars.map(c => c.id as string))
+
+  const focusItems = (await focusItemsP).filter(it => !unit || visiblePlanIds.has(it.calendar_id))
   const planTallies: Record<string, PlanTally> = {}
   {
     const today = todayISO()
@@ -370,7 +376,7 @@ export default async function SocialCalendarPage({
     departments = (data || []) as { id: string; name: string }[]
   } catch { /* pre-migration — picker falls back to a flat list */ }
 
-  const clients = (await clientsP).data || []
+  const clients = ((await clientsP).data || [] as unknown[]).filter(c => !unit || unit.clientIds.has((c as unknown as { id: string }).id))
   const { packages, packageTasks } = await packagesP
   const companySettings: Record<string, string> = await companySettingsP
 

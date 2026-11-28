@@ -1,10 +1,12 @@
 import { getBrandFilter, inBrand } from '@/lib/brands/filter'
+import { inUnitWork, unitWorkFilter } from '@/lib/units/work-filter'
 import { redirect } from 'next/navigation'
 import { withDraftFlag } from '@/lib/clients/draft'
 import { createAdminClient } from '@/lib/supabase/server'
 import { selectWithOptionalColumns } from '@/lib/offer-columns'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility } from '@/lib/permissions/strip'
+import { loadChatViewer } from '@/lib/whatsapp-listener/insights-run'
 import RequestsClient from './requests-client'
 
 export const dynamic = 'force-dynamic'
@@ -23,13 +25,20 @@ export default async function RequestsPage({
 
   const admin = createAdminClient()
 
+  // "WhatsApp chats" in the More menu is offered on the chats page's own rule
+  // (whatsapp/page.tsx sends anyone else to the dashboard): an admin, or a
+  // person with at least one chat shared with them. Started now, read at the end.
+  const whatsAppOpen = loadChatViewer(admin)
+    .then(cv => !!cv.me && (cv.me.isAdmin || cv.visible.size > 0))
+    .catch(() => false)
+
   // Defensive: portal tables may not exist until the migration runs.
   let requests: any[] = []
   let migrated = true
   try {
     const { data, error } = await admin
       .from('task_requests')
-      .select('*, client:clients(id, name, code), agency:agencies(id, name), service:services(id, name), assigned_employee:employees!task_requests_assigned_employee_id_fkey(id, cqid), promoted_task:tasks!task_requests_promoted_task_id_fkey(id, task_number, title, status)')
+      .select('*, client:clients(id, name, code), agency:agencies(id, name), service:services(id, name), assigned_employee:employees!task_requests_assigned_employee_id_fkey(id, cqid), promoted_task:tasks!task_requests_promoted_task_id_fkey(id, task_number, title, status, deleted_at)')
       .order('created_at', { ascending: false })
       .limit(500)
     if (error) migrated = false
@@ -95,6 +104,8 @@ export default async function RequestsPage({
     start:    isAdmin || !!me?.permissions?.has('requests.start'),
     manage:   isAdmin || !!me?.permissions?.has('requests.manage'),
     activity: isAdmin || !!me?.permissions?.has('requests.activity.view'),
+    // Permanent, so admins only (deleteRequests enforces it).
+    delete: isAdmin,
   }
 
   // Brand workspace / switcher: requests on the brand's services, or from its clients.
@@ -105,17 +116,37 @@ export default async function RequestsPage({
       : inBrand(brandFilter, { clientId: r.client_id }))
   }
 
+  // A unit team (Social Media, Cirqle Flyers, Memoura…) sees only its own
+  // unit's requests, clients and prices — never another unit's.
+  const unit = await unitWorkFilter(admin, me)
+  let clientRows = brandFilter ? (clientsRes.data || []).filter((c: any) => brandFilter.clientIds.has(c.id)) : (clientsRes.data || [])
+  let unitPricing = pricingRows
+  if (unit) {
+    // …plus anything assigned to them by name — all a unit STAFF member gets.
+    requests = requests.filter(r => inUnitWork(unit, { serviceId: r.service_id, clientId: r.client_id })
+      || (!!me?.employeeId && r.assigned_employee_id === me.employeeId))
+    clientRows = clientRows.filter((c: { id: string }) => unit.clientIds.has(c.id))
+    unitPricing = pricingRows.filter(r => unit.clientIds.has(r.client_id) && unit.serviceIds.has(r.service_id))
+    offerCampaigns = unit.coversOfferFlyers
+      ? offerCampaigns.filter((c: { client?: { id?: string } | { id?: string }[] | null }) => {
+          const client = Array.isArray(c.client) ? c.client[0] : c.client
+          return !!client?.id && unit.clientIds.has(client.id)
+        })
+      : []
+  }
+
   return (
     <RequestsClient
       migrated={migrated}
       initialRequests={requests}
       perms={perms}
-      clients={brandFilter ? (clientsRes.data || []).filter((c: any) => brandFilter.clientIds.has(c.id)) : (clientsRes.data || [])}
+      clients={clientRows}
       employees={employeesRes.data || []}
-      services={servicesRes.data || []}
-      servicePricing={pricingRows}
+      services={unit ? (servicesRes.data || []).filter(s => unit.serviceIds.has(s.id as string)) : (servicesRes.data || [])}
+      servicePricing={unitPricing}
       offerCampaigns={offerCampaigns}
       initialFocusId={focusId}
+      canOpenWhatsApp={await whatsAppOpen}
     />
   )
 }

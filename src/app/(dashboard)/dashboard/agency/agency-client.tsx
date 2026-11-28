@@ -68,7 +68,7 @@ export default function AgencyClient({
   return (
     <>
       <Header
-        title="Agency dashboard"
+        title="All-client Performance"
         subtitle="Every client's social, leads and ads in one view"
         actions={
           <div className="flex items-center gap-2">

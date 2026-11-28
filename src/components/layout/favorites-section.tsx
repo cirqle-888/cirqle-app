@@ -5,14 +5,14 @@
  * @dnd-kit (same DndContext/SortableContext/useSortable/arrayMove pattern as
  * src/app/(dashboard)/dashboard/tasks/tasks-client.tsx).
  */
-import { useId } from 'react'
+import { useEffect, useId, useState } from 'react'
 import {
   DndContext, closestCenter, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent,
 } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import Link from 'next/link'
-import { GripVertical, X, type LucideIcon } from 'lucide-react'
+import { ChevronDown, ChevronUp, GripVertical, X, type LucideIcon } from 'lucide-react'
 import { useFavorites } from '@/contexts/favorites-context'
 import { usePermissions } from '@/contexts/permission-context'
 import { canOpenHref } from '@/lib/nav-sections'
@@ -75,6 +75,15 @@ function SortableFavoriteRow({
   )
 }
 
+/**
+ * How many pins show before "Show N more". A long list (fifteen pins) filled
+ * the whole sidebar and pushed the menu below the fold, mostly as a second
+ * copy of its rows. Order is the person's own (drag to reorder), so the ones
+ * they use most stay on top; the choice to show all is remembered.
+ */
+const FAVORITES_SHOWN = 6
+const SHOW_ALL_KEY = 'sidebar-favorites-all'
+
 export function FavoritesSection({
   isCollapsed, activeHref, onNavClick,
 }: {
@@ -90,6 +99,14 @@ export function FavoritesSection({
   // which don't line up between server and client when the sidebar renders
   // two instances (desktop + mobile) → hydration-mismatch warnings.
   const dndId = useId()
+  const [showAll, setShowAll] = useState(false)
+  useEffect(() => {
+    try { setShowAll(localStorage.getItem(SHOW_ALL_KEY) === '1') } catch { /* private mode */ }
+  }, [])
+  const toggleShowAll = () => setShowAll(prev => {
+    try { localStorage.setItem(SHOW_ALL_KEY, prev ? '0' : '1') } catch { /* private mode */ }
+    return !prev
+  })
 
   // A favourite must never outrank a permission. Pins are stored rows: they
   // survive a designation change, so a page someone could open last month can
@@ -109,10 +126,18 @@ export function FavoritesSection({
   // Saved views are favourites rows as well, but they belong to the screen
   // whose filters they restore and render as chips there — not in this list.
   const visibleFavorites = favorites.filter(fav =>
-    fav.entityType !== SAVED_VIEW_ENTITY_TYPE && canOpenHref(fav.href, can, user.isAdmin),
+    fav.entityType !== SAVED_VIEW_ENTITY_TYPE && canOpenHref(fav.href, can, user.isAdmin, (user.unitRoutesOnly ?? false)),
   )
 
   if (visibleFavorites.length === 0) return null
+
+  // One over the limit shows in full — a "1 more" button is as long as the row.
+  // The page you are on always shows, wherever it sits in the list.
+  const foldable = visibleFavorites.length > FAVORITES_SHOWN + 1
+  const shownFavorites = !foldable || showAll
+    ? visibleFavorites
+    : visibleFavorites.filter((f, i) => i < FAVORITES_SHOWN || f.href === activeHref)
+  const hiddenCount = visibleFavorites.length - shownFavorites.length
 
   function handleDragEnd(e: DragEndEvent) {
     const { active, over } = e
@@ -131,9 +156,9 @@ export function FavoritesSection({
         </p>
       )}
       <DndContext id={dndId} sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={visibleFavorites.map(f => f.id)} strategy={verticalListSortingStrategy}>
+        <SortableContext items={shownFavorites.map(f => f.id)} strategy={verticalListSortingStrategy}>
           <div className="space-y-0.5">
-            {visibleFavorites.map(fav => (
+            {shownFavorites.map(fav => (
               <SortableFavoriteRow
                 key={fav.id}
                 fav={fav}
@@ -156,6 +181,18 @@ export function FavoritesSection({
           </div>
         </SortableContext>
       </DndContext>
+      {foldable && (
+        <button
+          type="button"
+          onClick={toggleShowAll}
+          aria-expanded={showAll}
+          title={isCollapsed ? (showAll ? 'Show fewer favorites' : `Show ${hiddenCount} more favorites`) : undefined}
+          className={`mt-0.5 flex w-full items-center rounded-lg text-xs font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-foreground transition-colors ${isCollapsed ? 'justify-center p-2' : 'gap-2 px-3 py-1.5'}`}
+        >
+          {showAll ? <ChevronUp className="w-3.5 h-3.5 shrink-0" /> : <ChevronDown className="w-3.5 h-3.5 shrink-0" />}
+          {!isCollapsed && <span>{showAll ? 'Show fewer' : `Show ${hiddenCount} more`}</span>}
+        </button>
+      )}
     </div>
   )
 }

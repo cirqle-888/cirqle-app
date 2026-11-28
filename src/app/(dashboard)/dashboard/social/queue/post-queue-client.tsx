@@ -16,7 +16,7 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
-import { SocialTabs } from '@/components/social-hub/social-tabs'
+import Header from '@/components/layout/header'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import {
   X, Check, Copy, ExternalLink, AlertTriangle, Loader2, Clock,
@@ -27,7 +27,7 @@ import {
   URGENCY_CHIP, cycleProgress, type PostStage,
 } from '@/lib/social-hub/post-queue'
 import type { QueueEntry } from '@/lib/social-hub/post-queue-load'
-import { postTiming, formatTime12, timeToMinutes, TIMING_LABEL } from '@/lib/social/posting-time'
+import { postTiming, formatTime12, comparePostingOrder, TIMING_LABEL } from '@/lib/social/posting-time'
 import { savePostContent, markAsPosted, unmarkPosted, myCalendarFeed, revokeMyCalendarFeed } from './actions'
 import { CalendarSubscribe } from '@/components/social-hub/calendar-subscribe'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -64,19 +64,10 @@ export default function PostQueueClient({
   )
 
   const attention = visible.filter(r => r.attention)
-  // Within a lane: by day, then by the time of day. Sorting by date alone put
-  // a 9am post below a 9pm one on the same day, which is the wrong order for
-  // the one screen whose job is "what goes out next".
-  // A post with no time sorts LAST within its day, not first: timeToMinutes
-  // returns -1 for "unreadable", and letting that win would put every
-  // undecided post ahead of the one actually going out at 9am.
-  const ofDay = (r: QueueEntry) => {
-    const m = timeToMinutes(r.postingTime)
-    return m < 0 ? Number.MAX_SAFE_INTEGER : m
-  }
+  // Within a lane: by day, then by the time of day (comparePostingOrder —
+  // undated ideas last).
   const byStage = (s: PostStage) =>
-    visible.filter(r => r.stage === s).sort((a, b) =>
-      a.plannedDate.localeCompare(b.plannedDate) || ofDay(a) - ofDay(b))
+    visible.filter(r => r.stage === s).sort(comparePostingOrder)
 
   /** Replace one row in place after an action, keeping scroll and filters. */
   const patch = (itemId: string, next: Partial<QueueEntry>) =>
@@ -86,35 +77,40 @@ export default function PostQueueClient({
     rows.filter(r => r.clientId === cid && r.stage === 'posted').length
 
   return (
+    <>
+    {/* The full page gets the shared Header (title, Social tabs, global
+        controls). The My Work embed keeps its own small heading. */}
+    {!compact && (
+      <Header
+        title="To Post"
+        subtitle="Finished artwork waiting to go out, for clients whose social we run"
+      />
+    )}
     <div className="p-4 sm:p-6 space-y-5">
-      {!compact && <SocialTabs />}
-      {/* ── Header ─────────────────────────────────────────────────────── */}
+      {/* ── Heading (embed) / client filter (full page) ────────────────── */}
+      {/* The phone-reminder toggle stays here rather than in the Header:
+          it opens a full-width panel in place. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          {compact ? (
+        {compact ? (
+          <div>
             <h2 className="text-base font-semibold">To Post</h2>
-          ) : (
-            <h1 className="text-xl font-semibold">Posting Queue</h1>
-          )}
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {compact
-              ? 'Artwork that is finished and still needs to go out.'
-              : 'Finished artwork waiting to go out. Only clients whose social we run.'}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {!compact && clients.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              <FilterPill active={client === 'all'} onClick={() => setClient('all')}>
-                All clients
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Artwork that is finished and still needs to go out.
+            </p>
+          </div>
+        ) : clients.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            <FilterPill active={client === 'all'} onClick={() => setClient('all')}>
+              All clients
+            </FilterPill>
+            {clients.map(([id, name]) => (
+              <FilterPill key={id} active={client === id} onClick={() => setClient(id)}>
+                {name}
               </FilterPill>
-              {clients.map(([id, name]) => (
-                <FilterPill key={id} active={client === id} onClick={() => setClient(id)}>
-                  {name}
-                </FilterPill>
-              ))}
-            </div>
-          )}
+            ))}
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
           {!compact && <CalendarSubscribe load={myCalendarFeed} revoke={revokeMyCalendarFeed} />}
         </div>
       </div>
@@ -222,6 +218,7 @@ export default function PostQueueClient({
         />
       )}
     </div>
+    </>
   )
 }
 
@@ -273,7 +270,7 @@ function QueueCard({ row, onOpen }: { row: QueueEntry; onOpen: () => void }) {
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="text-[11px] text-muted-foreground flex items-center gap-1 min-w-0">
           <CalendarDays className="w-3 h-3 shrink-0" />
-          <span className="truncate">{formatDay(row.plannedDate)}</span>
+          <span className="truncate">{row.plannedDate ? formatDay(row.plannedDate) : 'No date yet'}</span>
           <PostingClock row={row} />
         </span>
         <ChecklistDots checklist={row.checklist} />
@@ -380,7 +377,7 @@ function PostEditor({ row, canPublishApi, onClose, onSaved }: {
           <div className="min-w-0">
             <h2 className="text-base font-semibold leading-snug">{row.title}</h2>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {row.clientName} · planned {formatDay(row.plannedDate)}
+              {row.clientName} · {row.plannedDate ? `planned ${formatDay(row.plannedDate)}` : 'no date yet'}
               {row.refNo && ` · REQ-${String(row.refNo).padStart(4, '0')}`}
             </p>
           </div>
@@ -395,7 +392,7 @@ function PostEditor({ row, canPublishApi, onClose, onSaved }: {
             clean off the bottom of the sheet. That is the whole reason modal
             buttons go missing on a phone. */}
         <div className="p-4 space-y-4 overflow-y-auto flex-1 min-h-0">
-          {row.urgency.level !== 'none' && !isPosted && (
+          {row.urgency.level !== 'none' && row.plannedDate && !isPosted && (
             <div className={`text-xs px-2.5 py-2 rounded-lg border flex items-center gap-2 ${URGENCY_CHIP[row.urgency.level]}`}>
               <Clock className="w-3.5 h-3.5 shrink-0" />
               {row.urgency.level === 'overdue'
@@ -624,7 +621,7 @@ function PostingClock({ row }: { row: QueueEntry }) {
   }
 
   const timing = postTiming({
-    isoDate: row.plannedDate,
+    isoDate: row.plannedDate ?? '',
     time: row.postingTime,
     asap: row.postAsap,
     posted: !!row.postedAt,

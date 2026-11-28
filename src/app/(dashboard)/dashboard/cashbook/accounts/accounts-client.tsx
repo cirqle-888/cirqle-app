@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import Header from '@/components/layout/header'
 import {
-  Landmark, Wallet, ArrowLeft,
+  Landmark, Wallet,
   ChevronDown, ChevronRight, Plus, Search, Calendar,
   ArrowUpRight, ArrowDownRight,
 } from 'lucide-react'
@@ -180,14 +180,9 @@ export default function AccountsClient({ entries, accounts, isAdmin }: Props) {
         subtitle="Detailed ledger view per account"
         actions={
           <div className="flex items-center gap-2">
+            {/* No "← Cash Book" button: the breadcrumb above the title is that link. */}
             <Link
-              href="/dashboard/cashbook"
-              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground border border-border bg-secondary rounded-lg px-3 py-2 transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" /> Cash Book
-            </Link>
-            <Link
-              href="/dashboard/cashbook?addEntry=1"
+              href="/dashboard/cashbook?new=true"
               className="flex items-center gap-1.5 text-sm font-medium gradient-bg text-white rounded-lg px-3 py-2 hover:opacity-90 transition-opacity"
             >
               <Plus className="w-4 h-4" /> Add Entry

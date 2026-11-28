@@ -236,7 +236,7 @@ function StatementsInner({
 
   return (
     <div className="flex flex-col h-full">
-      <Header title="Statement of Account" subtitle="Running ledger, ageing and balance due — per client" />
+      <Header title="Statements" subtitle="Statement of account for each client" />
 
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5">
 

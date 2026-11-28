@@ -37,17 +37,22 @@ import {
 } from './dashboard-utils'
 import type { Granularity, DrawerType } from './dashboard-utils'
 import DashboardAnalytics from './dashboard-analytics'
+import UnitsStripPanel, { UnitsStripSkeleton } from './_units-strip'
 import { useWorkspace } from '@/contexts/workspace-context'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 interface Props {
+  /** A page alert (unpriced clients/services), drawn under the page title rather than above it. */
+  notice?: React.ReactNode
   stats: {
     totalBilled: number; totalPaid: number; badDebtInr: number; outstanding: number; outstandingThisMonth: number; bankBalance: number
     overdueCount: number; overdueAmount: number
     dueCount: number; dueAmount: number
     toBeInvoicedCount: number; toBeInvoicedAmount: number
+    /** Unsent drafts that are due to send today (isDueToSend). */
+    readyToSendCount: number; readyToSendAmount: number
     totalExpectedCash: number; totalDues: number
     /** Credit given that is still owed — see lib/finance/credit-ledger.ts. */
     creditOutstanding?: number
@@ -55,6 +60,8 @@ interface Props {
   invoices: any[]; overdueInvoices: any[]; dueInvoices: any[]
   allCashbook: any[]; displayTasks: any[]; analyticsViewPromise: Promise<AnalyticsView>
   departmentFactsPromise: Promise<import('@/lib/dashboard/department-facts').DepartmentFacts | null>
+  /** Admin only — Cirqle's units this month (Departments & Brands). */
+  unitsStripPromise?: Promise<import('@/lib/units/dashboard-strip').UnitsStrip | null>
   pendingPayPromise: Promise<Record<string, import('@/lib/dashboard/pending-pay').PendingPay>>
   todayTasks: any[]; unscoredDoneTasks: any[]; activeTasks: any[]; toBeInvoiced: any[]
   employees: any[]; scoresPromise: Promise<any[]>; payrollRecords: any[]
@@ -246,8 +253,9 @@ export default function DashboardClient(props: Props) {
     // with use() and must live under a <Suspense> boundary. The fallback keeps
     // the page header instant while the (employee-scoped) scores stream in.
     return (
-      <Suspense fallback={<EmployeeDashboardSkeleton todayStr={props.todayStr} />}>
+      <Suspense fallback={<EmployeeDashboardSkeleton />}>
         <EmployeeDashboard
+          notice={props.notice}
           todayStr={props.todayStr}
           scoresPromise={props.scoresPromise}
           payrollRecords={props.payrollRecords}
@@ -271,10 +279,10 @@ export default function DashboardClient(props: Props) {
 // wrapped in its own <Suspense> with a dimension-matched skeleton fallback.
 // ─────────────────────────────────────────────────────────────────────────────
 function AdminDashboard({
-  stats, invoices, overdueInvoices, dueInvoices, allCashbook,
-  analyticsViewPromise, departmentFactsPromise, pendingPayPromise, todayTasks, unscoredDoneTasks,
+  notice, stats, invoices, overdueInvoices, dueInvoices, allCashbook,
+  analyticsViewPromise, departmentFactsPromise, unitsStripPromise, pendingPayPromise, todayTasks, unscoredDoneTasks,
   activeTasks, toBeInvoiced, employees, earningsPromise, payrollRecords,
-  todayStr, exchangeRates = [], followupCounts,
+  exchangeRates = [], followupCounts,
   notifications, pendingRequests, draftInvoicesSample = [], payrollPendingCount = 0,
   companyOps = null,
 }: Props) {
@@ -308,12 +316,11 @@ function AdminDashboard({
     }
   }, [dateFilter, granularity, pathname, router, searchParams])
 
-  const today = new Date(todayStr + 'T12:00:00')
-  const todayLabel = today.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
   const periodLabel = dateFilter ? getDateFilterLabel(dateFilter) : 'All time'
 
   const urgentCount = unscoredDoneTasks.length + overdueInvoices.length
-  const smartFocusCount = urgentCount + (pendingRequests?.count || 0) + draftInvoicesSample.length + payrollPendingCount + (notifications?.unreadCount || 0)
+  // Drafts count in full — this used to add only the 3 sample rows shown.
+  const smartFocusCount = urgentCount + (pendingRequests?.count || 0) + stats.readyToSendCount + payrollPendingCount + (notifications?.unreadCount || 0)
 
   // ── FX live calculations ─────────────────────────────────────────────────
   // Build a rate map from the live exchange_rates table (fetched server-side).
@@ -347,32 +354,32 @@ function AdminDashboard({
     ? { ...stats, outstanding: liveFx.outstanding, overdueAmount: liveFx.overdueAmount, totalExpectedCash: liveFx.totalExpectedCash }
     : stats
 
+  // Smart Focus is the one "what needs me" feed; Follow-ups joined it as a
+  // card. Each keeps its own workspace widget key.
+  const showFocusCards = shouldShow('smart_focus') && (smartFocusCount > 0 || todayTasks.length > 0)
+  // Chasing only: drafts waiting to go out are the "Ready to Send" card's job.
+  const followupTotal = followupCounts ? followupCounts.urgent + followupCounts.regular : 0
+  const showFollowupCard = shouldShow('followups') && followupTotal > 0
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <div>
-      <Header title="Dashboard" subtitle={todayLabel} />
+      <Header title="Dashboard" />
+      {notice}
       <div className="p-4 sm:p-6 space-y-5 sm:space-y-6">
 
         {/* ── Period Selector ──────────────────────────────── */}
-        <div className="space-y-2">
-          {/* Row 1: date filter */}
+        {/* One row that wraps: the period and its grouping on the left, how
+            figures are shown on the right. It was two rows with a "Period:"
+            label the period button already says. */}
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-muted-foreground font-medium">Period:</span>
             <DateFilter value={dateFilter} onChange={setDateFilter} />
             {dateFilter && (
               <button onClick={() => setDateFilter(null)} className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded-md hover:bg-secondary transition-colors flex items-center gap-1">
                 <X className="w-3 h-3" /> Clear
               </button>
             )}
-          </div>
-          {/* Row 2: granularity + period label + FX toggle.
-              flex-wrap: three button-groups (4 + 2 + 2 buttons) don't fit a
-              375px viewport in one row — without wrap the FX Booked/Live
-              toggle was clipped off-screen with no scroll container to reach
-              it (genuinely inaccessible, not just cramped). Wrapping lets the
-              FX group drop to its own line on phones; unchanged on wider
-              screens where everything already fit on one line. */}
-          <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="flex items-center bg-secondary rounded-lg p-0.5 gap-0.5">
               {(['daily','monthly','quarterly','yearly'] as Granularity[]).map(g => (
                 <button key={g} onClick={() => setGranularity(g)}
@@ -381,44 +388,47 @@ function AdminDashboard({
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <p className="text-xs text-muted-foreground hidden sm:block">{periodLabel}</p>
-              {/* Amount display toggle */}
-              <div className="flex items-center bg-secondary rounded-lg p-0.5 gap-0">
-                <button
-                  onClick={() => setAmountDisplay('short')}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition ${amountDisplay === 'short' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                  title="Abbreviated (₹1.5L)"
-                >
-                  1.5L
-                </button>
-                <button
-                  onClick={() => setAmountDisplay('full')}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition ${amountDisplay === 'full' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                  title="Full figures (₹1,50,000)"
-                >
-                  Full
-                </button>
-              </div>
-              {/* FX Mode toggle */}
-              <div
-                className="flex items-center bg-secondary rounded-lg p-0.5 gap-0"
-                title="Booked = invoice exchange rate at invoice date&#10;Live = today's exchange rate from Settings"
+          </div>
+          {/* flex-wrap above: the groups don't fit a 375px viewport in one
+              row, and without wrap the FX Booked/Live toggle was clipped
+              off-screen with no way to reach it. */}
+          <div className="flex items-center gap-2 shrink-0">
+            <p className="text-xs text-muted-foreground hidden xl:block">{periodLabel}</p>
+            {/* Amount display toggle */}
+            <div className="flex items-center bg-secondary rounded-lg p-0.5 gap-0">
+              <button
+                onClick={() => setAmountDisplay('short')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition ${amountDisplay === 'short' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                title="Abbreviated (₹1.5L)"
               >
-                <button
-                  onClick={() => setFxMode('booked')}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition ${fxMode === 'booked' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                >
-                  Booked
-                </button>
-                <button
-                  onClick={() => setFxMode('live')}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition flex items-center gap-1 ${fxMode === 'live' ? 'bg-violet-500/20 text-violet-600 dark:text-violet-300 shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                >
-                  <Zap className="w-2.5 h-2.5" />
-                  Live
-                </button>
-              </div>
+                1.5L
+              </button>
+              <button
+                onClick={() => setAmountDisplay('full')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition ${amountDisplay === 'full' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                title="Full figures (₹1,50,000)"
+              >
+                Full
+              </button>
+            </div>
+            {/* FX Mode toggle */}
+            <div
+              className="flex items-center bg-secondary rounded-lg p-0.5 gap-0"
+              title="Booked = invoice exchange rate at invoice date&#10;Live = today's exchange rate from Settings"
+            >
+              <button
+                onClick={() => setFxMode('booked')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition ${fxMode === 'booked' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                Booked
+              </button>
+              <button
+                onClick={() => setFxMode('live')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition flex items-center gap-1 ${fxMode === 'live' ? 'bg-violet-500/20 text-violet-600 dark:text-violet-300 shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                <Zap className="w-2.5 h-2.5" />
+                Live
+              </button>
             </div>
           </div>
         </div>
@@ -429,7 +439,7 @@ function AdminDashboard({
             payroll, contributions, overdue money). Replaces the old narrower
             "Today's Focus" (3 tiles) rather than stacking a second, competing
             "what needs attention" section next to it. */}
-        {shouldShow('smart_focus') && (smartFocusCount > 0 || todayTasks.length > 0) && (
+        {(showFocusCards || showFollowupCard) && (
           <section>
             <div className="flex items-center gap-2 mb-3">
               <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
@@ -437,6 +447,7 @@ function AdminDashboard({
               {smartFocusCount > 0 && <span className="text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/20 px-2 py-0.5 rounded-full">{smartFocusCount} need attention</span>}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {showFocusCards && <>
               {!!notifications?.unreadCount && (
                 <FocusCard icon={<BellRing className="w-4 h-4 text-violet-400" />} color="violet"
                   title="Notifications" count={notifications.unreadCount} unit="unread"
@@ -468,12 +479,12 @@ function AdminDashboard({
                   items={overdueInvoices.slice(0,3).map(i => `${i.client?.name || i.invoice_number} — ${f((i.total_amount||0)-(i.paid_amount||0))}`)}
                   onClick={() => setDrawer('overdue')} />
               )}
-              {draftInvoicesSample.length > 0 && (
+              {stats.readyToSendCount > 0 && (
                 <FocusCard icon={<Send className="w-4 h-4 text-amber-400" />} color="amber"
-                  title="Drafts to Send" count={stats.toBeInvoicedCount} unit="invoice"
-                  sub={f(stats.toBeInvoicedAmount)}
+                  title="Ready to Send" count={stats.readyToSendCount} unit="invoice"
+                  sub={f(stats.readyToSendAmount)}
                   items={draftInvoicesSample}
-                  onClick={() => router.push('/dashboard/invoices')} />
+                  onClick={() => router.push('/dashboard/invoices?status=to_send')} />
               )}
               {payrollPendingCount > 0 && (
                 <FocusCard icon={<FileText className="w-4 h-4 text-emerald-400" />} color="emerald"
@@ -481,27 +492,22 @@ function AdminDashboard({
                   items={[]}
                   onClick={() => router.push('/dashboard/payroll')} />
               )}
+              </>}
+              {/* Collections, as one more thing to act on. This was a box of
+                  its own below the feed, with three tiles that re-counted the
+                  overdue invoices shown in the card beside it. */}
+              {showFollowupCard && followupCounts && (
+                <FocusCard icon={<PhoneCall className="w-4 h-4 text-primary" />} color="violet"
+                  title="Invoice Follow-ups" count={followupCounts.urgent + followupCounts.regular} unit="invoice"
+                  sub={[
+                    followupCounts.urgent ? `${followupCounts.urgent} urgent` : '',
+                    followupCounts.regular ? `${followupCounts.regular} regular` : '',
+                  ].filter(Boolean).join(' · ')}
+                  items={[]}
+                  onClick={() => router.push('/dashboard/invoices/follow-ups')} />
+              )}
             </div>
           </section>
-        )}
-
-        {/* ── Collections follow-up widget ──────────────── */}
-        {shouldShow('followups') && followupCounts && (followupCounts.urgent + followupCounts.regular + followupCounts.needsSent) > 0 && (
-          <Link
-            href="/dashboard/invoices/follow-ups"
-            className="block bg-card border border-border rounded-2xl p-4 hover:border-primary/30 transition-colors group"
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <PhoneCall className="w-4 h-4 text-primary" />
-              <h2 className="text-sm font-semibold">Invoice Follow-ups</h2>
-              <ArrowRight className="w-3.5 h-3.5 text-muted-foreground ml-auto group-hover:translate-x-0.5 transition-transform" />
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <FollowupTile icon={<AlertTriangle className="w-3.5 h-3.5" />} label="Urgent"      count={followupCounts.urgent}    tint="text-red-600 dark:text-red-400" />
-              <FollowupTile icon={<BellRing className="w-3.5 h-3.5" />}      label="Regular"     count={followupCounts.regular}   tint="text-amber-600 dark:text-amber-400" />
-              <FollowupTile icon={<Send className="w-3.5 h-3.5" />}          label="To be sent"  count={followupCounts.needsSent} tint="text-blue-600 dark:text-blue-400" />
-            </div>
-          </Link>
         )}
 
         {/* ── Total Expected Cash hero ──────────────────── */}
@@ -521,7 +527,7 @@ function AdminDashboard({
                 </div>
                 <p className="text-3xl font-black gradient-text leading-tight">{f(effectiveStats.totalExpectedCash)}</p>
                 <p className="text-xs text-muted-foreground mt-1.5">
-                  Bank balance + all outstanding + to be invoiced
+                  Bank balance + all outstanding + drafts not sent yet
                   {(stats.creditOutstanding ?? 0) > 0 ? ' + credit owed back' : ''}
                 </p>
               </div>
@@ -532,7 +538,7 @@ function AdminDashboard({
                   <span className="text-muted-foreground">Outstanding invoices</span>{' '}
                   <span className="font-semibold text-orange-400">{f(effectiveStats.outstanding)}</span>
                 </p>
-                <p className="text-xs"><span className="text-muted-foreground">To be invoiced</span> <span className="font-semibold text-yellow-400">{f(stats.toBeInvoicedAmount)}</span></p>
+                <p className="text-xs"><span className="text-muted-foreground">Drafts not sent</span> <span className="font-semibold text-yellow-400">{f(stats.toBeInvoicedAmount)}</span></p>
                 {/* Only when there is some. A nil line every day trains the
                     eye to skip the row, and this is the row that matters on
                     the day it is not nil. */}
@@ -600,6 +606,13 @@ function AdminDashboard({
           </div>
         )}
 
+        {/* ── Units this month (Departments & Brands), streamed ──────────── */}
+        {unitsStripPromise && (
+          <Suspense fallback={<UnitsStripSkeleton />}>
+            <UnitsStripPanel promise={unitsStripPromise} />
+          </Suspense>
+        )}
+
         {/* ── Streamed analytics (KPIs · Production · Pulse · bottom grid) ──── */}
         {/* These read the two heavy promises via use(); the shell above already
             painted. The fallback mirrors the real section's dimensions. */}
@@ -641,17 +654,6 @@ function AdminDashboard({
 // ─────────────────────────────────────────────────────────────────────────────
 // Sub-components
 // ─────────────────────────────────────────────────────────────────────────────
-function FollowupTile({ icon, label, count, tint }: { icon: React.ReactNode; label: string; count: number; tint: string }) {
-  return (
-    <div className="rounded-lg bg-secondary/50 border border-border px-3 py-2.5">
-      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mb-1">
-        <span className={tint}>{icon}</span>
-        <span className="truncate">{label}</span>
-      </div>
-      <div className={`text-xl font-bold ${count > 0 ? tint : 'text-muted-foreground/50'}`}>{count}</div>
-    </div>
-  )
-}
 
 /** Icon per action-queue bucket. Lives here, not in the queue module, so that
  *  module stays free of JSX and testable in a node environment. */
@@ -738,12 +740,10 @@ function AnalyticsSkeleton() {
   )
 }
 
-function EmployeeDashboardSkeleton({ todayStr }: { todayStr: string }) {
-  const today = new Date(todayStr + 'T12:00:00')
-  const todayLabel = today.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+function EmployeeDashboardSkeleton() {
   return (
     <div>
-      <Header title="My Workspace" subtitle={todayLabel} />
+      <Header title="Dashboard" />
       <div className="p-4 md:p-6 space-y-6">
         {/* Analytics filters */}
         <div className="h-12 w-full max-w-md bg-secondary/30 rounded-xl animate-pulse" />
@@ -790,11 +790,12 @@ function statusBadgeClass(status: string) {
 }
 
 function EmployeeDashboard({
-  todayStr, scoresPromise, payrollRecords: _payrollRecords, pendingContribCount = 0,
+  notice, scoresPromise, payrollRecords: _payrollRecords, pendingContribCount = 0,
   myActions = { active: [], needContribution: [] },
   actionQueue = [],
   canViewAnalytics = false,
 }: {
+  notice?: React.ReactNode
   todayStr: string; scoresPromise: Promise<any[]>; payrollRecords: any[]; pendingContribCount?: number
   myActions?: { active: any[]; needContribution: any[] }
   /** Permission-scoped action queue; see Props above. */
@@ -839,8 +840,6 @@ function EmployeeDashboard({
     }
   }, [dateFilter, granularity, histSearch, histStatus, histBand, histPage, pathname, router, searchParams])
 
-  const today     = new Date(todayStr + 'T12:00:00')
-  const todayLabel = today.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
   // ── STEP 1: Deduplicate by task.id AND employee_id ───────────────────────
   //
@@ -1018,7 +1017,8 @@ function EmployeeDashboard({
 
   return (
     <div>
-      <Header title="My Workspace" subtitle={todayLabel} />
+      <Header title="Dashboard" />
+      {notice}
       <div className="p-4 md:p-6 space-y-6">
 
         {/* ── Your action queue ───────────────────────────────────────────

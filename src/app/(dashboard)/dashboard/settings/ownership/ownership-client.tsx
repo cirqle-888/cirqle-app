@@ -13,6 +13,7 @@ import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Plus, Trash2, Loader2, Play, Eye, AlertTriangle, ChevronDown, Power, ArrowUpRight } from 'lucide-react'
+import Header from '@/components/layout/header'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -168,13 +169,43 @@ export default function OwnershipClient(p: Props) {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 space-y-6">
-      <div className="pl-14 md:pl-0 flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <Header
+        title="Ownership"
+        subtitle="Pay people a share of the business"
+        actions={
+          <>
+            {/* Changing the month drops any preview: a result labelled for one
+                month while the picker reads another is worse than none. `max`
+                stops a future month, which no period can have closed yet. */}
+            <input
+              type="month"
+              value={periodValue}
+              max={thisMonth}
+              onChange={e => { setPeriodValue(e.target.value); setPreview(null) }}
+              aria-label="Month to preview or run"
+              className="rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+            />
+            <button onClick={onPreview} disabled={busy !== null || !period}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50">
+              {busy === 'preview' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />} Preview
+            </button>
+            <button onClick={confirmRun} disabled={busy !== null || !period}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50">
+              {busy === 'run' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} Run now
+            </button>
+            <button onClick={() => setProgramModal('new')}
+              className="inline-flex items-center gap-1.5 rounded-lg gradient-bg px-3 py-2 text-sm font-medium text-white hover:opacity-90">
+              <Plus className="h-4 w-4" /> New program
+            </button>
+          </>
+        }
+      />
+      <div className="mx-auto max-w-4xl px-4 sm:px-6 py-6 space-y-6">
         <div>
-          <h1 className="text-2xl font-bold">Ownership</h1>
-          <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-            Pay people a share of the business — revenue share, profit share, incentives and bonuses.
-            Amounts are calculated into payroll, never typed in by hand.
+          <p className="text-sm text-muted-foreground max-w-2xl">
+            Revenue share, profit share, incentives and bonuses. Amounts are calculated into
+            payroll, never typed in by hand.
           </p>
           {/* The engine detail and the which-tool-when comparison matter once,
               when you are deciding where a rule belongs — not on every visit. */}
@@ -198,336 +229,311 @@ export default function OwnershipClient(p: Props) {
             What each role has earned <ArrowUpRight className="h-3 w-3" />
           </Link>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Changing the month drops any preview: a result labelled for one
-              month while the picker reads another is worse than none. `max`
-              stops a future month, which no period can have closed yet. */}
-          <input
-            type="month"
-            value={periodValue}
-            max={thisMonth}
-            onChange={e => { setPeriodValue(e.target.value); setPreview(null) }}
-            aria-label="Month to preview or run"
-            className="rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-          />
-          <button onClick={onPreview} disabled={busy !== null || !period}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50">
-            {busy === 'preview' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />} Preview
-          </button>
-          <button onClick={confirmRun} disabled={busy !== null || !period}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50">
-            {busy === 'run' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} Run now
-          </button>
-          <button onClick={() => setProgramModal('new')}
-            className="inline-flex items-center gap-1.5 rounded-lg gradient-bg px-3 py-2 text-sm font-medium text-white hover:opacity-90">
-            <Plus className="h-4 w-4" /> New program
-          </button>
-        </div>
-      </div>
 
-      {/* Over-commitment guard: nothing stops rules promising 130% of profit,
-          and payday is a bad time to find out. */}
-      {preview && preview.profitSharePercent > 100 && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 flex items-start gap-3">
-          <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
-          <div className="text-sm">
-            <p className="font-medium text-foreground">
-              Active rules promise {preview.profitSharePercent}% of company profit
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              More than 100% means the company pays out more profit than it makes. Reduce a percentage or deactivate a program.
-            </p>
+        {/* Over-commitment guard: nothing stops rules promising 130% of profit,
+            and payday is a bad time to find out. */}
+        {preview && preview.profitSharePercent > 100 && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="font-medium text-foreground">
+                Active rules promise {preview.profitSharePercent}% of company profit
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                More than 100% means the company pays out more profit than it makes. Reduce a percentage or deactivate a program.
+              </p>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {preview && (
-        <div className="rounded-xl border border-border bg-card p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold">If {label} paid today</h2>
-            <span className="text-sm font-semibold tabular-nums">{inr(preview.totalInr)}</span>
-          </div>
-          {/* Per-person totals first — "what does each person get" — then the lines behind them. */}
-          {preview.rows.length > 0 && (() => {
-            const totals = new Map<string, number>()
-            for (const r of preview.rows) totals.set(r.employeeId, (totals.get(r.employeeId) ?? 0) + r.earnedInr)
-            return (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {[...totals.entries()].sort((a, b) => b[1] - a[1]).map(([id, t]) => (
-                  <div key={id} className="rounded-lg border border-border bg-secondary/30 px-3 py-1.5">
-                    <p className="text-[11px] text-muted-foreground">{employeeLabel(id)}</p>
-                    <p className="text-sm font-semibold tabular-nums">{inr(t)}</p>
+        {preview && (
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold">If {label} paid today</h2>
+              <span className="text-sm font-semibold tabular-nums">{inr(preview.totalInr)}</span>
+            </div>
+            {/* Per-person totals first — "what does each person get" — then the lines behind them. */}
+            {preview.rows.length > 0 && (() => {
+              const totals = new Map<string, number>()
+              for (const r of preview.rows) totals.set(r.employeeId, (totals.get(r.employeeId) ?? 0) + r.earnedInr)
+              return (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {[...totals.entries()].sort((a, b) => b[1] - a[1]).map(([id, t]) => (
+                    <div key={id} className="rounded-lg border border-border bg-secondary/30 px-3 py-1.5">
+                      <p className="text-[11px] text-muted-foreground">{employeeLabel(id)}</p>
+                      <p className="text-sm font-semibold tabular-nums">{inr(t)}</p>
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
+            {preview.rows.length === 0 ? (
+              <p className="mt-2 text-xs text-muted-foreground">No program pays in {label}.</p>
+            ) : (
+              <div className="mt-2 divide-y divide-border text-xs">
+                {preview.rows.map((r, i) => (
+                  <div key={i} className="py-1.5">
+                  <button type="button" disabled={!r.items.length} onClick={() => setOpenRow(openRow === i ? null : i)}
+                    className="w-full flex items-center justify-between text-left disabled:cursor-default">
+                    <span className="min-w-0 truncate">
+                      {r.items.length > 0 && <ChevronDown className={`inline h-3 w-3 mr-1 text-muted-foreground transition-transform ${openRow === i ? '' : '-rotate-90'}`} />}
+                      {employeeLabel(r.employeeId)} · {r.programName}
+                      {r.label ? <span className="text-muted-foreground"> · {r.label}</span> : null}
+                      {/* The rate in words — this is the sanity check before a run,
+                          and a count spike shows up here rather than on a payslip. */}
+                      <span className="text-muted-foreground/70"> · {rateLabel(r)}</span>
+                    </span>
+                    <span className="tabular-nums font-medium">{inr(r.earnedInr)}</span>
+                  </button>
+                  {/* What was counted — every entry, client or planned task behind the number. */}
+                  {openRow === i && r.items.length > 0 && (
+                    <div className="mt-1.5 ml-4 max-h-64 overflow-y-auto rounded-md border border-border bg-secondary/20 divide-y divide-border">
+                      {r.items.map((it, j) => (
+                        <div key={j} className="flex items-center gap-3 px-2.5 py-1 text-[11px]">
+                          <span className="text-muted-foreground tabular-nums shrink-0">{it.date}</span>
+                          <span className="flex-1 min-w-0 truncate">{it.label}</span>
+                          {it.amountInr != null && <span className="tabular-nums text-muted-foreground shrink-0">{inr(it.amountInr)}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   </div>
                 ))}
               </div>
-            )
-          })()}
-          {preview.rows.length === 0 ? (
-            <p className="mt-2 text-xs text-muted-foreground">No program pays in {label}.</p>
-          ) : (
-            <div className="mt-2 divide-y divide-border text-xs">
-              {preview.rows.map((r, i) => (
-                <div key={i} className="py-1.5">
-                <button type="button" disabled={!r.items.length} onClick={() => setOpenRow(openRow === i ? null : i)}
-                  className="w-full flex items-center justify-between text-left disabled:cursor-default">
-                  <span className="min-w-0 truncate">
-                    {r.items.length > 0 && <ChevronDown className={`inline h-3 w-3 mr-1 text-muted-foreground transition-transform ${openRow === i ? '' : '-rotate-90'}`} />}
-                    {employeeLabel(r.employeeId)} · {r.programName}
-                    {r.label ? <span className="text-muted-foreground"> · {r.label}</span> : null}
-                    {/* The rate in words — this is the sanity check before a run,
-                        and a count spike shows up here rather than on a payslip. */}
-                    <span className="text-muted-foreground/70"> · {rateLabel(r)}</span>
+            )}
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              Profit share committed across active programs: {preview.profitSharePercent}%
+            </p>
+          </div>
+        )}
+
+        {p.programs.length === 0 && (
+          <div className="rounded-xl border border-dashed border-border bg-card p-10 text-center">
+            <p className="text-sm font-medium">No programs yet</p>
+            <p className="mt-1 text-xs text-muted-foreground max-w-md mx-auto">
+              Start with something small — e.g. &ldquo;Managers earn 2% of monthly billing&rdquo;.
+              Everyone with no program keeps earning exactly as they do today.
+            </p>
+          </div>
+        )}
+
+        {/* Who handles each client — what "Client handling" programs measure. */}
+        <details className="group rounded-xl border border-border bg-card">
+          <summary className="flex items-center justify-between gap-2 px-4 py-3 cursor-pointer select-none list-none">
+            <span className="text-sm font-semibold">Who handles each client
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {Object.keys(p.handlers).length} of {p.clients.length} assigned · used by Client handling programs
+              </span>
+            </span>
+            <ChevronDown className="w-4 h-4 text-muted-foreground group-open:rotate-180 transition-transform" />
+          </summary>
+          <div className="px-4 pb-4 space-y-2">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              Changes apply from
+              <input type="date" value={handlerFrom} onChange={e => setHandlerFrom(e.target.value)}
+                className="rounded-md border border-border bg-background px-2 py-1 text-xs" />
+              <span>— earlier work stays with the previous handler.</span>
+            </div>
+            <div className="divide-y divide-border rounded-lg border border-border">
+              {p.clients.map(c => (
+                <div key={c.id} className="flex items-center justify-between gap-3 px-3 py-1.5 text-sm">
+                  <span className="min-w-0 truncate">{c.name}
+                    {p.handlers[c.id] && <span className="ml-2 text-[11px] text-muted-foreground">since {p.handlers[c.id].from}</span>}
                   </span>
-                  <span className="tabular-nums font-medium">{inr(r.earnedInr)}</span>
-                </button>
-                {/* What was counted — every entry, client or planned task behind the number. */}
-                {openRow === i && r.items.length > 0 && (
-                  <div className="mt-1.5 ml-4 max-h-64 overflow-y-auto rounded-md border border-border bg-secondary/20 divide-y divide-border">
-                    {r.items.map((it, j) => (
-                      <div key={j} className="flex items-center gap-3 px-2.5 py-1 text-[11px]">
-                        <span className="text-muted-foreground tabular-nums shrink-0">{it.date}</span>
-                        <span className="flex-1 min-w-0 truncate">{it.label}</span>
-                        {it.amountInr != null && <span className="tabular-nums text-muted-foreground shrink-0">{inr(it.amountInr)}</span>}
-                      </div>
-                    ))}
+                  <div className="w-36 shrink-0">
+                    <AppSelect value={p.handlers[c.id]?.employeeId ?? ''} disabled={busy === `h:${c.id}`} onChange={async e => {
+                      setBusy(`h:${c.id}`)
+                      const res = await setClientHandler(c.id, e.target.value || null, handlerFrom)
+                      setBusy(null)
+                      if (!res.ok) { toastError('Could not save', res.error); return }
+                      refresh()
+                    }}>
+                      <option value="">— nobody —</option>
+                      {p.employees.map(e => <option key={e.id} value={e.id}>{e.cqid}</option>)}
+                    </AppSelect>
                   </div>
-                )}
                 </div>
               ))}
             </div>
-          )}
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            Profit share committed across active programs: {preview.profitSharePercent}%
-          </p>
-        </div>
-      )}
-
-      {p.programs.length === 0 && (
-        <div className="rounded-xl border border-dashed border-border bg-card p-10 text-center">
-          <p className="text-sm font-medium">No programs yet</p>
-          <p className="mt-1 text-xs text-muted-foreground max-w-md mx-auto">
-            Start with something small — e.g. &ldquo;Managers earn 2% of monthly billing&rdquo;.
-            Everyone with no program keeps earning exactly as they do today.
-          </p>
-        </div>
-      )}
-
-      {/* Who handles each client — what "Client handling" programs measure. */}
-      <details className="group rounded-xl border border-border bg-card">
-        <summary className="flex items-center justify-between gap-2 px-4 py-3 cursor-pointer select-none list-none">
-          <span className="text-sm font-semibold">Who handles each client
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
-              {Object.keys(p.handlers).length} of {p.clients.length} assigned · used by Client handling programs
-            </span>
-          </span>
-          <ChevronDown className="w-4 h-4 text-muted-foreground group-open:rotate-180 transition-transform" />
-        </summary>
-        <div className="px-4 pb-4 space-y-2">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            Changes apply from
-            <input type="date" value={handlerFrom} onChange={e => setHandlerFrom(e.target.value)}
-              className="rounded-md border border-border bg-background px-2 py-1 text-xs" />
-            <span>— earlier work stays with the previous handler.</span>
           </div>
-          <div className="divide-y divide-border rounded-lg border border-border">
-            {p.clients.map(c => (
-              <div key={c.id} className="flex items-center justify-between gap-3 px-3 py-1.5 text-sm">
-                <span className="min-w-0 truncate">{c.name}
-                  {p.handlers[c.id] && <span className="ml-2 text-[11px] text-muted-foreground">since {p.handlers[c.id].from}</span>}
-                </span>
-                <div className="w-36 shrink-0">
-                  <AppSelect value={p.handlers[c.id]?.employeeId ?? ''} disabled={busy === `h:${c.id}`} onChange={async e => {
-                    setBusy(`h:${c.id}`)
-                    const res = await setClientHandler(c.id, e.target.value || null, handlerFrom)
-                    setBusy(null)
-                    if (!res.ok) { toastError('Could not save', res.error); return }
-                    refresh()
-                  }}>
-                    <option value="">— nobody —</option>
-                    {p.employees.map(e => <option key={e.id} value={e.id}>{e.cqid}</option>)}
-                  </AppSelect>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </details>
+        </details>
 
-      <div className="space-y-3">
-        {p.programs.map(prog => {
-          const progRules = p.rules.filter(r => r.programId === prog.id)
-          const open = expanded === prog.id
-          return (
-            <div key={prog.id} className="rounded-xl border border-border bg-card overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-3">
-                <button onClick={() => setExpanded(open ? null : prog.id)} className="flex items-center gap-2 min-w-0 text-left">
-                  <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? '' : '-rotate-90'}`} />
-                  <span className="font-semibold truncate">{prog.name}</span>
-                  {!prog.isActive && (
-                    <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">Paused</span>
-                  )}
-                  <span className="text-xs text-muted-foreground">
-                    {BASIS_LABEL[prog.basis]} · {PERIOD_LABEL[prog.periodType]} · {scopeLabel(prog)}
-                  </span>
-                </button>
-                <div className="flex items-center gap-1.5">
-                  <button onClick={async () => {
-                    setBusy(prog.id)
-                    const res = await setProgramActive(prog.id, !prog.isActive)
-                    setBusy(null)
-                    if (!res.ok) { toastError('Could not update', res.error); return }
-                    refresh()
-                  }} disabled={busy === prog.id}
-                    title={prog.isActive ? 'Pause this program' : 'Resume this program'}
-                    className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-50">
-                    <Power className="h-3.5 w-3.5" />
+        <div className="space-y-3">
+          {p.programs.map(prog => {
+            const progRules = p.rules.filter(r => r.programId === prog.id)
+            const open = expanded === prog.id
+            return (
+              <div key={prog.id} className="rounded-xl border border-border bg-card overflow-hidden">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-3">
+                  <button onClick={() => setExpanded(open ? null : prog.id)} className="flex items-center gap-2 min-w-0 text-left">
+                    <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? '' : '-rotate-90'}`} />
+                    <span className="font-semibold truncate">{prog.name}</span>
+                    {!prog.isActive && (
+                      <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">Paused</span>
+                    )}
+                    <span className="text-xs text-muted-foreground">
+                      {BASIS_LABEL[prog.basis]} · {PERIOD_LABEL[prog.periodType]} · {scopeLabel(prog)}
+                    </span>
                   </button>
-                  <button onClick={() => setProgramModal(prog)}
-                    className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium hover:bg-secondary">Edit</button>
-                  <button onClick={() => setConfirmPrompt({
-                    title: `Delete the "${prog.name}" program?`,
-                    body: `Its ${progRules.length} rule${progRules.length === 1 ? '' : 's'} and every award already computed from it are removed. Nobody earns from this program again, and awards already paid out on past payslips are unaffected.`,
-                    confirmLabel: 'Delete program',
-                    danger: true,
-                    onConfirm: async () => {
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={async () => {
                       setBusy(prog.id)
-                      const res = await deleteProgram(prog.id)
+                      const res = await setProgramActive(prog.id, !prog.isActive)
                       setBusy(null)
-                      if (!res.ok) { toastError('Could not delete', res.error); return }
-                      success('Program deleted'); refresh()
-                    },
-                  })} disabled={busy === prog.id}
-                    className="rounded-md p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 disabled:opacity-50">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                      if (!res.ok) { toastError('Could not update', res.error); return }
+                      refresh()
+                    }} disabled={busy === prog.id}
+                      title={prog.isActive ? 'Pause this program' : 'Resume this program'}
+                      className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-50">
+                      <Power className="h-3.5 w-3.5" />
+                    </button>
+                    <button onClick={() => setProgramModal(prog)}
+                      className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium hover:bg-secondary">Edit</button>
+                    <button onClick={() => setConfirmPrompt({
+                      title: `Delete the "${prog.name}" program?`,
+                      body: `Its ${progRules.length} rule${progRules.length === 1 ? '' : 's'} and every award already computed from it are removed. Nobody earns from this program again, and awards already paid out on past payslips are unaffected.`,
+                      confirmLabel: 'Delete program',
+                      danger: true,
+                      onConfirm: async () => {
+                        setBusy(prog.id)
+                        const res = await deleteProgram(prog.id)
+                        setBusy(null)
+                        if (!res.ok) { toastError('Could not delete', res.error); return }
+                        success('Program deleted'); refresh()
+                      },
+                    })} disabled={busy === prog.id}
+                      className="rounded-md p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 disabled:opacity-50">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              {open && prog.basis === 'referrals' && (
-                // The built-in referral program has no rules worth editing:
-                // each job says who is paid and at what %. Showing its
-                // placeholder rule ("Admin · 100%") would invite edits that
-                // change nothing, so the card explains the program instead.
-                // Pausing it above is the off switch for every referral.
-                <div className="p-4 space-y-4">
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    Pays whoever is named as <span className="font-medium text-foreground">Referred by</span> on a job,
-                    at the % set on that job, into the payslip of the month the job is dated.
-                    Set it once for a whole client below, or on a single job in its edit window under{' '}
-                    <span className="font-medium text-foreground">Referral commission</span>.
-                  </p>
-                  <ClientReferrals
-                    clients={p.clients}
-                    employees={p.employees}
-                    referrals={p.clientReferrals}
-                    thisMonth={p.referralThisMonth}
-                    monthLabel={MONTH_NAMES[p.currentMonth - 1]}
-                    defaultFrom={`${p.currentYear}-${pad2(p.currentMonth)}-01`}
-                    onSaved={(t, d) => { success(t, d); refresh() }}
-                    onError={toastError}
-                    onConfirm={setConfirmPrompt}
-                  />
-                </div>
-              )}
-              {open && prog.basis !== 'referrals' && (
-                <div className="p-4 space-y-2">
-                  {progRules.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No rules yet — nobody earns from this program.</p>
-                  ) : progRules.map(r => (
-                    <div key={r.id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-sm">
-                      <div className="min-w-0">
-                        <span className="font-medium">
-                          {ruleTarget(r)}
-                        </span>
-                        {ruleEmployees(r).length > 0 && <span className="ml-1.5 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">override</span>}
-                        {r.label && <span className="ml-1.5 text-xs text-muted-foreground">· {r.label}</span>}
-                        {prog.basis === 'clients_handled' && (
-                          <span className="ml-1.5 text-xs text-muted-foreground"
-                            title={(r.clientIds ?? []).map(id => p.clients.find(c => c.id === id)?.name ?? '').join(', ')}>
-                            · {r.clientIds?.length ? `${r.clientIds.length} client${r.clientIds.length === 1 ? '' : 's'}` : 'clients from the handler list'}
+                {open && prog.basis === 'referrals' && (
+                  // The built-in referral program has no rules worth editing:
+                  // each job says who is paid and at what %. Showing its
+                  // placeholder rule ("Admin · 100%") would invite edits that
+                  // change nothing, so the card explains the program instead.
+                  // Pausing it above is the off switch for every referral.
+                  <div className="p-4 space-y-4">
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      Pays whoever is named as <span className="font-medium text-foreground">Referred by</span> on a job,
+                      at the % set on that job, into the payslip of the month the job is dated.
+                      Set it once for a whole client below, or on a single job in its edit window under{' '}
+                      <span className="font-medium text-foreground">Referral commission</span>.
+                    </p>
+                    <ClientReferrals
+                      clients={p.clients}
+                      employees={p.employees}
+                      referrals={p.clientReferrals}
+                      thisMonth={p.referralThisMonth}
+                      monthLabel={MONTH_NAMES[p.currentMonth - 1]}
+                      defaultFrom={`${p.currentYear}-${pad2(p.currentMonth)}-01`}
+                      onSaved={(t, d) => { success(t, d); refresh() }}
+                      onError={toastError}
+                      onConfirm={setConfirmPrompt}
+                    />
+                  </div>
+                )}
+                {open && prog.basis !== 'referrals' && (
+                  <div className="p-4 space-y-2">
+                    {progRules.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">No rules yet — nobody earns from this program.</p>
+                    ) : progRules.map(r => (
+                      <div key={r.id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-sm">
+                        <div className="min-w-0">
+                          <span className="font-medium">
+                            {ruleTarget(r)}
                           </span>
-                        )}
-                        <span className="ml-2 text-xs text-muted-foreground">
-                          {r.percent != null ? `${r.percent}%` : inr(r.fixedAmountInr ?? 0)}
-                        </span>
+                          {ruleEmployees(r).length > 0 && <span className="ml-1.5 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">override</span>}
+                          {r.label && <span className="ml-1.5 text-xs text-muted-foreground">· {r.label}</span>}
+                          {prog.basis === 'clients_handled' && (
+                            <span className="ml-1.5 text-xs text-muted-foreground"
+                              title={(r.clientIds ?? []).map(id => p.clients.find(c => c.id === id)?.name ?? '').join(', ')}>
+                              · {r.clientIds?.length ? `${r.clientIds.length} client${r.clientIds.length === 1 ? '' : 's'}` : 'clients from the handler list'}
+                            </span>
+                          )}
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            {r.percent != null ? `${r.percent}%` : inr(r.fixedAmountInr ?? 0)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button onClick={() => setRuleModal({ programId: prog.id, rule: r })}
+                            className="rounded-lg border border-border px-2 py-1 text-xs hover:bg-secondary">Edit</button>
+                          <button onClick={() => setConfirmPrompt({
+                            title: 'Delete this rule?',
+                            body: `${ruleTarget(r)} stop${ruleEmployees(r).length > 1 ? '' : 's'} earning ${r.percent != null ? `${r.percent}%` : inr(r.fixedAmountInr ?? 0)} from "${prog.name}". Awards already on past payslips stay as they are.`,
+                            confirmLabel: 'Delete rule',
+                            danger: true,
+                            onConfirm: async () => {
+                              const res = await deleteRule(r.id)
+                              if (!res.ok) { toastError('Could not delete', res.error); return }
+                              refresh()
+                            },
+                          })} className="rounded-md p-1 text-muted-foreground hover:text-red-500">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button onClick={() => setRuleModal({ programId: prog.id, rule: r })}
-                          className="rounded-lg border border-border px-2 py-1 text-xs hover:bg-secondary">Edit</button>
-                        <button onClick={() => setConfirmPrompt({
-                          title: 'Delete this rule?',
-                          body: `${ruleTarget(r)} stop${ruleEmployees(r).length > 1 ? '' : 's'} earning ${r.percent != null ? `${r.percent}%` : inr(r.fixedAmountInr ?? 0)} from "${prog.name}". Awards already on past payslips stay as they are.`,
-                          confirmLabel: 'Delete rule',
-                          danger: true,
-                          onConfirm: async () => {
-                            const res = await deleteRule(r.id)
-                            if (!res.ok) { toastError('Could not delete', res.error); return }
-                            refresh()
-                          },
-                        })} className="rounded-md p-1 text-muted-foreground hover:text-red-500">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  <button onClick={() => setRuleModal({ programId: prog.id, rule: null })}
-                    className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline">
-                    <Plus className="h-3.5 w-3.5" /> Add rule
-                  </button>
-                </div>
-              )}
-            </div>
-          )
-        })}
+                    ))}
+                    <button onClick={() => setRuleModal({ programId: prog.id, rule: null })}
+                      className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline">
+                      <Plus className="h-3.5 w-3.5" /> Add rule
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {programModal && (
+          <ProgramModal
+            initial={programModal === 'new' ? null : programModal}
+            clients={p.clients} services={p.services} categories={p.categories} orgUnits={p.orgUnits}
+            activityOptions={p.activityOptions}
+            onClose={() => setProgramModal(null)}
+            onSaved={() => { setProgramModal(null); success('Program saved'); refresh() }}
+            onError={(m) => toastError('Could not save', m)}
+          />
+        )}
+        {ruleModal && (
+          <RuleModal
+            programId={ruleModal.programId} initial={ruleModal.rule}
+            basis={p.programs.find(x => x.id === ruleModal.programId)?.basis ?? 'billing'}
+            employees={p.employees} designations={p.designations} clients={p.clients}
+            onClose={() => setRuleModal(null)}
+            onSaved={() => { setRuleModal(null); success('Rule saved'); refresh() }}
+            onError={(m) => toastError('Could not save', m)}
+          />
+        )}
+
+        {runConfirm && period && (
+          <ConfirmDialog
+            title={`Compute ${label}'s awards into payroll?`}
+            body={
+              (preview
+                ? `Preview showed ${preview.rows.length} award${preview.rows.length === 1 ? '' : 's'} totalling ${inr(preview.totalInr)}. `
+                : '') +
+              `Existing awards for ${label} are replaced with freshly computed ones. Nothing is paid out by this — ` +
+              `the amounts appear on ${label}'s payslips when payroll is generated or recalculated. A closed month is never touched.`
+            }
+            confirmLabel="Compute awards"
+            onConfirm={() => { void onRun() }}
+            onCancel={() => setRunConfirm(false)}
+          />
+        )}
+        {confirmPrompt && (
+          <ConfirmDialog
+            title={confirmPrompt.title}
+            body={confirmPrompt.body}
+            confirmLabel={confirmPrompt.confirmLabel}
+            danger={confirmPrompt.danger}
+            onConfirm={() => { const fn = confirmPrompt.onConfirm; setConfirmPrompt(null); fn() }}
+            onCancel={() => setConfirmPrompt(null)}
+          />
+        )}
+        <ToastContainer toasts={toasts} onDismiss={dismiss} />
       </div>
-
-      {programModal && (
-        <ProgramModal
-          initial={programModal === 'new' ? null : programModal}
-          clients={p.clients} services={p.services} categories={p.categories} orgUnits={p.orgUnits}
-          activityOptions={p.activityOptions}
-          onClose={() => setProgramModal(null)}
-          onSaved={() => { setProgramModal(null); success('Program saved'); refresh() }}
-          onError={(m) => toastError('Could not save', m)}
-        />
-      )}
-      {ruleModal && (
-        <RuleModal
-          programId={ruleModal.programId} initial={ruleModal.rule}
-          basis={p.programs.find(x => x.id === ruleModal.programId)?.basis ?? 'billing'}
-          employees={p.employees} designations={p.designations} clients={p.clients}
-          onClose={() => setRuleModal(null)}
-          onSaved={() => { setRuleModal(null); success('Rule saved'); refresh() }}
-          onError={(m) => toastError('Could not save', m)}
-        />
-      )}
-
-      {runConfirm && period && (
-        <ConfirmDialog
-          title={`Compute ${label}'s awards into payroll?`}
-          body={
-            (preview
-              ? `Preview showed ${preview.rows.length} award${preview.rows.length === 1 ? '' : 's'} totalling ${inr(preview.totalInr)}. `
-              : '') +
-            `Existing awards for ${label} are replaced with freshly computed ones. Nothing is paid out by this — ` +
-            `the amounts appear on ${label}'s payslips when payroll is generated or recalculated. A closed month is never touched.`
-          }
-          confirmLabel="Compute awards"
-          onConfirm={() => { void onRun() }}
-          onCancel={() => setRunConfirm(false)}
-        />
-      )}
-      {confirmPrompt && (
-        <ConfirmDialog
-          title={confirmPrompt.title}
-          body={confirmPrompt.body}
-          confirmLabel={confirmPrompt.confirmLabel}
-          danger={confirmPrompt.danger}
-          onConfirm={() => { const fn = confirmPrompt.onConfirm; setConfirmPrompt(null); fn() }}
-          onCancel={() => setConfirmPrompt(null)}
-        />
-      )}
-      <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
   )
 }

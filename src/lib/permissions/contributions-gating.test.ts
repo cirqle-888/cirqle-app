@@ -59,7 +59,7 @@ describe('the route is gated to match the nav item', () => {
 
   it('the route table still supports a plain single-key rule', () => {
     // The any-of change must not have broken the 20-odd single-key routes.
-    expect(MW).toMatch(/\[RegExp, string \| string\[\]\]/)
+    expect(MW).toMatch(/\[RegExp, string \| string\[\](?: \| null)?\]/)
     expect(MW).toContain("'billing.view_invoices'")
   })
 })

@@ -25,10 +25,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import Header from '@/components/layout/header'
 import {
-  ArrowLeft, Undo2, Redo2, Wand2, Square, PenLine, Brush, Eraser,
+  Undo2, Redo2, Wand2, Square, PenLine, Brush, Eraser,
   Upload, Scissors, Save, Trash2, Loader2, Check, ZoomIn,
 } from 'lucide-react'
 import { useToast, ToastContainer } from '@/components/ui/toast'
@@ -413,29 +413,26 @@ export default function AreasClient({
 
   return (
     <div className="flex flex-col h-[calc(100dvh-var(--bottom-nav-h,0px))] min-h-0">
-      {/* Header */}
-      <header className="flex items-center gap-3 flex-wrap px-4 py-3 border-b border-border shrink-0">
-        <Link href="/dashboard/portfolio" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="w-4 h-4" /> Portfolio
-        </Link>
-        <div className="min-w-0">
-          <h1 className="text-sm font-semibold truncate">{showcase.clientName} · clickable areas</h1>
-          <p className="text-[11px] text-muted-foreground">Saved separately from the rest of the presentation.</p>
-        </div>
-        <div className="flex items-center gap-1.5 ml-auto">
-          <button type="button" title="Undo (⌘Z)" aria-label="Undo" disabled={!canUndo(history)}
-            onClick={() => setHistory(undoHistory)}
-            className="p-2 rounded-lg border border-border disabled:opacity-35 hover:bg-secondary"><Undo2 className="w-4 h-4" /></button>
-          <button type="button" title="Redo (⌘⇧Z)" aria-label="Redo" disabled={!canRedo(history)}
-            onClick={() => setHistory(redoHistory)}
-            className="p-2 rounded-lg border border-border disabled:opacity-35 hover:bg-secondary"><Redo2 className="w-4 h-4" /></button>
-          <span className="text-[11px] text-muted-foreground px-1">{dirty ? 'Unsaved' : 'Saved'}</span>
-          <button type="button" onClick={save} disabled={saving || !dirty}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg gradient-bg text-white text-sm font-semibold disabled:opacity-50">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save
-          </button>
-        </div>
-      </header>
+      <Header
+        title={`${showcase.clientName} · clickable areas`}
+        crumbLabel="Clickable areas"
+        subtitle="Saved separately from the rest of the presentation"
+        actions={
+          <>
+            <button type="button" title="Undo (⌘Z)" aria-label="Undo" disabled={!canUndo(history)}
+              onClick={() => setHistory(undoHistory)}
+              className="p-2 rounded-lg border border-border disabled:opacity-35 hover:bg-secondary"><Undo2 className="w-4 h-4" /></button>
+            <button type="button" title="Redo (⌘⇧Z)" aria-label="Redo" disabled={!canRedo(history)}
+              onClick={() => setHistory(redoHistory)}
+              className="p-2 rounded-lg border border-border disabled:opacity-35 hover:bg-secondary"><Redo2 className="w-4 h-4" /></button>
+            <span className="text-[11px] text-muted-foreground px-1">{dirty ? 'Unsaved' : 'Saved'}</span>
+            <button type="button" onClick={save} disabled={saving || !dirty}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg gradient-bg text-white text-sm font-semibold disabled:opacity-50">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save
+            </button>
+          </>
+        }
+      />
 
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
         {/* ── Stage ─────────────────────────────────────────────────────── */}

@@ -12,6 +12,8 @@ import { normalizeContentBrief, contentBriefToText, type ContentBrief, type Cont
 import { suggestContentType } from '@/lib/social/plan'
 import { getCompanySettings } from '@/lib/settings/company-settings'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { logActivity } from '@/lib/activity/log'
+import { requestDeleteBlocker, DELETE_LIMIT } from '@/lib/requests/delete-rules'
 import { requirePermission, requireReadPermission, resolveCurrentEmployeeId, loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility } from '@/lib/permissions/strip'
 import { PERMS } from '@/lib/permissions/keys'
@@ -716,4 +718,100 @@ export async function reorderStaffPriority(requestIds: string[]): Promise<Action
   )
   revalidatePath(REVALIDATE)
   return { ok: true }
+}
+
+// ─── Delete for good ─────────────────────────────────────────────────────────
+
+export interface DeleteRequestsResult {
+  deleted: string[]
+  /** The ones that stayed, each with why. */
+  kept: { id: string; label: string; reason: string }[]
+  /** Set when the delete worked but its follow-up did not. */
+  warning?: string
+}
+
+/** True for "this table does not exist": a module whose migration never ran. */
+const tableNotThere = (e: { code?: string }) => e.code === '42P01' || e.code === 'PGRST205'
+
+/**
+ * Delete requests permanently — for clearing out test entries and cancelled
+ * work. Admin only: unlike Archive this cannot be undone, and each request's
+ * timeline and revisions go with it.
+ *
+ * Every id is checked here (requestDeleteBlocker, plus an advertising link);
+ * the ones that must stay come back with the reason. A social calendar entry
+ * that was sent as one of these is marked cancelled — the database would only
+ * unlink it, and it would come back as work that was never sent.
+ */
+export async function deleteRequests(requestIds: string[]): Promise<ActionResult<DeleteRequestsResult>> {
+  // The write guard first: it keeps a "view as" preview read-only, even when
+  // the person being previewed is an admin. Then admins only.
+  const guard = await requirePermission(PERMS.REQUESTS_MANAGE)
+  if (!guard.ok) return { ok: false, error: guard.error }
+  if (!guard.isAdmin) return { ok: false, error: 'Only an admin can delete requests.' }
+  const ids = [...new Set(requestIds)].filter(Boolean)
+  if (!ids.length) return { ok: false, error: 'No requests selected.' }
+  if (ids.length > DELETE_LIMIT) return { ok: false, error: `Delete up to ${DELETE_LIMIT} at a time.` }
+
+  const admin = createAdminClient()
+  const { data: rows, error } = await admin.from('task_requests')
+    .select('id, ref_no, title, status, promoted_task_id, promoted_task:tasks!task_requests_promoted_task_id_fkey(status, deleted_at)')
+    .in('id', ids)
+  if (error) return { ok: false, error: error.message }
+
+  // Both links are read BEFORE deleting, because deleting clears them. A read
+  // that fails for any reason but a missing table stops the whole delete.
+  const ads = await admin.from('ad_projects').select('request_id').in('request_id', ids)
+  if (ads.error && !tableNotThere(ads.error)) return { ok: false, error: ads.error.message }
+  const plan = await admin.from('social_calendar_items').select('id, request_id').in('request_id', ids)
+  if (plan.error && !tableNotThere(plan.error)) return { ok: false, error: plan.error.message }
+  const advertised = new Set((ads.data ?? []).map(a => a.request_id as string))
+
+  const result: DeleteRequestsResult = { deleted: [], kept: [] }
+  for (const row of rows ?? []) {
+    const task = Array.isArray(row.promoted_task) ? row.promoted_task[0] : row.promoted_task
+    const keep = (reason: string) => result.kept.push({
+      id: row.id, reason,
+      label: row.ref_no ? `REQ-${String(row.ref_no).padStart(4, '0')}` : row.title,
+    })
+    const blocker = requestDeleteBlocker({ status: row.status, task })
+      ?? (advertised.has(row.id) ? 'an advertising project is linked to it' : null)
+    if (blocker) { keep(blocker); continue }
+
+    // Delete only the row that was checked: if its status changed or a task
+    // was started since the read, this matches nothing.
+    const asChecked = admin.from('task_requests').delete().eq('id', row.id).eq('status', row.status)
+    const { data: gone, error: failed } = await (row.promoted_task_id
+      ? asChecked.eq('promoted_task_id', row.promoted_task_id)
+      : asChecked.is('promoted_task_id', null)
+    ).select('id')
+    if (failed) { keep(failed.message); continue }
+    if (!gone?.length) { keep('it changed while you were deleting (reload and check it)'); continue }
+
+    result.deleted.push(row.id)
+    // The request's own timeline is deleted with it, so the record goes here.
+    await logActivity({
+      actorId: guard.employeeId, entityType: 'request', entityId: row.id, action: 'deleted',
+      detail: { ref_no: row.ref_no, title: row.title, status: row.status, permanent: true },
+    })
+  }
+
+  const entries = (plan.data ?? [])
+    .filter(p => result.deleted.includes(p.request_id as string))
+    .map(p => p.id as string)
+  if (entries.length) {
+    const { error: planFailed } = await admin.from('social_calendar_items')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .in('id', entries)
+    if (planFailed) {
+      result.warning = 'The social calendar entry behind it could not be marked cancelled. Remove it from the calendar.'
+    }
+  }
+
+  if (result.deleted.length) {
+    revalidatePath(REVALIDATE)
+    revalidatePath('/dashboard/my-work')
+    revalidatePath('/dashboard/social-calendar')
+  }
+  return { ok: true, data: result }
 }

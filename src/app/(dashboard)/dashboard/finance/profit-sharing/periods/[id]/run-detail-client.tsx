@@ -83,7 +83,7 @@ export default function RunDetailClient({ run, stored, live, liveError, isFirst,
       {run.status === 'void' && <Banner tone="bad">Voided: {run.voidReason}</Banner>}
 
       {isFirst && !final && (
-        <Card title="Opening accumulated loss (D7)" subtitle="The first period needs this before it can be confirmed. It is entered by you — history is never used to set it.">
+        <Card title="Opening accumulated loss" subtitle="The first period needs this before it can be confirmed. It is entered by you — history is never used to set it.">
           <div className="flex flex-wrap items-end gap-2">
             <Field label="Opening accumulated loss (₹)"><input type="number" step="0.01" min="0" className={inputCls} value={openingLoss} onChange={e => setOpeningLossValue(e.target.value)} /></Field>
             <Button variant="primary" busy={busy === 'ol'} disabled={openingLoss === ''} onClick={() => act('ol', () => setOpeningLoss(run.id, Number(openingLoss)), 'Opening loss saved — recalculate')}>Save</Button>
@@ -105,7 +105,7 @@ export default function RunDetailClient({ run, stored, live, liveError, isFirst,
           {run.status === 'reviewed' && (
             <div className="mt-4 space-y-2 border-t border-border pt-4">
               {live.freeCash.capitalShareExceedsCash && (
-                <Field label="Written acknowledgement (D13)" hint="The Capital Share is more than the cash available. Confirmation is not payment; each payment re-checks cash.">
+                <Field label="Written acknowledgement" hint="The Capital Share is more than the cash available. Confirmation is not payment; each payment re-checks cash.">
                   <textarea className={inputCls} rows={2} value={ack} onChange={e => setAck(e.target.value)} />
                 </Field>
               )}
@@ -159,9 +159,9 @@ function Figures({ c, label }: { c: RunComputation; label: Map<string, string> }
       <Card title="How the profit is worked out" subtitle="Cirqle’s own money collected, minus own operating payments, minus pay earned. Open each line for its workings.">
         <div className="space-y-2">
           <Workings label="Own revenue collected" value={inr(p.ownRevenueInr)}>
-            The own-revenue share of client receipts applied to invoices (pass-through first, then tax, then Cirqle’s fee — D2),
+            The own-revenue share of client receipts applied to invoices (pass-through first, then tax, then Cirqle’s fee),
             on the later of the receipt and allocation dates, plus reviewed receipts with no invoice. Refunds (reversals) come off on their own date.
-            Client money not yet applied to an invoice is held, not revenue (D3).
+            Client money not yet applied to an invoice is held, not revenue.
           </Workings>
           <Workings label="Own operating payments" value={`− ${inr(p.operatingPaymentsInr)}`}>
             Cash Book cost and expense payments that are Cirqle’s own: excludes money paid on clients’ behalf, unassigned ad funding (prepaid),
@@ -172,7 +172,7 @@ function Figures({ c, label }: { c: RunComputation; label: Map<string, string> }
             ({inr(c.payroll.grossEarnedInr)}), plus advances converted to pay that were classified as additional pay ({inr(c.payroll.conversionPayInr)}).
           </Workings>
           {p.extraPayInr !== 0 && <Workings label="Pay outside payroll (reviewed)" value={`− ${inr(p.extraPayInr)}`}>Salary payments with no payslip that you classified as extra pay.</Workings>}
-          {p.deviceCostsInr !== 0 && <Workings label="Device usage costs confirmed in the period" value={`− ${inr(p.deviceCostsInr)}`}>Recognised when each valuation was confirmed (D14); the later payment is not counted again.</Workings>}
+          {p.deviceCostsInr !== 0 && <Workings label="Device usage costs confirmed in the period" value={`− ${inr(p.deviceCostsInr)}`}>Recognised when each valuation was confirmed; the later payment is not counted again.</Workings>}
           {(p.passthroughWriteoffsInr !== 0 || p.adWriteoffsInr !== 0) && (
             <Workings label="Written off" value={`− ${inr(p.passthroughWriteoffsInr + p.adWriteoffsInr)}`}>
               Pass-through costs on invoices written off as bad debt ({inr(p.passthroughWriteoffsInr)}) and unassigned ad funding written off by review ({inr(p.adWriteoffsInr)}).
@@ -184,13 +184,13 @@ function Figures({ c, label }: { c: RunComputation; label: Map<string, string> }
 
       <Card title="Losses and distribution" subtitle="Losses are absorbed first. The pool is the distribution % of eligible profit; Capital Share and Reserve split the pool.">
         <div className="space-y-2">
-          <Workings label="Opening accumulated loss" value={inr(c.loss.openingLossInr)}>For the first period, the figure you entered (D7). Afterwards, the previous confirmed period’s closing loss.</Workings>
+          <Workings label="Opening accumulated loss" value={inr(c.loss.openingLossInr)}>For the first period, the figure you entered. Afterwards, the previous confirmed period’s closing loss.</Workings>
           <Workings label="Loss absorbed" value={`− ${inr(c.loss.lossOffsetInr)}`}>min(opening loss, this period’s profit).</Workings>
           <Workings label="Closing accumulated loss" value={inr(c.loss.closingLossInr)}>Opening − absorbed + this period’s loss, if any.</Workings>
           <Workings label="Eligible profit" value={inr(c.distribution.eligibleProfitInr)}>Profit after losses are absorbed.</Workings>
           <Workings label="Distribution pool" value={inr(c.distribution.poolInr)}>Eligible profit × distribution %.</Workings>
           <Workings label="Capital Share" value={inr(c.distribution.capitalShareInr)}>Pool × Capital Share %. Split by capital-days below.</Workings>
-          <Workings label="Business Reserve" value={inr(c.distribution.reserveInr)}>Pool − Capital Share. An earmark of retained profit (D9).</Workings>
+          <Workings label="Business Reserve" value={inr(c.distribution.reserveInr)}>Pool − Capital Share. An earmark of retained profit.</Workings>
           <Workings label="Retained outside the pool" value={inr(c.distribution.retainedOutsideInr)}>Eligible profit − pool.</Workings>
           <Workings label="Total retained in the business" value={inr(c.distribution.totalRetainedInr + c.capital.unallocatedInr)}>
             Reserve + retained outside the pool{c.capital.unallocatedInr > 0 ? ` + ${inr(c.capital.unallocatedInr)} of Capital Share nobody held capital for` : ''}.
@@ -230,10 +230,10 @@ function Figures({ c, label }: { c: RunComputation; label: Map<string, string> }
         <div className="space-y-2">
           <Workings label="Closing cash" value={inr(c.freeCash.closingCashInr)}>Cash Book balance at the period end, including account opening balances.</Workings>
           <Workings label="Unpaid payroll" value={`− ${inr(c.freeCash.payrollLiabilityInr)}`}>Net pay − salary paid, across every payslip up to the period end.</Workings>
-          <Workings label="Client funds held" value={`− ${inr(c.freeCash.clientFundsHeldInr)}`}>Client receipts not yet applied to an invoice’s own parts (D3).</Workings>
+          <Workings label="Client funds held" value={`− ${inr(c.freeCash.clientFundsHeldInr)}`}>Client receipts not yet applied to an invoice’s own parts.</Workings>
           <Workings label="Pending shares from earlier periods" value={`− ${inr(c.freeCash.pendingEntitlementsInr)}`}>Confirmed, not yet paid, reinvested or waived.</Workings>
           <Workings label="Device settlements owed" value={`− ${inr(c.freeCash.unpaidDeviceInr)}`}>Confirmed device values not yet settled.</Workings>
-          <Workings label="Free cash" value={inr(c.freeCash.freeCashInr)}>Closing cash − the liabilities above. GST is not deducted while D1 is open.</Workings>
+          <Workings label="Free cash" value={inr(c.freeCash.freeCashInr)}>Closing cash − the liabilities above. GST is not deducted while the GST/TDS decision is open.</Workings>
           <Workings label="Business Reserve earmark" value={`− ${inr(c.freeCash.reserveBalanceInr)}`}>The reserve balance including this period’s allocation.</Workings>
           <Workings label={<b>Cash available for payment</b>} value={<b>{inr(c.freeCash.cashAvailableInr)}</b>}>What could actually be paid out now.</Workings>
           <p className="pt-1 text-xs text-muted-foreground">

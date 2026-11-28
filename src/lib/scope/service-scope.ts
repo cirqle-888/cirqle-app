@@ -13,7 +13,7 @@
  *
  * Conventions mirror src/lib/permissions/strip.ts: pure post-fetch filters that
  * never mutate their input and early-return the original array when the viewer
- * is unrestricted, so the 'legacy' path is a byte-identical passthrough.
+ * is unrestricted ('all', or 'legacy' for org-unit-scoped viewers).
  *
  * NAMING: everything here is ServiceScope*. Do not shorten to Scope* —
  * src/lib/finance/classify.ts already owns `FinanceScope` ('client'|'company')
@@ -29,9 +29,14 @@ import { confinedScope } from '@/lib/brands/restriction'
 type Admin = ReturnType<typeof createAdminClient>
 
 /**
- *   'all'      — admin, `scope.view_all`, or (on tasks) `tasks.view_all`
- *   'services' — restricted to assigned services
- *   'legacy'   — neither: unchanged historical behaviour, everything visible
+ *   'all'      — admin, `scope.view_all`, or the module's own view_all key
+ *   'services' — restricted to assigned services. Also the DEFAULT for a
+ *                non-admin who holds no scope key at all (decided 2026-11-27:
+ *                every person's reach is defined explicitly — there is no
+ *                "sees everything" fallback any more)
+ *   'legacy'   — the viewer is scoped by ORG UNIT instead (scope.by_unit and
+ *                its module keys): service scope steps aside and unit-scope
+ *                does the narrowing
  */
 export type ServiceScopeMode = 'all' | 'services' | 'legacy'
 
@@ -68,10 +73,18 @@ export function resolveServiceScopeMode(
   if (me.isAdmin) return 'all'
   if (hasPermission(me, PERMS.SCOPE_VIEW_ALL)) return 'all'
   if (module === 'tasks' && hasPermission(me, PERMS.TASKS_VIEW_ALL)) return 'all'
+  if (module === 'contributions' && hasPermission(me, PERMS.CONTRIBUTIONS_VIEW_ALL)) return 'all'
 
   if (hasPermission(me, PERMS.SCOPE_BY_SERVICE)) return 'services'
   if (module === 'tasks' && hasPermission(me, PERMS.TASKS_VIEW_BY_SERVICE)) return 'services'
-  return 'legacy'
+
+  // Org-unit scoping is explicit too; unit-scope.ts narrows those viewers.
+  if (hasPermission(me, PERMS.SCOPE_BY_UNIT)) return 'legacy'
+  if (module === 'tasks' && hasPermission(me, PERMS.TASKS_VIEW_BY_UNIT)) return 'legacy'
+  if (module === 'contributions' && hasPermission(me, PERMS.CONTRIBUTIONS_VIEW_UNIT)) return 'legacy'
+
+  // No scope key at all: only what is assigned to them. Never everything.
+  return 'services'
 }
 
 // ── Loading ──────────────────────────────────────────────────────────────────
@@ -184,9 +197,9 @@ export async function loadServiceScope(
     })(),
   ])
 
-  // A failed read must not masquerade as "assigned to nothing" — that would
-  // blank a restricted user's entire app. Degrade to unrestricted instead.
-  if (assigned === null) mode = 'legacy'
+  // A failed read leaves the viewer with nothing rather than everything: with
+  // reach defined explicitly, a hiccup must never widen what someone sees.
+  // (It used to degrade to unrestricted.)
 
   const serviceIds = new Set<string>(mode === 'services' ? (assigned ?? []) : [])
 
@@ -200,8 +213,24 @@ export async function loadServiceScope(
 
   const visibleClientIds = new Set<string>()
   if (mode === 'services' && serviceIds.size > 0) {
-    for (const [clientId, svc] of clientServices) {
-      for (const id of svc) { if (serviceIds.has(id)) { visibleClientIds.add(clientId); break } }
+    // A client PINNED to a department (clients.department_id, set on the
+    // Access map) belongs to that department alone, whatever it buys — so a
+    // mixed client can be kept to one team. Unpinned clients go by what they
+    // buy. A failed read shows no clients rather than ignoring the pins.
+    const [pins, svcCats] = await Promise.all([
+      admin.from('clients').select('id, department_id'),
+      admin.from('services').select('id, category_id').in('id', [...serviceIds]),
+    ])
+    if (!pins.error && !svcCats.error) {
+      const myDepartments = new Set(((svcCats.data || []) as { category_id?: string | null }[])
+        .map(r => r.category_id).filter((c): c is string => !!c))
+      const pinOf = new Map(((pins.data || []) as { id: string; department_id?: string | null }[])
+        .filter(c => c.department_id).map(c => [c.id, c.department_id as string]))
+      for (const [clientId, svc] of clientServices) {
+        if (pinOf.has(clientId)) continue
+        for (const id of svc) { if (serviceIds.has(id)) { visibleClientIds.add(clientId); break } }
+      }
+      for (const [clientId, dept] of pinOf) if (myDepartments.has(dept)) visibleClientIds.add(clientId)
     }
   }
 
@@ -228,14 +257,15 @@ export function markUnconfiguredClients(scope: ServiceScope, clientIds: Iterable
 // ── Restriction active? ──────────────────────────────────────────────────────
 
 /**
- * True only when the viewer is genuinely restricted AND has assignments.
+ * True when the viewer is restricted to their assigned services.
  *
- * An employee with zero assigned services sees EVERYTHING (product decision):
- * a half-configured rollout must never lock anyone out. The Settings health
- * panel surfaces these people so the restriction can't be silently useless.
+ * Zero assigned services means seeing NOTHING but their own work (decided
+ * 2026-11-27, replacing the earlier "no assignments sees everything" rule):
+ * reach is defined explicitly, never by omission. The Settings health panel
+ * surfaces these people so they can be assigned.
  */
 export function isServiceRestricted(scope: ServiceScope): boolean {
-  return scope.mode === 'services' && scope.serviceIds.size > 0
+  return scope.mode === 'services'
 }
 
 // ── Pure filters (feature A) ─────────────────────────────────────────────────
@@ -247,9 +277,10 @@ export function scopeServiceList<T extends { id: string }>(rows: T[], scope: Ser
 
 export function scopeClientList<T extends { id: string }>(rows: T[], scope: ServiceScope): T[] {
   if (!isServiceRestricted(scope)) return rows
-  // Unconfigured clients stay visible — no commitments means "not set up yet",
-  // and hiding them would make them invisible AND unfixable.
-  return rows.filter(r => scope.visibleClientIds.has(r.id) || scope.unconfiguredClientIds.has(r.id))
+  // Only clients who buy one of the viewer's services. A client with nothing
+  // set up yet belongs to no one, so only people who see all clients (who
+  // set clients up) see it — it used to be shown to everyone restricted.
+  return rows.filter(r => scope.visibleClientIds.has(r.id))
 }
 
 /**
@@ -267,8 +298,8 @@ export function scopeRowsByService<T>(
   const keepIds = new Set(keep.ids ?? [])
   return rows.filter(row => {
     const serviceId = pick(row)
-    if (serviceId == null) return true                    // unclassified work stays visible
-    if (scope.serviceIds.has(serviceId)) return true
+    // Unclassified work is visible only to the people it belongs to (keep).
+    if (serviceId != null && scope.serviceIds.has(serviceId)) return true
     const ownId = keep.id?.(row)
     return ownId != null && keepIds.has(ownId)
   })
@@ -284,8 +315,8 @@ export function scopeRowsByClient<T>(
   const keepIds = new Set(keep.ids ?? [])
   return rows.filter(row => {
     const clientId = pick(row)
-    if (clientId == null) return true                     // internal Cirqle work
-    if (scope.visibleClientIds.has(clientId) || scope.unconfiguredClientIds.has(clientId)) return true
+    // Internal Cirqle work (no client) is visible only to the people it belongs to (keep).
+    if (clientId != null && scope.visibleClientIds.has(clientId)) return true
     const ownId = keep.id?.(row)
     return ownId != null && keepIds.has(ownId)
   })

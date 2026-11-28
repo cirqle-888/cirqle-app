@@ -2,6 +2,7 @@
 
 import { useState, useRef, useMemo } from 'react'
 import Link from 'next/link'
+import Header from '@/components/layout/header'
 import {
   Search, Plus, Upload, ImageIcon,
   X, Check, Loader2, Pencil, Users, ChevronDown, ChevronUp,
@@ -419,12 +420,14 @@ function ProductCard({
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function CatalogClient({
-  initialProducts, clients, categories, brands,
+  initialProducts, clients, categories, brands, pendingQueue = null,
 }: {
   initialProducts: any[]
   clients: { id: string; name: string }[]
   categories: string[]
   brands: string[]
+  /** The submissions waiting for review (page.tsx) — shown under the title, above the products. */
+  pendingQueue?: React.ReactNode
 }) {
   const [products, setProducts] = useState(initialProducts)
   const [search, setSearch] = useState('')
@@ -464,18 +467,14 @@ export default function CatalogClient({
   const totalActive = products.filter(p => p.status === 'active').length
 
   return (
+    // The top bar and the filters stay put; only the product grid scrolls.
+    // The column is exactly <main>'s height, so <main> itself never scrolls.
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="px-6 pt-6 pb-4 border-b border-border">
-        {/* pl-12 on mobile clears the fixed global sidebar hamburger. */}
-        <div className="flex items-start justify-between gap-4 mb-4 pl-12 md:pl-0">
-          <div>
-            <h1 className="text-xl font-bold flex items-center gap-2">
-              <Package className="w-5 h-5 text-violet-400" /> Product Catalog
-            </h1>
-            <p className="text-sm text-muted-foreground mt-0.5">{totalActive} active products · shared across all clients</p>
-          </div>
-          <div className="flex gap-2 shrink-0">
+      <Header
+        title="Product Catalog"
+        subtitle={`${totalActive} active products · shared across all clients`}
+        actions={
+          <>
             <Link
               href="/dashboard/catalog/import"
               className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-xl bg-secondary border border-border hover:bg-secondary/70 text-muted-foreground hover:text-foreground transition-colors"
@@ -488,9 +487,10 @@ export default function CatalogClient({
             >
               <Plus className="w-4 h-4" /> Add product
             </button>
-          </div>
-        </div>
-
+          </>
+        }
+      />
+      <div className="px-4 sm:px-6 py-4 border-b border-border">
         {/* Filters */}
         <div className="flex gap-2 flex-wrap">
           <div className="relative flex-1 min-w-48">
@@ -536,8 +536,10 @@ export default function CatalogClient({
         </div>
       </div>
 
-      {/* Product grid */}
-      <div className="flex-1 overflow-y-auto p-6">
+      {/* Product grid — the review queue scrolls with it, so a long queue can
+          never squeeze the grid out of the fixed-height column. */}
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6">
+        {pendingQueue}
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <Package className="w-12 h-12 text-muted-foreground/20 mb-4" />

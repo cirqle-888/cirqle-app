@@ -12,8 +12,9 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Megaphone, Loader2, ArrowLeft } from 'lucide-react'
+import { Megaphone, Loader2 } from 'lucide-react'
 import Link from 'next/link'
+import Header from '@/components/layout/header'
 import { PLATFORMS, CAMPAIGN_TYPES, STATUSES } from '@/lib/advertising/types'
 import { createAdProject } from '../actions'
 import BudgetFields, { emptyBudget, resolveBudget, type BudgetValue } from '../budget-fields'
@@ -139,16 +140,9 @@ export default function NewCampaignForm({ clients, services, servicePricing, ini
   const labelCls = 'block text-xs font-medium text-muted-foreground mb-1'
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8 space-y-6">
-      <div>
-        <Link href="/dashboard/advertising" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" /> Advertising
-        </Link>
-        <h1 className="text-xl font-semibold flex items-center gap-2 mt-2">
-          <Megaphone className="h-5 w-5 text-pink-500" /> New campaign
-        </h1>
-      </div>
-
+    <>
+    <Header title="New campaign" />
+    <div className="mx-auto max-w-2xl px-4 sm:px-6 py-6 space-y-6">
       {error && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-700">{error}</div>
       )}
@@ -262,5 +256,6 @@ export default function NewCampaignForm({ clients, services, servicePricing, ini
         </div>
       </form>
     </div>
+    </>
   )
 }

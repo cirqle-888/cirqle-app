@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { unitLockFor, unitTeamIds } from '@/lib/units/membership'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
@@ -31,13 +32,19 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
   if (!hasPermission(me, PERMS.REQUESTS_WORK_OWN) && !canManageTeam) redirect('/dashboard')
 
   const admin = createAdminClient()
+  // A business-unit team (lib/units) manages only its own people: a lead in
+  // Social Media never sees Cirqle Flyers' boards. null = not in a unit.
+  const unitTeam = await unitTeamIds(admin, me)
+  // Unit STAFF see their own board only, whatever their role allows.
+  const staffOnly = (await unitLockFor(admin, me)) === 'staff'
 
   // Team: everyone active with work on their board, busiest-late first.
   let team: { employeeId: string; cqid: string; open: number; overdue: number }[] = []
-  if (canManageTeam) {
+  if (canManageTeam && !staffOnly) {
     const { data: emps } = await admin.from('employees').select('id, cqid').eq('is_active', true).order('cqid')
     const today = toISODate(new Date())
-    const loads = await Promise.all(((emps ?? []) as { id: string; cqid: string }[]).map(async e => {
+    const people = ((emps ?? []) as { id: string; cqid: string }[]).filter(e => !unitTeam || unitTeam.has(e.id))
+    const loads = await Promise.all(people.map(async e => {
       const work = await loadMyWork(admin, e.id).catch(() => [])
       const open = work.filter(r => isPending(rowStageOf(r))).length
       const overdue = work.filter(r => isPending(rowStageOf(r)) && r.due_date && r.due_date < today).length
@@ -48,7 +55,7 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
   }
 
   const { for: forId } = await searchParams
-  const viewing = canManageTeam && forId && forId !== me.employeeId ? team.find(t => t.employeeId === forId)
+  const viewing = canManageTeam && !staffOnly && forId && forId !== me.employeeId && (!unitTeam || unitTeam.has(forId)) ? team.find(t => t.employeeId === forId)
     ?? await admin.from('employees').select('id, cqid').eq('id', forId).maybeSingle()
       .then(({ data }) => data ? { employeeId: data.id as string, cqid: data.cqid as string, open: 0, overdue: 0 } : null)
     : null
@@ -78,6 +85,8 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
         viewing={viewing ? { employeeId: viewing.employeeId, cqid: viewing.cqid } : null}
         myEmployeeId={me.employeeId}
         myCqid={me.cqid}
+        // Deleting is permanent, so admins only (both delete actions enforce it).
+        canDelete={me.isAdmin}
       />
       {!viewing && canPost && queue.length > 0 && (
         <div className="px-4 sm:px-6 pb-6">

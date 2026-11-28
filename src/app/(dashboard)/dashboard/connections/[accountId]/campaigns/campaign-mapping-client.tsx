@@ -3,9 +3,10 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
+import Header from '@/components/layout/header'
 import {
   Loader2, RefreshCw, Search, Check, X, EyeOff, Eye, ExternalLink,
-  AlertTriangle, ListChecks, ArrowLeft,
+  AlertTriangle,
 } from 'lucide-react'
 import { CIRQLE_CAMPAIGN_TYPES, metaObjectiveToCampaignType } from '@/lib/advertising/campaign-objective'
 import {
@@ -171,28 +172,18 @@ export function CampaignMappingClient({
   }
 
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div>
-        <Link href="/dashboard/connections" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-2">
-          <ArrowLeft className="h-3.5 w-3.5" /> Connections
-        </Link>
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-              <ListChecks className="h-6 w-6 text-pink-500" /> Map Campaigns
-            </h1>
-            <p className="text-muted-foreground mt-1 text-sm">
-              {account?.name ?? 'Ad account'} · {account?.account_id} · assign each campaign to a client, objective &amp; project.
-            </p>
-          </div>
-          <Button onClick={onDiscover} disabled={discovering}>
-            {discovering ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-            Discover campaigns
-          </Button>
-        </div>
-      </div>
-
+    <>
+    <Header
+      title="Map Campaigns"
+      subtitle={[account?.name ?? 'Ad account', account?.account_id].filter(Boolean).join(' · ')}
+      actions={
+        <Button onClick={onDiscover} disabled={discovering}>
+          {discovering ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+          Discover campaigns
+        </Button>
+      }
+    />
+    <div className="px-4 sm:px-6 py-6 space-y-5">
       {toast && (
         <div className={`rounded-lg border px-4 py-2 text-sm flex items-center gap-2 ${toast.type === 'success' ? 'border-green-300 bg-green-50 text-green-700' : 'border-red-300 bg-red-50 text-red-700'}`}>
           {toast.type === 'success' ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
@@ -362,19 +353,18 @@ export function CampaignMappingClient({
         </div>
       </div>
     </div>
+    </>
   )
 }
 
 function EmptyShell({ accountName, children }: { accountName?: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-4">
-      <Link href="/dashboard/connections" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="h-3.5 w-3.5" /> Connections
-      </Link>
-      <h1 className="text-2xl font-bold flex items-center gap-2"><ListChecks className="h-6 w-6 text-pink-500" /> Map Campaigns</h1>
-      <div className="text-sm text-muted-foreground">{accountName}</div>
-      <div className="rounded-xl border border-border bg-card p-6">{children}</div>
-    </div>
+    <>
+      <Header title="Map Campaigns" subtitle={accountName} />
+      <div className="px-4 sm:px-6 py-6">
+        <div className="rounded-xl border border-border bg-card p-6">{children}</div>
+      </div>
+    </>
   )
 }
 

@@ -16,6 +16,8 @@ import { usePresence } from '@/contexts/presence-context'
 import { LiveClock } from '@/components/layout/live-clock'
 import { useLiquidGlass } from '@/components/ui/use-liquid-glass'
 import { ProfileActions, ChangePasswordModal } from '@/components/layout/sidebar'
+import { ModuleTabs, useModuleTabs } from '@/components/layout/module-tabs'
+import { crumbsFor } from '@/lib/breadcrumbs'
 
 interface HeaderProps {
   title: string
@@ -29,65 +31,9 @@ interface HeaderProps {
   crumbLabel?: string
 }
 
-const ROUTE_LABELS: Record<string, string> = {
-  'prompt-studio': 'Prompt Studio',
-  dashboard:     'Dashboard',
-  tasks:         'Tasks',
-  contributions: 'Contributions',
-  invoices:      'Invoices',
-  packages:      'Packages',
-  connections:   'Connections',
-  feed:          'Feed Planner',
-  assets:        'Asset Assignment',
-  marketing:     'Marketing',
-  'cirqle-accounts': 'Cirqle Brands',
-  portfolio:     'Website Portfolio',
-  quotations:    'Quotations',
-  cashbook:      'Cash Book',
-  recurring:     'Recurring Expenses',
-  clients:       'Clients',
-  ranking:       'Client Ranking',
-  capture:       'AI Capture',
-  'pricing-matrix': 'Pricing Matrix',
-  'quote-planner': 'Quote Planner',
-  'client-analytics': 'Client Analytics',
-  partners:      'Business Partners',
-  payroll:       'HR & Payroll',
-  reports:       'Reports',
-  workspace:     'My Planner',
-  'role-earnings': 'Earnings by Role',
-  import:        'Bulk Import',
-  settings:      'Settings',
-  finance:       'Finance',
-  'profit-sharing': 'Profit Sharing',
-  investors:     'Investors & Capital',
-  periods:       'Profit Periods',
-  departments:   'Departments',
-  settlements:   'Settlements',
-  devices:       'Device Valuation',
-  history:       'Audit History',
-  health:        'Business Health',
-}
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-function Breadcrumbs({ isEmployee, crumbLabel }: { isEmployee: boolean; crumbLabel?: string }) {  
+function Breadcrumbs({ isEmployee, crumbLabel }: { isEmployee: boolean; crumbLabel?: string }) {
   const pathname = usePathname()
-  // e.g. /dashboard/tasks  →  ['dashboard', 'tasks']
-  const segments = pathname.split('/').filter(Boolean)
-
-  // Build cumulative hrefs
-  const crumbs = segments.map((seg, i) => {
-    const isLast = i === segments.length - 1
-    const fallback = UUID_RE.test(seg)
-      ? 'Details'                                  // never print a raw record id
-      : ROUTE_LABELS[seg] ?? seg.charAt(0).toUpperCase() + seg.slice(1)
-    return {
-      label: isLast && crumbLabel ? crumbLabel : fallback,
-      href:  '/' + segments.slice(0, i + 1).join('/'),
-      isLast,
-    }
-  })
+  const crumbs = crumbsFor(pathname, crumbLabel)
 
   // Only show breadcrumbs when there's more than one level (not just /dashboard)
   if (crumbs.length <= 1) return null
@@ -143,7 +89,11 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
   const { mine, available: presenceAvailable } = usePresence()
   const router = useRouter()
   const isEmployee = !user.isAdmin
-  
+  // The module's tab bar (Cash Book › Recurring, Invoices › Statements…), on
+  // every page of a group declared in lib/nav-sections. It already says where
+  // you are and leads back to the module, so the breadcrumb steps aside.
+  const moduleTabs = useModuleTabs()
+
   const [profileOpen, setProfileOpen] = useState(false)
 
   // ── Page actions: beside the title when they fit, their own row when not ──
@@ -163,6 +113,20 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
   }, [ref])
   // Liquid glass: content scrolling up under the bar bends along its bottom edge.
   useLiquidGlass(barRef, { bezel: 10, strength: 12 })
+  // Publish this bar's height as --page-header-h, so whatever sticks BELOW it
+  // (a timeline's day headings, a full-height split view) can sit under it
+  // instead of sliding beneath it or guessing a pixel figure that is wrong
+  // as soon as a breadcrumb or a tab row comes or goes.
+  useEffect(() => {
+    const bar = barRef.current
+    if (!bar) return
+    const root = document.documentElement
+    const publish = () => root.style.setProperty('--page-header-h', `${bar.offsetHeight}px`)
+    publish()
+    const ro = new ResizeObserver(publish)
+    ro.observe(bar)
+    return () => { ro.disconnect(); root.style.removeProperty('--page-header-h') }
+  }, [])
   const hasActions = !!actions
   useEffect(() => {
     const bar = barRef.current
@@ -190,6 +154,9 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
     return () => ro.disconnect()
   }, [hasActions])
   const [showPwdModal, setShowPwdModal] = useState(false)
+  // Buttons that don't fit beside the title go on the module's tab row (tabs
+  // left, buttons right) instead of adding a third row to the bar.
+  const shareTabRow = stackActions && hasActions && !!moduleTabs
 
   // Close on any click outside, and on Escape.
   //
@@ -236,9 +203,12 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
     router.push('/dashboard/capture')
   }
 
+  const pathname = usePathname() ?? ''
   const globalActions = (
     <>
-      {can('capture.use') && (
+      {/* Not on AI Capture itself: there it would only reopen the page you
+          are on, which reads the clipboard once, when it first loads. */}
+      {can('capture.use') && pathname !== '/dashboard/capture' && (
       <button
         type="button"
         onClick={() => void openAiCapture()}
@@ -252,10 +222,14 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
       <LiveClock className="mr-1" />
       {/* Full search bar only at xl: below that the sidebar leaves too little
           room for it beside a page's own actions, and the icon does the same job. */}
-      <CommandPaletteTrigger className="hidden xl:flex w-64" />
+      <CommandPaletteTrigger className="hidden xl:flex w-40 2xl:w-64" />
       <CommandPaletteTrigger className="xl:hidden" isCollapsed={true} />
       
-      <AppLauncherTrigger />
+      {/* Phones have the bottom bar's More, which opens the same full menu —
+          a second way in, at the top, only crowded the title. */}
+      <div className="hidden sm:flex">
+        <AppLauncherTrigger />
+      </div>
       {/* Toggles the app-wide comms widget on its Chat tab — the same surface
           as the corner launcher, reachable from the top bar on every page. */}
       {/* Screen-share control: one click (or Cmd/Ctrl+Shift+H) blurs every
@@ -345,23 +319,34 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
   return (
     <div
       ref={setBarRef}
-      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-x-3 gap-y-2 sm:gap-x-4 ${stackActions ? 'sm:flex-wrap' : ''} pr-3 md:px-5 liquid-glass liquid-glass-bar-top sticky top-0 z-30 ${isEmployee ? 'pl-3 py-2 sm:pl-16 sm:py-3.5' : 'pl-3 sm:pl-16 py-2.5 sm:py-3.5'}`}
+      // Left padding matches the page body below it (px-4 / sm:px-6). It was
+      // sm:pl-16 — room for a top-left menu button that no longer exists — so
+      // every title sat 40px to the right of the content it belongs to.
+      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-x-3 gap-y-2 sm:gap-x-4 ${stackActions || moduleTabs ? 'sm:flex-wrap' : ''} px-4 sm:px-6 liquid-glass liquid-glass-bar-top sticky top-0 z-30 ${moduleTabs ? 'pt-2.5 sm:pt-3.5 pb-0' : isEmployee ? 'py-2 sm:py-3.5' : 'py-2.5 sm:py-3.5'}`}
     >
       <div className="flex items-center justify-between w-full sm:w-auto sm:flex-1 min-w-0 sm:min-w-[10rem] gap-2">
         {/* Left: Branding & Title */}
         <div className="flex flex-col min-w-0 flex-1 justify-center">
-          <Breadcrumbs isEmployee={isEmployee} crumbLabel={crumbLabel} />
+          {!moduleTabs && <Breadcrumbs isEmployee={isEmployee} crumbLabel={crumbLabel} />}
           <div className="flex items-center gap-2 min-w-0">
             {isEmployee && (
               <div className="w-7 h-7 rounded-lg gradient-bg flex items-center justify-center shrink-0 shadow-sm sm:hidden">
                 <span className="text-white font-bold text-xs">C</span>
               </div>
             )}
-            <h1 className="text-lg md:text-xl font-semibold text-foreground truncate tracking-tight">{title}</h1>
+            {title
+              ? <h1 className="text-lg md:text-xl font-semibold text-foreground truncate tracking-tight">{title}</h1>
+              // A loading screen draws the real bar (so nothing jumps when the
+              // page arrives) before it knows the title: a placeholder instead.
+              : <span aria-hidden className="h-5 w-32 rounded bg-secondary/60 animate-pulse" />}
             {subtitle && (
               // flex-1 basis-0 = subtitle only ever takes LEFTOVER space, so it
               // can never squeeze the title into truncating while room remains.
-              <div className="text-sm text-muted-foreground truncate hidden lg:block tracking-tight flex-1 min-w-0">{subtitle}</div>
+              // And it shows only when that space is worth reading: cut to
+              // "Match…" or "Tas…" it was noise (container query, 14rem).
+              <div className="@container hidden lg:block flex-1 min-w-0">
+                <div className="text-sm text-muted-foreground truncate tracking-tight hidden @min-[14rem]:block">{subtitle}</div>
+              </div>
             )}
           </div>
         </div>
@@ -376,7 +361,12 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
       {actions && (
         // Phones, and any width where they don't fit beside the title: a row
         // of their own that wraps, so no button is ever off-screen.
-        <div ref={actionsRef} className={`flex flex-wrap items-center gap-2 w-full min-w-0 [&>*]:shrink-0 ${stackActions ? 'sm:order-last sm:basis-full sm:justify-end' : 'sm:w-auto sm:flex-nowrap sm:shrink-0'}`}>
+        // Pages often pass their buttons as one wrapper, which then could not
+        // wrap on a phone (Departments & Brands ran 150px off the screen);
+        // there it may wrap its own buttons.
+        <div ref={actionsRef} className={`flex flex-wrap items-center gap-2 w-full min-w-0 [&>*]:shrink-0 max-sm:[&>*]:max-w-full max-sm:[&>*]:flex-wrap ${shareTabRow
+          ? 'sm:order-3 sm:ml-auto sm:w-auto sm:max-w-full sm:justify-end sm:self-end sm:pb-1.5'
+          : stackActions ? 'sm:order-last sm:basis-full sm:justify-end' : 'sm:w-auto sm:flex-nowrap sm:shrink-0'}`}>
           {actions}
         </div>
       )}
@@ -385,6 +375,18 @@ const Header = forwardRef<HTMLDivElement, HeaderProps>(function Header(
       <div ref={globalsRef} className="hidden sm:flex items-center gap-1.5 sm:gap-2 shrink-0 border-l border-border/60 pl-2 sm:pl-4">
         {globalActions}
       </div>
+
+      {/* Forces the shared tab row onto a new line under title + globals. */}
+      {shareTabRow && <div aria-hidden className="hidden sm:block sm:order-1 sm:basis-full sm:h-0 sm:-mt-2" />}
+
+      {/* Last row, its underline on the bar's bottom edge: full width, or
+          beside the page buttons (min width so buttons wrap before the tabs
+          are squeezed away). */}
+      {moduleTabs && (
+        <div className={`order-last w-full min-w-0 ${shareTabRow ? 'sm:order-2 sm:w-auto sm:flex-1 sm:basis-0 sm:min-w-[16rem] sm:self-end' : 'sm:basis-full'}`}>
+          <ModuleTabs set={moduleTabs} />
+        </div>
+      )}
 
       {showPwdModal && <ChangePasswordModal onClose={() => setShowPwdModal(false)} />}
     </div>

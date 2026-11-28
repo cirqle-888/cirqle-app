@@ -20,8 +20,10 @@ import { CampaignReviewTools } from '@/components/reporting/campaign-review-tool
 import { ReportComposer, type ComposerProject } from '@/components/reporting/report-composer'
 import type { ClientReportPreferences } from '@/lib/reporting/preferences'
 import { usePrivacy } from '@/contexts/privacy-context'
+import Header from '@/components/layout/header'
+import { OverflowMenu } from '@/components/ui/overflow-menu'
 import {
-  Megaphone, ArrowLeft, Loader2, Plus, Check, Trash2, FileText, ExternalLink,
+  Loader2, Plus, Check, Trash2, FileText, ExternalLink,
   Download, Calendar, CheckCircle, XCircle, Clock, Settings2, RefreshCw,
 } from 'lucide-react'
 import {
@@ -227,126 +229,125 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
   const def = result.definition
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 space-y-6">
-      {/* Header */}
-      <div>
-        <Link href="/dashboard/advertising" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" /> Advertising
-        </Link>
-        <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold flex items-center gap-2">
-              <Megaphone className="h-5 w-5 text-pink-500" /> {project.campaign_name}
-              {project.archived_at && (
-                <span className="ml-2 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 px-2 py-0.5 text-xs font-semibold">
-                  Archived
-                </span>
-              )}
-              <FavoriteToggle
-                entityType="campaign"
-                entityId={project.id}
-                href={`/dashboard/advertising/${project.id}`}
-                label={project.campaign_name}
-                iconKey="Megaphone"
-              />
-              <DiscussButton entityType="project" entityId={project.id} variant="icon" label="Discuss this campaign" panelTitle={project.campaign_name} />
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              {adRefLabel(project.id)} · {project.client?.name || (brands.length > 0
-                ? (brands.find(b => b.id === project.brand_id) ?? brands.find(b => b.isDefault))?.name ?? 'Cirqle'
-                : project.page ? 'Cirqle' : 'No client')}
-              {project.page ? ` · ${pageLabel(project.page)}` : ''} · {PLATFORM_LABEL[project.platform] || project.platform}
-              {project.campaign_type ? ` · ${CAMPAIGN_TYPE_LABEL[project.campaign_type] || project.campaign_type}` : ''}
-            </p>
-            {/* The campaign in one line: objective result, cost, dates, freshness. */}
-            <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-              {def.metric ? (
-                <span><strong className="tabular-nums">{num(result.count)}</strong> {def.label.toLowerCase()}
-                  {result.cost != null && <> · <strong className="tabular-nums">{inr(result.cost, 2)}</strong> {def.costLabel.toLowerCase().replace('cost per', 'per')}</>}
-                </span>
-              ) : (
-                <span className="text-muted-foreground">{def.unavailableReason ?? 'No result metric for this objective'}</span>
-              )}
-              <span className="text-muted-foreground">
-                <Calendar className="mr-1 inline h-3.5 w-3.5" />{project.start_date || '—'} → {project.end_date || 'ongoing'}
-              </span>
-              <span className={fresh.stale ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}>
-                <RefreshCw className="mr-1 inline h-3.5 w-3.5" />{fresh.text}
-              </span>
-              {platform?.adsManagerUrl && (
-                <a href={platform.adsManagerUrl} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-pink-600 hover:underline dark:text-pink-400">
-                  Open in Ads Manager <ExternalLink className="h-3.5 w-3.5" />
-                </a>
-              )}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Two statuses, kept apart: Meta's delivery status (read-only,
-                as last seen by discovery) and Cirqle's own workflow status. */}
-            {platform?.status && (
-              <span
-                title={platform.statusSeenAt ? `Status on ${PLATFORM_LABEL[platform.provider ?? ''] || platform.provider} as of ${new Date(platform.statusSeenAt).toLocaleString('en-IN')}` : undefined}
-                className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted-foreground"
-              >
-                {PLATFORM_LABEL[platform.provider ?? ''] || 'Platform'}: {platform.status.toLowerCase().replace(/_/g, ' ')}
-              </span>
-            )}
-            <button
-              onClick={() => setShowSettings(v => !v)}
-              aria-expanded={showSettings}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-secondary"
+    <>
+    <Header
+      title={project.campaign_name}
+      crumbLabel={project.campaign_name}
+      actions={
+        <>
+          {project.archived_at && (
+            <span className="rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 px-2 py-0.5 text-xs font-semibold">
+              Archived
+            </span>
+          )}
+          <FavoriteToggle
+            entityType="campaign"
+            entityId={project.id}
+            href={`/dashboard/advertising/${project.id}`}
+            label={project.campaign_name}
+            iconKey="Megaphone"
+          />
+          <DiscussButton entityType="project" entityId={project.id} variant="icon" label="Discuss this campaign" panelTitle={project.campaign_name} />
+          {/* Two statuses, kept apart: Meta's delivery status (read-only,
+              as last seen by discovery) and Cirqle's own workflow status. */}
+          {platform?.status && (
+            <span
+              title={platform.statusSeenAt ? `Status on ${PLATFORM_LABEL[platform.provider ?? ''] || platform.provider} as of ${new Date(platform.statusSeenAt).toLocaleString('en-IN')}` : undefined}
+              className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted-foreground"
             >
-              <Settings2 className="h-3.5 w-3.5" /> Sync &amp; connection
-            </button>
-            {perms.edit ? (
-              <select
-                value={status}
-                onChange={e => onStatus(e.target.value)}
-                className={`rounded-full border px-3 py-1 text-xs font-semibold outline-none ${AD_STATUS_CHIP[status] || ''}`}
-              >
-                {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
-            ) : (
-              <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${AD_STATUS_CHIP[status] || ''}`}>
-                {STATUS_LABEL[status] || status}
-              </span>
-            )}
-            {perms.edit && (
-              <>
-                <button
-                  onClick={() => project.archived_at ? void onToggleArchive() : setConfirmPrompt({
+              {PLATFORM_LABEL[platform.provider ?? ''] || 'Platform'}: {platform.status.toLowerCase().replace(/_/g, ' ')}
+            </span>
+          )}
+          <button
+            onClick={() => setShowSettings(v => !v)}
+            aria-expanded={showSettings}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-secondary"
+          >
+            <Settings2 className="h-3.5 w-3.5" /> Sync &amp; connection
+          </button>
+          {perms.edit ? (
+            <select
+              value={status}
+              onChange={e => onStatus(e.target.value)}
+              className={`rounded-full border px-3 py-1 text-xs font-semibold outline-none ${AD_STATUS_CHIP[status] || ''}`}
+            >
+              {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          ) : (
+            <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${AD_STATUS_CHIP[status] || ''}`}>
+              {STATUS_LABEL[status] || status}
+            </span>
+          )}
+          {/* Archive and Delete sit behind "…": a red Delete button in the
+              top bar was one slip from the everyday controls beside it. Both
+              still ask before doing anything. */}
+          {perms.edit && (
+            <OverflowMenu
+              label="Campaign actions"
+              items={[
+                {
+                  label: project.archived_at ? 'Unarchive campaign' : 'Archive campaign',
+                  icon: project.archived_at ? ArchiveRestore : Archive,
+                  disabled: archiving,
+                  onClick: () => project.archived_at ? void onToggleArchive() : setConfirmPrompt({
                     title: `Archive "${project.campaign_name}"?`,
                     body: 'The campaign drops out of active lists and stops appearing in day-to-day views. Its spend, metrics and invoices are untouched, and you can unarchive it at any time.',
                     confirmLabel: 'Archive campaign',
                     onConfirm: () => { void onToggleArchive() },
-                  })}
-                  disabled={archiving}
-                  title={project.archived_at ? 'Unarchive campaign' : 'Archive campaign'}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-secondary disabled:opacity-50 transition-colors"
-                >
-                  {archiving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : project.archived_at ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
-                  {project.archived_at ? 'Unarchive' : 'Archive'}
-                </button>
-                <button
-                  onClick={() => setConfirmPrompt({
+                  }),
+                },
+                {
+                  label: 'Delete campaign',
+                  icon: Trash2,
+                  danger: true,
+                  separatorBefore: true,
+                  disabled: deleting,
+                  onClick: () => setConfirmPrompt({
                     title: `Delete "${project.campaign_name}"?`,
                     body: 'The campaign and everything recorded against it — daily performance, notes and reports — stop being visible anywhere. This cannot be undone; archive it instead if you only want it out of the way.',
                     confirmLabel: 'Delete campaign',
                     danger: true,
                     onConfirm: () => { void onDelete() },
-                  })}
-                  disabled={deleting}
-                  title="Delete campaign"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-500/20 dark:text-red-400 disabled:opacity-50 transition-colors"
-                >
-                  {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                  Delete
-                </button>
-              </>
-            )}
-          </div>
-        </div>
+                  }),
+                },
+              ]}
+            />
+          )}
+        </>
+      }
+    />
+    <div className="mx-auto max-w-5xl px-4 sm:px-6 py-6 space-y-6">
+      {/* The campaign at a glance: who and where, then its objective result,
+          cost, dates and freshness in one line. */}
+      <div>
+        <p className="text-sm text-muted-foreground">
+          {adRefLabel(project.id)} · {project.client?.name || (brands.length > 0
+            ? (brands.find(b => b.id === project.brand_id) ?? brands.find(b => b.isDefault))?.name ?? 'Cirqle'
+            : project.page ? 'Cirqle' : 'No client')}
+          {project.page ? ` · ${pageLabel(project.page)}` : ''} · {PLATFORM_LABEL[project.platform] || project.platform}
+          {project.campaign_type ? ` · ${CAMPAIGN_TYPE_LABEL[project.campaign_type] || project.campaign_type}` : ''}
+        </p>
+        <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          {def.metric ? (
+            <span><strong className="tabular-nums">{num(result.count)}</strong> {def.label.toLowerCase()}
+              {result.cost != null && <> · <strong className="tabular-nums">{inr(result.cost, 2)}</strong> {def.costLabel.toLowerCase().replace('cost per', 'per')}</>}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">{def.unavailableReason ?? 'No result metric for this objective'}</span>
+          )}
+          <span className="text-muted-foreground">
+            <Calendar className="mr-1 inline h-3.5 w-3.5" />{project.start_date || '—'} → {project.end_date || 'ongoing'}
+          </span>
+          <span className={fresh.stale ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}>
+            <RefreshCw className="mr-1 inline h-3.5 w-3.5" />{fresh.text}
+          </span>
+          {platform?.adsManagerUrl && (
+            <a href={platform.adsManagerUrl} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-pink-600 hover:underline dark:text-pink-400">
+              Open in Ads Manager <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          )}
+        </p>
       </div>
 
       {showSettings && (
@@ -420,6 +421,7 @@ export default function ProjectDetailClient({ project, metrics, tasks, notes, in
         />
       )}
     </div>
+    </>
   )
 }
 

@@ -15,6 +15,8 @@ import {
 } from "@/lib/prompt-studio/style";
 import PromptStudioClient from "./prompt-studio-client";
 import { loadDepartmentClientScope, scopeClientsByDepartment } from "@/lib/scope/department-clients";
+import { unitLockFor } from "@/lib/units/membership";
+import { ownTaskClientIds } from "@/lib/units/work-filter";
 
 export const dynamic = "force-dynamic";
 
@@ -99,8 +101,14 @@ export default async function PromptStudioPage({
   // Departments); admins see every client. Holding prompt_studio.manage does
   // NOT widen it — the people who use Prompt Studio day to day hold it, so it
   // would cancel the restriction for exactly them. See lib/scope/department-clients.
-  const deptScope = await loadDepartmentClientScope(db, me);
-  const visibleClients = scopeClientsByDepartment(clients.data as StudioClient[], deptScope);
+  const [deptScope, unitLock] = await Promise.all([loadDepartmentClientScope(db, me), unitLockFor(db, me)]);
+  // Unit STAFF get no clients from their unit — only those of the tasks given
+  // to them, so they can still build prompts for their own work.
+  const staffClients = unitLock === "staff" && me?.employeeId ? await ownTaskClientIds(db, me.employeeId) : null;
+  const byDepartment = scopeClientsByDepartment(clients.data as StudioClient[], deptScope);
+  const inDepartment = new Set(byDepartment.map((c) => c.id));
+  const visibleClients = byDepartment
+    .concat(staffClients ? (clients.data as StudioClient[]).filter((c) => staffClients.has(c.id) && !inDepartment.has(c.id)) : []);
   const visibleIds = new Set(visibleClients.map((c) => c.id));
   const visibleCards = (cards.data as SavedCard[]).filter(
     (c) => !deptScope.restricted || visibleIds.has(c.client_id),

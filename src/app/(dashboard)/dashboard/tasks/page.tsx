@@ -5,7 +5,7 @@ import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility, stripTaskListPricing, userCanSee } from '@/lib/permissions/strip'
 import { TASK_COLUMNS_NO_PRICING, TASK_JOINS } from '@/lib/tasks/select-columns'
 import { PERMS } from '@/lib/permissions/keys'
-import { resolveTaskVisibilityMode, fetchEmployeeServiceIds, filterTasksByVisibility } from '@/lib/tasks/visibility'
+import { filterTasksByVisibility } from '@/lib/tasks/visibility'
 import { matchesTaskRef } from '@/lib/navigation/focus-record'
 import { loadUnitScope, scopeTasksByUnit, unitTaskIdsFrom } from '@/lib/scope/unit-scope'
 import { loadServiceScope } from '@/lib/scope/service-scope'
@@ -299,7 +299,11 @@ export default async function TasksPage({
   // Service-scoped task visibility (tasks.view_by_service). 'services' viewers
   // only receive tasks of their assigned services plus tasks they worked on —
   // filtered server-side below so hidden tasks never reach the client state.
-  const visibilityMode = resolveTaskVisibilityMode(me)
+  // Whose work this viewer sees: the shared service scope, which also carries
+  // business-unit and brand confinement and category assignments (it used to
+  // read the designation and direct assignments only, so a unit team still
+  // got every unit's tasks here).
+  const taskScopeP = loadServiceScope(supabase, me, 'tasks')
 
   // Fetch tasks via pagination (bypasses Supabase's 1000-row response cap)
   // in parallel with all the smaller reference-data queries, including the
@@ -367,9 +371,7 @@ export default async function TasksPage({
     getCompanySettings(),
     // Services assigned to the viewer (employee_services) — only needed when
     // their designation restricts task visibility by service.
-    visibilityMode === 'services' && me?.employeeId
-      ? fetchEmployeeServiceIds(supabase, me.employeeId)
-      : Promise.resolve([] as string[]),
+    taskScopeP.then(s => [...s.serviceIds]),
     // Org-unit task visibility (tasks.view_by_unit). Short-circuits without a
     // query for every viewer who isn't unit-scoped.
     loadUnitScope(supabase, me, 'tasks'),
@@ -433,7 +435,7 @@ export default async function TasksPage({
     // which PEOPLE exist for you. Two dependent reads, chained inside one
     // slot so the second starts the moment the first lands. Same fail-open
     // contract as the task filter: null = no narrowing.
-    loadServiceScope(supabase, me, 'tasks').then(scope => visibleEmployeeIds(supabase, scope)),
+    taskScopeP.then(scope => visibleEmployeeIds(supabase, scope)),
     // Departments, for the admin-only Department filter (see the comment where
     // they are passed to the client). Empty for everyone else.
     isAdmin
@@ -455,6 +457,7 @@ export default async function TasksPage({
   // their unit-mates has history on. Ids come from the assignment graph
   // already fetched above — no extra query. No-op when the viewer isn't
   // unit-scoped, or when their unit maps no revenue at all.
+  const visibilityMode = (await taskScopeP).mode
   const unitTaskIds = unitTaskIdsFrom(unitScope, [
     (taskAssignmentsRes.data || []) as any[],
     (taskGroupAssignmentsRes.data || []) as any[],
@@ -546,9 +549,9 @@ export default async function TasksPage({
   // service names ("Offer Flyer", "A3 Offer Flyer", …) in the dropdowns, and
   // could file a task against them.
   //
-  // Mirrors filterTasksByVisibility EXACTLY, including its no-lockout rule:
-  // only narrows in 'services' mode, and an employee with zero assignments
-  // keeps the full list rather than being left with an empty picker.
+  // Mirrors filterTasksByVisibility EXACTLY: narrows in 'services' mode, and
+  // an employee with zero assignments gets an empty picker (reach is explicit
+  // since 2026-11-27 — it used to be the full list).
   //
   // Safe for display: task rows render task.service?.name, embedded by the
   // server join, so a task whose service falls outside the scope still shows
@@ -559,8 +562,8 @@ export default async function TasksPage({
   // in the Assignee filter — a designer from another department they have no
   // working relationship with.
   //
-  // Same fail-open contract as the task filter: null = no narrowing, which is
-  // what an admin and a half-configured account both get.
+  // Same contract as the task filter: null = no narrowing (admins, View all);
+  // someone with nothing assigned sees only themselves.
   const canRevealNames = isAdmin || userCanSee(me, PERMS.EMPLOYEES_REVEAL_NAMES)
   const scopedEmployees = stripEmployeeNames(
     scopeEmployeeList((employeesRes.data || []) as { id: string; name?: string | null }[], visibleEmpIds),
@@ -571,7 +574,7 @@ export default async function TasksPage({
   // supabase-js cannot type statically.
   const allServices = (servicesRes.data || []) as { id: string; name: string; category_id?: string | null }[]
   const scopedServices =
-    visibilityMode === 'services' && myServiceIds.length > 0
+    visibilityMode === 'services'
       ? allServices.filter(s => myServiceIds.includes(s.id))
       : allServices
 
@@ -610,8 +613,8 @@ export default async function TasksPage({
   // page exactly as it was.
   return (
     <>
-    {vis.tasksPricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
     <TasksClient
+      notice={vis.tasksPricing ? <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} /> : null}
       promotionRequest={promotionRequest}
       promotionSocialItem={promotionSocialItem}
       requestRefByTaskId={requestRefByTaskId}

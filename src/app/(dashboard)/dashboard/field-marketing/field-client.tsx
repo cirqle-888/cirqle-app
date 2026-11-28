@@ -306,20 +306,24 @@ export default function FieldClient({
         title="Field Marketing"
         subtitle="Direct marketing on the map — visits, follow-ups and coverage"
         actions={
+          // One filled primary (Quick Visit, from lg) plus Add place; the rest
+          // are behind the toolbar's "…". Below lg the bottom bar carries the
+          // five field actions, so Locate me stays a button there instead.
           <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={locateMe} className="lg:hidden"><LocateFixed className="w-4 h-4 mr-1.5" />Locate me</Button>
+            {canManage && (
+              <Button size="sm" variant="secondary" onClick={addMode ? cancelAdd : beginAdd}>
+                {addMode ? <><X className="w-4 h-4 mr-1.5" />Cancel</> : <><Plus className="w-4 h-4 mr-1.5" />Add place</>}
+              </Button>
+            )}
             <FieldToolbar
               onNearby={() => setPanel('nearby')}
               onNextBest={() => setPanel('nextbest')}
               onPlan={() => setPanel('plan')}
               onOnTheWay={() => setPanel('ontheway')}
               onQuick={() => setPanel('quickpick')}
+              moreItems={[{ label: 'Locate me', icon: LocateFixed, onClick: locateMe, separatorBefore: true }]}
             />
-            <Button size="sm" variant="secondary" onClick={locateMe}><LocateFixed className="w-4 h-4 mr-1.5" />Locate me</Button>
-            {canManage && (
-              <Button size="sm" onClick={addMode ? cancelAdd : beginAdd}>
-                {addMode ? <><X className="w-4 h-4 mr-1.5" />Cancel</> : <><Plus className="w-4 h-4 mr-1.5" />Add place</>}
-              </Button>
-            )}
           </div>
         }
       />
@@ -404,8 +408,10 @@ export default function FieldClient({
           )}
         </div>
 
-        {/* Map + list */}
-        <div className="grid lg:grid-cols-[minmax(0,1fr)_400px] gap-4">
+        {/* Map + list. grid-cols-1 at base: without it the phone's single
+            column sized to the map tiles' width and the page scrolled
+            sideways by 750px. */}
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px] gap-4">
           {/* `isolate` traps Leaflet's internal z-indexes (panes 400, controls
               1000) inside this card's own stacking context — without it they
               leak into the page root and paint OVER modal overlays (z-50/60),

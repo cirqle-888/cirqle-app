@@ -62,7 +62,7 @@ export default function HealthClient({ ownerCheck, ownerCheckLines, ownerCheckIn
 
   return (
     <div className="min-h-screen">
-      <Header title="Business Health Center" subtitle="Cash, collections, client risk, and whether your automations are actually running" />
+      <Header title="Business Health" subtitle="Cash, collections, client risk, and whether your automations are actually running" />
       <div className="px-4 sm:px-6 lg:px-8 pb-16 max-w-6xl mx-auto mt-2 space-y-6">
 
         <OwnerCheckPanel check={ownerCheck} lines={ownerCheckLines} incomplete={ownerCheckIncomplete} amt={amt} />
