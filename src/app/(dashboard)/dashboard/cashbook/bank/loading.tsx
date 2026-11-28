@@ -1,8 +1,11 @@
+import Header from '@/components/layout/header'
+
 export default function BankReconciliationLoading() {
   return (
+    <>
+      {/* The real top bar, so nothing jumps when the page arrives. */}
+      <Header title="Bank Reconciliation" />
     <div className="space-y-4 p-4 md:p-6">
-      <div className="h-7 w-56 animate-pulse rounded bg-secondary/60" />
-      <div className="h-px bg-border" />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="h-20 animate-pulse rounded-xl border border-border bg-card"
@@ -20,5 +23,6 @@ export default function BankReconciliationLoading() {
         ))}
       </div>
     </div>
+    </>
   )
 }

@@ -18,6 +18,7 @@
 
 import { Suspense, useState, useMemo, useCallback, use } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { matchesDateFilter, getDateFilterLabel } from '@/components/ui/date-filter'
 import { sliceView, type AnalyticsView } from '@/lib/analytics/view'
 import { dateFilterWindow } from '@/lib/analytics/window'
@@ -31,7 +32,7 @@ import {
 import { usePrivacy } from '@/contexts/privacy-context'
 import {
   fmt, fmtFull, fmtDate, daysLate, daysToGo, getPeriodKey, getPeriodLabel,
-  StatusBadge, IncomeOutflowBar, JobsDoneBar, DashboardTrendGraph,
+  StatusBadge, DashboardTrendGraph,
   WEEKDAY, MONTH_NAMES, FULL_MONTHS,
 } from './dashboard-utils'
 import type { Granularity, PulseTab, DrawerType } from './dashboard-utils'
@@ -90,6 +91,7 @@ export default function DashboardAnalytics({
   const pendingPay        = use(pendingPayPromise)
 
   const f = displayFull ? fmtFull : fmt
+  const router = useRouter()
 
   const { dn } = usePrivacy()
   const [pulseTab, setPulseTab] = useState<PulseTab>('trends')
@@ -346,6 +348,20 @@ export default function DashboardAnalytics({
     return { tasks: scoped.taskCount, creatives: scoped.creativeCount }
   }, [scoped])
 
+  // The days the window really covers, up to today. "Per Day" used to divide
+  // by a flat 30 for any filter (so "this week" read ~4× too low) and by 365
+  // with none, while the data then spans up to 36 months — and called that
+  // "this year". This month on the 9th is 9 days; no filter is the span the
+  // data covers.
+  const productionDays = useMemo(() => {
+    const w = dateFilterWindow(dateFilter)
+    const today = todayISO()
+    const from = w?.from ?? view.days.reduce((min, d) => (d.date < min ? d.date : min), today)
+    const to = w && w.to < today ? w.to : today
+    const ms = Date.parse(`${to}T12:00:00`) - Date.parse(`${from}T12:00:00`)
+    return Math.max(1, Math.round(ms / 86_400_000) + 1)
+  }, [dateFilter, view])
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <>
@@ -356,7 +372,10 @@ export default function DashboardAnalytics({
         <KpiCard label="Bank Balance"    value={f(stats.bankBalance)}        icon={<TrendingUp className="w-3.5 h-3.5"/>}  color={stats.bankBalance >= 0 ? 'teal' : 'red'} sub="net cash" />
         <KpiCard label="Outstanding"     value={f(stats.outstanding)}        icon={<Clock className="w-3.5 h-3.5"/>}       color={stats.outstanding > 0 ? 'orange' : 'green'} sub={`${f(stats.outstandingThisMonth)} this month`} />
         <KpiCard label="Overdue"         value={f(stats.overdueAmount)}      icon={<AlertTriangle className="w-3.5 h-3.5"/>} color="red"    badge={stats.overdueCount} trend={stats.overdueCount > 0 ? { pct: null, invert: true } : null} clickable onClick={() => setDrawer('overdue')} />
-        <KpiCard label="To Be Invoiced"  value={f(stats.toBeInvoicedAmount)} icon={<FileText className="w-3.5 h-3.5"/>}  color="yellow" badge={stats.toBeInvoicedCount} clickable onClick={() => setDrawer('toBeInvoiced')} />
+        {/* Every draft not sent yet, due or not. Opens Invoices filtered to
+            exactly these, so the list matches the number. (It used to open a
+            drawer of every done task — a different thing from the card.) */}
+        <KpiCard label="Drafts Not Sent" value={f(stats.toBeInvoicedAmount)} icon={<FileText className="w-3.5 h-3.5"/>}  color="yellow" badge={stats.toBeInvoicedCount} clickable onClick={() => router.push('/dashboard/invoices?status=unsent')} />
       </div>
 
       {/* ── Business Trends graph (Finance Engine) ─────── */}
@@ -382,23 +401,38 @@ export default function DashboardAnalytics({
       </Suspense>
 
       {/* ── Company Ops (Finance Engine) ───────────────── */}
-      {/* Company-scoped money only — fully separate from client billing above. */}
+      {/* Company-scoped money only — fully separate from client billing above.
+          One slim row, not six more cards: the full breakdown is the Company
+          Operations report, which this links to. */}
       {companyOps && (
-        <section>
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Company Ops · this month</h3>
-            <Link href="/dashboard/reports/company-ops" className="text-xs text-primary hover:underline">
-              Company Operations report →
+        <section className="bg-card border border-border rounded-2xl px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Company · this month</h3>
+            <Link href="/dashboard/reports/company-ops" className="text-xs text-primary hover:underline shrink-0">
+              Company Operations →
             </Link>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
-            <KpiCard label="Company Spend" value={f(companyOps.opexInr)}      icon={<Briefcase className="w-3.5 h-3.5"/>}   color="purple" sub="company books" />
-            <KpiCard label="Payroll"       value={f(companyOps.payrollInr)}   icon={<Users className="w-3.5 h-3.5"/>}       color="teal" />
-            <KpiCard label="Marketing"     value={f(companyOps.marketingInr)} icon={<TrendingUp className="w-3.5 h-3.5"/>}  color="orange" sub="incl. internal ads" />
-            <KpiCard label="Software"      value={f(companyOps.softwareInr)}  icon={<FileText className="w-3.5 h-3.5"/>}    color="yellow" />
-            <KpiCard label="Burn Rate"     value={f(companyOps.burnRateInr)}  icon={<AlertTriangle className="w-3.5 h-3.5"/>} color="red" sub="3-mo avg net outflow" />
-            <KpiCard label="Runway"        value={companyOps.runwayMonths == null ? '—' : `${companyOps.runwayMonths} mo`} icon={<Clock className="w-3.5 h-3.5"/>} color={companyOps.runwayMonths != null && companyOps.runwayMonths < 3 ? 'red' : 'green'} sub={companyOps.untriagedCount > 0 ? `${companyOps.untriagedCount} entries need triage` : 'all entries classified'} />
-          </div>
+          <dl className="mt-2 grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-x-4 gap-y-2">
+            {([
+              ['Company spend', f(companyOps.opexInr), ''],
+              ['Payroll', f(companyOps.payrollInr), ''],
+              ['Marketing', f(companyOps.marketingInr), ''],
+              ['Software', f(companyOps.softwareInr), ''],
+              ['Burn rate', f(companyOps.burnRateInr), 'text-red-500'],
+              ['Runway', companyOps.runwayMonths == null ? '—' : `${companyOps.runwayMonths} mo`,
+                companyOps.runwayMonths != null && companyOps.runwayMonths < 3 ? 'text-red-500' : 'text-emerald-600 dark:text-emerald-400'],
+            ] as [string, string, string][]).map(([label, value, tone]) => (
+              <div key={label} className="min-w-0">
+                <dt className="text-[11px] text-muted-foreground truncate">{label}</dt>
+                <dd className={`text-sm font-semibold tabular-nums truncate ${tone}`}>{value}</dd>
+              </div>
+            ))}
+          </dl>
+          {companyOps.untriagedCount > 0 && (
+            <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
+              {companyOps.untriagedCount} {companyOps.untriagedCount === 1 ? 'entry needs' : 'entries need'} a category before these are exact.
+            </p>
+          )}
         </section>
       )}
 
@@ -409,14 +443,14 @@ export default function DashboardAnalytics({
         <KpiCard label="Tasks"      value={productionTotals.tasks.toLocaleString('en-IN')}                                              icon={<ClipboardList className="w-3.5 h-3.5"/>} color="purple" sub="in period" />
         <KpiCard label="Creatives"  value={productionTotals.creatives.toLocaleString('en-IN', { maximumFractionDigits: 0 })}            icon={<BarChart3 className="w-3.5 h-3.5"/>}      color="teal"   sub="pages/posts produced" />
         <KpiCard label="Avg/Task"   value={productionTotals.tasks > 0 ? (productionTotals.creatives/productionTotals.tasks).toFixed(1) : '—'} icon={<BarChart2 className="w-3.5 h-3.5"/>}     color="orange" sub="creatives per task" />
-        <KpiCard label="Per Day"    value={productionTotals.tasks > 0 ? (productionTotals.creatives / Math.max(1, Math.ceil((dateFilter ? 30 : 365) * (productionTotals.tasks > 0 ? 1 : 0)))).toFixed(1) : '—'} icon={<TrendingUp className="w-3.5 h-3.5"/>} color="green" sub={dateFilter ? '~per day in window' : '~per day this year'} />
+        <KpiCard label="Per Day"    value={productionTotals.tasks > 0 ? (productionTotals.creatives / productionDays).toFixed(1) : '—'} icon={<TrendingUp className="w-3.5 h-3.5"/>} color="green" sub={dateFilter ? `creatives a day, ${productionDays} days` : 'creatives a day, all time'} />
       </div>
 
       {/* ── Business Pulse tabs ───────────────────────── */}
       <section>
         <div className="flex items-center gap-1 mb-4 bg-secondary rounded-xl p-1 w-fit flex-wrap">
           {([
-            { key: 'trends', label: 'Trends', icon: <BarChart2 className="w-3.5 h-3.5" /> },
+            { key: 'trends', label: 'Period summary', icon: <BarChart2 className="w-3.5 h-3.5" /> },
             { key: 'invoices', label: 'Invoice Status', icon: <FileText className="w-3.5 h-3.5" /> },
             { key: 'performance', label: 'Performance', icon: <TrendingUp className="w-3.5 h-3.5" /> },
             { key: 'insights', label: 'Insights', icon: <Trophy className="w-3.5 h-3.5" /> },
@@ -441,17 +475,9 @@ export default function DashboardAnalytics({
               </div>
             )}
 
-            {/* Income vs Outflow chart */}
-            <div className="bg-card border border-border rounded-xl p-4">
-              <p className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wider">Income vs Outflow ({granularity})</p>
-              <IncomeOutflowBar data={trendData} fmt={f} />
-            </div>
-
-            {/* Job value + count chart */}
-            <div className="bg-card border border-border rounded-xl p-4">
-              <p className="text-xs font-semibold text-muted-foreground mb-3 uppercase tracking-wider">Jobs Done ({granularity})</p>
-              <JobsDoneBar data={trendData} fmt={f} />
-            </div>
+            {/* The income/outflow and jobs charts that sat here drew the same
+                series as the Business Trends graph above, a second time. The
+                tab keeps what only it has: the comparison and the table. */}
 
             {/* Trend data — cards on phones (no horizontal scroll needed to read
                 6 numeric columns), the original table preserved from md: up. */}
@@ -518,8 +544,8 @@ export default function DashboardAnalytics({
                 <p className="text-xl font-bold text-foreground mt-0.5">{stats.dueCount}</p>
                 <p className="text-xs text-yellow-400 mt-0.5">{f(stats.dueAmount)}</p>
               </div>
-              <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 cursor-pointer hover:border-blue-500/40 transition-colors" onClick={() => setDrawer('toBeInvoiced')}>
-                <p className="text-xs text-blue-400 font-semibold">To Be Invoiced</p>
+              <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3 cursor-pointer hover:border-blue-500/40 transition-colors" onClick={() => router.push('/dashboard/invoices?status=unsent')}>
+                <p className="text-xs text-blue-400 font-semibold">Drafts Not Sent</p>
                 <p className="text-xl font-bold text-foreground mt-0.5">{stats.toBeInvoicedCount}</p>
                 <p className="text-xs text-blue-400 mt-0.5">{f(stats.toBeInvoicedAmount)}</p>
               </div>

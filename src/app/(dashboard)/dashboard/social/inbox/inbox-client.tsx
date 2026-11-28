@@ -11,11 +11,11 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import { Button } from '@/components/ui/button'
-import { SocialTabs } from '@/components/social-hub/social-tabs'
+import Header from '@/components/layout/header'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { PlatformIcon } from '@/components/social-hub/platform-icon'
 import {
-  MessageCircle, Send, EyeOff, Trash2, Check, Loader2, ExternalLink, RefreshCw, AlertTriangle,
+  Send, EyeOff, Trash2, Check, Loader2, ExternalLink, RefreshCw, AlertTriangle,
 } from 'lucide-react'
 import {
   filterThreads, sortThreads, needsReply, isLate, ageInHours, threadSize,
@@ -115,23 +115,18 @@ export default function InboxClient({ accounts, canDelete }: { accounts: Account
   })
 
   return (
-    <div className="p-4 sm:p-6 space-y-4">
-      <SocialTabs />
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold flex items-center gap-2">
-            <MessageCircle className="w-5 h-5" /> Comments
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Everything waiting on a reply, across Instagram and Facebook.
-          </p>
-        </div>
+    <>
+    <Header
+      title="Comments"
+      subtitle="Everything waiting on a reply, across Instagram and Facebook"
+      actions={
         <Button variant="outline" onClick={() => void refresh(accountId)} disabled={loading}>
           <RefreshCw className={`w-4 h-4 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
-      </div>
-
+      }
+    />
+    <div className="p-4 sm:p-6 space-y-4">
       {/* Accounts */}
       <div className="flex flex-wrap gap-1.5">
         {accounts.map(a => (
@@ -310,5 +305,6 @@ export default function InboxClient({ accounts, canDelete }: { accounts: Account
 
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </div>
+    </>
   )
 }

@@ -23,9 +23,10 @@ import { usePrivacy } from '@/contexts/privacy-context'
 import {
   Megaphone, Plus, TrendingUp, Target, Wallet, ArrowRight, Inbox, Play,
   Loader2, Link2, BarChart3, Zap, AlertTriangle,
-  Clock, ChevronRight, ChevronDown, History, Trash2, ArrowDownLeft, ArrowUpRight, ArrowLeft,
+  Clock, ChevronRight, ChevronDown, History, Trash2, ArrowDownLeft, ArrowUpRight,
   Search, RefreshCw, BellOff, CheckCircle2, Info,
 } from 'lucide-react'
+import Header from '@/components/layout/header'
 import {
   AD_STATUS_CHIP, STATUS_LABEL, PLATFORM_LABEL, CAMPAIGN_TYPE_LABEL, STATUSES, type AdProjectRow,
 } from '@/lib/advertising/types'
@@ -486,30 +487,18 @@ export default function AdvertisingClient({
   )
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 space-y-6">
-
-      <Link href="/dashboard/apps" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-2">
-        <ArrowLeft className="w-4 h-4" /> Back to Apps Directory
-      </Link>
-
-      {/* ── Header ── */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Megaphone className="h-6 w-6 text-pink-500" />
-            Advertising
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Client wallets, campaigns, live KPIs — Cashbook is the financial source of truth.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <>
+    <Header
+      title="Advertising"
+      subtitle="Client wallets, campaigns and live KPIs"
+      actions={
+        <>
           <Link
             href="/dashboard/connections"
             className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:border-pink-500/40 transition-colors"
           >
             <Link2 className="h-4 w-4 text-pink-500" />
-            Ad Accounts
+            Connections
           </Link>
           {perms.viewFinancials && (
             <Link
@@ -529,8 +518,10 @@ export default function AdvertisingClient({
               New Campaign
             </Link>
           )}
-        </div>
-      </div>
+        </>
+      }
+    />
+    <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6 space-y-6">
 
       {/* ── Migration notices ── */}
       {!migrated && (
@@ -584,7 +575,9 @@ export default function AdvertisingClient({
             ))}
             <span className="text-xs text-muted-foreground">{range.from ? `${range.from} → ${range.to}` : `up to ${range.to}`}</span>
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {/* 4–8 cards depending on the data: let them share the row evenly
+              instead of leaving one alone on a second line. */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(150px,1fr))]">
             <KpiCard icon={Zap} label="Active" value={totals.active} sub={`of ${cards.filter(c => !c.p.archived_at).length} campaigns`} accent />
             <KpiCard icon={Wallet} label="Spend" value={inr(totals.spend)} sub={`${range.label} · excl. GST`} />
             {totals.results.length > 0
@@ -663,11 +656,13 @@ export default function AdvertisingClient({
             <option value="">All platforms</option>
             {platforms.map(p => <option key={p} value={p}>{PLATFORM_LABEL[p] || p}</option>)}
           </select>
-          <input
-            type="month" value={fMonth} onChange={e => setFMonth(e.target.value)}
-            className="rounded-lg border border-border bg-card px-2.5 py-1 text-xs"
-            title="Campaign month (start date)"
-          />
+          <label className="flex items-center gap-1.5 rounded-lg border border-border bg-card pl-2.5 pr-1 text-xs text-muted-foreground" title="Campaign month (start date)">
+            Month
+            <input
+              type="month" value={fMonth} onChange={e => setFMonth(e.target.value)}
+              className="bg-transparent py-1 pr-1.5 text-xs text-foreground focus:outline-none"
+            />
+          </label>
           {walletSupported && perms.viewFinancials && (
             <select value={fBalance} onChange={e => setFBalance(e.target.value as BalanceFilter)}
               className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs">
@@ -753,6 +748,7 @@ export default function AdvertisingClient({
         <p className="text-sm text-muted-foreground py-8 text-center">No campaigns match the current filters.</p>
       )}
     </div>
+    </>
   )
 }
 
@@ -874,7 +870,7 @@ function ClientSection({ group, history, candidates, walletSupported, canManage,
           <div className="flex items-center gap-2 min-w-0">
             {group.clientId === COMPANY_KEY
               ? <span className="font-semibold truncate">{group.name}</span>
-              : <Link href={`/dashboard/advertising/clients/${group.clientId}`} className="font-semibold truncate hover:underline">{group.name}</Link>}
+              : <Link href={`/dashboard/marketing/${group.clientId}?tab=ads`} className="font-semibold truncate hover:underline">{group.name}</Link>}
             {group.code && <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">{group.code}</span>}
             <span className="text-xs text-muted-foreground">· {group.cards.length} campaign{group.cards.length === 1 ? '' : 's'}</span>
           </div>

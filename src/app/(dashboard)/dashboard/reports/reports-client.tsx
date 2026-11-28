@@ -417,34 +417,13 @@ export default function ReportsClient({
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <div>
-      {/* The page is employee analytics, not a hub — the old title promised
-          every report and linked to none of them. Renamed to what it is, with
-          the siblings listed once so they are findable from here. */}
-      <Header title="Employee Performance" subtitle="Who earned what, and how the work was scored" />
+      {/* The page is employee analytics, not a hub. Its sibling reports were a
+          row of links here that disagreed with the sidebar; they are the
+          sidebar's Insights rows and this page's tab bar now. Titled like
+          its sidebar row (Insights → Team Performance). */}
+      <Header title="Team Performance" subtitle="Who earned what, and how the work was scored" />
 
-      <div className="p-6 space-y-5">
-
-        {/* Sibling reports — this screen answers one question; these answer the rest. */}
-        <div className="flex flex-wrap gap-1.5 text-xs">
-          <span className="text-muted-foreground self-center mr-0.5">Other reports:</span>
-          {[
-            { href: '/dashboard/reports/contribution-analysis', label: 'Contribution Analysis' },
-            { href: '/dashboard/reports/role-earnings', label: 'Earnings by Role' },
-            { href: '/dashboard/reports/what-if', label: 'What-If Planner' },
-            { href: '/dashboard/health', label: 'Business Health' },
-            { href: '/dashboard/reports/client-profitability', label: 'Client Profitability' },
-            { href: '/dashboard/reports/cost-attribution', label: 'Cost & Tags' },
-            { href: '/dashboard/reports/company-ops', label: 'Company Operations' },
-            { href: '/dashboard/reports/department-pnl', label: 'Department P&L' },
-            { href: '/dashboard/reports/department-growth', label: 'Departments' },
-            { href: '/dashboard/clients/ranking', label: 'Client Ranking' },
-          ].map(r => (
-            <a key={r.href} href={r.href}
-              className="rounded-lg border border-border px-2.5 py-1 text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors">
-              {r.label}
-            </a>
-          ))}
-        </div>
+      <div className="px-4 sm:px-6 py-6 space-y-5">
 
         {/* ── Top bar: date filter + employee pills ── */}
         <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -607,7 +586,10 @@ export default function ReportsClient({
                   {taskCount === 0 ? (
                     <p className="text-xs text-muted-foreground text-center py-4">No scored tasks {dateFilter ? `for ${getDateFilterLabel(dateFilter)}` : ''}</p>
                   ) : (
-                    <div className="space-y-3">
+                    // The five columns need ~440px: on a phone the table scrolls
+                    // inside its card instead of stretching the whole page.
+                    <div className="overflow-x-auto">
+                    <div className="space-y-3 min-w-[440px]">
                       {/* Header */}
                       <div className="grid grid-cols-[80px_1fr_90px_90px_90px] gap-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider pb-1 border-b border-border/40">
                         <span>Band</span>
@@ -656,6 +638,7 @@ export default function ReportsClient({
                           {fmt(bandSplitData.reduce((s, b) => s + b.compEarnings, 0))}
                         </span>
                       </div>
+                    </div>
                     </div>
                   )}
                 </div>

@@ -1,6 +1,11 @@
+import Header from '@/components/layout/header'
+
 export default function DesignationsLoading() {
   return (
-    <div className="md:flex md:h-[calc(100dvh-4rem)]">
+    <>
+      {/* The real top bar, so nothing jumps when the page arrives. */}
+      <Header title="Access & Roles" />
+    <div className="md:flex md:h-[calc(100dvh_-_var(--page-header-h,73px))]">
       {/* List pane */}
       <div className="w-full md:w-64 border-b md:border-b-0 md:border-r border-border p-3 space-y-1 md:shrink-0">
         <div className="h-8 w-28 bg-secondary/60 rounded animate-pulse mb-3" />
@@ -17,5 +22,6 @@ export default function DesignationsLoading() {
         ))}
       </div>
     </div>
+    </>
   )
 }

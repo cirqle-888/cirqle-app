@@ -66,14 +66,14 @@ export default async function CatalogPage() {
   const brands = [...new Set(products.map((p: any) => p.brand).filter(Boolean))].sort()
 
   return (
-    <>
-      {pending.length > 0 && <PendingSubmissions items={pending} />}
-      <CatalogClient
-        initialProducts={products}
-        clients={clients}
-        categories={categories as string[]}
-        brands={brands as string[]}
-      />
-    </>
+    // The review queue renders inside the catalog, under its title — not above
+    // the page's top bar, where it used to push the title down.
+    <CatalogClient
+      initialProducts={products}
+      clients={clients}
+      categories={categories as string[]}
+      brands={brands as string[]}
+      pendingQueue={pending.length > 0 ? <PendingSubmissions items={pending} /> : null}
+    />
   )
 }

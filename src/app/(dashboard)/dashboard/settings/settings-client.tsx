@@ -6,7 +6,9 @@ import Link from 'next/link'
 import { cn, copyToClipboard } from '@/lib/utils'
 import Header from '@/components/layout/header'
 import AppSelect from '@/components/ui/app-select'
+import { usePermissions } from '@/contexts/permission-context'
 import { createClient as createSupabaseClient } from '@/lib/supabase/client'
+import { DEFAULT_SETTINGS_TAB, settingsTabParam, type SettingsTab } from './settings-tabs'
 import {
   upsertCompanySettings, createBrandingUploadUrl,
   createEmployee, updateEmployee,
@@ -102,12 +104,7 @@ function ArchFilterTabs({ value, onChange }: { value: 'active' | 'archived' | 'a
   )
 }
 
-const SETTINGS_TABS = [
-  'Company', 'Employees', 'Services', 'Departments',
-  'Groups & Params', 'Tools', 'Bank Accounts', 'Cash Categories', 'Exchange Rates',
-  'Privacy & Security', 'Message Templates', 'WhatsApp Listener', 'Matching'
-] as const
-type SettingsTab = typeof SETTINGS_TABS[number]
+// The tab ids themselves live in settings-tabs.ts, shared with page.tsx.
 
 /**
  * Display names for tabs whose internal id is engine vocabulary.
@@ -134,6 +131,35 @@ const SETTINGS_GROUPS: { label: string; emoji: string; tabs: SettingsTab[] }[] =
   { label: 'Communication',   emoji: '💬', tabs: ['Message Templates', 'WhatsApp Listener'] },
   { label: 'Advanced',        emoji: '⚙️', tabs: ['Groups & Params', 'Tools', 'Exchange Rates', 'Matching'] },
 ]
+
+// ─── Team Access (Settings' own sub-pages) ───────────────────────────────────
+// One list for the desktop rail AND the mobile picker: kept as two copies,
+// mobile had drifted to two of the four. Each link carries its page's own
+// gate (`perm`, or `adminOnly`), so nobody is offered a page that then sends
+// them back — they all used to show to anyone who could open Settings.
+const TEAM_ACCESS_LINKS: { href: string; label: string; perm?: string; adminOnly?: boolean }[] = [
+  { href: '/dashboard/settings/designations', label: 'Access & Roles', perm: 'settings.manage_designations' },
+  // Sits directly under Access & Roles because it answers the question that
+  // page raises: you grant a designation some keys, then want to know what
+  // that actually looks like to the person.
+  { href: '/dashboard/settings/access-preview', label: 'Access Preview', adminOnly: true },
+  // Ownership Platform — revenue/profit share, incentives, bonuses.
+  // Configuration lives here; the monthly ritual lives in Finance → Months.
+  { href: '/dashboard/settings/ownership', label: 'Ownership', perm: 'payroll.manage_ownership' },
+  { href: '/dashboard/settings/organization', label: 'Organization', perm: 'settings.manage_org' },
+  // Shared workspaces. It has no sidebar row, so managers find it here;
+  // everyone else reaches their own from the sidebar's workspace menu.
+  { href: '/dashboard/settings/workspaces', label: 'Workspaces', perm: 'workspaces.manage' },
+]
+
+/** The "opens its own page" arrow on each Team Access link. */
+function SubPageArrow({ className }: { className: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+    </svg>
+  )
+}
 
 const CURRENCIES: Currency[] = ['AED', 'SAR', 'USD', 'QAR', 'GBP', 'EUR']
 const ROLES = ['super_admin', 'accounts', 'team_lead', 'employee', 'view_only']
@@ -162,7 +188,8 @@ interface Props {
   /** Designations holding ≥1 CRITICAL permission (pricing / earnings / personal
    *  data) — the picker warns in red before one is assigned. */
   criticalDesignationIds?: string[]
-  initialTab?: string
+  /** Already resolved from `?tab=` by page.tsx (resolveSettingsTab). */
+  initialTab?: SettingsTab
   initialEditClientId?: string
   initialEditServiceId?: string
   returnTo?: string
@@ -191,7 +218,9 @@ export default function SettingsClient(props: Props) {
   const [deptSaving, setDeptSaving] = useState(false)
   // Services tab: which department groups are collapsed ('uncategorised' for the null group).
   const [collapsedDepts, setCollapsedDepts] = useState<Set<string>>(new Set())
-  const [tab, setTab] = useState(props.initialTab ?? 'Company')
+  const [tab, setTab] = useState<SettingsTab>(props.initialTab ?? DEFAULT_SETTINGS_TAB)
+  const { can, user: permUser } = usePermissions()
+  const teamAccessLinks = TEAM_ACCESS_LINKS.filter(l => (!l.perm || can(l.perm)) && (!l.adminOnly || permUser.isAdmin))
   const router = useRouter()
   const supabase = createSupabaseClient()
   const toast = useToast()
@@ -280,6 +309,13 @@ export default function SettingsClient(props: Props) {
 
   // ── Quick Edit ─────────────────────────────────────
   const [quickEdit, setQuickEdit] = useState(false)
+
+  // Switching tabs writes `?tab=` (in the form page.tsx reads back), so a
+  // refresh or a shared link reopens the same tab.
+  function openTab(t: SettingsTab) {
+    setTab(t); setQuickEdit(false)
+    window.history.replaceState(null, '', `?tab=${settingsTabParam(t)}`)
+  }
 
   // ── Per-tab search + sort + view ───────────────────────────
   const [serviceSearch, setServiceSearch] = useState('')
@@ -859,7 +895,7 @@ export default function SettingsClient(props: Props) {
 
       {/* On mobile this stacks: section picker → content (full width).
           On md+ it's the original 2-column layout with a left sidebar. */}
-      <div className="md:flex md:h-[calc(100dvh-73px)]">
+      <div className="md:flex md:h-[calc(100dvh_-_var(--page-header-h,73px))]">
         {/* ── Section picker — MOBILE ONLY ──
             A native <select> with <optgroup> so users can jump to any
             settings section without the left nav eating ~half the screen. */}
@@ -867,11 +903,7 @@ export default function SettingsClient(props: Props) {
           <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-1">Section</label>
           <select
             value={tab}
-            onChange={async e => {
-              const t = e.target.value as SettingsTab
-              setTab(t); setQuickEdit(false)
-              window.history.replaceState(null, '', `?tab=${t.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`)
-            }}
+            onChange={e => openTab(e.target.value as SettingsTab)}
             className="w-full bg-secondary border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
           >
             {SETTINGS_GROUPS.map(group => (
@@ -882,24 +914,21 @@ export default function SettingsClient(props: Props) {
               </optgroup>
             ))}
           </select>
-          <a
-            href="/dashboard/settings/designations"
-            className="mt-2 flex items-center justify-between text-xs text-muted-foreground hover:text-foreground bg-secondary/60 rounded-lg px-3 py-1.5 border border-border"
-          >
-            <span>🔐  Access & Roles</span>
-            <svg className="w-3 h-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-            </svg>
-          </a>
-          <a
-            href="/dashboard/settings/ownership"
-            className="mt-2 flex items-center justify-between text-xs text-muted-foreground hover:text-foreground bg-secondary/60 rounded-lg px-3 py-1.5 border border-border"
-          >
-            <span>🤝  Ownership</span>
-            <svg className="w-3 h-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-            </svg>
-          </a>
+          {/* Team Access — the rail's links, as chips that wrap, so this
+              sticky picker stays short however many there are. */}
+          <p className="mt-2.5 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">Team Access</p>
+          <div className="flex flex-wrap gap-1.5">
+            {teamAccessLinks.map(l => (
+              <a
+                key={l.href}
+                href={l.href}
+                className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground bg-secondary/60 rounded-lg px-2.5 py-1.5 border border-border"
+              >
+                <span>{l.label}</span>
+                <SubPageArrow className="w-3 h-3 opacity-50" />
+              </a>
+            ))}
+          </div>
         </div>
 
         {/* ── Settings sidebar — DESKTOP ONLY (md+) ── */}
@@ -912,7 +941,7 @@ export default function SettingsClient(props: Props) {
               </p>
               <div className="space-y-0.5">
                 {group.tabs.map(t => (
-                  <button key={t} onClick={() => { setTab(t); setQuickEdit(false); window.history.replaceState(null, '', `?tab=${t.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`) }}
+                  <button key={t} onClick={() => openTab(t)}
                     className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${tab === t ? 'bg-primary/15 text-primary font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-secondary'}`}>
                     {tabLabel(t)}
                   </button>
@@ -921,54 +950,22 @@ export default function SettingsClient(props: Props) {
             </div>
           ))}
 
-          {/* Access & Roles — link to designations page */}
+          {/* Team Access — Settings' own sub-pages (TEAM_ACCESS_LINKS). */}
           <div className="mt-4">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/40 px-3 mb-1.5 flex items-center gap-1.5">
               <span>🔐</span>
               <span>Team Access</span>
             </p>
-            <a
-              href="/dashboard/settings/designations"
-              className="flex items-center justify-between w-full text-left px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors group"
-            >
-              <span>Access & Roles</span>
-              <svg className="w-3 h-3 opacity-40 group-hover:opacity-70 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-              </svg>
-            </a>
-            {/* Sits directly under Access & Roles because it answers the
-                question that page raises: you grant a designation some keys,
-                then want to know what that actually looks like to the person. */}
-            <a
-              href="/dashboard/settings/access-preview"
-              className="flex items-center justify-between w-full text-left px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors group"
-            >
-              <span>Access Preview</span>
-              <svg className="w-3 h-3 opacity-40 group-hover:opacity-70 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-              </svg>
-            </a>
-            {/* Ownership Platform — revenue/profit share, incentives, bonuses.
-                Configuration lives here; the monthly ritual lives in
-                Finance → Months. */}
-            <a
-              href="/dashboard/settings/ownership"
-              className="flex items-center justify-between w-full text-left px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors group"
-            >
-              <span>Ownership</span>
-              <svg className="w-3 h-3 opacity-40 group-hover:opacity-70 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-              </svg>
-            </a>
-            <a
-              href="/dashboard/settings/organization"
-              className="flex items-center justify-between w-full text-left px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors group"
-            >
-              <span>Organization</span>
-              <svg className="w-3 h-3 opacity-40 group-hover:opacity-70 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-              </svg>
-            </a>
+            {teamAccessLinks.map(l => (
+              <a
+                key={l.href}
+                href={l.href}
+                className="flex items-center justify-between w-full text-left px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors group"
+              >
+                <span>{l.label}</span>
+                <SubPageArrow className="w-3 h-3 opacity-40 group-hover:opacity-70 transition-opacity" />
+              </a>
+            ))}
           </div>
         </div>
 

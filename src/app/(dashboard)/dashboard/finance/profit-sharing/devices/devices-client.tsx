@@ -23,7 +23,7 @@ export default function DevicesClient({ today, policyApproved, members, devices,
       {host}
       {!policyApproved && (
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
-          No device policy is approved (D11). Valuations can be drafted and calculated, but none can be confirmed until a policy is approved in Settings.
+          No device policy is approved. Valuations can be drafted and calculated, but none can be confirmed until a policy is approved in Settings.
         </div>
       )}
       <Card title="Device register" subtitle="Employee-owned devices can be valued; company-owned devices never earn an employee value. Calculation alone never pays, invests or touches a payslip.">

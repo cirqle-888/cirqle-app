@@ -12,6 +12,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Sparkles, Loader2, User, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react'
+import Header from '@/components/layout/header'
 import { analyzeCapture, analyzeCaptureAs, commitRequestCapture, commitAdvertisingCapture } from './actions'
 import type { CaptureInput, CaptureResult, CaptureType } from '@/lib/capture/types'
 import { isExternalHref } from '@/lib/offers/studio'
@@ -131,17 +132,9 @@ export default function CaptureClient() {
   const cls = result?.classification
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8 space-y-6">
-      {/* pl-12 on mobile clears the fixed global sidebar hamburger. */}
-      <div className="pl-12 md:pl-0">
-        <h1 className="text-xl font-semibold flex items-center gap-2">
-          <Sparkles className="h-5 w-5 text-violet-500" /> AI Capture
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Paste a WhatsApp message, email, product list, or contact. Cirqle detects what it is and the client, then prepares a draft for you to confirm.
-        </p>
-      </div>
-
+    <>
+    <Header title="AI Capture" subtitle="Paste a message, email or list — Cirqle prepares a draft for you to confirm" />
+    <div className="mx-auto max-w-2xl px-4 sm:px-6 py-6 space-y-6">
       <div className="space-y-3">
         <textarea
           value={text}
@@ -238,6 +231,7 @@ export default function CaptureClient() {
         </div>
       )}
     </div>
+    </>
   )
 }
 

@@ -1,8 +1,11 @@
+import Header from '@/components/layout/header'
+
 export default function ReconciliationLoading() {
   return (
+    <>
+      {/* The real top bar, so nothing jumps when the page arrives. */}
+      <Header title="Cash Book Checks" />
     <div className="p-4 md:p-6 space-y-4">
-      <div className="h-7 w-48 bg-secondary/60 rounded animate-pulse" />
-      <div className="h-px bg-border" />
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {Array.from({ length: 3 }).map((_, i) => (
           <div key={i} className="h-20 bg-card border border-border rounded-xl animate-pulse" style={{ animationDelay: `${i * 60}ms` }} />
@@ -14,5 +17,6 @@ export default function ReconciliationLoading() {
         ))}
       </div>
     </div>
+    </>
   )
 }

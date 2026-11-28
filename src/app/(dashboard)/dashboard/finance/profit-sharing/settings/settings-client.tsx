@@ -94,7 +94,7 @@ function DistributionCard({ versions, lastConfirmedEnd, today, run, busy }: {
 function ReserveCard({ reserve, balance, today, run, busy }: { reserve: ReserveMovement[]; balance: number; today: string; run: Run; busy: string | null }) {
   const [f, setF] = useState({ amountInr: '', movedOn: today, reason: '' })
   return (
-    <Card title={`Business Reserve — ${inr(balance)}`} subtitle="An internal earmark of retained profit (D9). It creates no cash, does not absorb losses and does not fund payouts. A release needs a reason and Admin approval.">
+    <Card title={`Business Reserve — ${inr(balance)}`} subtitle="An internal earmark of retained profit. It creates no cash, does not absorb losses and does not fund payouts. A release needs a reason and Admin approval.">
       {reserve.length === 0 ? <Empty>No reserve movements yet.</Empty> : (
         <Table head={['Date', 'Movement', 'Amount', 'Reason']}>
           {reserve.map(m => (
@@ -130,7 +130,7 @@ function DevicePolicyCard({ draft, approvedAt, serviceCategories, run, busy }: {
   const setCond = (c: string, v: string) => setP(x => ({ ...x, conditionFactors: { ...x.conditionFactors, [c]: Number(v) } }))
   const setNeed = (id: string, v: DeviceNeed) => setP(x => ({ ...x, deviceNeedMap: { ...x.deviceNeedMap, [id]: v } }))
   return (
-    <Card title="Device valuation policy (D11)"
+    <Card title="Device valuation policy"
       subtitle={approvedAt
         ? `Approved ${approvedAt.slice(0, 10)}. Changes are saved as a new version.`
         : 'No policy is approved. Valuations can be drafted and calculated, but none can be confirmed until you approve one. The values below are provisional.'}>

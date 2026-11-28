@@ -1,9 +1,10 @@
+import Header from '@/components/layout/header'
+
 export default function QuotationsLoading() {
   return (
     <div>
-      <div className="h-[68px] sm:h-[72px] border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-30 px-4 md:px-6 flex items-center">
-        <div className="h-5 w-32 bg-secondary/60 rounded animate-pulse" />
-      </div>
+      {/* The real top bar, so nothing jumps when the page arrives. */}
+      <Header title="" />
       <div className="p-4 sm:p-6 space-y-4">
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           {Array.from({ length: 10 }).map((_, i) => (

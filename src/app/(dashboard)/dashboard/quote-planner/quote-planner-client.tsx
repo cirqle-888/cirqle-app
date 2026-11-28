@@ -7,7 +7,8 @@ import { historicalShares } from '@/lib/quote-planner/shares'
 import type { PlanLine, QuotePlan, ShareOverride } from '@/lib/quote-planner/types'
 import type { Currency, ContributionGroup, Parameter } from '@/types'
 import { formatINR, getCurrencySymbol } from '@/lib/calculations/currency'
-import { saveQuotePlan } from './actions'
+import { Button } from '@/components/ui/button'
+import { saveQuotePlan, loadQuotePlan, deleteQuotePlan } from './actions'
 
 /**
  * The planner screen.
@@ -57,13 +58,19 @@ export default function QuotePlannerClient(props: Props) {
     return m
   }, [rates])
 
-  const [plan, setPlan] = useState<QuotePlan>(() => ({
+  const blankPlan = (): QuotePlan => ({
     id: nextId('new'), clientId: null, name: 'New quote', status: 'draft',
     currency: 'INR', termMonths: 12, lines: [], shares: [], ratings: {},
     costs: [], includeOverheads: false, quotationId: null, notes: '',
-  }))
+  })
+  const [plan, setPlan] = useState<QuotePlan>(blankPlan)
   const [saving, setSaving] = useState(false)
+  const [opening, setOpening] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  // Saved plans. They were saved but never listed, so "Save plan" was a dead
+  // end: a plan could be stored and never opened again.
+  const [plans, setPlans] = useState<PlanRow[]>(props.plans)
+  const isSaved = plans.some(p => p.id === plan.id)
 
   const patch = (p: Partial<QuotePlan>) => setPlan(prev => ({ ...prev, ...p }))
 
@@ -117,15 +124,66 @@ export default function QuotePlannerClient(props: Props) {
     const out = await saveQuotePlan(plan)
     setSaving(false)
     if (!out.ok) { setMessage(out.error || 'Could not save.'); return }
-    if (out.data) patch({ id: out.data.id })
+    const id = out.data?.id ?? plan.id
+    if (out.data) patch({ id })
+    const row: PlanRow = { id, name: plan.name, client_id: plan.clientId, status: plan.status, currency: plan.currency, term_months: plan.termMonths }
+    setPlans(prev => [row, ...prev.filter(p => p.id !== id && p.id !== plan.id)])
     setMessage('Saved.')
+  }
+
+  async function onOpen(id: string) {
+    if (!id) return
+    setOpening(true); setMessage(null)
+    const out = await loadQuotePlan(id)
+    setOpening(false)
+    if (!out.ok || !out.data) { setMessage(out.error || 'Could not open that plan.'); return }
+    setPlan(out.data)
+  }
+
+  function onNew() {
+    setPlan(blankPlan())
+    setMessage(null)
+  }
+
+  async function onDelete() {
+    if (!isSaved || !window.confirm(`Delete the saved plan “${plan.name}”?`)) return
+    const out = await deleteQuotePlan(plan.id)
+    if (!out.ok) { setMessage(out.error || 'Could not delete.'); return }
+    setPlans(prev => prev.filter(p => p.id !== plan.id))
+    setPlan(blankPlan())
+    setMessage('Deleted.')
   }
 
   return (
     <div>
-      <Header title="Quote Planner" subtitle="Price a proposal and see what it leaves" />
+      <Header
+        title="Quote Planner"
+        subtitle="Price a proposal and see what it leaves"
+        actions={<>
+          {message && <span className="text-xs text-muted-foreground" role="status">{message}</span>}
+          {plans.length > 0 && (
+            <select
+              aria-label="Open a saved plan"
+              className="field h-9 text-sm max-w-[14rem]"
+              value={isSaved ? plan.id : ''}
+              disabled={opening}
+              onChange={e => void onOpen(e.target.value)}
+            >
+              <option value="">{opening ? 'Opening…' : `Saved plans (${plans.length})`}</option>
+              {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
+          <Button variant="outline" onClick={onNew}>New plan</Button>
+          {props.canManage && isSaved && (
+            <Button variant="ghost" onClick={() => void onDelete()}>Delete</Button>
+          )}
+          {props.canManage && (
+            <Button onClick={() => void onSave()} loading={saving}>{saving ? 'Saving…' : 'Save plan'}</Button>
+          )}
+        </>}
+      />
 
-      <div className="p-4 space-y-4 max-w-6xl">
+      <div className="px-4 sm:px-6 py-4 space-y-4 max-w-6xl">
         {/* ── The quote ─────────────────────────────────────────────────── */}
         <section className="bg-card border border-border rounded-xl p-4 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
@@ -156,8 +214,8 @@ export default function QuotePlannerClient(props: Props) {
             </label>
           </div>
 
-          <div className="flex items-center gap-2">
-            <select className="field h-9 text-sm" value=""
+          <div className="flex flex-wrap items-center gap-2">
+            <select className="field h-9 text-sm w-full sm:w-auto sm:max-w-sm" value=""
               onChange={e => { if (e.target.value) addLine(e.target.value) }}>
               <option value="">Add a service…</option>
               {services.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -295,12 +353,6 @@ export default function QuotePlannerClient(props: Props) {
           </ul>
         )}
 
-        {props.canManage && (
-          <div className="flex items-center gap-3">
-            <button onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save plan'}</button>
-            {message && <span className="text-[11px] text-muted-foreground">{message}</span>}
-          </div>
-        )}
       </div>
     </div>
   )

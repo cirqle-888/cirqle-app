@@ -4,6 +4,7 @@ import { PERMS } from '@/lib/permissions/keys'
 import { redirect } from 'next/navigation'
 import { IntegrationsClient } from './integrations-client'
 import { fetchProviderConnections } from './actions'
+import Header from '@/components/layout/header'
 
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -24,20 +25,17 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
   const params = await searchParams
 
   return (
-    <div className="flex flex-col gap-6 w-full p-6 max-w-7xl mx-auto">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Connections</h1>
-        <p className="text-muted-foreground mt-2">
-          One place to link Meta and Google. A single Meta connection powers
-          Social Hub, Advertising, Leads and the Agency dashboard — connect
-          once here, then assign each Page or ad account to its client.
-        </p>
+    <>
+      <Header
+        title="Connections"
+        subtitle="Connect Meta once here, then assign each Page or ad account to its client"
+      />
+      <div className="flex flex-col gap-6 w-full px-4 sm:px-6 py-6 max-w-7xl mx-auto">
+        <Suspense fallback={<IntegrationsSkeleton />}>
+          <IntegrationsLoader oauthSuccess={params.success} oauthError={params.error} />
+        </Suspense>
       </div>
-
-      <Suspense fallback={<IntegrationsSkeleton />}>
-        <IntegrationsLoader oauthSuccess={params.success} oauthError={params.error} />
-      </Suspense>
-    </div>
+    </>
   )
 }
 

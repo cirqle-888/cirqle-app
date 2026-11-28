@@ -132,7 +132,7 @@ export function AskBox() {
         <div role="status" className={`rounded-lg border px-3 py-2.5 text-sm ${result.ok ? 'border-border bg-secondary/50' : 'border-red-500/25 bg-red-500/5 text-red-700 dark:text-red-400'}`}>
           <p className="text-[11px] text-muted-foreground mb-1">{result.asked}</p>
           <p className="whitespace-pre-wrap break-words">{result.text}</p>
-          {result.ok && <p className="mt-2 text-[10px] text-muted-foreground">Written by AI from the chats you can see. Check the chat before acting on it.</p>}
+          {result.ok && <p className="mt-2 text-[10px] text-muted-foreground">Written by AI from the chats you can see, so check the chat before acting on it.</p>}
         </div>
       )}
     </section>

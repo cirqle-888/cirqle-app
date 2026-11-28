@@ -32,6 +32,7 @@ import AppSelect from '@/components/ui/app-select'
 import TagPicker from '@/components/ui/tag-picker'
 import { BrandSelect } from '@/components/brands/brand-select'
 import { FilterDropdown } from '@/components/ui/filter-dropdown'
+import { OverflowMenu, type OverflowItem } from '@/components/ui/overflow-menu'
 import { computeEqualSplit } from '@/lib/finance/splits'
 import type { Currency } from '@/types'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
@@ -1608,6 +1609,24 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
     return ordered.filter(c => inMonth.has(c.id) || c.id === filterClient)
   }, [entries, clients, monthEntries, filterClient])
 
+  // The header keeps the two buttons that write entries; the rest sit behind
+  // "…". Every item is gated on the permission it actually needs. A button you
+  // are not allowed to use is worse than no button: it reads as available, and
+  // the refusal only arrives after the click.
+  //
+  // Accounts shows balances — an aggregate, not one entry's own figure — so it
+  // follows `cashbook.view_totals`, the same permission that gates the summary
+  // cards. Checks (the ledger repair tools) needs `cashbook.view_amounts` AND
+  // admin: its page calls requireAdmin, so offering it to anyone else only
+  // bounced them back to the dashboard. Both routes are gated to match in
+  // supabase/middleware.ts; hiding the link alone would have left the URL working.
+  const headerToolSlots: (OverflowItem | false)[] = [
+    showTotals && { label: 'Accounts', icon: Landmark, onClick: () => router.push('/dashboard/cashbook/accounts') },
+    showAmounts && isAdmin && { label: 'Checks', icon: ShieldAlert, onClick: () => router.push('/dashboard/cashbook/reconciliation') },
+    realisedFxGainLoss !== 0 && { label: 'FX Report', icon: TrendingUp, onClick: () => setShowFxReportModal(true) },
+  ]
+  const headerTools = headerToolSlots.filter((item): item is OverflowItem => item !== false)
+
   return (
     <div>
       <Header
@@ -1615,33 +1634,6 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
         subtitle="Track all income and expenses"
         actions={
           <div className="flex items-center gap-2">
-            {/* Every control here is gated on the permission it actually needs.
-                A button you are not allowed to use is worse than no button: it
-                reads as available, and the refusal only arrives after the click.
-
-                Accounts shows balances — an aggregate, not one entry's own
-                figure — so it follows `cashbook.view_totals`, the same
-                permission that gates the summary cards above. Reconciliation
-                stays on `cashbook.view_amounts`: its own page is admin-only
-                regardless, so the finer split does not matter there. Both
-                routes are gated to match in supabase/middleware.ts; hiding the
-                link alone would have left the URL working. */}
-            {showTotals && (
-              <Link href="/dashboard/cashbook/accounts"
-                className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap"
-                title="Account balances & ledger">
-                <Landmark className="h-4 w-4 shrink-0" />
-                <span className="hidden sm:inline">Accounts</span>
-              </Link>
-            )}
-            {showAmounts && (
-              <Link href="/dashboard/cashbook/reconciliation"
-                className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap">
-                <ShieldAlert className="h-4 w-4 shrink-0" />
-                <span className="hidden sm:inline">Reconciliation</span>
-              </Link>
-            )}
-
             {/* Transfer and Add Entry write entries, so they follow
                 `cashbook.edit` rather than the amount permission. A data-entry
                 user who cannot see totals can still record them. */}
@@ -1659,14 +1651,7 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
                 Add Entry
               </button>
             )}
-            {realisedFxGainLoss !== 0 && (
-              <button onClick={() => setShowFxReportModal(true)}
-                className="flex items-center gap-1.5 bg-secondary text-sm font-medium px-3 py-2 rounded-lg hover:bg-secondary/80 transition-colors whitespace-nowrap"
-                title="View FX Gain/Loss report">
-                <TrendingUp className="w-4 h-4 shrink-0" />
-                <span className="hidden sm:inline">FX Report</span>
-              </button>
-            )}
+            <OverflowMenu label="More Cash Book tools" items={headerTools} />
           </div>
         }
       />
@@ -1755,12 +1740,16 @@ export default function CashBookClient({ initialEntries, categories, bankAccount
             
             <div className="h-5 w-px bg-border hidden sm:block"></div>
 
-            <input
-              type="month"
-              value={filterMonth}
-              onChange={e => setFilterMonth(e.target.value)}
-              className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary/50"
-            />
+            {/* Labelled: an empty month box reads "--------- ----" on its own. */}
+            <label className="flex items-center gap-1.5 bg-background border border-border rounded-lg pl-3 pr-1 text-xs text-muted-foreground focus-within:ring-2 focus-within:ring-primary/50">
+              Month
+              <input
+                type="month"
+                value={filterMonth}
+                onChange={e => setFilterMonth(e.target.value)}
+                className="bg-transparent py-1.5 pr-2 text-xs text-foreground focus:outline-none"
+              />
+            </label>
             
             <select 
               value={filterCategory} 

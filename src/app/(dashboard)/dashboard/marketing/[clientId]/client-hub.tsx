@@ -19,7 +19,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import Header from '@/components/layout/header'
 import Combobox from '@/components/ui/combobox'
 import {
-  ArrowLeft, ArrowRight, CalendarDays, Eye, Heart, LayoutDashboard, Megaphone, PenSquare, Plus,
+  ArrowRight, CalendarDays, Eye, Heart, LayoutDashboard, Megaphone, PenSquare, Plus,
   Share2, Target, UserPlus, Users, Wallet,
 } from 'lucide-react'
 import { PROGRESS_CHIP, PROGRESS_LABEL, resolveItemProgress } from '@/lib/social/plan'
@@ -136,19 +136,14 @@ export default function ClientHub({ client, clients, withMarketing, hub, issues,
       <div className="mx-auto max-w-7xl space-y-5 p-4 md:p-6">
         {/* ── Hero ─────────────────────────────────────────────────────────── */}
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div className="flex min-w-0 items-start gap-3">
-            <Link href="/dashboard/marketing" aria-label="All clients"
-              className="mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition hover:text-foreground">
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
+          {/* The name is the Header's title; the hero keeps the face, the
+              health dot and the one-line summary beside it. */}
+          <div className="flex min-w-0 items-center gap-3">
             <ClientAvatar id={client.id} name={client.name} size={48} />
-            <div className="min-w-0">
-              <h1 className="flex items-center gap-2 text-xl font-bold leading-tight tracking-tight sm:text-2xl">
-                <span className="break-words">{client.name}</span>
-                <HealthDot state={health} className="shrink-0" />
-              </h1>
-              <p className="mt-0.5 text-sm text-muted-foreground">{summary || 'Nothing set up yet'}</p>
-            </div>
+            <p className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+              <HealthDot state={health} className="shrink-0" />
+              <span>{summary || 'Nothing set up yet'}</span>
+            </p>
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -245,7 +240,7 @@ export default function ClientHub({ client, clients, withMarketing, hub, issues,
               <p className="text-xs text-muted-foreground mb-3">Client details, work, advertising and billing in one place.</p>
               <div className="flex flex-wrap gap-2">
                 <Link href={`/dashboard/clients/${client.id}`} className="rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-secondary">Client details &amp; work</Link>
-                {access.ads && <Link href={`/dashboard/advertising/clients/${client.id}`} className="rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-secondary">Ads &amp; reports</Link>}
+                {access.ads && ads && <button type="button" onClick={() => selectTab('ads')} className="rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-secondary">Ads &amp; reports</button>}
                 {access.ads && <Link href={`/dashboard/advertising/funds?client=${client.id}`} className="rounded-lg border border-border px-3 py-2 text-xs font-medium hover:bg-secondary">Ad funds</Link>}
               </div>
             </div>

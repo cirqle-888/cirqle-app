@@ -107,7 +107,7 @@ export default function ShopClient({
   return (
     <>
       <Header
-        title="Shop"
+        title="Shop Settings"
         subtitle="What the Memoura website sells and announces"
         actions={canManage && !notSetUp && (tab === 'gifts' || tab === 'banners') ? (
           <Button size="sm" onClick={() => (tab === 'gifts' ? setEditGift('new') : setEditBanner('new'))}>

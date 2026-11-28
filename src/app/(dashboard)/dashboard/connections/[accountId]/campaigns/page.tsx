@@ -36,15 +36,15 @@ export default async function CampaignMappingPage({
     notReady = true
   }
 
+  // No wrapper: the client renders the page Header first, as a direct child
+  // of the app's scroller, so it can stick.
   return (
-    <div className="flex flex-col gap-6 w-full p-6">
-      <CampaignMappingClient
-        accountId={accountId}
-        account={account}
-        initialCampaigns={campaigns}
-        clients={clients}
-        notReady={notReady}
-      />
-    </div>
+    <CampaignMappingClient
+      accountId={accountId}
+      account={account}
+      initialCampaigns={campaigns}
+      clients={clients}
+      notReady={notReady}
+    />
   )
 }

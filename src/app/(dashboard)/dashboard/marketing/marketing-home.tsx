@@ -93,7 +93,7 @@ export default function MarketingHome({ clients, unassignedAssets, cirqleAccount
 
   return (
     <>
-      <Header title="Marketing" subtitle="Pick a client to see and manage everything for them in one place" />
+      <Header title="Clients Hub" subtitle="Pick a client to see and manage everything for them in one place" />
 
       <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
         {/* Hero search */}

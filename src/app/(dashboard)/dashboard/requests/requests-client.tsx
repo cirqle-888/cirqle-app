@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import Header from '@/components/layout/header'
 import {
   DndContext, DragOverlay, closestCenter, pointerWithin, MouseSensor, TouchSensor, useSensor, useSensors,
   useDraggable, useDroppable, type DragEndEvent,
@@ -389,7 +390,7 @@ function getShareStatusStyle(status: string): React.CSSProperties {
 
 export default function RequestsClient({
   migrated, initialRequests, perms, clients: clientsProp = [], employees = [], services = [],
-  servicePricing = [], offerCampaigns = [], initialFocusId = null,
+  servicePricing = [], offerCampaigns = [], initialFocusId = null, canOpenWhatsApp = false,
 }: {
   migrated: boolean
   initialRequests: any[]
@@ -402,6 +403,8 @@ export default function RequestsClient({
   /** Offer-campaign submissions — shown in the same inbox as a different request type. */
   offerCampaigns?: any[]
   initialFocusId?: string | null
+  /** May open WhatsApp chats — an admin, or someone a chat is shared with (same rule as whatsapp/page.tsx). */
+  canOpenWhatsApp?: boolean
 }) {
   const router = useRouter()
   // Assigned-employee names respect the global privacy lock — name only when unlocked, else CQID.
@@ -911,19 +914,6 @@ export default function RequestsClient({
     void runBulkAssign(ids, empId)
   }
 
-  // ── AI Capture ──────────────────────────────────────────────────────────
-  async function handleAiCaptureClick() {
-    try {
-      const text = await navigator.clipboard.readText()
-      if (text) {
-        window.__pendingCirqleCapture = { text }
-      }
-    } catch {
-      // Ignore clipboard errors
-    }
-    router.push('/dashboard/capture')
-  }
-
   async function doCreate() {
     if (creating) return
     setCreating(true)
@@ -1219,20 +1209,17 @@ export default function RequestsClient({
     : r.submitter_name ? `${r.submitter_name} (guest)` : 'Guest'
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
-      {/* ── Header ──────────────────────────────────────────────────────────
-          Title on the left, the page's actions on the right — kept OUT of the
-          status tabs so the primary button never scrolls away with them.
-          pl-12 on mobile clears the fixed global sidebar hamburger. */}
-      {/* One line. The counts sit where a sentence of description used to be —
-          the page says what is open instead of what the page is — and the
-          links used a few times a week live behind the "…". */}
-      <div className="flex items-center gap-x-3 gap-y-2 flex-wrap pl-12 md:pl-0">
-        <h1 className="text-xl font-bold tracking-tight leading-tight">Requests</h1>
-        {/* At-a-glance: what's open, what it's worth, and the pile nobody owns.
-            "Unassigned" is a shortcut straight into that filter. */}
-        {migrated && (pipeline.count > 0 || openLoad.unassigned > 0) && (
-          <div className="flex items-center gap-2 flex-wrap">
+    <>
+      {/* The counts sit where a sentence of description used to be — the page
+          says what is open instead of what the page is — and the links used a
+          few times a week live behind the "…". AI Capture is the top bar's own
+          button. Each chip is its own child so the bar can wrap them on a phone. */}
+      <Header
+        title="Requests"
+        actions={migrated ? (
+          <>
+            {/* At-a-glance: what's open, what it's worth, and the pile nobody owns.
+                "Unassigned" is a shortcut straight into that filter. */}
             {pipeline.count > 0 && (
               <span className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium bg-secondary/70 border border-border/60 text-foreground/80">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />{pipeline.count} open
@@ -1254,17 +1241,6 @@ export default function RequestsClient({
                 <UserRound className="w-3 h-3" />{openLoad.unassigned} unassigned
               </button>
             )}
-          </div>
-        )}
-        {migrated && (
-          <div className="flex items-center gap-2 shrink-0 ml-auto">
-            {perms.manage && can('capture.use') && (
-              <button onClick={handleAiCaptureClick}
-                title="Create a new request from clipboard — same as the Cirqle Desktop toolbar's New Request button"
-                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-medium border border-violet-500/30 bg-violet-500/5 hover:bg-violet-500/10 text-violet-700 dark:text-violet-300 transition-colors">
-                <Sparkles className="w-3.5 h-3.5" /><span className="hidden sm:inline">AI Capture</span>
-              </button>
-            )}
             {perms.manage && (
               <button onClick={() => setShowNewMenu(true)}
                 className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-xs font-semibold gradient-bg text-white shadow-sm hover:opacity-90 transition-opacity">
@@ -1275,16 +1251,21 @@ export default function RequestsClient({
               label="More"
               items={[
                 { label: 'Pending by client', icon: Inbox, onClick: () => router.push('/dashboard/requests/pending') },
-                { label: 'WhatsApp chats', icon: MessageCircle, onClick: () => router.push('/dashboard/requests/whatsapp') },
+                // Only for people the chats page lets in — it sends everyone
+                // else back to the dashboard.
+                ...(canOpenWhatsApp ? [{
+                  label: 'WhatsApp chats', icon: MessageCircle, onClick: () => router.push('/dashboard/requests/whatsapp'),
+                }] : []),
                 ...(perms.manage ? [{
                   label: 'Share status as image', icon: Share2,
                   onClick: () => { setShowShare(true); setShareClientId(clientFilter || ''); setShareIncludeCompleted(false) },
                 }] : []),
               ]}
             />
-          </div>
-        )}
-      </div>
+          </>
+        ) : undefined}
+      />
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-6">
 
       {!migrated && (
         <div className="mt-4 flex items-start gap-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
@@ -2599,6 +2580,7 @@ export default function RequestsClient({
         />
       )}
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
-    </div>
+      </div>
+    </>
   )
 }

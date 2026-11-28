@@ -15,6 +15,7 @@ import { useRouter } from 'next/navigation'
 import {
   Lock, LockOpen, Loader2, TrendingUp, TrendingDown, AlertTriangle, ArrowRight, RefreshCw,
 } from 'lucide-react'
+import Header from '@/components/layout/header'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { lockMonth, unlockMonth, rescanAdjustments } from './actions'
@@ -124,132 +125,124 @@ export default function MonthsClient({ cards, canManage, canSeeAmounts }: {
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8 space-y-6">
-      {/* pl-14 on mobile clears the global sidebar hamburger (fixed top-left,
-          16–52px) which otherwise sits on top of the heading; md:pl-0 restores
-          normal padding where the hamburger is hidden. */}
-      <div className="pl-14 md:pl-0">
-        <h1 className="text-2xl font-bold">Financial Timeline</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          One card per month: what came in, what the team earned, what the company spent, and what is left.
-          Review it, pay payroll, then lock the month to close the books.
-        </p>
-      </div>
+    <>
+      <Header title="Months" subtitle="Profit, payroll and the lock for each month" />
+      <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 space-y-6">
+        <div className="space-y-4">
+          {cards.map(c => {
+            const isBusy = busy === key(c)
+            const positive = c.profitInr >= 0
+            return (
+              <div key={key(c)}
+                className={`rounded-xl border bg-card overflow-hidden ${c.locked ? 'border-border' : 'border-primary/30'}`}>
+                {/* Header */}
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-semibold">{MONTHS[c.month - 1]} {c.year}</span>
+                    {c.locked ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <Lock className="h-3 w-3" /> Locked
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                        <LockOpen className="h-3 w-3" /> Open
+                      </span>
+                    )}
+                    {c.frozen && (
+                      <span className="text-[10px] text-muted-foreground" title="Figures come from the snapshot taken when this month was locked">
+                        snapshot
+                      </span>
+                    )}
+                  </div>
 
-      <div className="space-y-4">
-        {cards.map(c => {
-          const isBusy = busy === key(c)
-          const positive = c.profitInr >= 0
-          return (
-            <div key={key(c)}
-              className={`rounded-xl border bg-card overflow-hidden ${c.locked ? 'border-border' : 'border-primary/30'}`}>
-              {/* Header */}
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-3">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="font-semibold">{MONTHS[c.month - 1]} {c.year}</span>
-                  {c.locked ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      <Lock className="h-3 w-3" /> Locked
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
-                      <LockOpen className="h-3 w-3" /> Open
-                    </span>
-                  )}
-                  {c.frozen && (
-                    <span className="text-[10px] text-muted-foreground" title="Figures come from the snapshot taken when this month was locked">
-                      snapshot
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {c.locked && (
+                      <button onClick={() => onRescan(c)} disabled={isBusy || !canManage}
+                        title="Check this closed month for late corrections"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium hover:bg-secondary disabled:opacity-50">
+                        {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                        Check corrections
+                      </button>
+                    )}
+                    {canManage && (c.explicitlyLocked ? (
+                      <button onClick={() => onUnlock(c)} disabled={isBusy}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium hover:bg-secondary disabled:opacity-50">
+                        <LockOpen className="h-3.5 w-3.5" /> Reopen
+                      </button>
+                    ) : !c.locked ? (
+                      <button onClick={() => onLock(c)} disabled={isBusy}
+                        className="inline-flex items-center gap-1.5 rounded-lg gradient-bg px-2.5 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50">
+                        {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lock className="h-3.5 w-3.5" />}
+                        Lock month
+                      </button>
+                    ) : (
+                      <span className="text-[11px] text-muted-foreground" title="Payroll for this month has been paid, which closes it">
+                        closed by payroll
+                      </span>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  {c.locked && (
-                    <button onClick={() => onRescan(c)} disabled={isBusy || !canManage}
-                      title="Check this closed month for late corrections"
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium hover:bg-secondary disabled:opacity-50">
-                      {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                      Check corrections
-                    </button>
-                  )}
-                  {canManage && (c.explicitlyLocked ? (
-                    <button onClick={() => onUnlock(c)} disabled={isBusy}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium hover:bg-secondary disabled:opacity-50">
-                      <LockOpen className="h-3.5 w-3.5" /> Reopen
-                    </button>
-                  ) : !c.locked ? (
-                    <button onClick={() => onLock(c)} disabled={isBusy}
-                      className="inline-flex items-center gap-1.5 rounded-lg gradient-bg px-2.5 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50">
-                      {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lock className="h-3.5 w-3.5" />}
-                      Lock month
-                    </button>
-                  ) : (
-                    <span className="text-[11px] text-muted-foreground" title="Payroll for this month has been paid, which closes it">
-                      closed by payroll
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {/* Composition — the profit engine's terms, in the order it computes them */}
-              {canSeeAmounts ? (
-                <div className="grid grid-cols-2 gap-2 p-4 sm:grid-cols-3 lg:grid-cols-5">
-                  <Stat label="Revenue" value={inr(c.revenueInr)} />
-                  <Stat label="Team earnings" value={`− ${inr(c.contributionInr)}`} />
-                  <Stat label="Base salaries" value={`− ${inr(c.baseSalariesInr)}`} />
-                  <Stat label="Company expenses" value={`− ${inr(c.expensesInr)}`} />
-                  <Stat
-                    label="Net profit"
-                    value={inr(c.profitInr)}
-                    tone={positive ? 'good' : 'bad'}
-                    icon={positive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                  />
-                </div>
-              ) : (
-                <p className="px-4 py-3 text-xs text-muted-foreground">
-                  You do not have permission to see financial amounts.
-                </p>
-              )}
-
-              {/* Payroll + corrections */}
-              <div className="flex flex-wrap items-center gap-3 border-t border-border px-4 py-2.5 text-xs">
-                <Link href="/dashboard/payroll"
-                  className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
-                  Payroll:&nbsp;
-                  <span className="font-semibold text-foreground">
-                    {c.payrollTotal === 0 ? 'not drafted' : `${c.payrollPaid}/${c.payrollTotal} paid`}
-                  </span>
-                  {canSeeAmounts && c.payrollNetInr > 0 && <span className="text-muted-foreground"> · {inr(c.payrollNetInr)}</span>}
-                  <ArrowRight className="h-3 w-3" />
-                </Link>
-
-                {c.pendingAdjustments > 0 && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-400">
-                    <AlertTriangle className="h-3 w-3" />
-                    {c.pendingAdjustments} correction{c.pendingAdjustments === 1 ? '' : 's'} from this month
-                    {canSeeAmounts && ` · ${inr(c.pendingAdjustmentInr)}`}
-                    <span className="font-normal opacity-80">— pays with the next open payroll</span>
-                  </span>
+                {/* Composition — the profit engine's terms, in the order it computes them */}
+                {canSeeAmounts ? (
+                  <div className="grid grid-cols-2 gap-2 p-4 sm:grid-cols-3 lg:grid-cols-5">
+                    <Stat label="Revenue" value={inr(c.revenueInr)} />
+                    <Stat label="Team earnings" value={`− ${inr(c.contributionInr)}`} />
+                    <Stat label="Base salaries" value={`− ${inr(c.baseSalariesInr)}`} />
+                    <Stat label="Company expenses" value={`− ${inr(c.expensesInr)}`} />
+                    <Stat
+                      label="Net profit"
+                      value={inr(c.profitInr)}
+                      tone={positive ? 'good' : 'bad'}
+                      icon={positive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                    />
+                  </div>
+                ) : (
+                  <p className="px-4 py-3 text-xs text-muted-foreground">
+                    You do not have permission to see financial amounts.
+                  </p>
                 )}
+
+                {/* Payroll + corrections */}
+                <div className="flex flex-wrap items-center gap-3 border-t border-border px-4 py-2.5 text-xs">
+                  <Link href="/dashboard/payroll"
+                    className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
+                    Payroll:&nbsp;
+                    <span className="font-semibold text-foreground">
+                      {c.payrollTotal === 0 ? 'not drafted' : `${c.payrollPaid}/${c.payrollTotal} paid`}
+                    </span>
+                    {canSeeAmounts && c.payrollNetInr > 0 && <span className="text-muted-foreground"> · {inr(c.payrollNetInr)}</span>}
+                    <ArrowRight className="h-3 w-3" />
+                  </Link>
+
+                  {c.pendingAdjustments > 0 && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-400">
+                      <AlertTriangle className="h-3 w-3" />
+                      {c.pendingAdjustments} correction{c.pendingAdjustments === 1 ? '' : 's'} from this month
+                      {canSeeAmounts && ` · ${inr(c.pendingAdjustmentInr)}`}
+                      <span className="font-normal opacity-80">— pays with the next open payroll</span>
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
+
+        {confirmPrompt && (
+          <ConfirmDialog
+            title={confirmPrompt.title}
+            body={confirmPrompt.body}
+            confirmLabel={confirmPrompt.confirmLabel}
+            danger={confirmPrompt.danger}
+            onConfirm={() => { const run = confirmPrompt.onConfirm; setConfirmPrompt(null); run() }}
+            onCancel={() => setConfirmPrompt(null)}
+          />
+        )}
+
+        <ToastContainer toasts={toasts} onDismiss={dismiss} />
       </div>
-
-      {confirmPrompt && (
-        <ConfirmDialog
-          title={confirmPrompt.title}
-          body={confirmPrompt.body}
-          confirmLabel={confirmPrompt.confirmLabel}
-          danger={confirmPrompt.danger}
-          onConfirm={() => { const run = confirmPrompt.onConfirm; setConfirmPrompt(null); run() }}
-          onCancel={() => setConfirmPrompt(null)}
-        />
-      )}
-
-      <ToastContainer toasts={toasts} onDismiss={dismiss} />
-    </div>
+    </>
   )
 }
 

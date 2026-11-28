@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { ArrowLeft, ExternalLink, TriangleAlert } from 'lucide-react'
+import { ExternalLink, TriangleAlert } from 'lucide-react'
 import Header from '@/components/layout/header'
 import { createAdminClient } from '@/lib/supabase/server'
 import { OFFER_STUDIO_URL } from '@/lib/offers/studio'
@@ -98,9 +98,6 @@ export default async function WhatsAppFlyersPage() {
     <div className="min-h-screen">
       <Header title="WhatsApp flyers" subtitle="Offer price lists from the client chats, and how far each flyer has got" />
       <div className="px-4 sm:px-6 lg:px-8 pb-16 max-w-5xl mx-auto mt-2 space-y-4">
-        <Link href="/dashboard/requests" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="w-3.5 h-3.5" /> Back to Requests
-        </Link>
         <WhatsAppTabs active="flyers" />
 
         {missing ? (
@@ -136,10 +133,7 @@ export default async function WhatsAppFlyersPage() {
             )}
 
             <p className="text-[11px] text-muted-foreground/70">
-              The stage is read from the chat: a photo or file posted by Cirqle counts as a design, the client&apos;s &quot;ok&quot; as approval, and anything else
-              the client says after a design as changes. It can be wrong when people reply about something else, so open the chat to check.
-              Pages are counted by what each picture says, so the same page posted twice is one page; on approval the task&apos;s quantity is set to that count.
-              Price checks compare a list with the same client&apos;s earlier lists. Nothing is sent to WhatsApp.
+              Stages and page counts are read from the chat and can be wrong, so open the chat to check — on approval the page count becomes the task&apos;s quantity.
             </p>
           </>
         )}

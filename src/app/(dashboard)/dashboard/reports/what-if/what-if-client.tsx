@@ -191,7 +191,7 @@ export default function WhatIfClient({ raw, employees: rawEmployees, baseSalarie
             No tasks in the selected period — pick a different baseline.
           </div>
         ) : (
-          <div className="grid lg:grid-cols-[380px_1fr] gap-4 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-[380px_minmax(0,1fr)] gap-4 items-start">
             {/* ── Left: adjustment levers for the active scenario ── */}
             <div className="space-y-3">
               <ScenarioNameCard active={active} updateActive={updateActive} />

@@ -22,7 +22,7 @@ export default function SettlementsClient({ data }: { data: SettlementsData }) {
   return (
     <div className="space-y-6">
       {host}
-      <Card title="Pending profit shares" subtitle="Confirmed, not yet settled. Confirmation is not payment: every payment re-checks the cash available (D13).">
+      <Card title="Pending profit shares" subtitle="Confirmed, not yet settled. Confirmation is not payment: every payment re-checks the cash available.">
         {data.entitlements.length === 0 ? <Empty>Nothing pending.</Empty> : (
           <Table head={['Investor', 'Period', 'Share', 'Pending', '']}>
             {data.entitlements.map(e => (
@@ -38,7 +38,7 @@ export default function SettlementsClient({ data }: { data: SettlementsData }) {
         )}
       </Card>
 
-      <Card title="Device values owed" subtitle="Confirmed valuations. A usage cost was already counted when confirmed; paying it is not counted again (D14). Never on a payslip.">
+      <Card title="Device values owed" subtitle="Confirmed valuations. A usage cost was already counted when confirmed; paying it is not counted again. Never on a payslip.">
         {data.valuations.length === 0 ? <Empty>Nothing owed.</Empty> : (
           <Table head={['Device', 'Kind', 'Outcome', 'Value', 'Pending', '']}>
             {data.valuations.map(v => (

@@ -18,7 +18,7 @@ export default async function PeriodsPage() {
     <>
       <Card title="New period" subtitle={next
         ? `Periods are whole months, follow on without gaps, and are confirmed in order. The next one starts ${next}.`
-        : 'The first period’s start month is the scheme start. You will enter its opening accumulated loss (D7) before it can be confirmed.'}>
+        : 'The first period’s start month is the scheme start. You will enter its opening accumulated loss before it can be confirmed.'}>
         <NewPeriodForm fixedStart={next ? next.slice(0, 7) : null} defaultEnd={todayIso().slice(0, 7)} />
       </Card>
 

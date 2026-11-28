@@ -128,8 +128,8 @@ export default async function InvoicesPage() {
 
   return (
     <>
-    {canSeePricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
     <InvoicesClient
+      notice={canSeePricing ? <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} /> : null}
       initialInvoices={brandFilter ? (initialInvoices as any[]).filter(i => inBrand(brandFilter, { clientId: i.client_id })) : initialInvoices}
       clients={((clientsRes.data || []) as any[]).filter(c => !c.is_draft && (!brandFilter || brandFilter.clientIds.has(c.id)))}
       draftClientIds={((clientsRes.data || []) as any[]).filter(c => c.is_draft).map(c => c.id as string)}

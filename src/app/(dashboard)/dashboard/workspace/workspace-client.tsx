@@ -85,7 +85,7 @@ export function WorkspaceClient({ initialItems }: { initialItems: WorkspaceItem[
 
   return (
     <div>
-      <Header title="My Planner" subtitle="Your private to-dos, notes and reminders — only you can see this" />
+      <Header title="My Planner" subtitle="Your private to-do list" />
       <div className="mx-auto max-w-2xl px-4 py-6">
         {/* Quick add */}
         <div className="mb-6 rounded-2xl border border-border bg-card p-3">
@@ -95,7 +95,7 @@ export function WorkspaceClient({ initialItems }: { initialItems: WorkspaceItem[
               value={title}
               onChange={e => setTitle(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') add() }}
-              placeholder="Add a task…  (Enter to save)"
+              placeholder="Add a to-do…  (Enter to save)"
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
             <button onClick={add} disabled={!title.trim()}
@@ -117,7 +117,7 @@ export function WorkspaceClient({ initialItems }: { initialItems: WorkspaceItem[
 
         {/* Buckets */}
         {active.length === 0 && (
-          <p className="py-10 text-center text-sm text-muted-foreground">Nothing planned. Add your first task above.</p>
+          <p className="py-10 text-center text-sm text-muted-foreground">Nothing planned. Add your first to-do above.</p>
         )}
         {BUCKET_ORDER.map(key => buckets[key].length > 0 && (
           <section key={key} className="mb-5">

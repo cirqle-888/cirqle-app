@@ -6,7 +6,6 @@ import Link from 'next/link'
 import { CopyForAi } from '@/components/prompt-studio/copy-for-ai'
 import { ImportPlanButton } from '@/components/prompt-studio/import-plan'
 import Header from '@/components/layout/header'
-import { SocialTabs } from '@/components/social-hub/social-tabs'
 import { PostingTimeField } from '@/components/social-hub/posting-time-field'
 import Combobox from '@/components/ui/combobox'
 import dynamic from 'next/dynamic'
@@ -1272,9 +1271,7 @@ export default function SocialCalendarClient({
       <Header
         title="Social Calendar"
       />
-      <div className="p-4 md:p-6 space-y-5">
-
-      <SocialTabs />
+      <div className="p-4 sm:p-6 space-y-5">
 
       {/*
         ── Needs attention ──

@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, Trash2, Save, Check, X, ChevronDown, ChevronLeft, ShieldAlert, Search } from 'lucide-react'
+import Header from '@/components/layout/header'
 import { usePermissions } from '@/contexts/permission-context'
 import { CRITICAL_PERMS } from '@/lib/permissions/keys'
 import { ModalOverlay } from '@/components/ui/modal-overlay'
@@ -267,185 +268,190 @@ export default function DesignationsClient(props: Props) {
 
   // ─── Render ────────────────────────────────────────────────────────────────
   // Layout:
-  //   - md+ : original 2-column (list rail + detail pane), fixed height.
+  //   - The shared Header on top (breadcrumbs + the app's global controls).
+  //   - md+ : original 2-column (list rail + detail pane), filling the screen
+  //           under the Header — 73px, the same allowance Settings makes.
   //   - <md : single-pane stack. `mobileView` decides which pane is visible.
+  // The Settings rail calls this page "Access & Roles", so the title and the
+  // last crumb do too; the list itself is still the designations.
   return (
-    <div className="md:flex md:h-[calc(100dvh-4rem)] md:min-h-[600px]">
-      {/* ── Left rail ──────────────────────────────────────────────────────── */}
-      <aside
-        className={
-          'md:w-72 md:shrink-0 md:border-r md:border-border md:bg-sidebar/50 md:flex md:flex-col md:h-full ' +
-          (mobileView === 'list' ? 'flex flex-col' : 'hidden md:flex')
-        }
-      >
-        {/* pl-14 on mobile clears the global sidebar hamburger (fixed top-left,
-            16-52px) that was covering the 'Designations' heading; md:px-4
-            restores desktop padding where the hamburger is md:hidden. */}
-        <div className="pl-14 pr-4 md:px-4 py-4 border-b border-border flex items-center justify-between">
-          <h2 className="font-semibold text-foreground">Designations</h2>
-          {canManage && (
-            <button
-              onClick={() => setShowNewModal(true)}
-              className="gradient-bg text-white text-xs font-medium rounded-lg px-2.5 py-1.5 inline-flex items-center gap-1 hover:opacity-90 transition-opacity"
-            >
-              <Plus className="w-3.5 h-3.5" /> New
-            </button>
-          )}
-        </div>
-
-        {/* Search — name AND description, because half these roles are found
-            by what they do ("cash book", "read-only") rather than by title. */}
-        <div className="px-3 pt-3">
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-muted-foreground/60 absolute left-2.5 top-1/2 -translate-y-1/2" />
-            <input
-              value={designationQuery}
-              onChange={e => setDesignationQuery(e.target.value)}
-              placeholder="Search designations…"
-              className="w-full bg-secondary border border-border rounded-lg pl-8 pr-7 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary/40"
-            />
-            {designationQuery && (
+    <div>
+      <Header
+        title="Access & Roles"
+        subtitle="What each designation can open and do"
+        crumbLabel="Access & Roles"
+      />
+      <div className="md:flex md:h-[calc(100dvh_-_var(--page-header-h,73px))] md:min-h-[600px]">
+        {/* ── Left rail ──────────────────────────────────────────────────────── */}
+        <aside
+          className={
+            'md:w-72 md:shrink-0 md:border-r md:border-border md:bg-sidebar/50 md:flex md:flex-col md:h-full ' +
+            (mobileView === 'list' ? 'flex flex-col' : 'hidden md:flex')
+          }
+        >
+          <div className="px-4 py-4 border-b border-border flex items-center justify-between">
+            <h2 className="font-semibold text-foreground">Designations</h2>
+            {canManage && (
               <button
-                onClick={() => setDesignationQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setShowNewModal(true)}
+                className="gradient-bg text-white text-xs font-medium rounded-lg px-2.5 py-1.5 inline-flex items-center gap-1 hover:opacity-90 transition-opacity"
               >
-                <X className="w-3 h-3" />
+                <Plus className="w-3.5 h-3.5" /> New
               </button>
             )}
           </div>
-        </div>
 
-        <div className="md:flex-1 md:overflow-y-auto py-2 px-2 space-y-1">
-          {designations.length === 0 && (
-            <p className="text-xs text-muted-foreground px-3 py-4">No designations yet.</p>
-          )}
-          {designations.length > 0 && visibleDesignations.length === 0 && (
-            <p className="text-xs text-muted-foreground px-3 py-4">
-              No designation matches &ldquo;{designationQuery}&rdquo;.
-            </p>
-          )}
-          {visibleDesignations.map(d => {
-            const isSelected = d.id === selectedId
-            const count = props.memberCounts[d.id] ?? 0
-            return (
-              <button
-                key={d.id}
-                onClick={() => { setSelectedId(d.id); setMobileView('detail') }}
-                className={
-                  'w-full text-left px-3 py-2.5 rounded-lg transition-colors flex items-start gap-2 ' +
-                  (isSelected
-                    ? 'bg-primary/15 border border-primary/40 text-foreground'
-                    : 'border border-transparent hover:bg-secondary text-muted-foreground hover:text-foreground')
-                }
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm font-medium truncate">{d.name}</span>
-                    {d.is_admin && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-700 dark:text-violet-300 font-medium uppercase tracking-wide">Admin</span>
-                    )}
-                    {!d.is_admin && d.is_system && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground font-medium uppercase tracking-wide">System</span>
-                    )}
-                    {/* Red flag: this role carries confidential access — the
-                        at-a-glance warning before assigning it to someone. */}
-                    {!d.is_admin && criticalCountFor(d.id) > 0 && (
-                      <span
-                        title={`${criticalCountFor(d.id)} critical permission${criticalCountFor(d.id) === 1 ? '' : 's'} (pricing / earnings / personal data)`}
-                        className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-700 dark:text-red-400 font-semibold uppercase tracking-wide"
-                      >
-                        <ShieldAlert className="w-3 h-3" /> {criticalCountFor(d.id)}
-                      </span>
-                    )}
-                  </div>
-                  {d.description && (
-                    <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{d.description}</p>
-                  )}
-                </div>
-                <span
+          {/* Search — name AND description, because half these roles are found
+              by what they do ("cash book", "read-only") rather than by title. */}
+          <div className="px-3 pt-3">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-muted-foreground/60 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                value={designationQuery}
+                onChange={e => setDesignationQuery(e.target.value)}
+                placeholder="Search designations…"
+                className="w-full bg-secondary border border-border rounded-lg pl-8 pr-7 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary/40"
+              />
+              {designationQuery && (
+                <button
+                  onClick={() => setDesignationQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="md:flex-1 md:overflow-y-auto py-2 px-2 space-y-1">
+            {designations.length === 0 && (
+              <p className="text-xs text-muted-foreground px-3 py-4">No designations yet.</p>
+            )}
+            {designations.length > 0 && visibleDesignations.length === 0 && (
+              <p className="text-xs text-muted-foreground px-3 py-4">
+                No designation matches &ldquo;{designationQuery}&rdquo;.
+              </p>
+            )}
+            {visibleDesignations.map(d => {
+              const isSelected = d.id === selectedId
+              const count = props.memberCounts[d.id] ?? 0
+              return (
+                <button
+                  key={d.id}
+                  onClick={() => { setSelectedId(d.id); setMobileView('detail') }}
                   className={
-                    'text-[11px] font-medium rounded-full px-2 py-0.5 shrink-0 ' +
-                    (isSelected ? 'bg-primary/20 text-foreground' : 'bg-secondary text-muted-foreground')
+                    'w-full text-left px-3 py-2.5 rounded-lg transition-colors flex items-start gap-2 ' +
+                    (isSelected
+                      ? 'bg-primary/15 border border-primary/40 text-foreground'
+                      : 'border border-transparent hover:bg-secondary text-muted-foreground hover:text-foreground')
                   }
                 >
-                  {count}
-                </span>
-              </button>
-            )
-          })}
-        </div>
-      </aside>
-
-      {/* ── Right pane ─────────────────────────────────────────────────────── */}
-      <main
-        className={
-          'md:flex-1 md:overflow-y-auto md:h-full md:block ' +
-          (mobileView === 'detail' ? 'block' : 'hidden md:block')
-        }
-      >
-        {/* Mobile-only back button to return to the list pane. pl-14 clears
-            the fixed global sidebar hamburger so the 'Back' label isn't
-            partly hidden under it (the button is full-width so it was
-            tappable regardless, but the leading text was occluded). */}
-        <button
-          onClick={() => setMobileView('list')}
-          className="md:hidden w-full flex items-center gap-1.5 pl-14 pr-4 py-2.5 text-sm font-medium text-primary border-b border-border bg-sidebar/40"
-        >
-          <ChevronLeft className="w-4 h-4" /> Back to designations
-        </button>
-        {selected ? (
-          <DesignationDetail
-            key={selected.id}
-            designation={selected}
-            permissionsByModule={groupedPermissions}
-            allowedIds={assignmentMap[selected.id] ?? new Set()}
-            criticalPermIds={criticalPermIds}
-            memberCount={props.memberCounts[selected.id] ?? 0}
-            canManage={canManage}
-            onTogglePermission={togglePermission}
-            onSaveMeta={async (changes) => {
-              const res = await updateDesignation(selected.id, changes)
-              if (!res.ok) {
-                toastError('Save failed', res.error)
-                return false
-              }
-              setDesignations(prev => prev.map(d => d.id === selected.id ? { ...d, ...changes, description: changes.description ?? d.description, name: changes.name ?? d.name } : d))
-              success('Saved.')
-              router.refresh()
-              return true
-            }}
-            onDelete={() => handleDelete(selected.id)}
-          />
-        ) : (
-          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-            Select a designation to view its permissions.
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-medium truncate">{d.name}</span>
+                      {d.is_admin && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-700 dark:text-violet-300 font-medium uppercase tracking-wide">Admin</span>
+                      )}
+                      {!d.is_admin && d.is_system && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground font-medium uppercase tracking-wide">System</span>
+                      )}
+                      {/* Red flag: this role carries confidential access — the
+                          at-a-glance warning before assigning it to someone. */}
+                      {!d.is_admin && criticalCountFor(d.id) > 0 && (
+                        <span
+                          title={`${criticalCountFor(d.id)} critical permission${criticalCountFor(d.id) === 1 ? '' : 's'} (pricing / earnings / personal data)`}
+                          className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-700 dark:text-red-400 font-semibold uppercase tracking-wide"
+                        >
+                          <ShieldAlert className="w-3 h-3" /> {criticalCountFor(d.id)}
+                        </span>
+                      )}
+                    </div>
+                    {d.description && (
+                      <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{d.description}</p>
+                    )}
+                  </div>
+                  <span
+                    className={
+                      'text-[11px] font-medium rounded-full px-2 py-0.5 shrink-0 ' +
+                      (isSelected ? 'bg-primary/20 text-foreground' : 'bg-secondary text-muted-foreground')
+                    }
+                  >
+                    {count}
+                  </span>
+                </button>
+              )
+            })}
           </div>
+        </aside>
+
+        {/* ── Right pane ─────────────────────────────────────────────────────── */}
+        <main
+          className={
+            'md:flex-1 md:overflow-y-auto md:h-full md:block ' +
+            (mobileView === 'detail' ? 'block' : 'hidden md:block')
+          }
+        >
+          {/* Mobile-only back button to return to the list pane. */}
+          <button
+            onClick={() => setMobileView('list')}
+            className="md:hidden w-full flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-primary border-b border-border bg-sidebar/40"
+          >
+            <ChevronLeft className="w-4 h-4" /> Back to designations
+          </button>
+          {selected ? (
+            <DesignationDetail
+              key={selected.id}
+              designation={selected}
+              permissionsByModule={groupedPermissions}
+              allowedIds={assignmentMap[selected.id] ?? new Set()}
+              criticalPermIds={criticalPermIds}
+              memberCount={props.memberCounts[selected.id] ?? 0}
+              canManage={canManage}
+              onTogglePermission={togglePermission}
+              onSaveMeta={async (changes) => {
+                const res = await updateDesignation(selected.id, changes)
+                if (!res.ok) {
+                  toastError('Save failed', res.error)
+                  return false
+                }
+                setDesignations(prev => prev.map(d => d.id === selected.id ? { ...d, ...changes, description: changes.description ?? d.description, name: changes.name ?? d.name } : d))
+                success('Saved.')
+                router.refresh()
+                return true
+              }}
+              onDelete={() => handleDelete(selected.id)}
+            />
+          ) : (
+            <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+              Select a designation to view its permissions.
+            </div>
+          )}
+        </main>
+
+        {showNewModal && (
+          <NewDesignationModal
+            designations={designations}
+            onClose={() => setShowNewModal(false)}
+            onCreate={async (input) => {
+              const ok = await handleCreate(input)
+              if (ok) setShowNewModal(false)
+            }}
+          />
         )}
-      </main>
 
-      {showNewModal && (
-        <NewDesignationModal
-          designations={designations}
-          onClose={() => setShowNewModal(false)}
-          onCreate={async (input) => {
-            const ok = await handleCreate(input)
-            if (ok) setShowNewModal(false)
-          }}
-        />
-      )}
+        {confirmPrompt && (
+          <ConfirmDialog
+            title={confirmPrompt.title}
+            body={confirmPrompt.body}
+            confirmLabel={confirmPrompt.confirmLabel}
+            danger={confirmPrompt.danger}
+            onConfirm={() => { const run = confirmPrompt.onConfirm; setConfirmPrompt(null); run() }}
+            onCancel={() => setConfirmPrompt(null)}
+          />
+        )}
 
-      {confirmPrompt && (
-        <ConfirmDialog
-          title={confirmPrompt.title}
-          body={confirmPrompt.body}
-          confirmLabel={confirmPrompt.confirmLabel}
-          danger={confirmPrompt.danger}
-          onConfirm={() => { const run = confirmPrompt.onConfirm; setConfirmPrompt(null); run() }}
-          onCancel={() => setConfirmPrompt(null)}
-        />
-      )}
-
-      <ToastContainer toasts={toasts} onDismiss={dismiss} />
+        <ToastContainer toasts={toasts} onDismiss={dismiss} />
+      </div>
     </div>
   )
 }
@@ -562,7 +568,8 @@ function DesignationDetail({
             ) : (
               <>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="text-xl font-semibold text-foreground">{designation.name}</h1>
+                  {/* h2: the page's h1 is the Header's title. */}
+                  <h2 className="text-xl font-semibold text-foreground">{designation.name}</h2>
                   {designation.is_admin && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-700 dark:text-violet-300 font-medium uppercase tracking-wide">Admin</span>
                   )}

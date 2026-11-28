@@ -254,7 +254,7 @@ export function TimelineTab({ scope, variant = 'default' }: TimelineTabProps) {
 
       {groups.map(g => (
         <div key={g.label}>
-          <div className="sticky top-0 z-10 -mx-1 bg-background/95 px-1 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground backdrop-blur">
+          <div className="sticky top-[var(--page-header-h,0px)] z-10 -mx-1 bg-background/95 px-1 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground backdrop-blur">
             {g.label}
           </div>
           <div className="divide-y divide-border/60">

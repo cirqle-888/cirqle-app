@@ -21,6 +21,8 @@ import {
   clientDepartmentIds,
 } from '@/lib/clients/department-filter'
 import { usePrivacy } from '@/contexts/privacy-context'
+import { usePermissions } from '@/contexts/permission-context'
+import { canOpenHref } from '@/lib/nav-sections'
 import {
   Plus, Search, X, Edit2, Archive, ArchiveRestore, ChevronRight,
   Users2, Award, IndianRupee, AlertTriangle, Settings2, Layers, FlaskConical, CheckCircle2, CheckSquare,
@@ -102,6 +104,10 @@ export default function ClientsClient({ clients: initialClients, stats, departme
   const router = useRouter()
   const toast = useToast()
   const { ds } = usePrivacy()
+  const { user, can } = usePermissions()
+  // Same rule as the page itself and the sidebar (reports.view) — the button
+  // used to show for everyone and bounce most of them back to the dashboard.
+  const canRanking = canOpenHref('/dashboard/clients/ranking', can, user.isAdmin, user.unitRoutesOnly ?? false)
   const [clients, setClients] = useState(initialClients)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'active' | 'drafts' | 'archived' | 'all'>('active')
@@ -276,10 +282,12 @@ export default function ClientsClient({ clients: initialClients, stats, departme
         subtitle={`${totals.count} active client${totals.count === 1 ? '' : 's'}${brandName ? ` of ${brandName} — switch to “All brands” in the sidebar to see everyone` : ''}`}
         actions={
           <>
-            <Link href="/dashboard/clients/ranking"
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
-              <Award className="w-4 h-4" /> Ranking
-            </Link>
+            {canRanking && (
+              <Link href="/dashboard/clients/ranking"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+                <Award className="w-4 h-4" /> Ranking
+              </Link>
+            )}
             {canPricingMatrix && (
               <Link href="/dashboard/pricing-matrix"
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">

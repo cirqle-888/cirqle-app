@@ -16,6 +16,7 @@ import { summarizeFollowups } from '@/lib/followups/grouping'
 import { getMyNotifications } from '@/app/api/notifications/actions'
 import DashboardClient from './dashboard-client'
 import { toISODate, todayISO } from '@/lib/utils/local-date'
+import { isDueToSend } from '@/lib/utils/invoice'
 import { buildActionQueue, type ActionQueueItem } from '@/lib/dashboard/action-queue'
 import { loadDepartmentFacts, type DepartmentFacts } from '@/lib/dashboard/department-facts'
 import { operatingRows } from '@/lib/finance/cash-flow'
@@ -58,9 +59,12 @@ export default async function DashboardPage() {
   // the edge case of a role that opens nothing at all.
   const canViewDashboard = isAdmin || hasPermission(me, PERMS.DASHBOARD_VIEW)
   if (!canViewDashboard) {
-    const landing = navSections
-      .flatMap(s => s.items)
-      .find(i => i.href !== '/dashboard' && isNavItemVisible(i, key => hasPermission(me, key), isAdmin))
+    // A sidebar ROW first (My Work, Requests, Tasks…), not a tab or a page
+    // with no row; any page they may open only if no row is theirs at all.
+    const opens = (i: (typeof navSections)[number]['items'][number]) =>
+      i.href !== '/dashboard' && isNavItemVisible(i, key => hasPermission(me, key), isAdmin)
+    const items = navSections.flatMap(s => s.items)
+    const landing = items.find(i => !i.tabOf && !i.hideInSidebar && opens(i)) ?? items.find(opens)
     if (landing) redirect(landing.href)
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center px-6">
@@ -574,6 +578,11 @@ export default async function DashboardPage() {
 
   // To be invoiced = draft + reviewed totals (prepared but not sent yet)
   const toBeInvoicedAmount = draftInvoices.reduce((s, i) => s + invTotalInr(i), 0)
+  // Of those, the ones due to send today — the same rule as Invoices' "Ready to
+  // send" and Business Health (isDueToSend). Smart Focus is a to-do list, so it
+  // counts these: next month's drafts are still collecting work.
+  const readyDrafts = draftInvoices.filter(i => isDueToSend(i, todayISO()))
+  const readyToSendAmount = readyDrafts.reduce((s, i) => s + invTotalInr(i), 0)
 
   const effectiveDue = (i: any): Date => {
     if (i.due_date) { const d = new Date(i.due_date); if (!isNaN(d.getTime())) return d }
@@ -604,7 +613,7 @@ export default async function DashboardPage() {
   // permission that governs the data it returns.
   const notifications: { rows: any[]; unreadCount: number } =
     (notifRes?.ok && notifRes.data) ? notifRes.data : { rows: [], unreadCount: 0 }
-  const draftInvoicesSample = draftInvoices.slice(0, 3).map(i => `${i.invoice_number} — ${i.client?.name || ''}`)
+  const draftInvoicesSample = readyDrafts.slice(0, 3).map(i => `${i.invoice_number} — ${i.client?.name || ''}`)
 
   const payrollPendingCount = isAdmin ? payrollRecords.filter((p: any) => p.status === 'pending').length : 0
 
@@ -660,8 +669,10 @@ export default async function DashboardPage() {
 
   return (
     <>
-    {canSeePricing && <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} />}
+    {/* The pricing alert goes under the page title (DashboardClient's
+        notice slot), not above the whole header bar. */}
     <DashboardClient
+      notice={canSeePricing ? <PricingPendingBanner clients={pendingPricing.clients} services={pendingPricing.services} /> : null}
       invoices={invoices as any[]}
       overdueInvoices={overdueInvoices as any[]}
       dueInvoices={dueInvoices as any[]}
@@ -695,6 +706,8 @@ export default async function DashboardPage() {
         dueAmount:           dueInvoices.reduce((s, i) => s + (invTotalInr(i) - invPaidInr(i)), 0),
         toBeInvoicedCount:   draftInvoices.length,
         toBeInvoicedAmount,
+        readyToSendCount:    readyDrafts.length,
+        readyToSendAmount,
         creditOutstanding,
         totalExpectedCash:   bankBalance + outstanding + toBeInvoicedAmount + creditOutstanding,
         totalDues:           overdueInvoices.length + dueInvoices.length + toBeInvoiced.length,

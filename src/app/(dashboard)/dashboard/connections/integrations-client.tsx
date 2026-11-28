@@ -322,7 +322,7 @@ export function IntegrationsClient({
                       }}
                     >
                       <FolderPlus className="mr-2 h-4 w-4" />
-                      Create Single Project
+                      New campaign
                     </Button>
                   </div>
                 </div>

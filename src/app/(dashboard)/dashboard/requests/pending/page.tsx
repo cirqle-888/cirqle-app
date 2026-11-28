@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { ArrowLeft, MessageCircle } from 'lucide-react'
+import { MessageCircle } from 'lucide-react'
 import Header from '@/components/layout/header'
 import { createAdminClient, fetchAll } from '@/lib/supabase/server'
 import { loadCurrentUser } from '@/lib/permissions/check'
@@ -64,11 +64,7 @@ export default async function PendingByClientPage() {
   return (
     <div className="min-h-screen">
       <Header title="Pending by client" subtitle="Who is waiting on us, longest wait first" />
-      <div className="px-4 sm:px-6 lg:px-8 pb-16 max-w-5xl mx-auto mt-2 space-y-5">
-        <Link href="/dashboard/requests" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="w-3.5 h-3.5" /> Back to Requests
-        </Link>
-
+      <div className="px-4 sm:px-6 lg:px-8 pb-16 max-w-5xl mx-auto mt-4 space-y-5">
         {reqRes.error && (
           <p className="text-xs text-amber-600 dark:text-amber-400">Some requests could not be read, so this list may be incomplete.</p>
         )}

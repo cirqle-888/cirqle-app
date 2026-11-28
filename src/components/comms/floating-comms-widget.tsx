@@ -570,7 +570,10 @@ export function FloatingCommsWidget() {
         data-chat-launcher
         // On the chat page itself the launcher only gets in the way — it sat on
         // top of the Send button — and the page already is the chat.
-        className={`fixed bottom-5 right-5 z-50 ${onChatPage && !open ? 'hidden' : 'flex'} items-center gap-1 transition-transform duration-200 ${
+        // Above the phone's bottom bar (--bottom-nav-h is 0 on wider screens,
+        // so desktop is unchanged). At bottom-5 it sat on the bar and covered
+        // its More and Me tabs.
+        className={`fixed bottom-[calc(var(--bottom-nav-h,0px)+1.25rem)] right-5 z-50 ${onChatPage && !open ? 'hidden' : 'flex'} items-center gap-1 transition-transform duration-200 ${
           tucked ? 'translate-x-[calc(100%-0.75rem)]' : 'translate-x-0'
         }`}
       >
@@ -603,7 +606,7 @@ export function FloatingCommsWidget() {
 
       {/* Panel */}
       {open && (
-        <div ref={panelRef} className="fixed bottom-20 right-5 z-50 flex h-[540px] max-h-[calc(100dvh-6rem)] w-[360px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl">
+        <div ref={panelRef} className="fixed bottom-[calc(var(--bottom-nav-h,0px)+5rem)] right-5 z-50 flex h-[540px] max-h-[calc(100dvh_-_var(--bottom-nav-h,0px)_-_6rem)] w-[360px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl">
           {/* Tabs */}
           <div className="flex items-center border-b border-border">
             <button onClick={() => { setTab('chat'); setActiveId(null); setClientId(null) }}

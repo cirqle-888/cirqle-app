@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/server'
 import { selectWithOptionalColumns } from '@/lib/offer-columns'
 import { loadCurrentUser } from '@/lib/permissions/check'
 import { financialVisibility } from '@/lib/permissions/strip'
+import { loadChatViewer } from '@/lib/whatsapp-listener/insights-run'
 import RequestsClient from './requests-client'
 
 export const dynamic = 'force-dynamic'
@@ -23,6 +24,13 @@ export default async function RequestsPage({
   if (me && !canView) redirect('/dashboard')
 
   const admin = createAdminClient()
+
+  // "WhatsApp chats" in the More menu is offered on the chats page's own rule
+  // (whatsapp/page.tsx sends anyone else to the dashboard): an admin, or a
+  // person with at least one chat shared with them. Started now, read at the end.
+  const whatsAppOpen = loadChatViewer(admin)
+    .then(cv => !!cv.me && (cv.me.isAdmin || cv.visible.size > 0))
+    .catch(() => false)
 
   // Defensive: portal tables may not exist until the migration runs.
   let requests: any[] = []
@@ -136,6 +144,7 @@ export default async function RequestsPage({
       servicePricing={unitPricing}
       offerCampaigns={offerCampaigns}
       initialFocusId={focusId}
+      canOpenWhatsApp={await whatsAppOpen}
     />
   )
 }

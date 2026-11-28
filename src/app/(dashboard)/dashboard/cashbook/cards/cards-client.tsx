@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
-import { AlertTriangle, Check, CreditCard, FileUp, Link2, Loader2, RefreshCw, Unlink, X } from 'lucide-react'
+import { AlertTriangle, Check, FileUp, Link2, Loader2, RefreshCw, Unlink, X } from 'lucide-react'
+import Header from '@/components/layout/header'
 import AppSelect from '@/components/ui/app-select'
 import { useToast, ToastContainer } from '@/components/ui/toast'
 import { parseStatementText, parseStatementRows, guessColumns, type ParsedLine, type ParseResult } from '@/lib/reconcile/parse'
@@ -502,18 +503,15 @@ export default function CardsClient({ cards, canManage, migrationMissing }: Prop
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex-1 space-y-4 overflow-y-auto p-4 pb-24 pt-6 md:p-8">
-      <div>
-        <h2 className="flex items-center gap-2 text-3xl font-bold tracking-tight">
-          <CreditCard className="h-7 w-7" /> Card Statements
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Match each charge on a card statement to what the cash book recorded, one billing
-          cycle at a time.
-        </p>
+    <>
+      <Header
+        title="Card Statements"
+        subtitle="Match each card charge to the cash book, one billing cycle at a time"
+      />
+      <div className="space-y-4 px-4 pb-24 pt-4 sm:px-6 sm:pt-6 md:pb-8">
+        {children}
       </div>
-      {children}
-    </div>
+    </>
   )
 }
 

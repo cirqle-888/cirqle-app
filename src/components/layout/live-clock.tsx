@@ -42,7 +42,7 @@ export function LiveClock({ className = '' }: { className?: string }) {
   const minuteBucket = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 
   // Reserve the width during SSR/hydration so the header does not jump.
-  if (!minuteBucket) return <span className={`hidden lg:inline-block w-[104px] ${className}`} aria-hidden />
+  if (!minuteBucket) return <span className={`hidden lg:inline-block w-[64px] 2xl:w-[104px] ${className}`} aria-hidden />
 
   const now = new Date(minuteBucket * MINUTE)
 
@@ -52,8 +52,10 @@ export function LiveClock({ className = '' }: { className?: string }) {
       title={now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
     >
       <span>{now.toLocaleDateString('en-IN', DATE_FMT)}</span>
-      <span className="opacity-40">·</span>
-      <span className="font-medium text-foreground/80">
+      {/* The time joins on wide screens; below that the bar is too full, and
+          the date is what the calendars are compared against. */}
+      <span className="hidden 2xl:inline opacity-40">·</span>
+      <span className="hidden 2xl:inline font-medium text-foreground/80">
         {now.toLocaleTimeString('en-IN', TIME_FMT)}
       </span>
     </span>

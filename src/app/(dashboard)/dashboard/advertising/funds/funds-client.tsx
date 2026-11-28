@@ -23,6 +23,9 @@ import type { StatementClient, StatementMonth } from '@/lib/advertising/funds-co
 import { recordAdTopUp, linkFundingEventToEntry, dismissFundingEvent, syncAdBillingNow } from './actions'
 import { todayISO } from '@/lib/utils/local-date'
 import { renderAdStatementHtml, type AdStatementParty, type AdStatementTopUp } from '@/lib/advertising/ad-statement-html'
+import Header from '@/components/layout/header'
+
+const SUBTITLE = 'Top up Meta, see who each rupee is for, and check all ad spend is invoiced'
 
 const inr = (v: number | null | undefined, dp = 0) =>
   v == null ? '—' : `₹${Number(v).toLocaleString('en-IN', { minimumFractionDigits: dp, maximumFractionDigits: dp })}`
@@ -67,14 +70,16 @@ export default function FundsClient({ data, canManage, initialClientId }: {
 
   if (!data.migrated) {
     return (
-      <div className="p-6 max-w-3xl">
-        <Header />
-        <p className="mt-6 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm">
-          Ad Funds isn&apos;t set up yet. Apply the database migration
-          <code className="mx-1 rounded bg-secondary px-1">20261027120000_ad_funds_autopilot.sql</code>
-          and reload.
-        </p>
-      </div>
+      <>
+        <Header title="Ad Funds" subtitle={SUBTITLE} />
+        <div className="p-4 sm:p-6 max-w-3xl">
+          <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm">
+            Ad Funds isn&apos;t set up yet. Apply the database migration
+            <code className="mx-1 rounded bg-secondary px-1">20261027120000_ad_funds_autopilot.sql</code>
+            and reload.
+          </p>
+        </div>
+      </>
     )
   }
 
@@ -94,17 +99,23 @@ export default function FundsClient({ data, canManage, initialClientId }: {
   }
 
   return (
-    <div className="p-4 sm:p-6 space-y-6 print:p-0">
-      <div className="flex flex-wrap items-start justify-between gap-3 print:hidden">
-        <Header />
-        {canManage && (
+    <>
+    {/* `contents` keeps the Header sticky (the wrapper draws no box) while
+        print:hidden still leaves the bar off a printed statement. */}
+    <div className="contents print:hidden">
+      <Header
+        title="Ad Funds"
+        subtitle={SUBTITLE}
+        actions={canManage ? (
           <button onClick={sync} disabled={syncing}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50">
             {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Sync from Meta
           </button>
-        )}
-      </div>
+        ) : undefined}
+      />
+    </div>
+    <div className="p-4 sm:p-6 space-y-6 print:p-0">
       {syncMsg && <p className="text-xs text-muted-foreground print:hidden">{syncMsg}</p>}
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4 print:hidden" aria-label="Ad funds overview">
@@ -172,17 +183,7 @@ export default function FundsClient({ data, canManage, initialClientId }: {
         }} />
       </section>
     </div>
-  )
-}
-
-function Header() {
-  return (
-    <div>
-      <h1 className="text-2xl font-bold flex items-center gap-2"><Wallet className="h-6 w-6 text-pink-500" /> Ad Funds</h1>
-      <p className="text-sm text-muted-foreground mt-0.5">
-        Top up Meta, see which client every rupee is for, and check that all ad spend is invoiced (actual spend + 18% GST).
-      </p>
-    </div>
+    </>
   )
 }
 

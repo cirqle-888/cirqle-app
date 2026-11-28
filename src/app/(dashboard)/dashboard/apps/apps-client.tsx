@@ -240,7 +240,7 @@ export default function AppsClient({ clientCounts, multiServiceClients = [] }: {
   return (
     <div className="min-h-screen pb-20">
       <Header
-        title="Portals & Apps"
+        title="Apps Directory"
         subtitle="Manage client-facing touchpoints, internal operations, and enterprise intake flows."
       />
       <div className="px-4 sm:px-6 lg:px-8 max-w-[1400px] mx-auto mt-6 space-y-14">

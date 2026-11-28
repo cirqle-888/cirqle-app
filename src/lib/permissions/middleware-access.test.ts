@@ -32,6 +32,15 @@ describe('dashboard route authorization', () => {
     expect(response.headers.get('location')).toBe('https://cirqle.test/dashboard?denied=1')
   })
 
+  it('lets every employee open Workspaces, where they design their own', async () => {
+    // "My workspaces" in the sidebar's workspace menu is offered to everyone;
+    // the page scopes itself. The general Settings rule must not catch it.
+    const own = await updateSession(new NextRequest('https://cirqle.test/dashboard/settings/workspaces'))
+    expect(own.headers.get('location')).toBeNull()
+    const settings = await updateSession(new NextRequest('https://cirqle.test/dashboard/settings'))
+    expect(settings.headers.get('location')).toBe('https://cirqle.test/dashboard?denied=1')
+  })
+
   it('keeps the home dashboard reachable without a designation', async () => {
     const response = await updateSession(new NextRequest('https://cirqle.test/dashboard'))
     expect(response.headers.get('location')).toBeNull()

@@ -32,7 +32,7 @@ import { formatCurrency, getCurrencySymbol, round2 } from '@/lib/calculations/cu
 import CurrencyAmountInput, { type RateSource } from '@/components/ui/currency-amount-input'
 import {
   FileText, Plus, X, ChevronRight, CheckCircle, Send, CreditCard,
-  Trash2, AlertTriangle, Clock, Eye, Lock, Zap, Download, RefreshCw, RotateCw, ListRestart, Undo2, CalendarClock,
+  Trash2, AlertTriangle, Clock, Eye, Lock, Zap, Download, RefreshCw, RotateCw, ListRestart, Undo2,
   Calendar, Building2, IndianRupee, MoreHorizontal, Search, Filter,
   Printer, TrendingUp, BadgeCheck, Receipt, Edit2, History, Tag, Percent, ChevronDown, ChevronUp, ArrowDownToLine, Gift, ExternalLink, Copy,
   Wallet, ShoppingBag, Share2, Layers, ListTree, Check, AlertCircle,
@@ -187,6 +187,8 @@ interface Invoice {
 }
 
 interface Props {
+  /** A page alert (unpriced clients/services), drawn under the page title rather than above it. */
+  notice?: React.ReactNode
   initialInvoices: Invoice[]
   clients: { id: string; name: string; code: string; phone?: string; email?: string; address?: string; default_currency?: string; business_partner_id?: string | null }[]
   /** Business partners, for the list's partner filter. */
@@ -349,7 +351,7 @@ function findLinkedCashbookEntry(inv: Invoice, p: Payment) {
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function InvoicesClient({ initialInvoices, clients, partners = [], draftClientIds = [], bankAccounts, cashbookCategories, services, companySettings, exchangeRates, visibility, agreementBreakdowns }: Props) {
+export default function InvoicesClient({ notice, initialInvoices, clients, partners = [], draftClientIds = [], bankAccounts, cashbookCategories, services, companySettings, exchangeRates, visibility, agreementBreakdowns }: Props) {
   // Coming back from a record lands where the list was left, not at the top.
   // See lib/lists/scroll-restore for the rules.
   useScrollRestore('invoices')
@@ -930,6 +932,9 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
       } else if (filterStatus === 'to_send') {
         // Not a status — the daily question. See isDueToSend.
         if (!isDueToSend(inv, todayISO())) return false
+      } else if (filterStatus === 'unsent') {
+        // Every unsent draft, due or not (draft + reviewed).
+        if (inv.status !== 'draft' && inv.status !== 'reviewed') return false
       } else if (filterStatus === 'sent') {
         // Overdue has its own filter, and a sent-but-late invoice was showing
         // under both. Sent now means "out with the client and still inside its
@@ -3113,7 +3118,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
             <div className={cn("flex-wrap items-center gap-2 sm:flex", mobileFiltersOpen ? "flex" : "hidden")}>
               <AppSelect aria-label="Filter by invoice status" value={filterStatus} onChange={e => setFilterStatus(e.target.value)} wrapperClassName="min-w-[5.5rem] flex-1" className="text-xs">
                 <option value="">All statuses</option>
-                {(tab === 'closed' ? ['paid', 'cancelled', 'bad_debt'] : tab === 'all' ? ['to_send', 'draft', 'reviewed', 'sent', 'partial', 'overdue', 'paid', 'cancelled', 'bad_debt'] : ['to_send', 'draft', 'reviewed', 'sent', 'partial', 'overdue']).map(status => <option key={status} value={status}>{getStatusLabel(status)}</option>)}
+                {(tab === 'closed' ? ['paid', 'cancelled', 'bad_debt'] : tab === 'all' ? ['to_send', 'unsent', 'draft', 'reviewed', 'sent', 'partial', 'overdue', 'paid', 'cancelled', 'bad_debt'] : ['to_send', 'unsent', 'draft', 'reviewed', 'sent', 'partial', 'overdue']).map(status => <option key={status} value={status}>{getStatusLabel(status)}</option>)}
               </AppSelect>
               {partners.length > 0 && (
                 <AppSelect aria-label="Filter by business partner" value={filterPartner}
@@ -6553,17 +6558,17 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
     return (
       <section className={cn("border-b border-border/60 bg-card px-4 sm:px-6",
         showRightPanel ? (focused ? "hidden" : "hidden shrink-0 py-2 xl:block") : "py-3 sm:py-4")} aria-label="Invoice overview">
-        <div className="flex items-center justify-between gap-3">
-          <h1 className={cn("font-semibold tracking-tight", showRightPanel ? "text-sm" : "text-base sm:text-lg")}>Invoice overview</h1>
+        {/* No title of its own: the page Header above already says "Invoices",
+            and its tab bar leads to Follow-ups, Statements and Unbilled work
+            (the Follow-ups button and "Client statements" item that sat here
+            repeated it). */}
+        <div className="flex items-center justify-end gap-3">
           <div className="flex shrink-0 items-center gap-2">
             {showTotals && (
               <button onClick={() => setShowSummary(true)} aria-label="Summary" className={toolBtn}>
                 <BarChart3 className="h-4 w-4" /><span className="hidden sm:inline">Summary</span>
               </button>
             )}
-            <Link href="/dashboard/invoices/follow-ups" aria-label="Follow-ups" className={toolBtn}>
-              <CalendarClock className="h-4 w-4" /><span className="hidden sm:inline">Follow-ups</span>
-            </Link>
             <OverflowMenu label="Invoice tools" items={[
               ...(can('billing.edit') && !permUser.isViewAs ? [
                 // Invoices are generated automatically, so a blank one is a
@@ -6572,7 +6577,6 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
                 { label: 'Generate from tasks', icon: Calendar, onClick: () => { setPanelMode('generate'); setSelectedId(null); setGenTasks([]) } },
                 { label: 'Generate in bulk', icon: History, onClick: () => { setPanelMode('batch_generate'); setSelectedId(null); setBatchGroups([]); setBatchDone(0) } },
               ] : []),
-              { label: 'Client statements', icon: Receipt, onClick: () => router.push('/dashboard/statements') },
               ...(showTotals ? [{ label: 'Financial analytics', icon: TrendingUp, onClick: () => { setPanelMode('discounts'); setSelectedId(null); loadDiscountAnalytics() } }] : []),
               { label: 'Export all invoices (CSV)', icon: Download, onClick: exportInvoicesCSV, separatorBefore: true },
             ]} />
@@ -6580,8 +6584,6 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
         </div>
         {!showRightPanel && (
           <>
-            <p className="mt-1 hidden text-xs text-muted-foreground sm:block">Review drafts, track payments, and keep client billing moving.</p>
-
             {/* Phone: one row of figures. Overdue and Ready filter the list. */}
             <div className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 pb-0.5 hide-scrollbar sm:hidden">
               {showTotals && (
@@ -6649,6 +6651,7 @@ export default function InvoicesClient({ initialInvoices, clients, partners = []
   return (
     <div className="flex flex-col h-dvh bg-background text-foreground">
       {!focused && <Header title="Invoices" />}
+      {!focused && notice}
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
 
       {leaveGuard && (

@@ -15,7 +15,7 @@ describe('the feature list is the sidebar', () => {
   it('includes the report itself, admin only', () => {
     const self = features.find(f => f.href === '/dashboard/reports/feature-usage')
     expect(self?.adminOnly).toBe(true)
-    expect(self?.section).toBe('Insights')
+    expect(self?.section).toBe('Admin')
   })
 
   it('has a "what it\'s for" and "how to start" line for every sidebar page', () => {
@@ -77,5 +77,31 @@ describe('featureForPath', () => {
     expect(featureForPath('/login')).toBeNull()
     expect(featureForPath('')).toBeNull()
     expect(featureForPath('/dashboardx')).toBeNull()
+  })
+})
+
+describe('how to start: the place comes from the sidebar', () => {
+  const byHref = (href: string) => listFeatures().find(f => f.href === href)!
+
+  it('names a row by section and label', () => {
+    expect(byHref('/dashboard/approvals').start).toMatch(/^Work → Approvals, /)
+  })
+
+  it('names a tab page by its row and its tab', () => {
+    expect(byHref('/dashboard/cashbook/recurring').start).toMatch(/^Finance → Cash Book → Recurring tab, /)
+    expect(byHref('/dashboard/statements').start).toMatch(/^Sales → Invoices → Statements tab, /)
+  })
+
+  it('points a page with no row at where it is instead', () => {
+    expect(byHref('/dashboard/capture').start).toMatch(/^Tap AI Capture at the top of any page, /)
+    expect(byHref('/dashboard/settings/workspaces').start).toMatch(/^Open the workspace menu at the top of the sidebar → My workspaces, /)
+  })
+
+  it('never names a section the sidebar no longer has', () => {
+    const sections = new Set(navSections.map(s => s.label ?? 'Home'))
+    for (const f of listFeatures()) {
+      const named = f.start.match(/^([A-Z][a-z]+) → /)?.[1]
+      if (named) expect(sections.has(named), `${f.href}: "${f.start}"`).toBe(true)
+    }
   })
 })

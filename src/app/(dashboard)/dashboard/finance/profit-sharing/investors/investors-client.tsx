@@ -272,12 +272,12 @@ function AgreementsCard({ data, run, busy, nameOf }: { data: InvestorsData; run:
         <Field label="Kind">
           <select className={inputCls} value={f.kind} onChange={e => set('kind', e.target.value)}>
             <option value="capital_investment">Capital investment</option>
-            <option value="device_investment">Device investment (D10)</option>
+            <option value="device_investment">Device investment</option>
           </select>
         </Field>
         <Field label="Title"><input className={inputCls} value={f.title} onChange={e => set('title', e.target.value)} required /></Field>
-        <Field label="Repayment on exit (D12)" hint="No default is assumed"><input className={inputCls} value={f.repaymentTerms} onChange={e => set('repaymentTerms', e.target.value)} /></Field>
-        <Field label="Earned entitlements survive exit? (D12)">
+        <Field label="Repayment on exit" hint="No default is assumed"><input className={inputCls} value={f.repaymentTerms} onChange={e => set('repaymentTerms', e.target.value)} /></Field>
+        <Field label="Earned entitlements survive exit?">
           <select className={inputCls} value={f.survive} onChange={e => set('survive', e.target.value)}>
             <option value="">Not decided</option><option value="yes">Yes</option><option value="no">No</option>
           </select>

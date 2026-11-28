@@ -77,6 +77,10 @@ export function getStatusLabel(status: string): string {
     // Not a stored status — a list filter (see isDueToSend). Named here so the
     // active-filter chip reads "To send" instead of the raw key.
     to_send:     'To send',
+    // Also a list filter: every draft not sent yet, including ones not due
+    // (next month's drafts still collecting work). The dashboard's
+    // "Drafts not sent" figure opens it, so the list matches the number.
+    unsent:      'Not sent yet',
     cancelled:   'Cancelled',
     bad_debt:    'Bad Debt',
     approved:    'Approved',

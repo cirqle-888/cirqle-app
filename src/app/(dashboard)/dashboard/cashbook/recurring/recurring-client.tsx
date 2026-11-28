@@ -13,7 +13,6 @@
  */
 
 import { useMemo, useState, useTransition } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import Header from '@/components/layout/header'
 import AppSelect from '@/components/ui/app-select'
@@ -28,7 +27,7 @@ import {
   type RecurringExpenseRow,
 } from '../recurring-actions'
 import {
-  Plus, ChevronDown, Repeat, Pencil, Trash2, Pause, Play, ArrowLeft, Loader2,
+  Plus, ChevronDown, Repeat, Pencil, Trash2, Pause, Play, Loader2,
 } from 'lucide-react'
 import { todayISO } from '@/lib/utils/local-date'
 
@@ -176,11 +175,6 @@ export default function RecurringClient({
       />
 
       <div className="p-4 md:p-6 space-y-4 max-w-3xl">
-        <Link href="/dashboard/cashbook"
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="w-4 h-4" /> Back to Cash Book
-        </Link>
-
         {loadError && (
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
             Couldn&rsquo;t load recurring expenses. {loadError}

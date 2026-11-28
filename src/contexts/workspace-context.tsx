@@ -57,3 +57,8 @@ export function useWorkspace(): WorkspaceContextValue {
   if (!ctx) throw new Error('useWorkspace must be used within a WorkspaceProvider')
   return ctx
 }
+
+/** For shared chrome that may render outside the dashboard: null instead of throwing. */
+export function useOptionalWorkspace(): WorkspaceContextValue | null {
+  return useContext(Ctx)
+}
