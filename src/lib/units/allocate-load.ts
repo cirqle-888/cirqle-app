@@ -13,6 +13,7 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAll, fetchAllIn } from '@/lib/supabase/server'
 import type { EngineEntry, EntryKind, SplitPart } from './engine'
+import { payByPerson, type PayEntry, type PersonPay } from './hq'
 import { loadShares, type SharesData } from './load'
 import { normaliseDescription, phrasesFor, salaryByParts, suggestAllocation, type Allocation, type PayrollParts, type SuggestContext, type Suggestion } from './suggest'
 
@@ -34,8 +35,23 @@ export interface AllocationRow {
   suggestion: Suggestion | null
 }
 
+/** A salary payment's payroll, split by part. */
+export interface SalaryPay {
+  weights: Map<string, number>
+  reason: string
+  parts: PayrollParts
+  employeeId: string
+  /** YYYY-MM the payroll was for (a payment made in November is often October's pay). */
+  payMonth: string
+}
+
 export interface AllocationData {
   month: string
+  /** Salary payments in the month → the payroll they paid, by part. Server-side only. */
+  salaryByEntry: Map<string, SalaryPay>
+  /** employee → the units they are on (non-admin teams). */
+  unitsOfEmployee: Map<string, string[]>
+  cqidOf: Map<string, string>
   units: { id: string; name: string; color: string | null; sharesGeneralCosts: boolean }[]
   /** Each unit's own revenue in the month (its income basis), for splitting by revenue. */
   revenueByUnit: Record<string, number>
@@ -173,6 +189,9 @@ export async function loadAllocation(admin: Admin, month: string): Promise<Alloc
 
   return {
     month,
+    salaryByEntry: salaryParts,
+    unitsOfEmployee,
+    cqidOf,
     units: units.map(u => ({ id: u.id, name: u.name, color: u.color, sharesGeneralCosts: u.sharesGeneralCosts })),
     revenueByUnit,
     rows,
@@ -199,8 +218,8 @@ async function loadSalaryParts(
   assignedUnitsOfEmployee: Map<string, string[]>,
   generalUnitIds: string[],
   unitName: Map<string, string>,
-): Promise<Map<string, { weights: Map<string, number>; reason: string }>> {
-  const out = new Map<string, { weights: Map<string, number>; reason: string }>()
+): Promise<Map<string, SalaryPay>> {
+  const out = new Map<string, SalaryPay>()
   if (!entries.length) return out
   type Pay = { id: string; employee_id: string; month: number; year: number; base_salary: number | null; commission_earned: number | null; bonus: number | null; adjustment_earned: number | null; ownership_earned: number | null }
   const PAY_COLS = 'id, employee_id, month, year, base_salary, commission_earned, bonus, adjustment_earned, ownership_earned'
@@ -279,7 +298,28 @@ async function loadSalaryParts(
     }
     const home = unitsOfEmployee.get(p.employee_id) ?? assignedUnitsOfEmployee.get(p.employee_id) ?? []
     const split = salaryByParts(parts, home, generalUnitIds, unitName)
-    if (split.weights.size) out.set(entryId, split)
+    if (split.weights.size) out.set(entryId, { ...split, parts, employeeId: p.employee_id, payMonth: `${p.year}-${String(p.month).padStart(2, '0')}` })
   }
   return out
+}
+
+/** The units that carry General costs in the allocation's month. */
+export function generalUnitsOf(data: AllocationData): string[] {
+  return data.shares.result.general[0]?.splitBetween
+    ?? data.shares.departments.filter(d => d.isActive && d.sharesGeneralCosts).map(d => d.id)
+}
+
+/**
+ * Each person paid in the month: pay by part and where it was allocated
+ * (lib/units/hq). Server-side only — callers show units only what is theirs.
+ */
+export function payOfPeople(data: AllocationData): PersonPay[] {
+  const kindOf = (id: string) => data.shares.result.classified.get(id)
+  const entries: PayEntry[] = data.rows
+    .filter(r => data.salaryByEntry.has(r.entry.id) || r.entry.employeeId || /salary/i.test(`${r.entry.categoryName ?? ''} ${r.entry.description ?? ''}`))
+    .map(r => {
+      const pay = data.salaryByEntry.get(r.entry.id)
+      return { entry: r.entry, kind: kindOf(r.entry.id), pay: pay ? { employeeId: pay.employeeId, parts: pay.parts, payMonth: pay.payMonth } : undefined }
+    })
+  return payByPerson(entries, data.cqidOf, data.unitsOfEmployee, generalUnitsOf(data))
 }

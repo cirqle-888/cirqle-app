@@ -11,12 +11,13 @@ import { AlertTriangle, Eye, Search, Shuffle } from 'lucide-react'
 import { Badge, Button, Card, Empty, Table, useAction } from '../../finance/profit-sharing/_components'
 import { inputCls, td } from '../../finance/profit-sharing/_format'
 import { startViewAs } from '@/lib/permissions/view-as-actions'
+import type { UnitKind } from '@/lib/units/engine'
 import { checkPerson, setClientDepartment, setUnitMember, type PersonCheck } from '../actions'
 
 type Reach = 'admin' | 'units' | 'all' | 'org_unit' | 'assigned' | 'nothing'
 
 export interface AccessProps {
-  units: { id: string; name: string; color: string | null; kind: 'department' | 'brand'; hasWork: boolean }[]
+  units: { id: string; name: string; color: string | null; kind: UnitKind; hasWork: boolean }[]
   departments: { id: string; name: string; unitId: string | null }[]
   people: { id: string; cqid: string; designationName: string | null; reach: Reach; units: Record<string, 'lead' | 'member'>; assignedDepartmentIds: string[] }[]
   clients: { id: string; name: string; boughtDepartmentIds: string[]; pinnedDepartmentId: string | null; unitIds: string[]; mixed: boolean }[]

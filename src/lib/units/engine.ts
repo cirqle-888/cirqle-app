@@ -45,6 +45,22 @@ export interface DeptPartner {
   sharePct: number
 }
 
+/** What a unit is under the Cirqle umbrella. */
+export type UnitKind = 'department' | 'brand' | 'branch'
+
+export const UNIT_KINDS: readonly UnitKind[] = ['department', 'branch', 'brand']
+
+export const UNIT_KIND_LABEL: Record<UnitKind, { one: string; many: string; of: string }> = {
+  department: { one: 'Department', many: 'Departments', of: 'Department of Cirqle' },
+  branch: { one: 'Branch', many: 'Branches', of: 'Branch of Cirqle' },
+  brand: { one: 'Sub-brand', many: 'Sub-brands', of: 'Sub-brand of Cirqle' },
+}
+
+/** Read a stored kind safely; anything unknown is a department. */
+export function unitKind(v: unknown): UnitKind {
+  return v === 'brand' || v === 'branch' ? v : 'department'
+}
+
 export interface UnitMember {
   employeeId: string
   cqid: string
@@ -61,7 +77,7 @@ export interface DeptConfig {
   id: string
   name: string
   slug: string
-  kind: 'department' | 'brand'
+  kind: UnitKind
   color: string | null
   categoryIds: string[]
   revenueBasis: RevenueBasis

@@ -20,7 +20,7 @@ import type { Composition, InvoiceAllocation, InvoiceRaw } from '@/lib/profit-sh
 import { lastDayOfMonthISO, monthStartISO } from '@/lib/utils/local-date'
 import {
   computeDepartmentShares, monthsBetween, type DeptConfig, type EngineCollection, type EngineEntry,
-  type EngineInvoice, type EngineResult, type EntryTag, type RevenueBasis, type SplitPart,
+  type EngineInvoice, type EngineResult, type EntryTag, type RevenueBasis, type SplitPart, unitKind,
 } from './engine'
 
 type Admin = SupabaseClient<any, any, any>
@@ -61,7 +61,7 @@ export async function loadDepartments(admin: Admin): Promise<DeptConfig[]> {
     : []
   const cqid = new Map(emps.map(e => [e.id as string, (e.cqid as string) ?? '']))
   return depts.map(d => ({
-    id: d.id, name: d.name, slug: d.slug, kind: (d.kind === 'brand' ? 'brand' : 'department') as DeptConfig['kind'],
+    id: d.id, name: d.name, slug: d.slug, kind: unitKind(d.kind),
     color: d.color ?? null,
     categoryIds: (d.category_ids ?? []) as string[],
     revenueBasis: (d.revenue_basis === 'invoiced' ? 'invoiced' : 'collected') as RevenueBasis,

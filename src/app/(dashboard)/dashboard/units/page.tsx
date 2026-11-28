@@ -1,8 +1,8 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { ArrowRight, Lock, Maximize2, Plus, Settings2, ShieldCheck, Users, Wallet } from 'lucide-react'
+import { ArrowRight, Building2, Lock, Maximize2, Plus, Settings2, ShieldCheck, Users, Wallet } from 'lucide-react'
 import Header from '@/components/layout/header'
-import type { DeptLedger } from '@/lib/units/engine'
+import { UNIT_KINDS, UNIT_KIND_LABEL, type DeptLedger } from '@/lib/units/engine'
 import { loadDepartments, loadLookups, loadShares } from '@/lib/units/load'
 import { monthStartISO } from '@/lib/utils/local-date'
 import { Badge, Card, Empty, Stat, Table } from '../finance/profit-sharing/_components'
@@ -34,6 +34,9 @@ export default async function UnitsPage({ searchParams }: { searchParams: Promis
       subtitle="Cirqle's departments and sub-brands: their teams, results and profit-and-loss agreements."
       actions={installed ? (
         <span className="flex items-center gap-2">
+          <Link href={`${ROOT}/hq`} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-secondary">
+            <Building2 className="h-3.5 w-3.5" /> Cirqle HQ
+          </Link>
           <Link href={`${ROOT}/allocate`} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-secondary">
             <Wallet className="h-3.5 w-3.5" /> Cash Book allocation
           </Link>
@@ -69,10 +72,9 @@ export default async function UnitsPage({ searchParams }: { searchParams: Promis
     while (y < ty || (y === ty && m <= tm)) { out.push(`${y}-${String(m).padStart(2, '0')}`); m++; if (m > 12) { m = 1; y++ } }
     return out.length ? out : [thisMonth]
   })()
-  const groups: { title: string; list: DeptLedger[] }[] = [
-    { title: 'Departments', list: result.ledgers.filter(l => l.department.kind === 'department') },
-    { title: 'Sub-brands', list: result.ledgers.filter(l => l.department.kind === 'brand') },
-  ].filter(g => g.list.length)
+  const groups: { title: string; list: DeptLedger[] }[] = UNIT_KINDS
+    .map(k => ({ title: UNIT_KIND_LABEL[k].many, list: result.ledgers.filter(l => l.department.kind === k) }))
+    .filter(g => g.list.length)
 
   return (
     <>
@@ -228,7 +230,7 @@ async function memberIndex(admin: Parameters<typeof loadDepartments>[0], myUnitI
         {units.map(d => (
           <Card key={d.id}
             title={<span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ background: d.color ?? '#7c3aed' }} />{d.name}</span>}
-            subtitle={d.kind === 'brand' ? 'Sub-brand of Cirqle' : 'Department of Cirqle'}>
+            subtitle={UNIT_KIND_LABEL[d.kind].of}>
             <div className="space-y-3 text-sm">
               <p className="inline-flex items-center gap-1 text-muted-foreground"><Users className="h-4 w-4" />
                 {d.members.map(x => x.role === 'lead' ? `${x.cqid} (lead)` : x.cqid).join(', ')}</p>

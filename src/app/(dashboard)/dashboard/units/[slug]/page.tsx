@@ -3,9 +3,12 @@ import { notFound, redirect } from 'next/navigation'
 import { ArrowLeft, Maximize2, Minimize2, Settings2 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import Header from '@/components/layout/header'
+import { fetchAllIn } from '@/lib/supabase/server'
 import { loadDeptTasks, loadLookups, loadShares } from '@/lib/units/load'
-import type { DeptLedger, DeptMonth } from '@/lib/units/engine'
-import { confidentialRows } from '@/lib/units/confidential'
+import { loadAllocation, payOfPeople } from '@/lib/units/allocate-load'
+import { UNIT_KIND_LABEL, type DeptLedger, type DeptMonth } from '@/lib/units/engine'
+import { confidentialRows, ownerCqidOf } from '@/lib/units/confidential'
+import { unitTeamView, type TeamPayView } from '@/lib/units/hq'
 import { lastDayOfMonthISO, monthStartISO } from '@/lib/utils/local-date'
 import { Badge, Card, Empty, Stat, Table } from '../../finance/profit-sharing/_components'
 import { inr, td, tdNum } from '../../finance/profit-sharing/_format'
@@ -20,6 +23,7 @@ const TABS = [
   { key: 'invoices', label: 'Invoices' },
   { key: 'cashbook', label: 'Cash Book' },
   { key: 'work', label: 'Work & Clients' },
+  { key: 'team', label: 'Team' },
 ] as const
 type Tab = typeof TABS[number]['key']
 
@@ -39,7 +43,7 @@ export default async function DepartmentPage({ params, searchParams }: {
   params: Promise<{ slug: string }>
   searchParams: Promise<{ month?: string; tab?: string; focus?: string }>
 }) {
-  const { admin, installed, myUnits } = await requireUnitViewer()
+  const { me, admin, installed, myUnits } = await requireUnitViewer()
   if (!installed) return <div className="mx-auto max-w-6xl px-4 py-6 md:px-6"><NotInstalled /></div>
   const { slug } = await params
   // A team member opens only their own unit, and only when the owner shares
@@ -52,12 +56,17 @@ export default async function DepartmentPage({ params, searchParams }: {
   const sp = await searchParams
   const focus = sp.focus === '1'
   const viewOnly = readOnly || focus
-  const tab: Tab = (TABS.find(t => t.key === sp.tab)?.key ?? 'overview') as Tab
+  const asked: Tab = (TABS.find(t => t.key === sp.tab)?.key ?? 'overview') as Tab
 
   const history = await loadShares(admin)
   const ledger = history.result.ledgers.find(l => l.department.slug === slug)
   if (!ledger) notFound()
   const dept = ledger.department
+  // Team pay (with performance) is for the Admin and the unit's partners —
+  // the people who share its profit and loss — not every team member.
+  const seesTeam = !readOnly || dept.partners.some(p => p.employeeId === me.employeeId)
+  const tab: Tab = asked === 'team' && !seesTeam ? 'overview' : asked
+  const shownTabs = TABS.filter(t => t.key !== 'team' || seesTeam)
 
   const thisMonth = monthStartISO(0).slice(0, 7)
   const startMonth = dept.startsOn.slice(0, 7)
@@ -74,9 +83,10 @@ export default async function DepartmentPage({ params, searchParams }: {
   const from = all ? `${startMonth}-01` : `${month}-01`
   const to = (() => { const m = all ? lastMonth : month; const [y, mo] = m.split('-').map(Number); return lastDayOfMonthISO(y, mo) })()
 
-  const [lookups, tasks] = await Promise.all([
+  const [lookups, tasks, team] = await Promise.all([
     loadLookups(admin),
     tab === 'work' ? loadDeptTasks(admin, dept, from, to) : Promise.resolve([]),
+    tab === 'team' && !all ? loadTeam(admin, dept, month) : Promise.resolve(null),
   ])
   const categoryName = new Map(lookups.categories.map(c => [c.id, c.name]))
   const otherDepts = history.departments.filter(d => d.isActive).map(d => ({ id: d.id, name: d.name }))
@@ -91,7 +101,7 @@ export default async function DepartmentPage({ params, searchParams }: {
 
   const tabs = (
     <nav className="flex gap-1 overflow-x-auto border-b border-border" aria-label={`${dept.name} sections`}>
-      {TABS.map(t => (
+      {shownTabs.map(t => (
         <Link key={t.key} href={href({ tab: t.key })}
           className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors ${tab === t.key
             ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
@@ -110,6 +120,8 @@ export default async function DepartmentPage({ params, searchParams }: {
       {/* Staff outside this unit's team stay confidential: their costs show as one line under the owner (lib/units/confidential). */}
       {tab === 'cashbook' && <CashBook ledger={{ ...detail, entries: confidentialRows(detail.entries, dept) }} untagged={viewOnly ? [] : period.result.untagged} figures={figures} periodLabel={periodLabel} readOnly={viewOnly} />}
       {tab === 'work' && <Work ledger={detail} tasks={tasks} periodLabel={periodLabel} />}
+      {tab === 'team' && <Team team={team} ownerCqid={ownerCqidOf(dept)} periodLabel={periodLabel} showWaiting={!viewOnly}
+        waitingFor={months.length ? null : monthName(startMonth)} />}
     </div>
   )
 
@@ -157,7 +169,7 @@ export default async function DepartmentPage({ params, searchParams }: {
 
   return (
     <>
-      <Header title={dept.name} subtitle={`${dept.kind === 'brand' ? 'Sub-brand' : 'Department'} workspace · ${periodLabel}`} crumbLabel={dept.name} actions={toolbar} />
+      <Header title={dept.name} subtitle={`${UNIT_KIND_LABEL[dept.kind].one} workspace · ${periodLabel}`} crumbLabel={dept.name} actions={toolbar} />
       <div className="mx-auto max-w-6xl space-y-4 px-4 py-6 md:px-6">
         {!readOnly && <Link href={ROOT} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> All units</Link>}
         {tabs}
@@ -230,7 +242,7 @@ function Overview({ ledger, figures, periodLabel, all, month, categories, genera
         )}
       </Card>
 
-      <Card title={d.kind === 'brand' ? 'The sub-brand' : 'The department'}>
+      <Card title={`The ${UNIT_KIND_LABEL[d.kind].one.toLowerCase()}`}>
         <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
           <Row label="Work that counts">{categories.join(', ') || '—'}</Row>
           <Row label="Team">{d.members.map(m => m.role === 'lead' ? `${m.cqid} (lead)` : m.cqid).join(', ') || '—'}</Row>
@@ -436,6 +448,77 @@ function Work({ ledger, tasks, periodLabel }: {
                 <td className={tdNum}>{inr(t.billingInr)}</td>
               </tr>
             ))}
+          </Table>
+        )}
+      </Card>
+    </>
+  )
+}
+
+// ═══ Team ═══════════════════════════════════════════════════════════════════
+
+type Admin = Awaited<ReturnType<typeof requireUnitViewer>>['admin']
+
+/** The unit's own people for one month; everyone else folds under the owner. */
+async function loadTeam(admin: Admin, dept: DeptLedger['department'], month: string) {
+  const data = await loadAllocation(admin, month)
+  const view = unitTeamView(payOfPeople(data), dept)
+  const { data: rated } = await fetchAllIn(
+    (chunk: string[]) => admin.from('employees').select('id, performance_rating').in('id', chunk),
+    dept.members.map(m => m.employeeId),
+  )
+  const ratingOf = new Map(((rated ?? []) as { id: string; performance_rating: number | null }[]).map(e => [e.id, e.performance_rating]))
+  return { view, ratingOf }
+}
+
+function Team({ team, ownerCqid, periodLabel, showWaiting, waitingFor }: {
+  team: { view: TeamPayView; ratingOf: Map<string, number | null> } | null
+  ownerCqid: string
+  periodLabel: string
+  showWaiting: boolean
+  /** The first month, when the unit has not started yet. */
+  waitingFor: string | null
+}) {
+  if (!team) return <Empty>{waitingFor ? `Team pay shows month by month from ${waitingFor}, when this unit starts.` : 'Pick a month — team pay is shown one month at a time.'}</Empty>
+  const { view, ratingOf } = team
+  const carried = view.team.reduce((t, r) => t + r.chargedHere, 0)
+  return (
+    <>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Stat label="Team pay this unit carries" value={inr(carried)} hint={periodLabel} />
+        <Stat label={`${ownerCqid} — owner's team`} value={inr(view.ownerTeamInr)} hint="office and owner's staff, as one line" />
+        <Stat label="People on the team" value={view.team.length} />
+      </div>
+      <Card title="The team's pay" subtitle="Pay paid this month, by part. Contribution counts only work done for this unit; what each person earned elsewhere stays with that unit.">
+        {view.team.length === 0 ? <Empty>No one is on this team yet.</Empty> : (
+          <Table head={['Person', 'Share', 'Base', 'Contribution here', 'Ownership', 'Bonus / adj.', 'This unit carries', 'Performance', ...(showWaiting ? ['Not allocated'] : [])]}>
+            {view.team.map(r => {
+              const rating = ratingOf.get(r.employeeId)
+              return (
+                <tr key={r.employeeId} className="border-b border-border/60 last:border-0">
+                  <td className={`${td} font-medium`}>{r.cqid}{r.role === 'lead' && <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">lead</span>}</td>
+                  <td className={tdNum}>{r.sharePct != null ? `${r.sharePct}%` : '—'}</td>
+                  {r.paid ? (
+                    <>
+                      <td className={tdNum}>{inr(r.base)}</td>
+                      <td className={tdNum}>{inr(r.contributionHere)}</td>
+                      <td className={tdNum}>{inr(r.ownership)}</td>
+                      <td className={tdNum}>{inr(r.extra)}</td>
+                      <td className={`${tdNum} font-medium`}>{inr(r.chargedHere)}</td>
+                    </>
+                  ) : <td className={td} colSpan={5}><span className="text-xs text-muted-foreground">No pay this month</span></td>}
+                  <td className={tdNum}>{rating != null ? `${rating}%` : '—'}</td>
+                  {showWaiting && <td className={tdNum}>{r.waiting ? <span className="text-amber-600">{inr(r.waiting)}</span> : '—'}</td>}
+                </tr>
+              )
+            })}
+            <tr className="border-t border-border text-muted-foreground">
+              <td className={td}>{ownerCqid} — owner&apos;s team</td>
+              <td className={td} colSpan={5}><span className="text-xs">Office and owner&apos;s staff pay this unit carries, as one line</span></td>
+              <td className={`${tdNum} font-medium text-foreground`}>{inr(view.ownerTeamInr)}</td>
+              <td className={td} />
+              {showWaiting && <td className={td} />}
+            </tr>
           </Table>
         )}
       </Card>

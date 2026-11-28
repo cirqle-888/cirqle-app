@@ -8,6 +8,7 @@ import { useMemo, useState } from 'react'
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { Plus, Search, Trash2, X } from 'lucide-react'
 import { Button, Field, useAction } from '../finance/profit-sharing/_components'
+import { UNIT_KINDS, UNIT_KIND_LABEL, type UnitKind } from '@/lib/units/engine'
 import { inputCls } from '../finance/profit-sharing/_format'
 import {
   assignInvoice, deleteDepartment, findInvoices, saveDepartment, saveGeneralCategories, tagEntries,
@@ -45,7 +46,7 @@ export function MonthPicker({ months, value, allLabel = 'Since start' }: { month
 export interface FormDefaults {
   id: string | null
   name: string
-  kind: 'department' | 'brand'
+  kind: UnitKind
   color: string
   categoryIds: string[]
   revenueBasis: 'collected' | 'invoiced'
@@ -111,8 +112,7 @@ export function DepartmentForm({ defaults, categories, takenCategories, employee
         </Field>
         <Field label="Type">
           <select className={inputCls} value={f.kind} onChange={e => set('kind', e.target.value as FormDefaults['kind'])}>
-            <option value="department">Department of Cirqle</option>
-            <option value="brand">Sub-brand of Cirqle</option>
+            {UNIT_KINDS.map(k => <option key={k} value={k}>{UNIT_KIND_LABEL[k].of}</option>)}
           </select>
         </Field>
         <Field label="Colour">

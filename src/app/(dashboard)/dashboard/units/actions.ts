@@ -14,7 +14,7 @@ import { revalidatePath } from 'next/cache'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin } from '@/lib/permissions/check'
 import { round2 } from '@/lib/calculations/currency'
-import { slugify, validateDepartment, type RevenueBasis } from '@/lib/units/engine'
+import { slugify, unitKind, validateDepartment, type RevenueBasis, type UnitKind } from '@/lib/units/engine'
 import { loadDepartments, searchInvoices } from '@/lib/units/load'
 import { unitsOfEmployee } from '@/lib/units/membership'
 import { loadAllocation } from '@/lib/units/allocate-load'
@@ -34,6 +34,9 @@ function fail(e: unknown): { ok: false; error: string } {
   if (/business_unit\w*.*(does not exist|schema cache)|PGRST205/i.test(msg)) {
     return { ok: false, error: `Departments & Brands needs its database migration first (${MIGRATION}).` }
   }
+  if (/business_units_kind_check/i.test(msg)) {
+    return { ok: false, error: 'Branches need a one-time database update first (supabase/migrations/20261128140000_unit_kind_branch.sql). Save it as a Department for now, or run that migration.' }
+  }
   return { ok: false, error: msg }
 }
 
@@ -44,7 +47,7 @@ const done = () => revalidatePath(ROOT, 'layout')
 export interface DepartmentInput {
   id?: string | null
   name: string
-  kind: 'department' | 'brand'
+  kind: UnitKind
   color: string | null
   categoryIds: string[]
   revenueBasis: RevenueBasis
@@ -113,7 +116,7 @@ export async function saveDepartment(input: DepartmentInput): Promise<Result<{ s
     }
 
     const row = {
-      name: draft.name, slug, kind: input.kind === 'brand' ? 'brand' : 'department',
+      name: draft.name, slug, kind: unitKind(input.kind),
       color: input.color?.trim() || null, category_ids: categoryIds, team_sees_results: !!input.teamSeesResults,
       revenue_basis: input.revenueBasis === 'invoiced' ? 'invoiced' : 'collected',
       shares_general_costs: !!input.sharesGeneralCosts, starts_on: draft.startsOn, ends_on: draft.endsOn,
