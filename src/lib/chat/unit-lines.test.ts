@@ -108,3 +108,25 @@ describe('the database applies the same line', () => {
     expect(sql).toContain("r.mode = 'everyone' OR emp_id = ANY (r.employee_ids)")              // …"Everyone" or named
   })
 })
+
+describe('the office team works with every unit', () => {
+  const withOffice = (): ChatAccessContext => ({ ...ctx(), officeIds: new Set(['office']) })
+  it('a unit member and the office team can chat, either way', () => {
+    expect(canChat(withOffice(), 's1', 'office')).toBe(true)
+    expect(canChat(withOffice(), 'office', 'f1')).toBe(true)
+    expect(crossesUnitLine(withOffice(), 'f1', 'office')).toBe(false)
+  })
+  it('…but two units still cannot', () => {
+    expect(canChat(withOffice(), 's1', 'f1')).toBe(false)
+  })
+  it('a group with the unit and the office team stays open; add another unit and it closes', () => {
+    expect(blockedByUnitLine(withOffice(), 's1', { departmentId: null, posting: 'all', memberIds: ['s1', 's2', 'office'] })).toBe(false)
+    expect(blockedByUnitLine(withOffice(), 's1', { departmentId: null, posting: 'all', memberIds: ['s1', 'office', 'f1'] })).toBe(true)
+  })
+  it('the database agrees', () => {
+    const sql = readFileSync(join(process.cwd(), 'supabase/migrations/20261128190000_chat_office_team.sql'), 'utf8')
+    expect(sql).toContain('FROM public.business_unit_office_staff os WHERE os.employee_id = cm.employee_id')
+    expect(sql).toContain("COALESCE(od.is_admin, FALSE) = FALSE")
+    expect(sql).toMatch(/GRANT EXECUTE ON FUNCTION public\.chat_unit_blocked\(uuid, uuid\) TO authenticated/)
+  })
+})

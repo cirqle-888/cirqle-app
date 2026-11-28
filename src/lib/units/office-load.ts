@@ -10,24 +10,14 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAll } from '@/lib/supabase/server'
 import { loadDepartments } from './load'
+import { loadOfficeIds } from './membership'
 import { officeRoster, type CatalogPerm, type OfficePerson } from './office'
 
 type Admin = SupabaseClient<any, any, any>
 
 export const OFFICE_MIGRATION = 'supabase/migrations/20261128160000_unit_office_staff.sql'
 
-const missing = (e: { code?: string; message?: string } | null) =>
-  !!e && (e.code === '42P01' || e.code === 'PGRST205' || /does not exist|schema cache/i.test(e.message ?? ''))
-
-/** The office list; null while its migration has not been run. */
-export async function loadOfficeIds(admin: Admin): Promise<Set<string> | null> {
-  const { data, error } = await admin.from('business_unit_office_staff').select('employee_id')
-  if (error) {
-    if (missing(error)) return null
-    throw new Error(`Could not read the office team: ${error.message}`)
-  }
-  return new Set((data ?? []).map((r: any) => r.employee_id as string))
-}
+export { loadOfficeIds }
 
 export interface OfficeTeamData {
   /** False until the office list's migration is run (office = anyone on no team). */

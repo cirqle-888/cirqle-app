@@ -88,3 +88,17 @@ export async function unitTeamIds(admin: Admin, me: Pick<CurrentUser, 'isAdmin' 
   if (error) throw new Error(`Could not read the unit team: ${error.message}`)
   return new Set([me.employeeId, ...((data ?? []) as { employee_id: string }[]).map(r => r.employee_id)])
 }
+
+/**
+ * Cirqle's office team (Departments & Brands → Cirqle HQ → Office team), or
+ * null while its migration has not been run. Unit lines in chat do not stand
+ * between a unit's team and the office team.
+ */
+export async function loadOfficeIds(admin: Admin): Promise<Set<string> | null> {
+  const { data, error } = await admin.from('business_unit_office_staff').select('employee_id')
+  if (error) {
+    if (notInstalled(error)) return null
+    throw new Error(`Could not read the office team: ${error.message}`)
+  }
+  return new Set(((data ?? []) as { employee_id: string }[]).map(r => r.employee_id))
+}

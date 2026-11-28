@@ -173,9 +173,10 @@ export default function ChatAccessClient({ settings, error }: { settings: ChatAc
           <li>With no rule, people can reach the colleagues they share work with (as before).</li>
           <li>
             <b className="text-foreground">Unit teams come first</b> (Departments &amp; Brands): someone on a unit&apos;s team chats only with
-            their own unit and admins, and does not see group chats or channels that include anyone else. To let a person — say
-            an office colleague — talk with a unit across that line, give <b className="text-foreground">that person</b> a rule of
-            “Everyone”, or name the unit members in their rule. Department rules never cross a unit line.
+            their own unit, the <b className="text-foreground">office team</b> (Cirqle HQ → Office team) and admins, and does not see group
+            chats or channels that include anyone else. To let someone else talk with a unit across that line, give
+            <b className="text-foreground"> that person</b> a rule of “Everyone”, or name the unit members in their rule. Department rules
+            never cross a unit line.
           </li>
         </ul>
       </div>

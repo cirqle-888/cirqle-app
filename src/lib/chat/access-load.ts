@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { CurrentUser } from '@/lib/permissions/check'
 import { loadServiceScope } from '@/lib/scope/service-scope'
 import { visibleEmployeeIds } from '@/lib/scope/employee-scope'
+import { loadOfficeIds } from '@/lib/units/membership'
 import type { ChatAccessContext, ChatAccessRule, ChatAccessMode } from './access'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -64,6 +65,8 @@ export async function loadAdminIds(admin: Admin): Promise<Set<string>> {
 export interface UnitLines {
   unitsByEmployee: Map<string, Set<string>>
   unitDepartmentsByEmployee: Map<string, Set<string>>
+  /** Cirqle's office team — no unit line stands between them and a unit. */
+  officeIds: Set<string>
 }
 
 /**
@@ -73,7 +76,7 @@ export interface UnitLines {
  * silently disappear.
  */
 export async function loadUnitLines(admin: Admin, adminIds: ReadonlySet<string>): Promise<UnitLines> {
-  const out: UnitLines = { unitsByEmployee: new Map(), unitDepartmentsByEmployee: new Map() }
+  const out: UnitLines = { unitsByEmployee: new Map(), unitDepartmentsByEmployee: new Map(), officeIds: (await loadOfficeIds(admin)) ?? new Set() }
   const { data: members, error } = await admin.from('business_unit_members').select('unit_id, employee_id')
   if (error) {
     if (error.code === 'PGRST205' || error.code === '42P01' || /does not exist|schema cache/i.test(error.message ?? '')) return out
@@ -105,11 +108,20 @@ export async function loadChatAccess(admin: Admin, me: CurrentUser, preloadedRul
   ])
   if (me.isAdmin) adminIds.add(me.employeeId)
   const [mine, lines] = await Promise.all([visibleEmployeeIds(admin, scope), loadUnitLines(admin, adminIds)])
+  // On a unit's team, the people you can reach with no rule set are your own
+  // unit's team and the office team, besides those you share work with — so
+  // a member whose work is only what is given to them (unit staff) can still
+  // talk to their team and to accounts.
+  const myUnits = lines.unitsByEmployee.get(me.employeeId)
+  const mineInUnit = mine && myUnits?.size
+    ? new Set([...mine, ...lines.officeIds,
+        ...[...lines.unitsByEmployee].filter(([, u]) => [...u].some(x => myUnits.has(x))).map(([id]) => id)])
+    : mine
   return {
     rules,
     departmentsByEmployee,
     adminIds,
-    defaultVisible: viewerId => (viewerId === me.employeeId ? mine : null),
+    defaultVisible: viewerId => (viewerId === me.employeeId ? mineInUnit : null),
     ...lines,
   }
 }

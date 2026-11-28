@@ -47,6 +47,8 @@ export interface ChatAccessContext {
   unitsByEmployee?: ReadonlyMap<string, ReadonlySet<string>>
   /** Those members' units' departments, for department channels. */
   unitDepartmentsByEmployee?: ReadonlyMap<string, ReadonlySet<string>>
+  /** Cirqle's office team: no unit line stands between them and a unit's team. */
+  officeIds?: ReadonlySet<string>
 }
 
 export interface EffectiveRule {
@@ -114,11 +116,13 @@ function personRuleAllows(ctx: ChatAccessContext, from: string, to: string): boo
 
 /**
  * Do these two (neither an admin) stand on opposite sides of a unit line?
- * Two people outside every unit never do; people on the same unit never do.
+ * Two people outside every unit never do; people on the same unit never do;
+ * nor does anyone on Cirqle's office team, with anyone.
  */
 export function crossesUnitLine(ctx: ChatAccessContext, a: string, b: string): boolean {
   const units = ctx.unitsByEmployee
   if (!units?.size) return false
+  if (ctx.officeIds?.has(a) || ctx.officeIds?.has(b)) return false
   const ua = units.get(a), ub = units.get(b)
   if (!ua?.size && !ub?.size) return false
   if (ua && ub) for (const u of ua) if (ub.has(u)) return false
@@ -151,7 +155,8 @@ export interface ConversationFacts {
  *   · admins-only posting (announcements) → never
  *   · a department channel            → closed unless it is one of their unit's departments
  *   · anything else                   → closed when any other non-admin member
- *                                       stands across the line from them
+ *                                       stands across the line from them (the
+ *                                       office team never does)
  */
 export function blockedByUnitLine(ctx: ChatAccessContext, viewer: string, conv: ConversationFacts): boolean {
   if (ctx.adminIds.has(viewer) || !isUnitMember(ctx, viewer)) return false
