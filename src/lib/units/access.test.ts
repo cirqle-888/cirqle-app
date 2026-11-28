@@ -165,6 +165,15 @@ describe('unit staff — own work only', () => {
     expect(offered).not.toContain('/dashboard/social-calendar')
     expect(offered).not.toContain('/dashboard/contributions')
     expect(canOpenHref('/dashboard/contributions', can, false, 'staff')).toBe(false)
+    // The unit page is only where a closed page sends them — never in their menus.
+    expect(offered).not.toContain('/dashboard/units')
+    expect(navSections.flatMap(s => s.items).filter(i => isNavItemVisible(i, can, false, true)).map(i => i.href)).toContain('/dashboard/units')
+  })
+  it('are passed on from the unit page, and never see a unit\'s results', () => {
+    const index = read('src/app/(dashboard)/dashboard/units/page.tsx')
+    expect(index).toContain("myUnits.filter(u => u.role !== 'staff')")
+    expect(index).toContain("redirect('/dashboard/my-work')")
+    expect(read('src/app/(dashboard)/dashboard/units/[slug]/page.tsx')).toContain("u.teamSeesResults && u.role !== 'staff'")
   })
   it('get none of their unit\'s departments — only the work given to them', () => {
     const m = read('src/lib/units/membership.ts')

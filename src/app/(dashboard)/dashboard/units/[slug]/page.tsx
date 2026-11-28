@@ -49,7 +49,8 @@ export default async function DepartmentPage({ params, searchParams }: {
   // A team member opens only their own unit, and only when the owner shares
   // its results. Everything they see here is read-only.
   const readOnly = myUnits !== null
-  if (readOnly && !myUnits.some(u => u.slug === slug && u.teamSeesResults)) redirect(ROOT)
+  // Unit staff (own work only) never see a unit's results, shared or not.
+  if (readOnly && !myUnits.some(u => u.slug === slug && u.teamSeesResults && u.role !== 'staff')) redirect(ROOT)
   // Focus mode is for sitting with the team, so it is view-only too: no list
   // of untagged company entries (they include everyone's salary) and no
   // search across every client's invoices.

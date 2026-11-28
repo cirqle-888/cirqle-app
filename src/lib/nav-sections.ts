@@ -52,7 +52,8 @@ export function isNavItemVisible(item: NavItem, can: (key: string) => boolean, i
   if (unitOnly && !isAdmin && !unitTeamMayOpen(item.href, unitOnly)) return false
   const anyOk = !item.requiredAnyPerm?.length || item.requiredAnyPerm.some(can)
   return (!item.requiredPerm || can(item.requiredPerm)) && anyOk
-    && (!item.adminOnly || isAdmin || (!!item.unitTeams && !!unitOnly))
+    // Unit staff (own work only) do not get the unit pages in their menus.
+    && (!item.adminOnly || isAdmin || (!!item.unitTeams && unitOnly === true))
 }
 
 /**

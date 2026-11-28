@@ -10,6 +10,9 @@ import { inr, td, tdNum } from '../finance/profit-sharing/_format'
 import { GeneralCategories, InvoiceAssign, MonthPicker } from './_ui'
 import { NotInstalled } from './_not-installed'
 import { MONTH, ROOT, monthName, requireUnitViewer } from './_page'
+import { hasPermission } from '@/lib/permissions/check'
+import { PERMS } from '@/lib/permissions/keys'
+import { isNavItemVisible, navSections } from '@/lib/nav-sections'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,10 +26,16 @@ const tone = (n: number) => (n > 0 ? 'good' : n < 0 ? 'bad' : 'muted') as 'good'
  * member sees only their own unit.
  */
 export default async function UnitsPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
-  const { admin, installed, myUnits } = await requireUnitViewer()
-  // A plain call, not <MemberIndex admin={…} />: a database client passed as a
-  // component prop gets serialised for React's dev tools and breaks the page.
-  if (myUnits) return memberIndex(admin, myUnits.map(u => u.id))
+  const { me, admin, installed, myUnits } = await requireUnitViewer()
+  if (myUnits) {
+    // Unit STAFF (own work only) have no use for the unit page: it is only
+    // where a closed page sends them, so pass them on to their own work.
+    const teamUnits = myUnits.filter(u => u.role !== 'staff')
+    if (!teamUnits.length) return staffHome(me)
+    // A plain call, not <MemberIndex admin={…} />: a database client passed as a
+    // component prop gets serialised for React's dev tools and breaks the page.
+    return memberIndex(admin, teamUnits.map(u => u.id))
+  }
 
   const header = (
     <Header
@@ -214,6 +223,33 @@ export default async function UnitsPage({ searchParams }: { searchParams: Promis
             unit. <Link href={`${ROOT}/allocate?month=${month}`} className="font-medium text-primary hover:underline">Allocate them</Link> — with suggestions.
           </p>
         )}
+      </div>
+    </>
+  )
+}
+
+/**
+ * Where unit staff land. My Work when their role can open it (it then never
+ * sends them back here, so no loop); otherwise a short page pointing to the
+ * pages they do have.
+ */
+function staffHome(me: Awaited<ReturnType<typeof requireUnitViewer>>['me']) {
+  if (hasPermission(me, [PERMS.REQUESTS_WORK_OWN, PERMS.REQUESTS_MANAGE])) redirect('/dashboard/my-work')
+  const can = (k: string) => hasPermission(me, k)
+  const pages = navSections.flatMap(s => s.items).filter(i => isNavItemVisible(i, can, false, 'staff'))
+  return (
+    <>
+      <Header title="My work" subtitle="The work given to you." />
+      <div className="mx-auto max-w-2xl px-4 py-6 md:px-6">
+        <Card>
+          {pages.length ? (
+            <ul className="space-y-1">
+              {pages.map(p => (
+                <li key={p.href}><Link href={p.href} className="flex items-center justify-between rounded-lg px-3 py-2 text-sm hover:bg-secondary">{p.label}<ArrowRight className="h-3.5 w-3.5 text-muted-foreground" /></Link></li>
+              ))}
+            </ul>
+          ) : <Empty>Nothing is open to you yet. Ask the Admin to give your role its pages.</Empty>}
+        </Card>
       </div>
     </>
   )
