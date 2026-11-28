@@ -119,12 +119,15 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
             {ledgers.map(l => {
               const m = l.months[0]
               const d = l.department
-              const before = d.startsOn.slice(0, 7) > month
+              // loadAllocation works units out before their start, moving the
+              // ledger's start; the real one is on the unit as loaded.
+              const start = (units.find(u => u.id === d.id)?.startsOn ?? d.startsOn).slice(0, 7)
+              const before = start > month
               return (
                 <tr key={d.id} className="border-b border-border/60 last:border-0">
                   <td className={td}>
                     <span className="flex items-center gap-2 font-medium"><span className="h-2.5 w-2.5 rounded-full" style={{ background: d.color ?? '#7c3aed' }} />{d.name}</span>
-                    <span className="text-[11px] text-muted-foreground">{UNIT_KIND_LABEL[d.kind].one}{before ? ` · starts ${monthName(d.startsOn.slice(0, 7))}` : ''}</span>
+                    <span className="text-[11px] text-muted-foreground">{UNIT_KIND_LABEL[d.kind].one}{before ? ` · starts ${monthName(start)}` : ''}</span>
                   </td>
                   <td className={tdNum}>{inr((m?.incomeInr ?? 0) + (m?.otherIncomeInr ?? 0))}</td>
                   <td className={tdNum}>{inr(m?.directCostsInr ?? 0)}</td>

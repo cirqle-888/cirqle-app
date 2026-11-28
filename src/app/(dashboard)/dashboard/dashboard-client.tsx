@@ -37,6 +37,7 @@ import {
 } from './dashboard-utils'
 import type { Granularity, DrawerType } from './dashboard-utils'
 import DashboardAnalytics from './dashboard-analytics'
+import UnitsStripPanel, { UnitsStripSkeleton } from './_units-strip'
 import { useWorkspace } from '@/contexts/workspace-context'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -55,6 +56,8 @@ interface Props {
   invoices: any[]; overdueInvoices: any[]; dueInvoices: any[]
   allCashbook: any[]; displayTasks: any[]; analyticsViewPromise: Promise<AnalyticsView>
   departmentFactsPromise: Promise<import('@/lib/dashboard/department-facts').DepartmentFacts | null>
+  /** Admin only — Cirqle's units this month (Departments & Brands). */
+  unitsStripPromise?: Promise<import('@/lib/units/dashboard-strip').UnitsStrip | null>
   pendingPayPromise: Promise<Record<string, import('@/lib/dashboard/pending-pay').PendingPay>>
   todayTasks: any[]; unscoredDoneTasks: any[]; activeTasks: any[]; toBeInvoiced: any[]
   employees: any[]; scoresPromise: Promise<any[]>; payrollRecords: any[]
@@ -272,7 +275,7 @@ export default function DashboardClient(props: Props) {
 // ─────────────────────────────────────────────────────────────────────────────
 function AdminDashboard({
   stats, invoices, overdueInvoices, dueInvoices, allCashbook,
-  analyticsViewPromise, departmentFactsPromise, pendingPayPromise, todayTasks, unscoredDoneTasks,
+  analyticsViewPromise, departmentFactsPromise, unitsStripPromise, pendingPayPromise, todayTasks, unscoredDoneTasks,
   activeTasks, toBeInvoiced, employees, earningsPromise, payrollRecords,
   todayStr, exchangeRates = [], followupCounts,
   notifications, pendingRequests, draftInvoicesSample = [], payrollPendingCount = 0,
@@ -598,6 +601,13 @@ function AdminDashboard({
               )}
             </div>
           </div>
+        )}
+
+        {/* ── Units this month (Departments & Brands), streamed ──────────── */}
+        {unitsStripPromise && (
+          <Suspense fallback={<UnitsStripSkeleton />}>
+            <UnitsStripPanel promise={unitsStripPromise} />
+          </Suspense>
         )}
 
         {/* ── Streamed analytics (KPIs · Production · Pulse · bottom grid) ──── */}

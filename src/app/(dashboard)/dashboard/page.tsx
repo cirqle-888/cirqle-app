@@ -20,6 +20,7 @@ import { buildActionQueue, type ActionQueueItem } from '@/lib/dashboard/action-q
 import { loadDepartmentFacts, type DepartmentFacts } from '@/lib/dashboard/department-facts'
 import { operatingRows } from '@/lib/finance/cash-flow'
 import { pendingPayByEmployee, type PendingPay } from '@/lib/dashboard/pending-pay'
+import { loadUnitsStrip, type UnitsStrip } from '@/lib/units/dashboard-strip'
 
 export const dynamic = 'force-dynamic'
 
@@ -350,6 +351,15 @@ export default async function DashboardPage() {
       })
     : Promise.resolve(null)
 
+  // Units this month (Departments & Brands) — streamed the same way; hidden
+  // (null) for non-admins, when there are no units, or if a read fails.
+  const unitsStripPromise: Promise<UnitsStrip | null> = isAdmin
+    ? loadUnitsStrip(supabase, todayISO().slice(0, 7)).catch(e => {
+        console.error('[dashboard] units strip:', e instanceof Error ? e.message : e)
+        return null
+      })
+    : Promise.resolve(null)
+
   // Payslips generated but not yet paid, per employee — what the company still
   // owes the team. A balance, not a period figure, so it ignores the date
   // filter. Admin only; a failed read just hides the line. Streamed, and
@@ -659,6 +669,7 @@ export default async function DashboardPage() {
       displayTasks={displayTasks as any[]}
       analyticsViewPromise={analyticsViewPromise}
       departmentFactsPromise={departmentFactsPromise}
+      unitsStripPromise={unitsStripPromise}
       pendingPayPromise={pendingPayPromise}
       todayTasks={todayTasks as any[]}
       unscoredDoneTasks={unscoredDoneTasks as any[]}
