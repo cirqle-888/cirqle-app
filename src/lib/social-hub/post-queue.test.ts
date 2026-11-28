@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { comparePostingOrder } from '@/lib/social/posting-time'
 import {
   isCreativeReady, isContentReady, postStageOf, urgencyOf, needsAttention,
   postChecklist, checklistProgress, cycleProgress, committedTarget, postContentTypeFor,
@@ -276,5 +277,26 @@ describe('postContentTypeFor', () => {
     const ALLOWED = ['image','carousel','video','reel','story_image','story_video','text','link']
     const CALENDAR = ['post','reel','story','carousel','video','flyer','poster','blog','seo','ad','email','other']
     for (const t of CALENDAR) expect(ALLOWED).toContain(postContentTypeFor(t))
+  })
+})
+
+describe('comparePostingOrder — the queue sort', () => {
+  const post = (plannedDate: string | null, postingTime: string | null = null) => ({ plannedDate, postingTime })
+
+  it('sorts by day, then by time of day', () => {
+    const sorted = [post('2026-12-02', '09:00'), post('2026-12-01', '21:00'), post('2026-12-01', '09:00')].sort(comparePostingOrder)
+    expect(sorted.map(p => `${p.plannedDate} ${p.postingTime}`)).toEqual(['2026-12-01 09:00', '2026-12-01 21:00', '2026-12-02 09:00'])
+  })
+
+  it('does not crash on an idea with no date, and puts it last', () => {
+    // One undated item (Social's Idea Board) used to take down the whole
+    // To Post page: it called .localeCompare on null.
+    const sorted = [post(null), post('2026-12-01'), post(null, '10:00')].sort(comparePostingOrder)
+    expect(sorted.map(p => p.plannedDate)).toEqual(['2026-12-01', null, null])
+  })
+
+  it('puts a post with no time after the timed ones on the same day', () => {
+    const sorted = [post('2026-12-01', null), post('2026-12-01', '18:00')].sort(comparePostingOrder)
+    expect(sorted.map(p => p.postingTime)).toEqual(['18:00', null])
   })
 })
