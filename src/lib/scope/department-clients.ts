@@ -132,7 +132,11 @@ export async function loadDepartmentClientScope(
       return all
     })(),
   ])
-  if (clients.error || services.error || !pricing) return UNRESTRICTED
+  // A failed read: unrestricted only for someone who is not confined — a unit
+  // or brand-workspace member gets no clients rather than every client.
+  if (clients.error || services.error || !pricing) {
+    return confined ? { restricted: true, departmentIds, clientIds: new Set() } : UNRESTRICTED
+  }
 
   const serviceDepartment = new Map(
     ((services.data || []) as { id: string; category_id: string | null }[]).map(s => [s.id, s.category_id]),

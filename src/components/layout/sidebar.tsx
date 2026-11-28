@@ -278,7 +278,7 @@ function SidebarContent({ onNavClick, isCollapsed = false }: { onNavClick?: () =
         .map(s => ({
           ...s,
           items: s.items.filter(i =>
-            isNavItemVisible(i, can, user.isAdmin, !!user.unitRoutesOnly) &&
+            isNavItemVisible(i, can, user.isAdmin, (user.unitRoutesOnly ?? false)) &&
             (!workspaceHrefs || workspaceHrefs.includes(i.href))
           ),
         }))
@@ -779,7 +779,7 @@ export default function Sidebar() {
               ]
           // Only pages this person can open — a business-unit team member
           // (lib/units/access) must not be offered Home or a stale favourite.
-          ).filter(item => canOpenHref(item.href, can, user.isAdmin, !!user.unitRoutesOnly)).map(item => {
+          ).filter(item => canOpenHref(item.href, can, user.isAdmin, (user.unitRoutesOnly ?? false))).map(item => {
             // Dashboard root: exact match only so Tasks/Contributions don't highlight it
             const active = item.href === '/dashboard'
               ? pathname === '/dashboard'

@@ -105,7 +105,7 @@ export function AppLauncherTrigger() {
   const visibleSections = useMemo(
     () =>
       navSections
-        .map(s => ({ label: s.label, items: s.items.filter(i => isNavItemVisible(i, can, user.isAdmin, !!user.unitRoutesOnly)) }))
+        .map(s => ({ label: s.label, items: s.items.filter(i => isNavItemVisible(i, can, user.isAdmin, (user.unitRoutesOnly ?? false))) }))
         .filter(s => s.items.length > 0),
     [can, user.isAdmin, user.unitRoutesOnly],
   )

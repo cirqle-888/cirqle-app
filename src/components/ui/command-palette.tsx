@@ -172,7 +172,7 @@ export function CommandPalette() {
   // ranked first, never hidden — Quick Actions can always reach anything
   // Search results should be able to reach, per spec.
   const allNavItems: NavItem[] = useMemo(
-    () => navSections.flatMap(s => s.items).filter(i => isNavItemVisible(i, can, user.isAdmin, !!user.unitRoutesOnly)),
+    () => navSections.flatMap(s => s.items).filter(i => isNavItemVisible(i, can, user.isAdmin, (user.unitRoutesOnly ?? false))),
     [can, user.isAdmin, user.unitRoutesOnly],
   )
   const workspaceHrefs = activeWorkspace.sidebarModuleHrefs
@@ -390,7 +390,7 @@ export function CommandPalette() {
       sections.push({
         label: 'Quick Actions',
         icon: Plus,
-        items: availableCreateShortcuts(can, user.isAdmin, user.isViewAs, !!user.unitRoutesOnly)
+        items: availableCreateShortcuts(can, user.isAdmin, user.isViewAs, (user.unitRoutesOnly ?? false))
           .map(item => ({ ...item, kind: 'action' as const })),
       })
     } else {
@@ -429,7 +429,7 @@ export function CommandPalette() {
     // as the sidebar to history, favorites and record results as well.
     const visibleSections = sections.map(section => ({
       ...section,
-      items: section.items.filter(item => canOpenSearchHref(item.href, can, user.isAdmin, user.isViewAs, !!user.unitRoutesOnly)),
+      items: section.items.filter(item => canOpenSearchHref(item.href, can, user.isAdmin, user.isViewAs, (user.unitRoutesOnly ?? false))),
     })).filter(section => section.items.length > 0)
     const flat = visibleSections.flatMap(s => s.items)
     return { sections: visibleSections, flat }

@@ -29,7 +29,7 @@ import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { canOpenHref } from '@/lib/nav-sections'
 import { hasPermission } from '@/lib/permissions/check'
-import { isUnitConfined } from '@/lib/units/membership'
+import { unitLockFor } from '@/lib/units/membership'
 import { UNIT_TEAM_HOME } from '@/lib/units/access'
 // Workspace logo URL fetch — pulls both dark and light variants.
 // Service-role client so RLS on company_settings can't block it.
@@ -86,9 +86,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
     ? await Promise.all([
         listFavoritesForEmployee(meResult.user.employeeId).catch(() => []),
         getMyWorkspaceState().catch(() => null),
-        // A business-unit team member: only the unit-team pages. Not caught —
-        // a failed read must not quietly open everything to a unit member.
-        isUnitConfined(createAdminClient(), meResult.user),
+        // A business-unit team member: only the unit-team pages (staff: the
+        // shorter staff list). Not caught — a failed read must not quietly
+        // open everything to a unit member.
+        unitLockFor(createAdminClient(), meResult.user),
       ])
     : [[], null, false]
 
@@ -160,7 +161,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // makes an admin's view-as preview of a member accurate.
   const requestPath = headersList.get('x-request-path')
   if (unitOnly && requestPath && requestPath !== UNIT_TEAM_HOME
-      && !canOpenHref(requestPath, (key) => hasPermission(me, key), user.isAdmin, true)) {
+      && !canOpenHref(requestPath, (key) => hasPermission(me, key), user.isAdmin, unitOnly)) {
     redirect(`${UNIT_TEAM_HOME}?denied=1`)
   }
 

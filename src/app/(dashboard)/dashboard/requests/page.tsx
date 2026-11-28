@@ -112,7 +112,9 @@ export default async function RequestsPage({
   let clientRows = brandFilter ? (clientsRes.data || []).filter((c: any) => brandFilter.clientIds.has(c.id)) : (clientsRes.data || [])
   let unitPricing = pricingRows
   if (unit) {
-    requests = requests.filter(r => inUnitWork(unit, { serviceId: r.service_id, clientId: r.client_id }))
+    // …plus anything assigned to them by name — all a unit STAFF member gets.
+    requests = requests.filter(r => inUnitWork(unit, { serviceId: r.service_id, clientId: r.client_id })
+      || (!!me?.employeeId && r.assigned_employee_id === me.employeeId))
     clientRows = clientRows.filter((c: { id: string }) => unit.clientIds.has(c.id))
     unitPricing = pricingRows.filter(r => unit.clientIds.has(r.client_id) && unit.serviceIds.has(r.service_id))
     offerCampaigns = unit.coversOfferFlyers

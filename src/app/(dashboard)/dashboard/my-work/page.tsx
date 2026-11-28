@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { unitTeamIds } from '@/lib/units/membership'
+import { unitLockFor, unitTeamIds } from '@/lib/units/membership'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { loadCurrentUser, hasPermission } from '@/lib/permissions/check'
 import { PERMS } from '@/lib/permissions/keys'
@@ -35,10 +35,12 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
   // A business-unit team (lib/units) manages only its own people: a lead in
   // Social Media never sees Cirqle Flyers' boards. null = not in a unit.
   const unitTeam = await unitTeamIds(admin, me)
+  // Unit STAFF see their own board only, whatever their role allows.
+  const staffOnly = (await unitLockFor(admin, me)) === 'staff'
 
   // Team: everyone active with work on their board, busiest-late first.
   let team: { employeeId: string; cqid: string; open: number; overdue: number }[] = []
-  if (canManageTeam) {
+  if (canManageTeam && !staffOnly) {
     const { data: emps } = await admin.from('employees').select('id, cqid').eq('is_active', true).order('cqid')
     const today = toISODate(new Date())
     const people = ((emps ?? []) as { id: string; cqid: string }[]).filter(e => !unitTeam || unitTeam.has(e.id))
@@ -53,7 +55,7 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
   }
 
   const { for: forId } = await searchParams
-  const viewing = canManageTeam && forId && forId !== me.employeeId && (!unitTeam || unitTeam.has(forId)) ? team.find(t => t.employeeId === forId)
+  const viewing = canManageTeam && !staffOnly && forId && forId !== me.employeeId && (!unitTeam || unitTeam.has(forId)) ? team.find(t => t.employeeId === forId)
     ?? await admin.from('employees').select('id, cqid').eq('id', forId).maybeSingle()
       .then(({ data }) => data ? { employeeId: data.id as string, cqid: data.cqid as string, open: 0, overdue: 0 } : null)
     : null

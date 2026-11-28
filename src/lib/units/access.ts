@@ -11,7 +11,8 @@
  * and a test (access.test.ts) refuses an entry whose page does not narrow its
  * data to the unit.
  *
- * Admins and the office team (staff in no unit) are not affected.
+ * Admins and the office team (people in no unit) are not affected. Unit
+ * staff (role 'staff') get the shorter UNIT_STAFF_PAGES below.
  */
 
 export interface UnitTeamPage {
@@ -82,10 +83,34 @@ export const UNIT_TEAM_PAGES: readonly UnitTeamPage[] = [
  */
 export const UNIT_TEAM_HOME = '/dashboard/units'
 
-/** May a unit team member open this path? Query strings and hashes are ignored. */
-export function unitTeamMayOpen(href: string): boolean {
+/**
+ * Unit STAFF (role 'staff') — on a team, but own work only: the pages they
+ * need to do the work given to them, nothing that lists the unit's clients,
+ * plans or earnings. A subset of UNIT_TEAM_PAGES (checked by access.test.ts).
+ */
+export const UNIT_STAFF_PAGES: readonly string[] = [
+  '/dashboard/my-work',
+  '/dashboard/tasks',
+  '/dashboard/requests',
+  '/dashboard/chat',
+  '/dashboard/prompt-studio',
+  '/dashboard/units',
+]
+
+/** How a person is held to unit pages: not at all, a team member's pages, or a staff member's. */
+export type UnitLock = boolean | 'staff'
+
+/** The lock for someone's unit roles (lead / member / staff). No roles = not locked. */
+export function unitLockOf(roles: readonly string[]): UnitLock {
+  if (!roles.length) return false
+  return roles.every(r => r === 'staff') ? 'staff' : true
+}
+
+/** May a unit team member (or, with 'staff', a staff member) open this path? Query strings and hashes are ignored. */
+export function unitTeamMayOpen(href: string, lock: UnitLock = true): boolean {
   const path = href.split(/[?#]/)[0].replace(/\/+$/, '') || '/'
   // Only dashboard pages are restricted here; API routes keep their own checks.
   if (path !== '/dashboard' && !path.startsWith('/dashboard/')) return true
-  return UNIT_TEAM_PAGES.some(p => path === p.href || path.startsWith(`${p.href}/`))
+  const pages = lock === 'staff' ? UNIT_STAFF_PAGES : UNIT_TEAM_PAGES.map(p => p.href)
+  return pages.some(h => path === h || path.startsWith(`${h}/`))
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
 import { join } from 'path'
-import { UNIT_TEAM_HOME, UNIT_TEAM_PAGES, unitTeamMayOpen } from './access'
+import { UNIT_STAFF_PAGES, UNIT_TEAM_HOME, UNIT_TEAM_PAGES, unitLockOf, unitTeamMayOpen } from './access'
 import { canOpenHref, isNavItemVisible, navSections } from '@/lib/nav-sections'
 
 /**
@@ -87,13 +87,23 @@ describe('navigation for a unit team', () => {
 
 describe('enforcement', () => {
   const mw = read('src/lib/supabase/middleware.ts')
-  it('the sign-in check applies the list to unit members', () => {
+  it('the sign-in check applies the list to unit members, and the shorter one to staff', () => {
+    expect(mw).toContain("supabase.rpc('my_unit_route_level')")
     expect(mw).toContain("supabase.rpc('my_unit_route_lock')")
-    expect(mw).toContain('profile.unitRoutesOnly && !unitTeamMayOpen(pathname)')
+    expect(mw).toContain('profile.unitRoutesOnly && !unitTeamMayOpen(pathname, profile.unitRoutesOnly)')
   })
   it('fails closed when the membership check errors', () => {
-    const block = mw.slice(mw.indexOf("supabase.rpc('my_unit_route_lock')"), mw.indexOf('profile = {', mw.indexOf("supabase.rpc('my_unit_route_lock')")))
+    const start = mw.indexOf("supabase.rpc('my_unit_route_level')")
+    const block = mw.slice(mw.indexOf('const failClosed'), mw.indexOf('profile = {', start))
     expect(block).toContain("url.pathname = '/login'")
+    expect(block.match(/return failClosed\(\)/g)?.length).toBe(2)
+  })
+  it('the staff level is answered by the database for the caller alone', () => {
+    const sql = read('supabase/migrations/20261128180000_unit_staff_role.sql')
+    expect(sql).toMatch(/my_unit_route_level[\s\S]*SECURITY DEFINER/)
+    expect(sql).toMatch(/e\.auth_id = auth\.uid\(\)/)
+    expect(sql).toMatch(/GRANT EXECUTE ON FUNCTION public\.my_unit_route_level\(\) TO authenticated/)
+    expect(sql).toMatch(/REVOKE ALL ON FUNCTION public\.my_unit_route_level\(\) FROM PUBLIC, anon/)
   })
   it('the database function answers only for the caller', () => {
     const sql = read('supabase/migrations/20261127100000_business_units.sql')
@@ -104,8 +114,8 @@ describe('enforcement', () => {
   })
   it('the layout guard knows about units too', () => {
     const layout = read('src/app/(dashboard)/layout.tsx')
-    expect(layout).toContain('isUnitConfined(')
-    expect(layout).toMatch(/canOpenHref\(requestPath, .*true\)/)
+    expect(layout).toContain('unitLockFor(')
+    expect(layout).toMatch(/canOpenHref\(requestPath, .*unitOnly\)/)
     // The real path must reach the layout on every request, not only when the
     // session cookie is refreshed — otherwise every page looks like
     // '/dashboard' to the unit check and a member bounces forever.
@@ -124,5 +134,42 @@ describe('no redirect loops', () => {
     const page = read('src/app/(dashboard)/dashboard/units/[slug]/page.tsx')
     expect(page).toContain('const viewOnly = readOnly || focus')
     expect(page).toContain('untagged={viewOnly ? [] : period.result.untagged}')
+  })
+})
+
+describe('unit staff — own work only', () => {
+  it('get a subset of the team pages, without the unit-wide lists', () => {
+    const team = new Set(UNIT_TEAM_PAGES.map(p => p.href))
+    for (const h of UNIT_STAFF_PAGES) expect(team.has(h)).toBe(true)
+    for (const closed of ['/dashboard/clients', '/dashboard/contributions', '/dashboard/social-calendar']) {
+      expect(unitTeamMayOpen(closed, 'staff')).toBe(false)
+      expect(unitTeamMayOpen(closed, true)).toBe(true)
+    }
+    for (const open of ['/dashboard/my-work', '/dashboard/tasks', '/dashboard/requests', '/dashboard/chat', '/dashboard/prompt-studio']) {
+      expect(unitTeamMayOpen(open, 'staff')).toBe(true)
+    }
+    expect(unitTeamMayOpen(UNIT_TEAM_HOME, 'staff')).toBe(true)   // no redirect loop
+    expect(unitTeamMayOpen('/dashboard/invoices', 'staff')).toBe(false)
+  })
+  it('are staff only when every unit they are on has them as staff', () => {
+    expect(unitLockOf([])).toBe(false)
+    expect(unitLockOf(['staff'])).toBe('staff')
+    expect(unitLockOf(['staff', 'staff'])).toBe('staff')
+    expect(unitLockOf(['staff', 'member'])).toBe(true)
+    expect(unitLockOf(['lead'])).toBe(true)
+  })
+  it('see only the staff pages in the navigation', () => {
+    const can = () => true
+    const offered = navSections.flatMap(s => s.items).filter(i => isNavItemVisible(i, can, false, 'staff')).map(i => i.href)
+    for (const h of offered) expect(unitTeamMayOpen(h, 'staff')).toBe(true)
+    expect(offered).not.toContain('/dashboard/social-calendar')
+    expect(offered).not.toContain('/dashboard/contributions')
+    expect(canOpenHref('/dashboard/contributions', can, false, 'staff')).toBe(false)
+  })
+  it('get none of their unit\'s departments — only the work given to them', () => {
+    const m = read('src/lib/units/membership.ts')
+    expect(m).toContain("units.filter(u => u.role !== 'staff').flatMap(u => u.categoryIds)")
+    expect(read('src/app/(dashboard)/dashboard/requests/page.tsx')).toContain('r.assigned_employee_id === me.employeeId')
+    expect(read('src/app/(dashboard)/dashboard/prompt-studio/page.tsx')).toContain('ownTaskClientIds(db, me.employeeId)')
   })
 })

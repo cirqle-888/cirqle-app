@@ -29,7 +29,7 @@ import type { DeptConfig } from './engine'
 
 type Admin = SupabaseClient
 
-export type ReachKind = 'admin' | 'units' | 'all' | 'org_unit' | 'assigned' | 'nothing'
+export type ReachKind = 'admin' | 'units' | 'unit_staff' | 'all' | 'org_unit' | 'assigned' | 'nothing'
 
 export interface PersonRow {
   id: string
@@ -38,7 +38,7 @@ export interface PersonRow {
   designationName: string | null
   reach: ReachKind
   /** unit id → role, for the people on unit teams. */
-  units: Record<string, 'lead' | 'member'>
+  units: Record<string, 'lead' | 'member' | 'staff'>
   /** Departments assigned directly (employee_service_categories, brands, direct services). */
   assignedDepartmentIds: string[]
 }
@@ -109,15 +109,15 @@ export async function loadAccessMap(admin: Admin): Promise<AccessMap> {
   const people: PersonRow[] = emps.filter(e => e.cqid).map(e => {
     const d = e.designation_id ? designation.get(e.designation_id) : undefined
     const keys = (e.designation_id && keysOf.get(e.designation_id)) || new Set<string>()
-    const myUnits: Record<string, 'lead' | 'member'> = {}
-    for (const m of members) if (m.employee_id === e.id) myUnits[m.unit_id] = m.role === 'lead' ? 'lead' : 'member'
+    const myUnits: Record<string, 'lead' | 'member' | 'staff'> = {}
+    for (const m of members) if (m.employee_id === e.id) myUnits[m.unit_id] = m.role === 'lead' || m.role === 'staff' ? m.role : 'member'
     const assigned = new Set<string>()
     for (const a of catAssign) if (a.employee_id === e.id) assigned.add(a.category_id)
     for (const a of svcAssign) if (a.employee_id === e.id) { const c = serviceDept.get(a.service_id); if (c) assigned.add(c) }
     for (const a of brandAssign) if (a.employee_id === e.id) for (const c of brandDepts.get(a.brand_id) ?? []) assigned.add(c)
-    const activeUnit = Object.keys(myUnits).some(id => units.find(u => u.id === id)?.isActive)
+    const activeRoles = Object.entries(myUnits).filter(([id]) => units.find(u => u.id === id)?.isActive).map(([, r]) => r)
     const reach: ReachKind = d?.is_admin ? 'admin'
-      : activeUnit ? 'units'
+      : activeRoles.length ? (activeRoles.every(r => r === 'staff') ? 'unit_staff' : 'units')
       : keys.has(PERMS.SCOPE_VIEW_ALL) ? 'all'
       : keys.has(PERMS.SCOPE_BY_UNIT) ? 'org_unit'
       : assigned.size ? 'assigned' : 'nothing'

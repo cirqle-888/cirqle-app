@@ -101,7 +101,7 @@ export function payByPerson(
 export interface TeamPayRow {
   employeeId: string
   cqid: string
-  role: 'lead' | 'member'
+  role: 'lead' | 'member' | 'staff'
   sharePct: number | null
   /** Paid this month at all? */
   paid: boolean
@@ -130,7 +130,7 @@ export interface TeamPayView {
  */
 export function unitTeamView(
   people: readonly PersonPay[],
-  unit: { id: string; members: readonly { employeeId: string; cqid: string; role: 'lead' | 'member' }[]; partners: readonly { employeeId: string; sharePct: number }[] },
+  unit: { id: string; members: readonly { employeeId: string; cqid: string; role: 'lead' | 'member' | 'staff' }[]; partners: readonly { employeeId: string; sharePct: number }[] },
 ): TeamPayView {
   const byId = new Map(people.map(p => [p.employeeId, p]))
   const team = unit.members.map(m => {

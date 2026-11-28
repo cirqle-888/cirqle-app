@@ -156,6 +156,23 @@ describe('unit team page lock', () => {
     expect(response.headers.get('location')).toBeNull()
   })
 
+  it('keeps unit staff to the staff pages', async () => {
+    asMember('unit-staff-1')
+    mocks.rpc.mockResolvedValue({ data: 'staff', error: null })
+    const closed = await updateSession(new NextRequest('https://cirqle.test/dashboard/social-calendar'))
+    expect(closed.headers.get('location')).toBe('https://cirqle.test/dashboard/units?denied=1')
+    asMember('unit-staff-2')
+    const open = await updateSession(new NextRequest('https://cirqle.test/dashboard/requests'))
+    expect(open.headers.get('location')).toBeNull()
+  })
+
+  it('gives a unit lead or member the team pages', async () => {
+    asMember('unit-team-1')
+    mocks.rpc.mockResolvedValue({ data: 'team', error: null })
+    const response = await updateSession(new NextRequest('https://cirqle.test/dashboard/social-calendar'))
+    expect(response.headers.get('location')).toBeNull()
+  })
+
   it('leaves staff outside any unit as they were', async () => {
     asMember('office-staff')
     mocks.rpc.mockResolvedValue({ data: false, error: null })

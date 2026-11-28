@@ -18,7 +18,7 @@ import {
   Calculator, CreditCard, Landmark, ShoppingBag, Store, Bookmark, Split,
   type LucideIcon,
 } from 'lucide-react'
-import { unitTeamMayOpen } from '@/lib/units/access'
+import { unitTeamMayOpen, type UnitLock } from '@/lib/units/access'
 
 export type NavItem = {
   label: string
@@ -46,12 +46,13 @@ export type NavSection = {
 }
 
 /** Permission/admin gate shared by every navSections consumer (Sidebar, App Launcher, Command Palette). */
-export function isNavItemVisible(item: NavItem, can: (key: string) => boolean, isAdmin: boolean, unitOnly = false): boolean {
-  // A business-unit team member sees only the unit-team pages (lib/units/access).
-  if (unitOnly && !isAdmin && !unitTeamMayOpen(item.href)) return false
+export function isNavItemVisible(item: NavItem, can: (key: string) => boolean, isAdmin: boolean, unitOnly: UnitLock = false): boolean {
+  // A business-unit team member sees only the unit-team pages; unit staff an
+  // even shorter list (lib/units/access).
+  if (unitOnly && !isAdmin && !unitTeamMayOpen(item.href, unitOnly)) return false
   const anyOk = !item.requiredAnyPerm?.length || item.requiredAnyPerm.some(can)
   return (!item.requiredPerm || can(item.requiredPerm)) && anyOk
-    && (!item.adminOnly || isAdmin || (!!item.unitTeams && unitOnly))
+    && (!item.adminOnly || isAdmin || (!!item.unitTeams && !!unitOnly))
 }
 
 /**
@@ -67,9 +68,9 @@ export function isNavItemVisible(item: NavItem, can: (key: string) => boolean, i
  * back to /dashboard. Query strings and hashes are ignored. Routes outside
  * the sidebar, and /dashboard itself, are left to their own page checks.
  */
-export function canOpenHref(href: string, can: (key: string) => boolean, isAdmin: boolean, unitOnly = false): boolean {
+export function canOpenHref(href: string, can: (key: string) => boolean, isAdmin: boolean, unitOnly: UnitLock = false): boolean {
   const path = href.split(/[?#]/)[0]
-  if (unitOnly && !isAdmin && !unitTeamMayOpen(path)) return false
+  if (unitOnly && !isAdmin && !unitTeamMayOpen(path, unitOnly)) return false
   const active = resolveActiveHref(navSections, path)
   if (!active || active === '/dashboard') return true
   const item = navSections.flatMap(s => s.items).find(i => i.href === active)

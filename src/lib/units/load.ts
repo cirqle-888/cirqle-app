@@ -49,6 +49,8 @@ export interface Lookups {
   employees: { id: string; cqid: string }[]
 }
 
+const ROLE_ORDER = { lead: 0, member: 1, staff: 2 } as const
+
 export async function loadDepartments(admin: Admin): Promise<DeptConfig[]> {
   const [depts, partners, members] = await Promise.all([
     rows(fetchAll(admin.from('business_units').select('*').order('display_order').order('created_at')), 'units'),
@@ -71,8 +73,8 @@ export async function loadDepartments(admin: Admin): Promise<DeptConfig[]> {
       employeeId: p.employee_id, cqid: cqid.get(p.employee_id) ?? '', sharePct: num(p.share_pct),
     })),
     members: members.filter(m => m.unit_id === d.id).map(m => ({
-      employeeId: m.employee_id, cqid: cqid.get(m.employee_id) ?? '', role: (m.role === 'lead' ? 'lead' : 'member') as 'lead' | 'member',
-    })).sort((x, y) => (x.role === y.role ? x.cqid.localeCompare(y.cqid) : x.role === 'lead' ? -1 : 1)),
+      employeeId: m.employee_id, cqid: cqid.get(m.employee_id) ?? '', role: (m.role === 'lead' || m.role === 'staff' ? m.role : 'member') as 'lead' | 'member' | 'staff',
+    })).sort((x, y) => ROLE_ORDER[x.role] - ROLE_ORDER[y.role] || x.cqid.localeCompare(y.cqid)),
   }))
 }
 

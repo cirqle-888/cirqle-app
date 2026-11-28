@@ -57,7 +57,7 @@ export interface FormDefaults {
   isActive: boolean
   teamSeesResults: boolean
   partners: { employeeId: string; sharePct: number }[]
-  members: { employeeId: string; role: 'lead' | 'member' }[]
+  members: { employeeId: string; role: 'lead' | 'member' | 'staff' }[]
 }
 
 export function DepartmentForm({ defaults, categories, takenCategories, employees }: {
@@ -164,9 +164,10 @@ export function DepartmentForm({ defaults, categories, takenCategories, employee
                 {employees.filter(e => e.id === m.employeeId || !onTeam.has(e.id)).map(e => <option key={e.id} value={e.id}>{e.cqid}</option>)}
               </select>
               <select className={`${inputCls} w-32 shrink-0`} value={m.role} aria-label="Role"
-                onChange={e => set('members', f.members.map((x, j) => j === i ? { ...x, role: e.target.value as 'lead' | 'member' } : x))}>
+                onChange={e => set('members', f.members.map((x, j) => j === i ? { ...x, role: e.target.value as 'lead' | 'member' | 'staff' } : x))}>
                 <option value="member">Member</option>
                 <option value="lead">Lead</option>
+                <option value="staff">Staff — own work</option>
               </select>
               <button type="button" aria-label="Remove from team" className="rounded-lg p-2 text-muted-foreground hover:bg-secondary"
                 onClick={() => set('members', f.members.filter((_, j) => j !== i))}><X className="h-4 w-4" /></button>

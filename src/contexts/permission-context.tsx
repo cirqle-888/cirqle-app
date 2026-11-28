@@ -18,8 +18,8 @@ export interface PermissionUser {
   dateOfBirth: string | null
   /** True while an admin is browsing as this employee (read-only preview). */
   isViewAs?: boolean
-  /** A business-unit team member: only the unit-team pages are offered (lib/units/access). */
-  unitRoutesOnly?: boolean
+  /** A business-unit team member: only the unit-team pages are offered; 'staff' = the shorter staff list (lib/units/access). */
+  unitRoutesOnly?: boolean | 'staff'
 }
 
 interface PermissionContextValue {

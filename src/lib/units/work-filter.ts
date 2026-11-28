@@ -45,3 +45,22 @@ export function inUnitWork(f: UnitWorkFilter, row: { serviceId?: string | null; 
   if (row.serviceId) return f.serviceIds.has(row.serviceId)
   return !!row.clientId && f.clientIds.has(row.clientId)
 }
+
+/**
+ * Clients of the tasks given to this person (assigned to them directly, by
+ * group or by parameter) — what a unit STAFF member works on, since their
+ * unit gives them no clients of its own. Fails closed: a read error is none.
+ */
+export async function ownTaskClientIds(admin: SupabaseClient, employeeId: string): Promise<Set<string>> {
+  const reads = await Promise.all(['task_assignments', 'task_group_assignments', 'task_parameter_assignments']
+    .map(t => admin.from(t).select('task_id').eq('employee_id', employeeId)))
+  if (reads.some(r => r.error)) return new Set()
+  const taskIds = [...new Set(reads.flatMap(r => ((r.data ?? []) as { task_id: string | null }[]).map(x => x.task_id).filter((x): x is string => !!x)))]
+  const out = new Set<string>()
+  for (let i = 0; i < taskIds.length; i += 200) {
+    const { data, error } = await admin.from('tasks').select('client_id').in('id', taskIds.slice(i, i + 200))
+    if (error) return new Set()
+    for (const t of (data ?? []) as { client_id: string | null }[]) if (t.client_id) out.add(t.client_id)
+  }
+  return out
+}

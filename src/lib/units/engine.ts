@@ -64,7 +64,8 @@ export function unitKind(v: unknown): UnitKind {
 export interface UnitMember {
   employeeId: string
   cqid: string
-  role: 'lead' | 'member'
+  /** lead / member see the whole unit's work; staff only the work given to them. */
+  role: 'lead' | 'member' | 'staff'
 }
 
 /**

@@ -113,7 +113,8 @@ interface ProfileCachePayload {
    * unit-team pages (lib/units/access). Missing on cookies signed before this
    * field existed, which read as false for at most PROFILE_TTL_SEC.
    */
-  unitRoutesOnly?: boolean
+  /** On a unit's team: only the unit-team pages; 'staff' = the shorter staff list. */
+  unitRoutesOnly?: boolean | 'staff'
   /** Unix seconds expiry. */
   exp: number
 }
@@ -489,19 +490,31 @@ export async function updateSession(request: NextRequest) {
       // alone. Before the migration the function does not exist: nobody is a
       // unit member yet. Any other failure fails CLOSED, like the profile read
       // above — a unit member must never be let loose by a hiccup.
-      let unitRoutesOnly = false
+      // Unit STAFF (own work only) get a shorter list; my_unit_route_level()
+      // says which. Before its migration it does not exist and the older
+      // yes/no lock answers instead (nobody can be staff before it anyway).
+      let unitRoutesOnly: boolean | 'staff' = false
       if (!isAdmin) {
-        const { data: locked, error: lockErr } = await supabase.rpc('my_unit_route_lock')
-        if (lockErr) {
-          const missing = lockErr.code === 'PGRST202' || lockErr.code === '42883' || /could not find the function|does not exist/i.test(lockErr.message ?? '')
-          if (!missing) {
-            const url = request.nextUrl.clone()
-            url.pathname = '/login'
-            url.searchParams.set('error', 'profile')
-            return NextResponse.redirect(url)
-          }
+        const isMissing = (e: { code?: string; message?: string }) =>
+          e.code === 'PGRST202' || e.code === '42883' || /could not find the function|does not exist/i.test(e.message ?? '')
+        const failClosed = () => {
+          const url = request.nextUrl.clone()
+          url.pathname = '/login'
+          url.searchParams.set('error', 'profile')
+          return NextResponse.redirect(url)
+        }
+        const { data: level, error: levelErr } = await supabase.rpc('my_unit_route_level')
+        if (!levelErr) {
+          unitRoutesOnly = level === 'staff' ? 'staff' : level === 'team' || level === true
+        } else if (!isMissing(levelErr)) {
+          return failClosed()
         } else {
-          unitRoutesOnly = locked === true
+          const { data: locked, error: lockErr } = await supabase.rpc('my_unit_route_lock')
+          if (lockErr) {
+            if (!isMissing(lockErr)) return failClosed()
+          } else {
+            unitRoutesOnly = locked === true
+          }
         }
       }
 
@@ -548,7 +561,7 @@ export async function updateSession(request: NextRequest) {
 
     // A unit team member opens only the unit-team pages — an allow-list, so a
     // page added later is closed to them until it is made safe for units.
-    if (profile.unitRoutesOnly && !unitTeamMayOpen(pathname)) {
+    if (profile.unitRoutesOnly && !unitTeamMayOpen(pathname, profile.unitRoutesOnly)) {
       const url = request.nextUrl.clone()
       url.pathname = UNIT_TEAM_HOME
       url.search = ''

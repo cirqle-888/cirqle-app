@@ -14,12 +14,12 @@ import { startViewAs } from '@/lib/permissions/view-as-actions'
 import type { UnitKind } from '@/lib/units/engine'
 import { checkPerson, setClientDepartment, setUnitMember, type PersonCheck } from '../actions'
 
-type Reach = 'admin' | 'units' | 'all' | 'org_unit' | 'assigned' | 'nothing'
+type Reach = 'admin' | 'units' | 'unit_staff' | 'all' | 'org_unit' | 'assigned' | 'nothing'
 
 export interface AccessProps {
   units: { id: string; name: string; color: string | null; kind: UnitKind; hasWork: boolean }[]
   departments: { id: string; name: string; unitId: string | null }[]
-  people: { id: string; cqid: string; designationName: string | null; reach: Reach; units: Record<string, 'lead' | 'member'>; assignedDepartmentIds: string[] }[]
+  people: { id: string; cqid: string; designationName: string | null; reach: Reach; units: Record<string, 'lead' | 'member' | 'staff'>; assignedDepartmentIds: string[] }[]
   clients: { id: string; name: string; boughtDepartmentIds: string[]; pinnedDepartmentId: string | null; unitIds: string[]; mixed: boolean }[]
   designationsWithoutReach: { id: string; name: string; people: string[] }[]
 }
@@ -28,6 +28,7 @@ const REACH: Record<Reach, { label: string; tone: 'good' | 'info' | 'warn' | 'ba
   admin: { label: 'Admin · everything', tone: 'good' },
   all: { label: 'View all', tone: 'good' },
   units: { label: 'Unit team', tone: 'info' },
+  unit_staff: { label: 'Unit staff · own work', tone: 'info' },
   org_unit: { label: 'Org unit', tone: 'muted' },
   assigned: { label: 'Assigned departments', tone: 'warn' },
   nothing: { label: 'Sees nothing', tone: 'bad' },
@@ -109,7 +110,7 @@ function People({ units, departments, people }: AccessProps) {
                     title={!u.hasWork ? 'Pick the work this unit covers first' : undefined}
                     value={p.units[u.id] ?? ''}
                     onChange={e => {
-                      const v = e.target.value as '' | 'lead' | 'member'
+                      const v = e.target.value as '' | 'lead' | 'member' | 'staff'
                       run(`${p.id}${u.id}`, () => setUnitMember(u.id, p.id, v || null), v ? `${p.cqid} → ${u.name}` : `${p.cqid} off ${u.name}`)
                     }}
                     className={`rounded-md border px-2 py-1 text-xs ${p.units[u.id] ? 'border-primary/50 bg-primary/10 font-medium' : 'border-border bg-card text-muted-foreground'}`}
@@ -117,6 +118,7 @@ function People({ units, departments, people }: AccessProps) {
                     <option value="">—</option>
                     <option value="member">Member</option>
                     <option value="lead">Lead</option>
+                    <option value="staff">Staff — own work</option>
                   </select>
                 </td>
               ))}

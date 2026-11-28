@@ -245,7 +245,7 @@ function Overview({ ledger, figures, periodLabel, all, month, categories, genera
       <Card title={`The ${UNIT_KIND_LABEL[d.kind].one.toLowerCase()}`}>
         <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
           <Row label="Work that counts">{categories.join(', ') || '—'}</Row>
-          <Row label="Team">{d.members.map(m => m.role === 'lead' ? `${m.cqid} (lead)` : m.cqid).join(', ') || '—'}</Row>
+          <Row label="Team">{d.members.map(m => m.role === 'member' ? m.cqid : `${m.cqid} (${m.role})`).join(', ') || '—'}</Row>
           <Row label="Agreement">{d.partners.length ? d.partners.map(p => `${p.cqid} ${p.sharePct}%`).join(' · ') : 'None — the result stays with Cirqle'}</Row>
           <Row label="Opening balance">₹0 — the agreement starts fresh in {monthName(d.startsOn.slice(0, 7))}; nothing before it is carried in</Row>
           <Row label="Results from">{monthName(d.startsOn.slice(0, 7))}{d.endsOn ? ` · ends ${monthName(d.endsOn.slice(0, 7))}` : ''}</Row>
@@ -496,7 +496,7 @@ function Team({ team, ownerCqid, periodLabel, showWaiting, waitingFor }: {
               const rating = ratingOf.get(r.employeeId)
               return (
                 <tr key={r.employeeId} className="border-b border-border/60 last:border-0">
-                  <td className={`${td} font-medium`}>{r.cqid}{r.role === 'lead' && <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">lead</span>}</td>
+                  <td className={`${td} font-medium`}>{r.cqid}{r.role !== 'member' && <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">{r.role}</span>}</td>
                   <td className={tdNum}>{r.sharePct != null ? `${r.sharePct}%` : '—'}</td>
                   {r.paid ? (
                     <>

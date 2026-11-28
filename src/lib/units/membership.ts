@@ -13,8 +13,13 @@ import 'server-only'
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { CurrentUser } from '@/lib/permissions/check'
+import { unitLockOf, type UnitLock } from './access'
 
 type Admin = SupabaseClient
+
+/** lead / member see the whole unit's work; staff see only the work given to them. */
+export type UnitRole = 'lead' | 'member' | 'staff'
+export const unitRole = (v: unknown): UnitRole => (v === 'lead' || v === 'staff' ? v : 'member')
 
 export interface MyUnit {
   id: string
@@ -22,7 +27,7 @@ export interface MyUnit {
   name: string
   categoryIds: string[]
   teamSeesResults: boolean
-  role: 'lead' | 'member'
+  role: UnitRole
 }
 
 const notInstalled = (e: { code?: string; message?: string } | null) =>
@@ -36,7 +41,7 @@ export async function unitsOfEmployee(admin: Admin, employeeId: string): Promise
     throw new Error(`Could not check unit membership: ${error.message}`)
   }
   if (!mem?.length) return []
-  const role = new Map((mem as { unit_id: string; role: string }[]).map(m => [m.unit_id, m.role === 'lead' ? 'lead' as const : 'member' as const]))
+  const role = new Map((mem as { unit_id: string; role: string }[]).map(m => [m.unit_id, unitRole(m.role)]))
   const { data: units, error: uErr } = await admin.from('business_units')
     .select('id, slug, name, category_ids, team_sees_results, is_active').in('id', [...role.keys()]).eq('is_active', true)
   if (uErr) throw new Error(`Could not check unit membership: ${uErr.message}`)
@@ -53,16 +58,25 @@ export async function isUnitConfined(admin: Admin, me: Pick<CurrentUser, 'isAdmi
   return (await unitsOfEmployee(admin, me.employeeId)).length > 0
 }
 
+/** How this person is held to unit pages: false, true (team) or 'staff'. Admins never are. */
+export async function unitLockFor(admin: Admin, me: Pick<CurrentUser, 'isAdmin' | 'employeeId'> | null): Promise<UnitLock> {
+  if (!me || me.isAdmin || !me.employeeId) return false
+  return unitLockOf((await unitsOfEmployee(admin, me.employeeId)).map(u => u.role))
+}
+
 /**
  * The departments (service categories) a confined member may see, or null
  * when they are not confined. An empty array means "confined to nothing" —
  * a unit with a team but no work yet shows its team nothing, never everything.
+ * A unit where the person is STAFF gives them none of its departments: they
+ * see only the tasks given to them (lib/scope/service-scope keeps a viewer's
+ * own tasks) and the requests assigned to them.
  */
 export async function unitCategoryIdsFor(admin: Admin, me: Pick<CurrentUser, 'isAdmin' | 'employeeId'> | null): Promise<string[] | null> {
   if (!me || me.isAdmin || !me.employeeId) return null
   const units = await unitsOfEmployee(admin, me.employeeId)
   if (!units.length) return null
-  return [...new Set(units.flatMap(u => u.categoryIds))]
+  return [...new Set(units.filter(u => u.role !== 'staff').flatMap(u => u.categoryIds))]
 }
 
 /** Everyone on the same unit(s) as this member — for team pickers and boards. */

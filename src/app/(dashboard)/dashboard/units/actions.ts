@@ -16,7 +16,8 @@ import { requireAdmin } from '@/lib/permissions/check'
 import { round2 } from '@/lib/calculations/currency'
 import { slugify, unitKind, validateDepartment, type RevenueBasis, type UnitKind } from '@/lib/units/engine'
 import { loadDepartments, searchInvoices } from '@/lib/units/load'
-import { unitsOfEmployee } from '@/lib/units/membership'
+import { unitRole, unitsOfEmployee } from '@/lib/units/membership'
+import { unitLockOf } from '@/lib/units/access'
 import { loadAllocation } from '@/lib/units/allocate-load'
 import { percentsByWeight, validateSplit, type Allocation } from '@/lib/units/suggest'
 import { loadServiceScope } from '@/lib/scope/service-scope'
@@ -33,6 +34,9 @@ function fail(e: unknown): { ok: false; error: string } {
   const msg = e instanceof Error ? e.message : String((e as { message?: string })?.message ?? e)
   if (/business_unit\w*.*(does not exist|schema cache)|PGRST205/i.test(msg)) {
     return { ok: false, error: `Departments & Brands needs its database migration first (${MIGRATION}).` }
+  }
+  if (/business_unit_members_role_check/i.test(msg)) {
+    return { ok: false, error: 'Staff need a one-time database update first (supabase/migrations/20261128180000_unit_staff_role.sql). Keep them as Member for now, or run that migration.' }
   }
   if (/business_units_kind_check/i.test(msg)) {
     return { ok: false, error: 'Branches need a one-time database update first (supabase/migrations/20261128140000_unit_kind_branch.sql). Save it as a Department for now, or run that migration.' }
@@ -61,7 +65,7 @@ export interface DepartmentInput {
   teamSeesResults: boolean
   /** Empty = no profit-and-loss agreement; the result stays with Cirqle. */
   partners: { employeeId: string; sharePct: number }[]
-  members: { employeeId: string; role: 'lead' | 'member' }[]
+  members: { employeeId: string; role: 'lead' | 'member' | 'staff' }[]
 }
 
 function lastDay(month: string): string {
@@ -91,7 +95,7 @@ export async function saveDepartment(input: DepartmentInput): Promise<Result<{ s
       .map(p => ({ employeeId: p.employeeId, cqid: cqid.get(p.employeeId) ?? '', sharePct: round2(Number(p.sharePct)) }))
     if (partners.some(p => !cqid.has(p.employeeId))) return { ok: false, error: 'A partner is not a known employee.' }
     const members = [...new Map(input.members.filter(m => UUID.test(m.employeeId)).map(m => [m.employeeId, m])).values()]
-      .map(m => ({ employeeId: m.employeeId, role: m.role === 'lead' ? 'lead' as const : 'member' as const }))
+      .map(m => ({ employeeId: m.employeeId, role: unitRole(m.role) }))
     if (members.some(m => !cqid.has(m.employeeId))) return { ok: false, error: 'A team member is not a known employee.' }
 
     const { data: cats } = await admin.from('service_categories').select('id')
@@ -280,8 +284,8 @@ export async function saveGeneralCategories(categoryIds: string[]): Promise<Resu
 
 // ═══ Access map ═════════════════════════════════════════════════════════════
 
-/** Put a person on a unit's team (as lead or member), or take them off it (null). */
-export async function setUnitMember(unitId: string, employeeId: string, role: 'lead' | 'member' | null): Promise<Result> {
+/** Put a person on a unit's team (as lead, member or staff), or take them off it (null). */
+export async function setUnitMember(unitId: string, employeeId: string, role: 'lead' | 'member' | 'staff' | null): Promise<Result> {
   const g = await requireAdmin()
   if (!g.ok) return g
   if (!UUID.test(unitId) || !UUID.test(employeeId)) return { ok: false, error: 'Unknown unit or person.' }
@@ -298,7 +302,7 @@ export async function setUnitMember(unitId: string, employeeId: string, role: 'l
         return { ok: false, error: 'Pick the work this unit covers before adding its team.' }
       }
       const { error } = await admin.from('business_unit_members')
-        .upsert({ unit_id: unitId, employee_id: employeeId, role }, { onConflict: 'unit_id,employee_id' })
+        .upsert({ unit_id: unitId, employee_id: employeeId, role: unitRole(role) }, { onConflict: 'unit_id,employee_id' })
       if (error) return fail(error)
     }
     done()
@@ -359,7 +363,7 @@ export async function checkPerson(employeeId: string): Promise<Result<PersonChec
     } as CurrentUser
 
     const [units, scope] = await Promise.all([unitsOfEmployee(admin, e.id), loadServiceScope(admin, person, 'global')])
-    const confined = !isAdmin && units.length > 0
+    const confined = isAdmin ? false : unitLockOf(units.map(u => u.role))
     const can = (k: string) => isAdmin || keys.has(k)
     const pages = navSections.flatMap(s => s.items).filter(i => isNavItemVisible(i, can, isAdmin, confined)).map(i => i.label)
 
@@ -375,6 +379,7 @@ export async function checkPerson(employeeId: string): Promise<Result<PersonChec
       clientCount = count ?? 0
     }
     const reach = isAdmin ? 'Admin — everything'
+      : confined === 'staff' ? `Unit staff: ${units.map(u => u.name).join(', ')} — only the work given to them, and only the staff pages`
       : confined ? `Unit team: ${units.map(u => u.name).join(', ')} — only those units, and only the unit-team pages`
       : scope.mode === 'all' ? 'View all — every client and all work'
       : scope.mode === 'legacy' ? 'Org unit — narrowed by their org unit'
